@@ -13,6 +13,8 @@ export SYBIL_WEBAUTHN_ORIGIN="${SYBIL_WEBAUTHN_ORIGIN:-https://app.example.test}
 export GF_SECURITY_ADMIN_PASSWORD="${GF_SECURITY_ADMIN_PASSWORD:-compose-smoke-grafana-password}"
 export CADDY_OPS_AUTH_USER="${CADDY_OPS_AUTH_USER:-ops}"
 export CADDY_OPS_AUTH_HASH="${CADDY_OPS_AUTH_HASH:-compose-smoke-caddy-hash}"
+export SYBIL_L1_RPC_URLS="${SYBIL_L1_RPC_URLS:-http://rpc-a.example.test,http://rpc-b.example.test}"
+export SYBIL_L1_RPC_IDS="${SYBIL_L1_RPC_IDS:-compose-smoke-a,compose-smoke-b}"
 
 cleanup_arena_env_file=false
 if [[ ! -f arena.env ]]; then
@@ -98,6 +100,8 @@ l1_indexer_service_block=$(
 )
 for expected in \
     'entrypoint: ["sybil-l1-indexer"]' \
+    'SYBIL_L1_TRUST_MODE: "${SYBIL_L1_TRUST_MODE:-unsafe-single-dev}"' \
+    'SYBIL_L1_RPC_IDS: "${SYBIL_L1_RPC_IDS:-local-anvil}"' \
     'SYBIL_L1_CURSOR_PATH: "/l1-indexer-data/cursor.json"' \
     'SYBIL_L1_METRICS_BIND: "0.0.0.0:9102"' \
     'l1-indexer-data:/l1-indexer-data' \

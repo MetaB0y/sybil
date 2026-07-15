@@ -665,11 +665,11 @@
       }
     },
     {
-      "title": "L1 Reorg Latched",
+      "title": "L1 Integrity Latched",
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 114 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
-      "targets": [{ "expr": "sybil_l1_indexer_reorg_latched", "refId": "A" }],
+      "targets": [{ "expr": "sybil_l1_indexer_integrity_latched", "refId": "A" }],
       "fieldConfig": {
         "defaults": { "unit": "none", "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [
           { "color": "green", "value": null },
@@ -690,7 +690,7 @@
       }
     },
     {
-      "title": "L1 Confirmed Lag",
+      "title": "L1 Authenticated-Prefix Lag",
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 114 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
@@ -710,8 +710,8 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 118 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [
-        { "expr": "sybil_l1_indexer_latest_block", "legendFormat": "latest", "refId": "A" },
-        { "expr": "sybil_l1_indexer_confirmed_tip_block", "legendFormat": "confirmed tip", "refId": "B" },
+        { "expr": "sybil_l1_indexer_latest_block", "legendFormat": "source tip", "refId": "A" },
+        { "expr": "sybil_l1_indexer_confirmed_tip_block", "legendFormat": "authenticated tip", "refId": "B" },
         { "expr": "sybil_l1_indexer_checkpoint_block", "legendFormat": "checkpoint", "refId": "C" },
         { "expr": "sybil_l1_indexer_next_from_block", "legendFormat": "next from", "refId": "D" }
       ],

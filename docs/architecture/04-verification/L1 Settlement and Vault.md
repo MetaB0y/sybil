@@ -83,9 +83,10 @@ amount_nanos = amount_token_units * 1_000
 1. `deposit` transfers tokens and appends a domain-separated leaf to a
    depth-32 incremental Merkle tree.
 2. `DepositReceived` exposes the sequential id and cumulative root.
-3. The indexer waits for configured confirmations, validates every log's
-   canonical block hash, reconciles the log root with `depositRootByCount`, and
-   submits ordered input through service routes.
+3. The public indexer chooses the lowest finalized height reported by every
+   configured provider, requires unanimous block hashes, fetches vault logs by
+   exact block hash, and reconciles `depositRootByCount` at the deposit log's
+   same canonical block hash before using the service route.
 4. The sequencer credits a known account or quarantines an unresolved key.
 5. The transition guest reconstructs the same deposit prefix and requires the
    credited/quarantined events and committed cursor/root to agree.
@@ -94,8 +95,9 @@ Leaf/node domains, zero hashes, and conversion rules are shared by
 `sybil-l1-protocol` and Solidity golden tests. Host calldata, event, and return
 types come from the unconditional Alloy bindings in `sybil-l1-abi`, with
 existing byte-level goldens guarding the Rust/Solidity boundary. RPC/finality
-policy remains an operational trust boundary; root mismatch or cursor/vault
-identity mismatch is fatal in the indexer.
+policy remains an explicit operational trust boundary; provider disagreement,
+invalid hash binding, finality regression, root mismatch, or cursor identity
+mismatch is fatal and durably latched in the indexer.
 
 #### Same-deposit-ID substitution argument
 
@@ -114,27 +116,42 @@ checkpoints:
    against the vault's real mapping before accepting the state root.
 
 The argument relies on Keccak collision resistance and the settlement/vault
-binding; it does not turn a single JSON-RPC endpoint into an authenticated L1
-view. A fully dishonest RPC can still induce temporary, unprovable off-chain
-state before L1 submission fails. Therefore deposit ingress remains
-service-gated and real-funds operation still requires the finalized/provider
-or receipt-proof policy described below. Deterministic indexer, sequencer, and
-Foundry tests cover both root choices.
+binding. Public operation now uses `unanimous-finalized`: at least two
+operator-asserted independently operated providers with distinct URLs, the
+standardized
+`finalized` tag, EIP-234 block-hash log filters, and EIP-1898
+`requireCanonical=true` calls. Every provider must return identical
+security-relevant content. One unavailable provider stalls ingestion; a
+conflicting provider latches a fatal incident; no endpoint is silently dropped.
+
+This is not an embedded Ethereum light client or a receipt/storage Merkle-proof
+verifier. Its ratified trust assumption is that at least one configured
+provider is honest and independent. It detects a fully self-consistent fork
+fabricated by one provider because that view conflicts with the honest source;
+it cannot detect all configured providers colluding on the same fabricated
+view. Provider ownership, credentials, TLS, and configuration control therefore
+remain part of the production security boundary. Deposit ingress remains
+service-authenticated. Deterministic tests cover inconsistent headers, omitted
+logs, inconsistent contract state, invalid hash binding, and a self-consistent
+fabricated fork.
 
 ### Confirmed-prefix checkpoint and deep reorgs
 
-The indexer requires a deployment-bound cursor file. Cursor schema v2 stores
-`next_from` together with the canonical number/hash of `next_from - 1`. Before
-reading or submitting another range, the indexer re-reads that header and
-requires the hash to match; the descendant header commits the entire processed
-prefix. It also checks each deposit and withdrawal event's reported block hash
-against the canonical header and requires the range-tip hash to remain stable
+The indexer requires a deployment-bound cursor file. Cursor schema v3 stores
+`next_from`, the canonical number/hash of `next_from - 1`, the last
+authenticated source-tip number/hash, the trust mode, and the sorted non-secret
+provider identities. Changing chain, vault, trust mode, or provider set for an
+acknowledged cursor is refused. Before reading or
+submitting another range, the indexer requires every provider to reproduce the
+checkpoint header. The descendant header commits the processed prefix. Each
+log query is pinned to an agreed header hash, each deposit state call is pinned
+to the deposit's own header hash, and the range-tip hash must remain stable
 across ingestion.
 
-A mismatch stops before further L1 input and persists a fail-stop incident in
+A mismatch stops before further L1 input and persists `integrity_incident` in
 the cursor. The process retains only scrapeable metrics and unhealthy health
 endpoints; restarts refuse the latch. Critical alerts cover fatal kind, unready
-state, consecutive RPC failures, and confirmed lag. This detects deep rewrites
+state, consecutive RPC failures, and authenticated-prefix lag. This detects deep rewrites
 of deposits already credited and withdrawal events already applied; it does not
 invent an inverse transition. Operators must freeze the API and both contracts,
 preserve the store/cursor, and follow the
@@ -142,10 +159,11 @@ preserve the store/cursor, and follow the
 rollback/reconstruction is not implemented, so this remains a blocker before
 real funds.
 
-Local Anvil may explicitly use zero confirmations. Public-chain dev/test policy
-is at least 64 confirmations with the same configured minimum. A block-count
-heuristic and one RPC provider still do not replace a reviewed finalized-tag,
-provider-quorum, or receipt-proof policy.
+Local Anvil may explicitly select `unsafe-single-dev` and use zero
+confirmations; that mode logs a `DEV-ONLY` warning and makes no public-finality
+claim. Public/devnet deployments use `unanimous-finalized` with at least two
+independently operated provider identities. Confirmation-count settings are
+ignored in that mode.
 
 ### Normal withdrawals
 
@@ -252,8 +270,9 @@ authority.
 - Decide whether escape mode is permanent for a deployment or has an explicit,
   safe resumption mechanism.
 - Implement and drill complete state recovery after a canonical L1 checkpoint
-  mismatch, plus production finality/provider monitoring; fail-stop detection
-  alone is not a real-funds recovery mechanism.
+  or provider-integrity mismatch. The finalized provider policy and critical
+  monitoring fail closed, but detection alone is not a real-funds recovery
+  mechanism.
 
 ## See also
 

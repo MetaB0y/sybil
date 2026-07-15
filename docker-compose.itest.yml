@@ -24,10 +24,16 @@ services:
       - itest-data:/itest-data
     restart: "no"
 
+  sybil-history:
+    image: sybil-api:itest
+    restart: "no"
+
 volumes:
   # Override docker-compose.yml's globally named arena volume so concurrent or
   # failed test projects cannot touch developer/deployment data.
   arena-data:
     name: "${COMPOSE_PROJECT_NAME:-sybil-itest}-arena-data"
+  history-data:
+    name: "${COMPOSE_PROJECT_NAME:-sybil-itest}-history-data"
   itest-data:
     name: "${COMPOSE_PROJECT_NAME:-sybil-itest}-data"

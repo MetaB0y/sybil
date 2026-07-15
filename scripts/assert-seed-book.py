@@ -91,8 +91,8 @@ def assert_result(
     block: dict[str, Any],
     yes_account_actual: dict[str, Any],
     no_account_actual: dict[str, Any],
-    yes_fills: list[dict[str, Any]],
-    no_fills: list[dict[str, Any]],
+    yes_fill_page: dict[str, Any],
+    no_fill_page: dict[str, Any],
 ) -> None:
     assert_summary(summary)
     expected = summary["expected"]
@@ -102,8 +102,17 @@ def assert_result(
     yes_order = one_by(summary["orders"], "side", "BuyYes")
     no_order = one_by(summary["orders"], "side", "BuyNo")
 
-    assert len(yes_fills) == 1, yes_fills
-    assert len(no_fills) == 1, no_fills
+    for page in (yes_fill_page, no_fill_page):
+        assert page["history_scope"] == "remote", page
+        assert page["cursor_gap"] is False, page
+        assert page["history_truncated"] is False, page
+        assert page["next_after"] is None, page
+        assert page["indexed_through_height"] >= block["height"], page
+        assert page["history_complete_from_height"] <= block["height"], page
+    yes_fills = yes_fill_page["fills"]
+    no_fills = no_fill_page["fills"]
+    assert len(yes_fills) == 1, yes_fill_page
+    assert len(no_fills) == 1, no_fill_page
     yes_fill = yes_fills[0]
     no_fill = no_fills[0]
     for fill, order in ((yes_fill, yes_order), (no_fill, no_order)):
@@ -121,14 +130,10 @@ def assert_result(
         expected["yes_price_nanos"],
         expected["no_price_nanos"],
     ]
-    block_fills = {
-        (fill["order_id"], fill["account_id"], fill["fill_qty"], fill["fill_price_nanos"])
-        for fill in block["fills"]
-    }
-    assert block_fills == {
-        (yes_order["order_id"], yes_account["account_id"], 1_000, 500_000_000),
-        (no_order["order_id"], no_account["account_id"], 1_000, 500_000_000),
-    }
+    # Public block history intentionally exposes aggregate execution facts, not
+    # account-attributed fill rows. The two authenticated account-history pages
+    # above bind each exact order/fill to its owner; the block binds their shared
+    # height, aggregate count, volume, welfare, and clearing prices.
 
     assert yes_account_actual["account_id"] == yes_account["account_id"]
     assert no_account_actual["account_id"] == no_account["account_id"]
@@ -269,9 +274,32 @@ def self_test() -> None:
         "reserved_balance_nanos": 500_000_000,
         "positions": [{"market_id": 7, "outcome": "NO", "quantity": 1_000}],
     }
-    yes_fills = [{"order_id": 21, "fill_qty": 1_000, "fill_price_nanos": 500_000_000, "block_height": 3}]
-    no_fills = [{"order_id": 22, "fill_qty": 1_000, "fill_price_nanos": 500_000_000, "block_height": 3}]
-    assert_result(summary, block, yes_account, no_account, yes_fills, no_fills)
+    def fill_page(order_id: int) -> dict[str, Any]:
+        return {
+            "fills": [
+                {
+                    "order_id": order_id,
+                    "fill_qty": 1_000,
+                    "fill_price_nanos": 500_000_000,
+                    "block_height": 3,
+                }
+            ],
+            "next_after": None,
+            "cursor_gap": False,
+            "history_truncated": False,
+            "history_scope": "remote",
+            "indexed_through_height": 3,
+            "history_complete_from_height": 1,
+        }
+
+    assert_result(
+        summary,
+        block,
+        yes_account,
+        no_account,
+        fill_page(21),
+        fill_page(22),
+    )
 
 
 def main() -> None:

@@ -12,12 +12,15 @@ lifecycle inputs through service-authenticated API routes.
 ## Boundaries
 
 - Do not bypass `sybil-api` or mutate sequencer storage directly.
-- Confirmation depth, vault/chain identity, deposit ordering, and
-  `depositRootByCount` reconciliation are safety checks, not tuning details.
+- Finalized-provider unanimity, vault/chain/source identity, deposit ordering,
+  block-hash pinning, and `depositRootByCount` reconciliation are safety checks,
+  not tuning details. Confirmation depth is local-unsafe mode only.
 - Cursor files are deployment-bound. Refuse mismatched chain/vault state and
   starts that skip an existing cursor.
-- Reorg/root mismatch is fatal; retry only genuinely transient RPC/HTTP errors.
-- Public-chain operation still depends on the configured RPC/finality policy.
+- Reorg/root/provider/finality mismatch is fatal and durably latched; retry only
+  genuinely transient whole-quorum RPC/HTTP errors.
+- Public-chain operation assumes at least one configured independently operated
+  provider is honest; never silently drop a provider from an acknowledged set.
 
 ## Code map
 
@@ -26,6 +29,7 @@ lifecycle inputs through service-authenticated API routes.
 | Polling/reconciliation orchestration | `src/main.rs` |
 | Vault-log decoding and ordering | `src/events.rs` |
 | Deployment-bound cursor durability | `src/cursor.rs` |
+| Finalized multi-provider source policy | `src/source.rs` |
 
 Run `cargo test -p sybil-l1-indexer`. Exercise compose bridge tests for changes
 to scanning, cursor, or API submission behavior.

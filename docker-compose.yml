@@ -84,7 +84,9 @@ services:
     memswap_limit: "384m"
     entrypoint: ["sybil-l1-indexer"]
     environment:
-      SYBIL_L1_RPC_URL: "${SYBIL_L1_RPC_URL:-http://host.docker.internal:8545}"
+      SYBIL_L1_RPC_URLS: "${SYBIL_L1_RPC_URLS:-http://host.docker.internal:8545}"
+      SYBIL_L1_RPC_IDS: "${SYBIL_L1_RPC_IDS:-local-anvil}"
+      SYBIL_L1_TRUST_MODE: "${SYBIL_L1_TRUST_MODE:-unsafe-single-dev}"
       SYBIL_API_URL: "http://sybil-api:3000"
       SYBIL_SERVICE_TOKEN: "${SYBIL_SERVICE_TOKEN:-sybil-local-service}"
       SYBIL_L1_VAULT: "${SYBIL_L1_VAULT:-}"
