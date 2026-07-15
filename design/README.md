@@ -50,7 +50,6 @@ archive.
 | [`capability-mask-keys.md`](capability-mask-keys.md) | exploratory; the committed field exists, scoped enforcement does not |
 | [`user-cli-plan.md`](user-cli-plan.md) | proposed |
 | [`epoch-prover-service.md`](epoch-prover-service.md) | proposed implementation plan under ADR-0019 |
-| [`actor-liquidity-v2-2026-07-14.md`](actor-liquidity-v2-2026-07-14.md) | proposed |
 | [`possibility-space-2026-07.md`](possibility-space-2026-07.md) | brainstorm, not backlog |
 
 ## Strategies requiring a fresh survey
