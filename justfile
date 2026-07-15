@@ -385,6 +385,7 @@ frontend-check:
     cd frontend/web
     pnpm install --frozen-lockfile
     pnpm types:check
+    pnpm scenarios:check
     pnpm tsc --noEmit
     pnpm lint
     pnpm test

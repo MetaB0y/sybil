@@ -2,15 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   formatWithdrawalCountdown,
   pendingWithdrawals,
-  withdrawalCancelState,
+  withdrawalDisplayState,
   type BridgeWithdrawal,
 } from "./withdrawals";
 
 const NOW = Date.UTC(2026, 6, 6, 12, 0, 0);
 
-function withdrawal(
-  patch: Partial<BridgeWithdrawal> = {},
-): BridgeWithdrawal {
+function withdrawal(patch: Partial<BridgeWithdrawal> = {}): BridgeWithdrawal {
   return {
     account_id: 7,
     amount_nanos: "1000000000",
@@ -51,23 +49,35 @@ describe("withdrawal countdown helpers", () => {
 
   it("derives cancel-window states from L1 status and executable time", () => {
     expect(
-      withdrawalCancelState(
-        withdrawal({ l1_status: "queued", l1_executable_at_unix: NOW / 1000 + 60 }),
+      withdrawalDisplayState(
+        withdrawal({
+          l1_status: "queued",
+          l1_executable_at_unix: NOW / 1000 + 60,
+        }),
         NOW,
       ),
     ).toBe("cancel-window-open");
     expect(
-      withdrawalCancelState(
-        withdrawal({ l1_status: "queued", l1_executable_at_unix: NOW / 1000 - 1 }),
+      withdrawalDisplayState(
+        withdrawal({
+          l1_status: "queued",
+          l1_executable_at_unix: NOW / 1000 - 1,
+        }),
         NOW,
       ),
     ).toBe("executable");
-    expect(withdrawalCancelState(withdrawal({ l1_status: "finalized" }), NOW)).toBe(
-      "finalized",
-    );
-    expect(withdrawalCancelState(withdrawal({ l1_status: "cancelled" }), NOW)).toBe(
-      "cancelled",
-    );
+    expect(
+      withdrawalDisplayState(withdrawal({ l1_status: "finalized" }), NOW),
+    ).toBe("finalized");
+    expect(
+      withdrawalDisplayState(withdrawal({ l1_status: "cancelled" }), NOW),
+    ).toBe("cancelled");
+    expect(
+      withdrawalDisplayState(withdrawal({ l1_status: "refunded" }), NOW),
+    ).toBe("refunded");
+    expect(
+      withdrawalDisplayState(withdrawal({ l1_status: "queued" }), NOW),
+    ).toBe("queued");
   });
 
   it("keeps only pending withdrawals", () => {
@@ -76,6 +86,7 @@ describe("withdrawal countdown helpers", () => {
         withdrawal({ withdrawal_id: 1, l1_status: "queued" }),
         withdrawal({ withdrawal_id: 2, l1_status: "finalized" }),
         withdrawal({ withdrawal_id: 3, l1_status: "cancelled" }),
+        withdrawal({ withdrawal_id: 4, l1_status: "refunded" }),
       ],
       NOW,
     );

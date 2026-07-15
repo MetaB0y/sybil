@@ -6,7 +6,7 @@ import { api } from "@/lib/api/client";
 import {
   formatWithdrawalCountdown,
   pendingWithdrawals,
-  withdrawalCancelState,
+  withdrawalDisplayState,
   type BridgeWithdrawal,
 } from "@/lib/account/withdrawals";
 import { formatDollars, parseNanos } from "@/lib/format/nanos";
@@ -142,10 +142,10 @@ export function WithdrawalStatusPanel({
         }}
       >
         Status only on this private devnet. New withdrawal requests are not
-        enabled in the web app: the signed API is service-gated and currently
-        creates a Sybil withdrawal leaf and debits available cash, but does not
-        by itself release L1 funds. The proof-backed vault claim path is still
-        incomplete.
+        enabled in the web app. The owner-signed API can create a Sybil
+        withdrawal leaf and debit available cash, but relay, delayed L1
+        finalization, and confirmed-log indexing are separate steps. This
+        devnet&apos;s accept-all mock relay is not real-funds proof security.
       </div>
     </section>
   );
@@ -162,7 +162,7 @@ function WithdrawalRow({
     nowMs,
     withdrawal.l1_executable_at_unix,
   );
-  const state = withdrawalCancelState(withdrawal, nowMs);
+  const state = withdrawalDisplayState(withdrawal, nowMs);
   const absolute =
     withdrawal.l1_executable_at_unix == null
       ? "L1 executable time not observed yet"
@@ -233,14 +233,16 @@ function WithdrawalRow({
 function StatePill({
   state,
 }: {
-  state: ReturnType<typeof withdrawalCancelState>;
+  state: ReturnType<typeof withdrawalDisplayState>;
 }) {
   const color =
     state === "cancel-window-open"
       ? "var(--warn)"
       : state === "executable"
         ? "var(--yes)"
-        : "var(--fg-3)";
+        : state === "refunded"
+          ? "var(--accent)"
+          : "var(--fg-3)";
   const label =
     state === "cancel-window-open"
       ? "cancel window"

@@ -31,7 +31,14 @@ pnpm lint
 pnpm test
 pnpm build
 pnpm e2e                 # requires the configured app/API environment
+pnpm scenarios:check     # validate agent-readable UX acceptance contracts
+pnpm scenarios:list      # print side-effect and priority catalog
 ```
+
+[`computer-use/`](computer-use/README.md) contains natural-language journeys
+for a future computer-use runner. They classify mutation authority, fixtures,
+visible assertions, evidence, cleanup, and stop conditions without coupling the
+acceptance contract to Playwright or source selectors.
 
 ## Data and trust boundaries
 
@@ -48,6 +55,8 @@ pnpm e2e                 # requires the configured app/API environment
   require a registered signing key.
 
 See [`DATA_MAP.md`](../DATA_MAP.md) for endpoint-to-screen coverage and
+[`computer-use/README.md`](computer-use/README.md) for browser-agent acceptance.
+See
 [`docs/architecture/05-interfaces/REST API.md`](../../docs/architecture/05-interfaces/REST%20API.md)
 for the backend contract. Before changing frontend code, read the local
 [`AGENTS.md`](AGENTS.md); this repo's Next.js version may differ from familiar

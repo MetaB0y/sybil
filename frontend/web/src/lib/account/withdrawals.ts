@@ -8,18 +8,21 @@ export type WithdrawalCountdown = {
   expired: boolean;
 };
 
-export type WithdrawalCancelState =
+export type WithdrawalDisplayState =
   | "not-requested"
+  | "queued"
   | "cancel-window-open"
   | "executable"
   | "finalized"
-  | "cancelled";
+  | "cancelled"
+  | "refunded";
 
 export function formatWithdrawalCountdown(
   nowMs: number,
   executableAtUnix: number | null | undefined,
 ): WithdrawalCountdown {
-  if (executableAtUnix == null) return { label: "waiting for L1", expired: false };
+  if (executableAtUnix == null)
+    return { label: "waiting for L1", expired: false };
   const remainingMs = executableAtUnix * 1000 - nowMs;
   if (remainingMs <= 0) return { label: "executable now", expired: true };
 
@@ -35,22 +38,38 @@ export function formatWithdrawalCountdown(
   return { label: `${seconds}s`, expired: false };
 }
 
-export function withdrawalCancelState(
+export function withdrawalDisplayState(
   withdrawal: Pick<
     BridgeWithdrawal,
-    "l1_status" | "l1_executable_at_unix" | "l1_cancelled_at_unix" | "l1_finalized_at_unix"
+    | "l1_status"
+    | "l1_executable_at_unix"
+    | "l1_cancelled_at_unix"
+    | "l1_finalized_at_unix"
   >,
   nowMs: number,
-): WithdrawalCancelState {
-  if (withdrawal.l1_status === "cancelled" || withdrawal.l1_cancelled_at_unix != null) {
+): WithdrawalDisplayState {
+  if (
+    withdrawal.l1_status === "cancelled" ||
+    withdrawal.l1_cancelled_at_unix != null
+  ) {
     return "cancelled";
   }
-  if (withdrawal.l1_status === "finalized" || withdrawal.l1_finalized_at_unix != null) {
+  if (
+    withdrawal.l1_status === "finalized" ||
+    withdrawal.l1_finalized_at_unix != null
+  ) {
     return "finalized";
   }
-  if (withdrawal.l1_status === "not_requested" || withdrawal.l1_executable_at_unix == null) {
+  if (withdrawal.l1_status === "refunded") {
+    return "refunded";
+  }
+  if (
+    withdrawal.l1_status === "not_requested" ||
+    withdrawal.l1_status == null
+  ) {
     return "not-requested";
   }
+  if (withdrawal.l1_executable_at_unix == null) return "queued";
   return withdrawal.l1_executable_at_unix * 1000 > nowMs
     ? "cancel-window-open"
     : "executable";
@@ -61,9 +80,10 @@ export function pendingWithdrawals(
   nowMs: number,
 ): BridgeWithdrawal[] {
   return withdrawals.filter((w) => {
-    const state = withdrawalCancelState(w, nowMs);
+    const state = withdrawalDisplayState(w, nowMs);
     return (
       state === "not-requested" ||
+      state === "queued" ||
       state === "cancel-window-open" ||
       state === "executable"
     );
