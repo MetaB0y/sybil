@@ -610,8 +610,8 @@ monitoring-check: compose-smoke
         exit 2
     fi
 
-# Isolated Docker money-path E2E (SYB-243). Builds sybil-api, runs the shared
-# deterministic signed seeder, asserts exact fills/prices/balances, then down -v.
+# Isolated no-proving Docker money-path E2E. Exercises the deterministic signed
+# trading fixture and chain-bound mock bridge/relay lifecycle, then down -v.
 itest-compose:
     ./scripts/itest-compose.sh
 
@@ -831,6 +831,11 @@ contracts-coverage:
 # SEPOLIA_RPC_URL, PRIVATE_KEY, and the confirmation phrase documented by the runbook.
 contracts-sepolia-mock-deploy:
     ./scripts/deploy-sepolia-mock-l1.sh
+
+# Submit the newest committed API root and queue every eligible withdrawal on
+# the validated unsafe Sepolia mock deployment. Finalization remains separate.
+contracts-sepolia-mock-relay:
+    ./scripts/relay-sepolia-mock-withdrawals.sh
 
 # Run a local Anvil bridge smoke with the explicit unsafe accept-all verifier.
 # Start anvil separately, or point rpc_url at an existing Anvil-compatible RPC.

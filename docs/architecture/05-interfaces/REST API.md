@@ -90,7 +90,21 @@ and Vault]] for the provider-quorum and fail-stop recovery boundary.
 `POST /v1/bridge/withdrawals/signed` verifies a P256 signature over the
 canonical withdrawal payload against the account key registry before appending
 the corresponding `BridgeWithdrawal` write; `POST /v1/bridge/withdrawals`
-remains a service-only operator path.
+remains a service-only operator path. Both monetary bridge creation routes and
+deposit ingestion first require one all-or-none API domain configured by
+`SYBIL_BRIDGE_CHAIN_ID`, `SYBIL_BRIDGE_VAULT_ADDRESS`, and
+`SYBIL_BRIDGE_TOKEN_ADDRESS`. Absence returns `503 BRIDGE_UNAVAILABLE`; a
+different request domain returns `400 BRIDGE_DOMAIN_MISMATCH` before sequencer
+mutation. Public `GET /v1/bridge/status` exposes the configured domain or its
+absence so operators and clients do not infer bridge readiness from route
+existence.
+
+`GET /v1/bridge/withdrawals/pending` is the service-authenticated operator
+relay feed. It returns only active `not_requested` leaves, ordered by withdrawal
+id. It is intentionally separate from owner-scoped account status and from
+public block data: recipients, amounts, and account attribution are private.
+The unsafe Sepolia relay consumes this feed, while the confirmed-log indexer is
+still the only component allowed to advance queued/finalized/cancelled status.
 
 The service-gated indexer advances `POST /v1/bridge/l1-height` after each fully
 processed confirmed scan range. That existing scan cursor is the withdrawal

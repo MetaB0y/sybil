@@ -23,7 +23,7 @@ use crate::types::request::{
     SubmitL1DepositRequest, SubmitL1WithdrawalEventRequest,
 };
 use crate::types::response::{
-    BridgeAccountKeyResponse, BridgeDepositResponse, BridgeStatusResponse,
+    BridgeAccountKeyResponse, BridgeDepositResponse, BridgeDomainResponse, BridgeStatusResponse,
     BridgeWithdrawalL1EventResponse, BridgeWithdrawalResponse, ObserveL1HeightResponse,
 };
 use crate::webauthn;
@@ -119,6 +119,24 @@ fn withdrawal_request_from_api(
     })
 }
 
+fn require_configured_domain(
+    state: &AppState,
+    chain_id: u64,
+    vault_address: [u8; 20],
+    token_address: [u8; 20],
+) -> Result<(), AppError> {
+    let domain = state
+        .bridge_domain
+        .ok_or_else(AppError::bridge_unavailable)?;
+    if domain.chain_id != chain_id
+        || domain.vault_address != vault_address
+        || domain.token_address != token_address
+    {
+        return Err(AppError::bridge_domain_mismatch());
+    }
+    Ok(())
+}
+
 /// GET /v1/bridge/status
 #[utoipa::path(
     tag = "routesbridge",
@@ -149,6 +167,11 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<BridgeStatusRe
         .filter(|withdrawal| withdrawal.l1_status == L1WithdrawalStatus::Refunded)
         .count();
     Ok(Json(BridgeStatusResponse {
+        configured_domain: state.bridge_domain.map(|domain| BridgeDomainResponse {
+            chain_id: domain.chain_id,
+            vault_address_hex: hex::encode(domain.vault_address),
+            token_address_hex: hex::encode(domain.token_address),
+        }),
         deposit_cursor: bridge.deposit_cursor,
         deposit_root_hex: hex::encode(bridge.deposit_root),
         observed_l1_height: bridge.observed_l1_height,
@@ -234,6 +257,35 @@ pub async fn list_account_withdrawals(
     ))
 }
 
+/// GET /v1/bridge/withdrawals/pending
+///
+/// Operator relay feed for active leaves that have not yet produced a
+/// confirmed `WithdrawalQueued` event. This is service-authenticated because
+/// rows contain account-attributed recipients and amounts.
+#[utoipa::path(
+    tag = "routesbridge",
+    get,
+    path = "/v1/bridge/withdrawals/pending",
+    responses(
+        (status = 200, description = "Active withdrawals awaiting an L1 queue event", body = [BridgeWithdrawalResponse]),
+        (status = 401, description = "Missing or invalid service token")
+    ),
+    security(("bearer_service" = []))
+)]
+pub async fn list_pending_withdrawals(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<BridgeWithdrawalResponse>>, AppError> {
+    let bridge = state.sequencer.get_bridge_state().await?;
+    Ok(Json(
+        bridge
+            .withdrawals
+            .values()
+            .filter(|withdrawal| withdrawal.l1_status == L1WithdrawalStatus::NotRequested)
+            .map(bridge_withdrawal_to_response)
+            .collect(),
+    ))
+}
+
 /// GET /v1/bridge/accounts/by-key/{key_hex}
 #[utoipa::path(
     tag = "routesbridge",
@@ -287,6 +339,9 @@ pub async fn submit_l1_deposit(
             "exactly one deposit disposition is required: account_id or quarantine=true",
         ));
     }
+    let vault_address = parse_hex_array::<20>(&req.vault_address_hex, "vault_address_hex")?;
+    let token_address = parse_hex_array::<20>(&req.token_address_hex, "token_address_hex")?;
+    require_configured_domain(&state, req.chain_id, vault_address, token_address)?;
     let account_id = req.account_id.map(AccountId);
     let sybil_account_key = match req.sybil_account_key_hex {
         Some(value) => parse_hex_array::<32>(&value, "sybil_account_key_hex")?,
@@ -310,8 +365,8 @@ pub async fn submit_l1_deposit(
         deposit_id: req.deposit_id,
         account_id,
         chain_id: req.chain_id,
-        vault_address: parse_hex_array::<20>(&req.vault_address_hex, "vault_address_hex")?,
-        token_address: parse_hex_array::<20>(&req.token_address_hex, "token_address_hex")?,
+        vault_address,
+        token_address,
         sender: parse_hex_array::<20>(&req.sender_hex, "sender_hex")?,
         sybil_account_key,
         amount_token_units: req.amount_token_units,
@@ -361,6 +416,12 @@ pub async fn create_withdrawal(
         }
     };
     let request = withdrawal_request_from_api(&req, expiry_height)?;
+    require_configured_domain(
+        &state,
+        request.chain_id,
+        request.vault_address,
+        request.token_address,
+    )?;
     let withdrawal = state.sequencer.create_bridge_withdrawal(request).await?;
     Ok(Json(bridge_withdrawal_to_response(&withdrawal)))
 }
@@ -391,6 +452,12 @@ pub async fn create_signed_withdrawal(
         .nonce
         .ok_or_else(|| AppError::bad_request("nonce is required for signed bridge withdrawals"))?;
     let request = withdrawal_request_from_api(&req.withdrawal, expiry_height)?;
+    require_configured_domain(
+        &state,
+        request.chain_id,
+        request.vault_address,
+        request.token_address,
+    )?;
     let signer = parse_signer_public_key(&req.signer_pubkey_hex)?;
     let genesis_hash = state
         .sequencer

@@ -140,6 +140,32 @@ impl AppError {
         }
     }
 
+    pub fn bridge_unavailable() -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            body: ErrorBody {
+                error: "Bridge deposits and withdrawals are unavailable because no L1 domain is configured"
+                    .to_string(),
+                code: "BRIDGE_UNAVAILABLE".to_string(),
+                details: None,
+            },
+            retry_after_secs: None,
+        }
+    }
+
+    pub fn bridge_domain_mismatch() -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            body: ErrorBody {
+                error: "Bridge request does not match the configured chain, vault, and token"
+                    .to_string(),
+                code: "BRIDGE_DOMAIN_MISMATCH".to_string(),
+                details: None,
+            },
+            retry_after_secs: None,
+        }
+    }
+
     pub fn history_unavailable(error: impl Into<String>) -> Self {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,

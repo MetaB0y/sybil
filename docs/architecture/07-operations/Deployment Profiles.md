@@ -178,6 +178,15 @@ at-least-one-honest-independent-provider assumption. Real-value operation
 remains blocked on complete state recovery for already-applied bridge events
 and the other incomplete production items in the L1 architecture.
 
+The API independently requires one all-or-none bridge admission domain:
+`SYBIL_BRIDGE_CHAIN_ID`, `SYBIL_BRIDGE_VAULT_ADDRESS`, and
+`SYBIL_BRIDGE_TOKEN_ADDRESS`. Base Compose passes the three optional values
+through to `sybil-api`; when absent, monetary bridge writes fail closed without
+preventing ordinary trading or status reads. For the unsafe Sepolia mock, all
+three values and the indexer's chain/vault settings must come from the same
+validated deployment manifest. The relay checks that equality again against
+live contract wiring before sending a transaction.
+
 ## Witness and proof-job retention policy
 
 - Block witnesses persist to the `block_witnesses` redb table **only when a

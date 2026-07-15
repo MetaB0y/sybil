@@ -146,6 +146,9 @@ pub async fn test_app_with_bootstrap(
 pub async fn test_app(dev_mode: bool) -> (Router, SequencerHandle) {
     test_app_with_config(ApiConfig {
         dev_mode,
+        bridge_chain_id: "1".to_string(),
+        bridge_vault_address: hex::encode([0x10; 20]),
+        bridge_token_address: hex::encode([0x20; 20]),
         ..ApiConfig::default()
     })
     .await

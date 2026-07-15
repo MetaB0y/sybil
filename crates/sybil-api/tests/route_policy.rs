@@ -278,6 +278,10 @@ fn exact_service_routes() -> &'static [RouteMount] {
             path: "/v1/bridge/deposits",
         },
         RouteMount {
+            method: "GET",
+            path: "/v1/bridge/withdrawals/pending",
+        },
+        RouteMount {
             method: "POST",
             path: "/v1/bridge/withdrawals",
         },
@@ -387,6 +391,9 @@ async fn prod_app() -> axum::Router {
         dev_mode: false,
         service_token: TOKEN.to_string(),
         event_snapshot_dir: temp_event_dir(),
+        bridge_chain_id: "1".to_string(),
+        bridge_vault_address: hex_bytes(0x10, 20),
+        bridge_token_address: hex_bytes(0x20, 20),
         ..ApiConfig::default()
     })
     .await;
@@ -525,6 +532,7 @@ fn service_probe_requests() -> Vec<(Method, &'static str, Value)> {
             "/v1/bridge/deposits",
             json!({"deposit_id": 1}),
         ),
+        (Method::GET, "/v1/bridge/withdrawals/pending", json!({})),
         (
             Method::POST,
             "/v1/bridge/withdrawals",
@@ -932,6 +940,39 @@ async fn service_routes_succeed_with_token_in_prod() {
     .unwrap();
     let msg = canonical_bridge_withdrawal_bytes(&signed_withdrawal, 1, genesis_hash);
     let signature: Signature = withdrawal_key.sign(&msg);
+    let mut wrong_domain = signed_withdrawal.clone();
+    wrong_domain.chain_id = 2;
+    let wrong_signature: Signature = withdrawal_key.sign(&canonical_bridge_withdrawal_bytes(
+        &wrong_domain,
+        1,
+        genesis_hash,
+    ));
+    let (status, body) = request_json(
+        app.clone(),
+        Method::POST,
+        "/v1/bridge/withdrawals/signed",
+        Some(TOKEN),
+        json!({
+            "withdrawal": {
+                "account_id": account_id,
+                "chain_id": 2,
+                "vault_address_hex": hex_bytes(0x10, 20),
+                "recipient_hex": hex_bytes(0x41, 20),
+                "token_address_hex": hex_bytes(0x20, 20),
+                "amount_token_units": 1_000u64,
+                "expiry_height": 10u64,
+                "nonce": 1u64,
+            },
+            "signer_pubkey_hex": withdrawal_pubkey_hex,
+            "signature_hex": hex::encode(wrong_signature.to_bytes()),
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(parse_json(&body)["code"], json!("BRIDGE_DOMAIN_MISMATCH"));
+
+    // The rejected domain never reaches the sequencer, so nonce 1 remains
+    // available for the correctly routed action below.
     let (status, body) = request_json(
         app.clone(),
         Method::POST,
@@ -972,6 +1013,17 @@ async fn service_routes_succeed_with_token_in_prod() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+
+    let (status, body) = request_json(
+        app.clone(),
+        Method::GET,
+        "/v1/bridge/withdrawals/pending",
+        Some(TOKEN),
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(parse_json(&body).as_array().unwrap().len(), 2);
 
     let (status, body) = request_json(
         app.clone(),

@@ -28,6 +28,7 @@ from .bridge_account_key_response import BridgeAccountKeyResponse
 from .bridge_block_response import BridgeBlockResponse
 from .bridge_deposit_event_response import BridgeDepositEventResponse
 from .bridge_deposit_response import BridgeDepositResponse
+from .bridge_domain_response import BridgeDomainResponse
 from .bridge_status_response import BridgeStatusResponse
 from .bridge_withdrawal_l1_event_response import BridgeWithdrawalL1EventResponse
 from .bridge_withdrawal_l1_status import BridgeWithdrawalL1Status
@@ -190,6 +191,7 @@ __all__ = (
     "BridgeBlockResponse",
     "BridgeDepositEventResponse",
     "BridgeDepositResponse",
+    "BridgeDomainResponse",
     "BridgeStatusResponse",
     "BridgeWithdrawalL1EventResponse",
     "BridgeWithdrawalL1Status",
