@@ -191,6 +191,7 @@ pub async fn ws_blocks(
             &state.sequencer,
             query,
             crate::ws::BlockStreamVisibility::Public,
+            state.ws_client_idle_timeout,
         )
         .await;
     })
@@ -221,6 +222,7 @@ pub async fn ws_service_blocks(
             &state.sequencer,
             query,
             crate::ws::BlockStreamVisibility::Service,
+            state.ws_client_idle_timeout,
         )
         .await;
     })

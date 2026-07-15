@@ -91,6 +91,7 @@ impl SequencerHandle {
         let oracle = sequencer.oracle();
         let config = sequencer.config.clone();
         let (block_broadcast, _) = broadcast::channel(64);
+        let recent_blocks = Arc::new(RwLock::new(VecDeque::new()));
         let mailbox_monitor = MailboxMonitor::new(
             SEQUENCER_ACTOR_METRIC_NAME,
             config.actor_queue_warn_depth,
@@ -99,6 +100,8 @@ impl SequencerHandle {
         let inner = SequencerHandleInner {
             actor: Arc::new(RwLock::new(None)),
             block_broadcast: block_broadcast.clone(),
+            recent_blocks: recent_blocks.clone(),
+            store: store.clone(),
             mailbox_monitor,
             shutdown_requested: Arc::new(AtomicBool::new(false)),
         };
@@ -115,6 +118,7 @@ impl SequencerHandle {
             sequencer,
             store,
             block_broadcast,
+            recent_blocks,
             mailbox_monitor: inner.mailbox_monitor.clone(),
         };
         let (child, _) = ractor::ActorRuntime::spawn_linked_instant(
@@ -538,8 +542,36 @@ impl SequencerHandle {
     }
 
     pub async fn get_block(&self, height: u64) -> Result<SealedBlock, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetBlock(height, reply))
-            .await?
+        if let Some(block) = recent_block_at(
+            &self
+                .inner
+                .recent_blocks
+                .read()
+                .expect("recent block cache lock poisoned"),
+            height,
+        ) {
+            return Ok(block);
+        }
+
+        let Some(store) = &self.inner.store else {
+            return Err(SequencerError::BlockNotFound);
+        };
+        match store.load_block(height).await {
+            Ok(Some(block)) => Ok(block),
+            Ok(None) => match store.canonical_archive_meta() {
+                Ok(meta) => match meta.oldest_retained_height {
+                    Some(retention_min_height) if height < retention_min_height => {
+                        Err(SequencerError::BlockPruned {
+                            requested_height: height,
+                            retention_min_height,
+                        })
+                    }
+                    _ => Err(SequencerError::BlockNotFound),
+                },
+                Err(error) => Err(SequencerError::Persistence(error.to_string())),
+            },
+            Err(error) => Err(SequencerError::Persistence(error.to_string())),
+        }
     }
 
     pub async fn get_da_artifact(&self, height: u64) -> Result<DaArtifactLookup, SequencerError> {
@@ -592,18 +624,16 @@ impl SequencerHandle {
     }
 
     pub async fn get_recent_blocks(&self, n: usize) -> Result<Vec<SealedBlock>, SequencerError> {
-        self.read_query(move |state| {
-            let cap = state.sequencer.config.recent_block_cache_capacity;
-            let take = n.min(cap);
-            state
-                .recent_blocks
-                .iter()
-                .rev()
-                .take(take)
-                .cloned()
-                .collect()
-        })
-        .await
+        Ok(self
+            .inner
+            .recent_blocks
+            .read()
+            .expect("recent block cache lock poisoned")
+            .iter()
+            .rev()
+            .take(n)
+            .cloned()
+            .collect())
     }
 
     pub async fn get_block_page(
@@ -611,8 +641,26 @@ impl SequencerHandle {
         before_height: Option<u64>,
         limit: usize,
     ) -> Result<Vec<SealedBlock>, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetBlockPage(before_height, limit, reply))
-            .await?
+        let limit = limit.min(MAX_BLOCK_REPLAY_QUERY_BLOCKS);
+        match &self.inner.store {
+            Some(store) => store
+                .load_block_page(before_height, limit)
+                .await
+                .map_err(|error| SequencerError::Persistence(error.to_string())),
+            None => Ok(self
+                .inner
+                .recent_blocks
+                .read()
+                .expect("recent block cache lock poisoned")
+                .iter()
+                .rev()
+                .filter(|block| {
+                    before_height.is_none_or(|before| block.canonical.header.height < before)
+                })
+                .take(limit)
+                .cloned()
+                .collect()),
+        }
     }
 
     pub async fn subscribe_blocks(
@@ -888,6 +936,13 @@ impl SequencerHandle {
         })
         .await
     }
+}
+
+fn recent_block_at(blocks: &VecDeque<SealedBlock>, height: u64) -> Option<SealedBlock> {
+    let first_height = blocks.front()?.canonical.header.height;
+    let index = usize::try_from(height.checked_sub(first_height)?).ok()?;
+    let block = blocks.get(index)?;
+    (block.canonical.header.height == height).then(|| block.clone())
 }
 
 #[cfg(test)]
@@ -3290,6 +3345,28 @@ mod tests {
 
         let result = handle.get_block(99).await;
         assert!(matches!(result, Err(SequencerError::BlockNotFound)));
+    }
+
+    #[tokio::test]
+    async fn recent_block_reads_remain_available_without_the_actor_mailbox() {
+        let (seq, _) = make_test_sequencer();
+        let handle = SequencerHandle::spawn(seq);
+        let committed = handle.produce_block().await.unwrap();
+
+        handle
+            .actor_ref()
+            .await
+            .unwrap()
+            .kill_and_wait(Some(Duration::from_secs(5)))
+            .await
+            .unwrap();
+
+        let replayed = handle
+            .get_block(committed.canonical.header.height)
+            .await
+            .unwrap();
+        assert_eq!(replayed.canonical.header, committed.canonical.header);
+        assert_eq!(handle.get_recent_blocks(1).await.unwrap().len(), 1);
     }
 
     #[tokio::test]

@@ -3,7 +3,7 @@ tags: [infrastructure]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-14
+last_verified: 2026-07-15
 ---
 
 The WebSocket block stream is the first-party production transport for the
@@ -28,6 +28,23 @@ capacity exhaustion returns HTTP `429` before upgrading. The service-authenticat
 v1 stream does not consume this anonymous budget.
 
 The stream sits on top of a `tokio::sync::broadcast` channel fed by the sequencer actor. Each subscriber gets its own 64-block buffer. If a client falls behind that window, the server sends a final `lagged` envelope and closes the connection with code 1008 — the client reconnects with `?from_block=<last_sent_height + 1>` and the handler replays canonical blocks before switching back to live. The recent in-memory cache is checked first; if the requested height has already been evicted, replay falls back to the durable canonical replay archive (physical redb table `blocks_full`). This is a deliberate "crash fast, recover cleanly" design: no silent block loss, no unbounded buffering.
+
+The post-commit recent-block ring is shared with `SequencerHandle` as a
+read-only serving surface. Exact-height lookup derives the ring offset in O(1)
+and does not enter the sequencer actor mailbox; evicted heights retain the same
+durable archive/retention behavior. This matters during correlated reconnects:
+ten clients replaying thousands of heights must not enqueue tens of thousands
+of reads ahead of block production.
+
+`sybil-ws-load` exercises this boundary with 100 or more public subscribers. It
+checks contiguous heights through lag/replay recovery while sampling process
+RSS/high-water, sequencer mailbox depth, solve p99, health p95, and committed
+height. A normal-cadence target measures fanout capacity; forcing the lag path
+requires the disposable fast-cadence profile documented in the
+[WebSocket load runbook](../../runbooks/websocket-load.md), because a
+10-second feed will not fill normal TCP buffers during a short test. The load
+generator is read-only and the suite remains explicit rather than part of fast
+CI.
 
 ## Message Envelope
 
@@ -62,6 +79,12 @@ a block has the same effect as observing it live. The Polymarket MM, for
 example, replays lifecycle and native-price state but never emits historical
 quotes.
 
+When draining a severely backed-up connection, the client may encounter an old
+Ping after the server has already queued `lagged` and closed its write side. A
+failed late Pong is therefore non-terminal: `sybil-client` keeps reading so the
+final versioned envelope wins over an incidental `Broken pipe`. If no envelope
+remains, the following read still reports the transport failure normally.
+
 Replay reads the canonical archive (physical redb table `blocks_full`) after
 the recent cache has evicted a block. If `from_block` is below the retained floor, the server emits
 `retention_gap { requested_height, retention_min_height, head_height }` and
@@ -71,7 +94,7 @@ not recoverable from this stream.
 
 ## Keepalive
 
-The server sends a WebSocket Ping frame every 30 seconds. Any message from the client (including Pong, Ping, or a text frame) counts as liveness. If the server sees no client activity for 90 seconds, it closes with "client idle timeout". Clients should respond promptly to Pings; browser `WebSocket` APIs handle this automatically, but hand-rolled clients need to echo Pings or send their own periodic frames.
+The server sends a WebSocket Ping frame every 30 seconds. Any message from the client (including Pong, Ping, or a text frame) counts as liveness. If the server sees no client activity for `SYBIL_WS_CLIENT_IDLE_TIMEOUT_MS` (90 seconds by default), it closes with "client idle timeout". Clients should respond promptly to Pings; browser `WebSocket` APIs handle this automatically, but hand-rolled clients need to echo Pings or send their own periodic frames. Disposable recovery tests may lengthen the window so a deliberate no-read stall reaches the independent lag boundary; shared deployments keep the production default.
 
 ## Versioning Policy
 
@@ -86,6 +109,7 @@ The server sends a WebSocket Ping frame every 30 seconds. Any message from the c
 > `crates/sybil-api-types/src/ws.rs` — public v2 and service v1 envelope schemas
 > `crates/sybil-api/src/routes/blocks.rs` — `/v2/blocks/ws` public and `/v1/blocks/ws` service wiring
 > `crates/sybil-api/tests/ws_integration.rs` — live-block, replay, retention-gap, and connection-cap tests
+> `crates/sybil-loadtest/src/bin/ws_load.rs` — explicit 100+ subscriber capacity/recovery harness
 
 ## See Also
 - [[SSE Block Stream]] — simpler alternative at `/v1/blocks/stream`

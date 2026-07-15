@@ -2,7 +2,7 @@
 tags: [testing, infrastructure]
 layer: sequencer
 status: current
-last_verified: 2026-07-13
+last_verified: 2026-07-15
 ---
 
 # Testing Strategy
@@ -143,10 +143,20 @@ Run the generator off-host for capacity conclusions and preserve the Goose
 report with its target/profile. The exact setup and threshold variables are in
 the [historical-read isolation runbook](../../runbooks/history-read-load.md).
 
+The second suite, `sybil-ws-load`, opens at least 100 public WebSocket streams
+through the shared Rust client, stalls a configured subset of readers, and
+checks every observed height across `lagged` reconnect/replay boundaries. It
+samples health and metrics throughout the same interval and fails on missing
+blocks, gaps/duplicates, failed recovery, excessive RSS/high-water growth,
+actor queue depth, solve p99, or health p95. The ordinary public-devnet profile
+measures concurrent fanout without requiring lag; the deterministic
+backpressure profile uses a disposable fast-cadence stack so the TCP window
+actually fills. See the [WebSocket load runbook](../../runbooks/websocket-load.md).
+
 ## Next Implementation Slice
 
 1. Add a disposable, seeded API/history process fixture for a short automated
-   load-test smoke; keep capacity thresholds outside ordinary CI.
+   historical-load smoke; keep capacity thresholds outside ordinary CI.
 2. Add focused properties for sell-side position reservations and cancellation /
    expiry release invariants.
 3. Move helpers into a separate test-support crate only if multiple crates begin

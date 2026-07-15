@@ -666,8 +666,15 @@ impl SybilClient {
                         }
                     }
                     Message::Ping(data) => {
-                        if let Err(e) = socket.send(Message::Pong(data)).await {
-                            return Some((Err(Error::WebSocket(e.to_string())), socket));
+                        if let Err(error) = socket.send(Message::Pong(data)).await {
+                            // A final protocol envelope may already be queued
+                            // behind this old Ping after the peer closed its
+                            // write side. Keep draining so `lagged` or
+                            // `retention_gap` is not masked by a late Pong.
+                            tracing::debug!(
+                                %error,
+                                "Pong write failed; draining final block-stream frames"
+                            );
                         }
                     }
                     Message::Pong(_) => {}
