@@ -138,6 +138,18 @@ impl AppError {
         }
     }
 
+    pub fn sequencer_integrity_halted() -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            body: ErrorBody {
+                error: "Sequencer writes are unavailable after an integrity failure".to_string(),
+                code: "SEQUENCER_INTEGRITY_HALTED".to_string(),
+                details: None,
+            },
+            retry_after_secs: None,
+        }
+    }
+
     pub fn mempool_full() -> Self {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,
@@ -284,6 +296,9 @@ impl From<matching_sequencer::SequencerError> for AppError {
             matching_sequencer::SequencerError::ProofUnavailable(msg) => {
                 AppError::service_unavailable(format!("Proof unavailable: {msg}"))
             }
+            matching_sequencer::SequencerError::IntegrityHalted => {
+                AppError::sequencer_integrity_halted()
+            }
             matching_sequencer::SequencerError::BlockProductionPaused => {
                 AppError::conflict("Block production paused")
             }
@@ -317,5 +332,21 @@ impl AppError {
     fn with_details(mut self, details: impl Into<String>) -> Self {
         self.body.details = Some(details.into());
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn integrity_halt_has_a_stable_service_unavailable_code() {
+        let error = AppError::from(matching_sequencer::SequencerError::IntegrityHalted);
+        assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(error.body.code, "SEQUENCER_INTEGRITY_HALTED");
+        assert_eq!(
+            error.body.error,
+            "Sequencer writes are unavailable after an integrity failure"
+        );
     }
 }

@@ -200,6 +200,15 @@ impl SequencerHandle {
     }
 
     #[cfg(test)]
+    async fn enter_integrity_halt_for_test(
+        &self,
+        error: SequencerError,
+    ) -> Result<(), SequencerError> {
+        self.rpc(|reply| SequencerMsg::TestEnterIntegrityHalt(error, reply))
+            .await
+    }
+
+    #[cfg(test)]
     async fn hold_next_tick_for_test(
         &self,
         hold: SequencerTestTickHold,
@@ -298,20 +307,22 @@ impl SequencerHandle {
         .await
     }
 
-    /// Read the committed height and chain identity from one actor snapshot.
+    /// Read committed chain identity and canonical-write availability from one
+    /// actor snapshot.
     ///
     /// Readiness callers must not combine separate mailbox reads: the actor
-    /// could become unavailable between them and expose a height without the
-    /// genesis domain required by signed actions.
-    pub async fn get_chain_status(
+    /// could become unavailable or integrity-halted between them and expose a
+    /// chain identity without its current write status.
+    pub async fn get_operational_status(
         &self,
-    ) -> Result<(Option<u64>, Option<[u8; 32]>), SequencerError> {
+    ) -> Result<SequencerOperationalStatus, SequencerError> {
         self.read_query(|state| {
             let height = state.sequencer.height();
-            (
-                (height > 0).then_some(height),
-                state.sequencer.genesis_hash(),
-            )
+            SequencerOperationalStatus {
+                committed_height: (height > 0).then_some(height),
+                genesis_hash: state.sequencer.genesis_hash(),
+                integrity_halted: state.halted_error.is_some(),
+            }
         })
         .await
     }
@@ -726,11 +737,11 @@ impl SequencerHandle {
     }
 
     pub async fn pause_block_production(&self) -> Result<(), SequencerError> {
-        self.rpc(SequencerMsg::PauseBlockProduction).await
+        self.rpc(SequencerMsg::PauseBlockProduction).await?
     }
 
     pub async fn resume_block_production(&self) -> Result<(), SequencerError> {
-        self.rpc(SequencerMsg::ResumeBlockProduction).await
+        self.rpc(SequencerMsg::ResumeBlockProduction).await?
     }
 
     #[tracing::instrument(skip_all)]
@@ -984,6 +995,161 @@ mod tests {
             .unwrap()
             .expect("first block remains latest");
         assert_eq!(latest.canonical.header.height, 1);
+    }
+
+    #[tokio::test]
+    async fn integrity_halt_rejects_writes_without_growing_live_or_durable_pending_state() {
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(3_600),
+            min_resting_order_notional_nanos: 0,
+            ..SequencerConfig::default()
+        };
+        let (mut sequencer, account_id) = make_test_sequencer_with_config(config);
+        let signing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        sequencer
+            .register_pubkey(account_id, PublicKey(*signing_key.verifying_key()))
+            .unwrap();
+
+        let path = temp_store_path("integrity-halt");
+        let store = Arc::new(crate::store::Store::open(&path).unwrap());
+        let handle = SequencerHandle::spawn_with_store_arc(sequencer, Some(store.clone()));
+        let baseline = handle.produce_block().await.unwrap();
+        let genesis_hash = crate::block::hash_header(&baseline.canonical.header);
+
+        let mut markets = MarketSet::new();
+        let market = markets.add_binary("Test");
+        let existing_order = outcome_buy(&markets, 0, market, 0, 500_000_000, 1);
+        let existing_order_id = handle
+            .submit_order(OrderSubmission {
+                account_id,
+                orders: vec![existing_order],
+                mm_constraint: None,
+            })
+            .await
+            .unwrap()[0];
+
+        let pending_before = handle.get_pending_orders(Some(account_id)).await.unwrap();
+        let balance_before = handle
+            .get_account(account_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .balance;
+        let durable_before = store.load_state().await.unwrap().unwrap();
+        assert_eq!(durable_before.acknowledged_writes.len(), 1);
+        let durable_sequences_before: Vec<_> = durable_before
+            .acknowledged_writes
+            .iter()
+            .map(|entry| entry.sequence)
+            .collect();
+
+        handle
+            .enter_integrity_halt_for_test(SequencerError::BlockInvariantFailure {
+                height: 2,
+                failures: vec![
+                    crate::error::BlockInvariantFailure::PreparedStateRootMismatch {
+                        block_state_root: [0; 32],
+                        prepared_state_root: [1; 32],
+                    },
+                ],
+            })
+            .await
+            .unwrap();
+
+        let status = handle.get_operational_status().await.unwrap();
+        assert_eq!(status.committed_height, Some(1));
+        assert_eq!(status.genesis_hash, Some(genesis_hash));
+        assert!(status.integrity_halted);
+
+        let unsigned = OrderSubmission {
+            account_id,
+            orders: vec![outcome_buy(&markets, 0, market, 0, 500_000_000, 2)],
+            mm_constraint: None,
+        };
+        assert!(matches!(
+            handle.submit_order(unsigned.clone()).await,
+            Err(SequencerError::IntegrityHalted)
+        ));
+        assert!(matches!(
+            handle.submit_ioc_order(unsigned).await,
+            Err(SequencerError::IntegrityHalted)
+        ));
+
+        let signed_order = crate::crypto::sign_order(
+            &outcome_buy(&markets, 0, market, 0, 500_000_000, 3),
+            1,
+            genesis_hash,
+            &signing_key,
+        );
+        assert!(matches!(
+            handle.submit_signed_order(signed_order).await,
+            Err(SequencerError::IntegrityHalted)
+        ));
+
+        let signed_cancel = crate::crypto::sign_cancel(
+            account_id,
+            existing_order_id,
+            1,
+            genesis_hash,
+            &signing_key,
+        );
+        assert!(matches!(
+            handle.cancel_signed_order(signed_cancel).await,
+            Err(SequencerError::IntegrityHalted)
+        ));
+        assert!(matches!(
+            handle.fund_account(account_id, 1).await,
+            Err(SequencerError::IntegrityHalted)
+        ));
+        assert!(matches!(
+            handle.create_market("must not persist".to_string()).await,
+            Err(SequencerError::IntegrityHalted)
+        ));
+
+        // Read-only diagnostics and the incident pause remain available. A
+        // resume cannot claim success while the stronger integrity halt wins.
+        assert!(handle.get_state_root().await.is_ok());
+        assert!(handle.get_latest_block().await.unwrap().is_some());
+        handle.pause_block_production().await.unwrap();
+        assert!(matches!(
+            handle.resume_block_production().await,
+            Err(SequencerError::IntegrityHalted)
+        ));
+
+        let pending_after = handle.get_pending_orders(Some(account_id)).await.unwrap();
+        assert_eq!(
+            pending_after
+                .iter()
+                .map(|order| order.order_id)
+                .collect::<Vec<_>>(),
+            pending_before
+                .iter()
+                .map(|order| order.order_id)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            handle
+                .get_account(account_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .balance,
+            balance_before
+        );
+
+        let durable_after = store.load_state().await.unwrap().unwrap();
+        assert_eq!(durable_after.acknowledged_writes.len(), 1);
+        assert_eq!(
+            durable_after
+                .acknowledged_writes
+                .iter()
+                .map(|entry| entry.sequence)
+                .collect::<Vec<_>>(),
+            durable_sequences_before
+        );
     }
 
     #[tokio::test]
@@ -1294,12 +1460,13 @@ mod tests {
         assert!(block.is_some());
         assert_eq!(block.unwrap().canonical.header.height, 1);
 
-        let (height, genesis_hash) = handle.get_chain_status().await.unwrap();
-        assert_eq!(height, Some(1));
+        let status = handle.get_operational_status().await.unwrap();
+        assert_eq!(status.committed_height, Some(1));
         assert_eq!(
-            genesis_hash,
+            status.genesis_hash,
             Some(crate::block::hash_header(&produced.canonical.header))
         );
+        assert!(!status.integrity_halted);
     }
 
     #[tokio::test]

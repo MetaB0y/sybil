@@ -238,6 +238,11 @@ pub enum SequencerError {
     /// Requested proof cannot be served by this sequencer configuration.
     #[error("proof unavailable: {0}")]
     ProofUnavailable(String),
+    /// A hard block invariant failed and the actor has entered fail-stop mode.
+    /// Reads remain available, but every canonical write is rejected until an
+    /// operator recovers from the last committed block.
+    #[error("sequencer integrity halted; writes are unavailable until operator recovery")]
+    IntegrityHalted,
     /// Block production is intentionally paused.
     #[error("block production paused")]
     BlockProductionPaused,

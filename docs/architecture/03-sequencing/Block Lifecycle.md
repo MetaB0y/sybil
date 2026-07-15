@@ -3,7 +3,7 @@ tags: [sequencer, block]
 layer: sequencer
 crate: matching-sequencer
 status: current
-last_verified: 2026-07-14
+last_verified: 2026-07-15
 ---
 
 # Block lifecycle
@@ -40,6 +40,24 @@ Two artifacts leave the kernel:
 4. qMDB roots match the header before the redb fence commits the slot.
 5. Publication happens after commit.
 6. Derived analytics never determine roots or witness validity.
+
+## Integrity halt
+
+A hard invariant or full-verifier failure discards the prepared transition and
+puts the actor into fail-stop mode. The mailbox boundary then rejects every
+canonical mutation before validation, replay-nonce advancement, WAL append, or
+live-state mutation. This includes ordinary/IOC/signed orders, cancellation,
+identity and account commands, market/oracle commands, and bridge inputs.
+
+Read queries remain available for incident diagnosis. `GET /v1/health` returns
+`503` with `status = "integrity_halted"` while retaining the last committed
+height and genesis hash, and mutation endpoints return the stable
+`SEQUENCER_INTEGRITY_HALTED` code. Pausing remains available as an incident
+control; resume cannot override the stronger halt. Immediately durable,
+noncanonical auto-resolution review records remain separate from this boundary
+because they neither mutate exchange state nor grow the acknowledged-write
+suffix. Recovery is an operator restart from the last committed fence after the
+underlying solver/state fault is understood.
 
 ## Where this lives
 

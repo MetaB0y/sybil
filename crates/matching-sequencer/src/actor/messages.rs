@@ -41,6 +41,8 @@ pub enum SequencerMsg {
     #[cfg(test)]
     TestCrashOnNextBlock(SequencerTestCrashpoint),
     #[cfg(test)]
+    TestEnterIntegrityHalt(SequencerError, RpcReplyPort<()>),
+    #[cfg(test)]
     TestHoldNextTick(SequencerTestTickHold, RpcReplyPort<()>),
     SubmitOrder(
         OrderSubmission,
@@ -198,8 +200,8 @@ pub enum SequencerMsg {
         AutoResolutionRecord,
         RpcReplyPort<Result<(), SequencerError>>,
     ),
-    PauseBlockProduction(RpcReplyPort<()>),
-    ResumeBlockProduction(RpcReplyPort<()>),
+    PauseBlockProduction(RpcReplyPort<Result<(), SequencerError>>),
+    ResumeBlockProduction(RpcReplyPort<Result<(), SequencerError>>),
     Query(SequencerReadQuery),
     /// Periodic indicative-solve tick (C2). Fires from a dedicated timer
     /// task at ~750ms cadence, decoupled from block production. The arm
@@ -214,6 +216,18 @@ pub enum SequencerMsg {
         solver: String,
         error: String,
     },
+}
+
+/// One atomic view of the sequencer's chain identity and write availability.
+///
+/// Health callers must not assemble these fields through separate mailbox
+/// reads: an invariant failure could occur between them and expose a healthy
+/// chain snapshot after writes have already failed closed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SequencerOperationalStatus {
+    pub committed_height: Option<u64>,
+    pub genesis_hash: Option<[u8; 32]>,
+    pub integrity_halted: bool,
 }
 
 pub struct SequencerReadQuery {

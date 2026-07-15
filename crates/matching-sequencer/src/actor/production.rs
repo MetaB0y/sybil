@@ -185,7 +185,7 @@ impl SequencerActorState {
         Ok(BlockTickOutcome::Produced(Box::new(sealed)))
     }
 
-    fn halt_after_invariant_failure(&mut self, error: SequencerError) {
+    pub(super) fn halt_after_invariant_failure(&mut self, error: SequencerError) {
         metrics::counter!("sybil_block_verification_failures").increment(1);
         // Verification failures mean the prepared state transition itself is
         // untrustworthy. Leave the live pre-block state intact and fail-stop

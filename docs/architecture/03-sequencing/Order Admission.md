@@ -3,7 +3,7 @@ tags: [infrastructure]
 layer: sequencer
 crate: matching-sequencer
 status: current
-last_verified: 2026-07-11
+last_verified: 2026-07-15
 ---
 
 # Order admission
@@ -53,6 +53,9 @@ graph TB
 - Deferred buffer is for MM-constrained and supported multi-order submissions
 - Unsupported multi-market/custom shapes are rejected before value execution
 - Deferred submissions are persisted before the API returns success
+- An integrity-halted actor rejects all order and cancel forms at the mailbox
+  boundary, before rate/signature work, nonce advancement, reservation, or WAL
+  append
 - MM quotes are one-shot — never carried over to the next batch
 - Admission backpressure is generous by default and only affects abnormal load
 - Durable resting-order growth is backed by positive order notional
