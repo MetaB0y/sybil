@@ -1,6 +1,7 @@
 from sybil_client.types import Block, BuyNo, BuyYes, Market, SellNo, SellYes
 
 from live.synthetic import (
+    CrossingNoiseStrategy,
     FastReferenceStrategy,
     NativeNoiseStrategy,
     SyntheticStrategyConfig,
@@ -243,3 +244,66 @@ def test_seeded_strategies_are_deterministic():
     second = NativeNoiseStrategy(config).generate_orders(block, markets, {}, cash=100.0)
 
     assert first == second
+
+
+def test_sparse_crossing_noise_never_builds_a_same_account_complete_set():
+    markets = {market_id: _market(market_id) for market_id in range(1, 207)}
+    block = _block(0.50)
+    block.clearing_prices.update({market_id: (500_000_000, 500_000_000) for market_id in markets})
+    strategy = CrossingNoiseStrategy(
+        SyntheticStrategyConfig(
+            max_inventory=100,
+            notional_budget=20.0,
+            random_seed=10_000,
+            randomization_range=0.02,
+            crossing_markets_per_block=4,
+        )
+    )
+
+    orders = strategy.generate_orders(block, markets, {}, cash=100_000.0)
+
+    assert len(orders) == 4
+    assert len({order.market_id for order in orders}) == 4
+    assert all(isinstance(order, (BuyYes, BuyNo)) for order in orders)
+    assert sum(isinstance(order, BuyYes) for order in orders) <= 1
+
+
+def test_fifteen_sparse_noise_streams_cover_about_quarter_catalog():
+    markets = {market_id: _market(market_id) for market_id in range(1, 207)}
+    block = _block(0.50)
+    block.clearing_prices.update({market_id: (500_000_000, 500_000_000) for market_id in markets})
+    touched = set()
+    for actor_index in range(15):
+        strategy = CrossingNoiseStrategy(
+            SyntheticStrategyConfig(
+                random_seed=10_000 + actor_index,
+                crossing_markets_per_block=4,
+            )
+        )
+        touched.update(
+            order.market_id
+            for order in strategy.generate_orders(block, markets, {}, cash=100_000.0)
+        )
+
+    assert 40 <= len(touched) <= 60
+
+
+def test_sparse_noise_can_unwind_inventory_with_one_order_per_market():
+    strategy = CrossingNoiseStrategy(
+        SyntheticStrategyConfig(
+            max_inventory=0,
+            notional_budget=20.0,
+            random_seed=3,
+            crossing_markets_per_block=1,
+        )
+    )
+
+    orders = strategy.generate_orders(
+        _block(0.50),
+        {1: _market()},
+        {(1, "YES"): 10, (1, "NO"): 10},
+        cash=0,
+    )
+
+    assert len(orders) == 1
+    assert isinstance(orders[0], (SellYes, SellNo))
