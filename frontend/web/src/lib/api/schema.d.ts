@@ -811,9 +811,10 @@ export interface paths {
     };
     /**
      * GET /v1/health
-     * @description Returns 200 when one atomic sequencer snapshot is available, 503 when it is
-     *     unavailable. Height and genesis hash are never assembled from separate
-     *     mailbox reads.
+     * @description Returns 200 when one atomic sequencer snapshot is available and canonical
+     *     writes are enabled. Returns 503 when the actor is unavailable or integrity-
+     *     halted. Height, genesis hash, and halt state are never assembled from
+     *     separate mailbox reads.
      *     Downstream services and Docker healthchecks should treat any non-200 as
      *     unhealthy and stop routing traffic.
      */
@@ -5699,7 +5700,7 @@ export interface operations {
           "application/json": components["schemas"]["HealthResponse"];
         };
       };
-      /** @description Sequencer unavailable or chain identity inconsistent */
+      /** @description Sequencer unavailable, integrity-halted, or chain identity inconsistent */
       503: {
         headers: {
           [name: string]: unknown;

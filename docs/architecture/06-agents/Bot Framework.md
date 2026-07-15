@@ -18,6 +18,13 @@ runtime heartbeat is refreshed with portfolio snapshots, and readers consider it
 live for at most 15 minutes without a heartbeat. Historical decisions and snapshots
 are retained, but score aggregates are computed only from the current live cohort;
 they never infer membership from name patterns or mix prior runs into current PnL.
+Decision, token-usage, and portfolio-snapshot rows carry the producing `run_id`, so
+reusing a trader name cannot attach an older run's measurements to the current
+cohort. Runtime replacement and participant insertion commit atomically. A replaced
+writer loses its heartbeat lease; any late rows remain tagged with its old run and
+cannot contaminate the successor. Roles are closed to `competitor`, `load`, and
+`noise`; load/noise rows are ineligible for scoring at both the write and read
+boundaries.
 
 ## Key Properties
 - `BaseAgent.on_block(block) -> list[OrderSpec]` — the core interface

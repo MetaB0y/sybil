@@ -16,6 +16,7 @@ class DecisionDB:
     def __init__(self, db_path: str = "live/decisions.db"):
         self.conn = connect_writer(db_path, check_same_thread=False)
         self._lock = threading.Lock()
+        self._active_runtime_id: str | None = None
         self._create_tables()
 
     def _create_tables(self):
@@ -26,9 +27,12 @@ class DecisionDB:
                 ("decisions", "article_urls", "TEXT"),
                 ("portfolio_snapshots", "total_fills", "INTEGER DEFAULT 0"),
                 ("portfolio_snapshots", "total_orders", "INTEGER DEFAULT 0"),
+                ("portfolio_snapshots", "run_id", "TEXT"),
                 # SYB-64: per-call USD cost + its source (provider vs price table).
                 ("token_usage", "usd_cost", "REAL DEFAULT 0"),
                 ("token_usage", "cost_source", "TEXT"),
+                ("token_usage", "run_id", "TEXT"),
+                ("decisions", "run_id", "TEXT"),
                 # SYB-114: sizer-side calibration/freshness metadata.
                 ("decisions", "raw_fair_value", "REAL"),
                 ("decisions", "effective_fair_value", "REAL"),
@@ -68,6 +72,7 @@ class DecisionDB:
 
                 CREATE TABLE IF NOT EXISTS decisions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT,
                     trader_name TEXT,
                     market_id INTEGER,
                     market_name TEXT,
@@ -99,6 +104,7 @@ class DecisionDB:
 
                 CREATE TABLE IF NOT EXISTS portfolio_snapshots (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT,
                     trader_name TEXT,
                     timestamp TEXT,
                     balance REAL,
@@ -119,6 +125,7 @@ class DecisionDB:
 
                 CREATE TABLE IF NOT EXISTS token_usage (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT,
                     trader_name TEXT,
                     timestamp TEXT,
                     prompt_tokens INTEGER,
@@ -146,18 +153,24 @@ class DecisionDB:
                 CREATE TABLE IF NOT EXISTS arena_run_participants (
                     run_id TEXT NOT NULL,
                     trader_name TEXT NOT NULL,
-                    role TEXT NOT NULL,
-                    scored INTEGER NOT NULL CHECK (scored IN (0, 1)),
+                    role TEXT NOT NULL CHECK (role IN ('competitor', 'load', 'noise')),
+                    scored INTEGER NOT NULL CHECK (
+                        scored IN (0, 1) AND (scored = 0 OR role = 'competitor')
+                    ),
                     PRIMARY KEY (run_id, trader_name),
                     FOREIGN KEY (run_id) REFERENCES arena_runs(run_id)
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_decisions_trader
                     ON decisions(trader_name);
+                CREATE INDEX IF NOT EXISTS idx_decisions_run_trader
+                    ON decisions(run_id, trader_name, id);
                 CREATE INDEX IF NOT EXISTS idx_decisions_time
                     ON decisions(timestamp);
                 CREATE INDEX IF NOT EXISTS idx_snapshots_trader
                     ON portfolio_snapshots(trader_name);
+                CREATE INDEX IF NOT EXISTS idx_snapshots_run_trader
+                    ON portfolio_snapshots(run_id, trader_name, id);
                 CREATE INDEX IF NOT EXISTS idx_snapshots_time
                     ON portfolio_snapshots(timestamp);
                 CREATE INDEX IF NOT EXISTS idx_arena_runs_active
@@ -173,46 +186,62 @@ class DecisionDB:
             raise ValueError("arena runtime participant names must be unique")
         if any(not name.strip() or not role.strip() for name, role, _ in participants):
             raise ValueError("arena runtime participant name and role must be nonempty")
+        allowed_roles = {"competitor", "load", "noise"}
+        if any(role not in allowed_roles for _name, role, _scored in participants):
+            raise ValueError("arena runtime role must be competitor, load, or noise")
+        if any(scored and role != "competitor" for _name, role, scored in participants):
+            raise ValueError("load and noise participants cannot be scored")
 
         now = datetime.now(timezone.utc).isoformat()
         run_id = uuid4().hex
-        with self._lock, self.conn:
-            self.conn.execute(
-                "UPDATE arena_runs SET stopped_at_utc = ? WHERE stopped_at_utc IS NULL",
-                (now,),
-            )
-            self.conn.execute(
-                """INSERT INTO arena_runs
-                   (run_id, started_at_utc, heartbeat_at_utc, stopped_at_utc)
-                   VALUES (?, ?, ?, NULL)""",
-                (run_id, now, now),
-            )
-            self.conn.executemany(
-                """INSERT INTO arena_run_participants
-                   (run_id, trader_name, role, scored) VALUES (?, ?, ?, ?)""",
-                [(run_id, name, role, 1 if scored else 0) for name, role, scored in participants],
-            )
+        with self._lock:
+            with self.conn:
+                self.conn.execute(
+                    "UPDATE arena_runs SET stopped_at_utc = ? WHERE stopped_at_utc IS NULL",
+                    (now,),
+                )
+                self.conn.execute(
+                    """INSERT INTO arena_runs
+                       (run_id, started_at_utc, heartbeat_at_utc, stopped_at_utc)
+                       VALUES (?, ?, ?, NULL)""",
+                    (run_id, now, now),
+                )
+                self.conn.executemany(
+                    """INSERT INTO arena_run_participants
+                       (run_id, trader_name, role, scored) VALUES (?, ?, ?, ?)""",
+                    [
+                        (run_id, name, role, 1 if scored else 0)
+                        for name, role, scored in participants
+                    ],
+                )
+            self._active_runtime_id = run_id
         return run_id
 
     def heartbeat_runtime(self, run_id: str) -> None:
         """Refresh liveness only for the still-active matching runtime."""
         now = datetime.now(timezone.utc).isoformat()
-        with self._lock, self.conn:
-            self.conn.execute(
-                """UPDATE arena_runs SET heartbeat_at_utc = ?
-                   WHERE run_id = ? AND stopped_at_utc IS NULL""",
-                (now, run_id),
-            )
+        with self._lock:
+            with self.conn:
+                cursor = self.conn.execute(
+                    """UPDATE arena_runs SET heartbeat_at_utc = ?
+                       WHERE run_id = ? AND stopped_at_utc IS NULL""",
+                    (now, run_id),
+                )
+            if cursor.rowcount != 1:
+                raise RuntimeError(f"arena runtime {run_id} is no longer active")
 
     def stop_runtime(self, run_id: str) -> None:
         """Mark a graceful shutdown without deleting historical membership."""
         now = datetime.now(timezone.utc).isoformat()
-        with self._lock, self.conn:
-            self.conn.execute(
-                """UPDATE arena_runs SET heartbeat_at_utc = ?, stopped_at_utc = ?
-                   WHERE run_id = ? AND stopped_at_utc IS NULL""",
-                (now, now, run_id),
-            )
+        with self._lock:
+            with self.conn:
+                self.conn.execute(
+                    """UPDATE arena_runs SET heartbeat_at_utc = ?, stopped_at_utc = ?
+                       WHERE run_id = ? AND stopped_at_utc IS NULL""",
+                    (now, now, run_id),
+                )
+            if self._active_runtime_id == run_id:
+                self._active_runtime_id = None
 
     def ensure_experiment(
         self,
@@ -348,15 +377,16 @@ class DecisionDB:
         with self._lock:
             cur = self.conn.execute(
                 """INSERT INTO decisions
-                   (trader_name, market_id, market_name, timestamp, article_ids,
+                   (run_id, trader_name, market_id, market_name, timestamp, article_ids,
                     article_urls, analysis, fair_value, market_price, orders,
                     motivation, raw_llm_response, llm_duration_s, balance,
                     yes_pos, no_pos, raw_fair_value, effective_fair_value,
                     fair_value_age_s, confidence, countercase, restate,
                     rejection_reason, market_category, market_tags,
                     analysis_batch_id, analysis_reference_price)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
+                    self._active_runtime_id,
                     trader_name,
                     market_id,
                     market_name,
@@ -402,9 +432,11 @@ class DecisionDB:
         with self._lock:
             cur = self.conn.execute(
                 """INSERT INTO portfolio_snapshots
-                   (trader_name, timestamp, balance, portfolio_value, pnl, positions, total_fills, total_orders)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (run_id, trader_name, timestamp, balance, portfolio_value, pnl,
+                    positions, total_fills, total_orders)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
+                    self._active_runtime_id,
                     trader_name,
                     datetime.now(timezone.utc).isoformat(),
                     balance,
@@ -431,10 +463,11 @@ class DecisionDB:
         with self._lock:
             self.conn.execute(
                 """INSERT INTO token_usage
-                   (trader_name, timestamp, prompt_tokens, completion_tokens,
-                    model, duration_s, usd_cost, cost_source)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (run_id, trader_name, timestamp, prompt_tokens,
+                    completion_tokens, model, duration_s, usd_cost, cost_source)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
+                    self._active_runtime_id,
                     trader_name,
                     datetime.now(timezone.utc).isoformat(),
                     prompt_tokens,

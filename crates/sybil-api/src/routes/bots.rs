@@ -472,8 +472,10 @@ fn load_summaries(conn: &Connection) -> rusqlite::Result<Vec<BotSummaryResponse>
         summary.latest_edge = edge;
     }
 
-    load_latest_snapshots(conn, &mut summaries);
-    apply_active_runtime_membership(conn, &mut summaries)?;
+    load_latest_snapshots(conn, &mut summaries, None);
+    if let Some(run_id) = apply_active_runtime_membership(conn, &mut summaries)? {
+        replace_active_runtime_summary_rows(conn, &mut summaries, &run_id)?;
+    }
 
     let mut rows: Vec<_> = summaries.into_values().collect();
     rows.sort_by(|a, b| {
@@ -490,13 +492,13 @@ fn load_summaries(conn: &Connection) -> rusqlite::Result<Vec<BotSummaryResponse>
 fn apply_active_runtime_membership(
     conn: &Connection,
     summaries: &mut HashMap<String, BotSummaryResponse>,
-) -> rusqlite::Result<()> {
+) -> rusqlite::Result<Option<String>> {
     if !table_exists(conn, "arena_runs") || !table_exists(conn, "arena_run_participants") {
-        return Ok(());
+        return Ok(None);
     }
 
     let mut stmt = conn.prepare(
-        "SELECT p.trader_name, p.role, p.scored \
+        "SELECT p.run_id, p.trader_name, p.role, p.scored \
          FROM arena_run_participants p \
          JOIN arena_runs r ON r.run_id = p.run_id \
          WHERE r.run_id = ( \
@@ -510,11 +512,14 @@ fn apply_active_runtime_membership(
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
-            row.get::<_, bool>(2)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, bool>(3)?,
         ))
     })?;
+    let mut active_run_id = None;
     for row in rows {
-        let (trader_name, role, scored) = row?;
+        let (run_id, trader_name, role, scored) = row?;
+        active_run_id = Some(run_id);
         let summary = summaries
             .entry(trader_name.clone())
             .or_insert_with(|| BotSummaryResponse {
@@ -522,13 +527,115 @@ fn apply_active_runtime_membership(
                 ..BotSummaryResponse::default()
             });
         summary.active = true;
+        summary.scored = scored && role == "competitor";
         summary.role = Some(role);
-        summary.scored = scored;
     }
+    Ok(active_run_id)
+}
+
+fn replace_active_runtime_summary_rows(
+    conn: &Connection,
+    summaries: &mut HashMap<String, BotSummaryResponse>,
+    run_id: &str,
+) -> rusqlite::Result<()> {
+    for summary in summaries.values_mut().filter(|summary| summary.active) {
+        summary.decision_count = 0;
+        summary.avg_edge = None;
+        summary.latest_timestamp = None;
+        summary.latest_market_id = None;
+        summary.latest_market_name = None;
+        summary.latest_fair_value = None;
+        summary.latest_market_price = None;
+        summary.latest_edge = None;
+        summary.latest_balance = None;
+        summary.portfolio_value = None;
+        summary.pnl = None;
+        summary.total_fills = None;
+        summary.total_orders = None;
+        summary.snapshot_timestamp = None;
+    }
+
+    let mut stmt = conn.prepare(
+        "SELECT trader_name, COUNT(*) AS decision_count, \
+                AVG(ABS(fair_value - market_price)) AS avg_edge \
+         FROM decisions WHERE run_id = ?1 GROUP BY trader_name",
+    )?;
+    let rows = stmt.query_map([run_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, Option<f64>>(2)?,
+        ))
+    })?;
+    for row in rows {
+        let (trader_name, decision_count, avg_edge) = row?;
+        let Some(summary) = summaries
+            .get_mut(&trader_name)
+            .filter(|summary| summary.active)
+        else {
+            continue;
+        };
+        summary.decision_count = decision_count;
+        summary.avg_edge = avg_edge;
+    }
+
+    let mut stmt = conn.prepare(
+        "SELECT d.trader_name, d.market_id, d.market_name, d.timestamp, \
+                d.fair_value, d.market_price, d.balance \
+         FROM decisions d \
+         JOIN (SELECT trader_name, MAX(id) AS id FROM decisions \
+               WHERE run_id = ?1 GROUP BY trader_name) latest \
+           ON d.trader_name = latest.trader_name AND d.id = latest.id",
+    )?;
+    let rows = stmt.query_map([run_id], |row| {
+        let fair_value: Option<f64> = row.get(4)?;
+        let market_price: Option<f64> = row.get(5)?;
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<i64>>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, Option<String>>(3)?,
+            fair_value,
+            market_price,
+            row.get::<_, Option<f64>>(6)?,
+            edge(fair_value, market_price),
+        ))
+    })?;
+    for row in rows {
+        let (
+            trader_name,
+            market_id,
+            market_name,
+            timestamp,
+            fair_value,
+            market_price,
+            balance,
+            latest_edge,
+        ) = row?;
+        let Some(summary) = summaries
+            .get_mut(&trader_name)
+            .filter(|summary| summary.active)
+        else {
+            continue;
+        };
+        summary.latest_market_id = market_id;
+        summary.latest_market_name = market_name;
+        summary.latest_timestamp = timestamp;
+        summary.latest_fair_value = fair_value;
+        summary.latest_market_price = market_price;
+        summary.latest_balance = balance;
+        summary.latest_edge = latest_edge;
+    }
+
+    load_latest_snapshots(conn, summaries, Some(run_id));
     Ok(())
 }
 
-fn load_latest_snapshots(conn: &Connection, summaries: &mut HashMap<String, BotSummaryResponse>) {
+fn load_latest_snapshots(
+    conn: &Connection,
+    summaries: &mut HashMap<String, BotSummaryResponse>,
+    run_id: Option<&str>,
+) {
     if !table_exists(conn, "portfolio_snapshots") {
         return;
     }
@@ -536,12 +643,13 @@ fn load_latest_snapshots(conn: &Connection, summaries: &mut HashMap<String, BotS
     let with_totals = conn.prepare(
         "SELECT p.trader_name, p.balance, p.portfolio_value, p.pnl, p.total_fills, p.total_orders, p.timestamp \
          FROM portfolio_snapshots p \
-         JOIN (SELECT trader_name, MAX(id) AS id FROM portfolio_snapshots GROUP BY trader_name) latest \
+         JOIN (SELECT trader_name, MAX(id) AS id FROM portfolio_snapshots \
+               WHERE (?1 IS NULL OR run_id = ?1) GROUP BY trader_name) latest \
            ON p.trader_name = latest.trader_name AND p.id = latest.id",
     );
 
     if let Ok(mut stmt) = with_totals
-        && let Ok(rows) = stmt.query_map([], |row| {
+        && let Ok(rows) = stmt.query_map([run_id], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<f64>>(1)?,
@@ -562,12 +670,13 @@ fn load_latest_snapshots(conn: &Connection, summaries: &mut HashMap<String, BotS
     let Ok(mut stmt) = conn.prepare(
         "SELECT p.trader_name, p.balance, p.portfolio_value, p.pnl, p.timestamp \
          FROM portfolio_snapshots p \
-         JOIN (SELECT trader_name, MAX(id) AS id FROM portfolio_snapshots GROUP BY trader_name) latest \
+         JOIN (SELECT trader_name, MAX(id) AS id FROM portfolio_snapshots \
+               WHERE (?1 IS NULL OR run_id = ?1) GROUP BY trader_name) latest \
            ON p.trader_name = latest.trader_name AND p.id = latest.id",
     ) else {
         return;
     };
-    let Ok(rows) = stmt.query_map([], |row| {
+    let Ok(rows) = stmt.query_map([run_id], |row| {
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, Option<f64>>(1)?,
@@ -843,6 +952,7 @@ mod tests {
         conn.execute_batch(
             "CREATE TABLE decisions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT,
                 trader_name TEXT,
                 market_id INTEGER,
                 market_name TEXT,
@@ -867,6 +977,7 @@ mod tests {
         conn.execute_batch(
             "CREATE TABLE portfolio_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT,
                 trader_name TEXT,
                 timestamp TEXT,
                 balance REAL,
@@ -954,20 +1065,32 @@ mod tests {
         decisions_table(&conn);
         snapshots_table(&conn);
         arena_runtime_tables(&conn);
-        for trader in ["alice", "old-experiment"] {
+        for (run_id, trader, fair_value, market_price) in [
+            (Some("old"), "alice", 0.1, 0.9),
+            (None, "old-experiment", 0.2, 0.8),
+            (Some("live"), "alice", 0.6, 0.5),
+        ] {
             conn.execute(
-                "INSERT INTO decisions (trader_name, timestamp) VALUES (?1, '2026-07-15T00:00:00+00:00')",
-                [trader],
+                "INSERT INTO decisions (
+                    run_id, trader_name, timestamp, fair_value, market_price
+                ) VALUES (?1, ?2, '2026-07-15T00:00:00+00:00', ?3, ?4)",
+                rusqlite::params![run_id, trader, fair_value, market_price],
             )
             .expect("insert decision");
         }
-        for (trader, pnl) in [("alice", 4.0), ("old-experiment", -8.0), ("Fast-0", 2.0)] {
+        for (run_id, trader, portfolio_value, pnl) in [
+            (Some("old"), "alice", 500.0, 400.0),
+            (None, "old-experiment", 92.0, -8.0),
+            (Some("live"), "alice", 104.0, 4.0),
+            (Some("live"), "Fast-0", 102.0, 2.0),
+            (Some("old"), "no-baseline", 900.0, 800.0),
+        ] {
             conn.execute(
                 "INSERT INTO portfolio_snapshots (
-                    trader_name, timestamp, balance, portfolio_value, pnl,
+                    run_id, trader_name, timestamp, balance, portfolio_value, pnl,
                     positions, total_fills, total_orders
-                ) VALUES (?1, '2026-07-15T00:00:00+00:00', 100.0, 100.0, ?2, '{}', 1, 2)",
-                rusqlite::params![trader, pnl],
+                ) VALUES (?1, ?2, '2026-07-15T00:00:00+00:00', 100.0, ?3, ?4, '{}', 1, 2)",
+                rusqlite::params![run_id, trader, portfolio_value, pnl],
             )
             .expect("insert snapshot");
         }
@@ -977,7 +1100,13 @@ mod tests {
             [],
         )
         .expect("insert live runtime");
-        for (trader, role, scored) in [("alice", "competitor", 1), ("Fast-0", "load", 0)] {
+        for (trader, role, scored) in [
+            ("alice", "competitor", 1),
+            ("no-baseline", "competitor", 1),
+            // Defensive read boundary: an invalid migrated/corrupt role/score
+            // pair must not enter public competition totals.
+            ("Fast-0", "load", 1),
+        ] {
             conn.execute(
                 "INSERT INTO arena_run_participants (run_id, trader_name, role, scored)
                  VALUES ('live', ?1, ?2, ?3)",
@@ -991,6 +1120,18 @@ mod tests {
         assert!(alice.active);
         assert!(alice.scored);
         assert_eq!(alice.role.as_deref(), Some("competitor"));
+        assert_eq!(alice.decision_count, 1);
+        assert!((alice.avg_edge.unwrap() - 0.1).abs() < 1e-12);
+        assert_eq!(alice.portfolio_value, Some(104.0));
+        assert_eq!(alice.pnl, Some(4.0));
+        let no_baseline = rows
+            .iter()
+            .find(|row| row.trader_name == "no-baseline")
+            .unwrap();
+        assert!(no_baseline.active);
+        assert!(no_baseline.scored);
+        assert_eq!(no_baseline.portfolio_value, None);
+        assert_eq!(no_baseline.pnl, None);
         let fast = rows.iter().find(|row| row.trader_name == "Fast-0").unwrap();
         assert!(fast.active);
         assert!(!fast.scored);
