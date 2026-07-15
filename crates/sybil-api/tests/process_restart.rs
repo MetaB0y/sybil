@@ -11,6 +11,7 @@ use matching_sequencer::AccountId;
 use matching_sequencer::crypto::{canonical_cancel_bytes, canonical_order_bytes};
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
+use redb::{Database, TableDefinition};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 
@@ -21,6 +22,11 @@ use common::process::{
     restart_api_with_env, resume_blocks, spawn_api, spawn_api_with_env, wait_for_block,
     wait_for_health, wait_for_height_at_least,
 };
+
+// Each test below spawns the real API binary plus an in-process history
+// service. Running the drills concurrently creates artificial CPU/memory and
+// socket-timeout failures that obscure the restart contract under test.
+static PROCESS_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn to_hex(bytes: &[u8]) -> String {
     hex::encode(bytes)
@@ -47,8 +53,88 @@ fn admin_feed(feeds: &Value) -> &Value {
         .expect("admin feed is installed at startup")
 }
 
+fn remove_first_acknowledged_write(data_dir: &std::path::Path) {
+    const ACKNOWLEDGED_WRITES: TableDefinition<u64, &[u8]> =
+        TableDefinition::new("acknowledged_writes");
+
+    let db = Database::open(data_dir.join("sybil.redb")).expect("persistent store reopens");
+    let txn = db.begin_write().expect("corruption transaction begins");
+    {
+        let mut table = txn
+            .open_table(ACKNOWLEDGED_WRITES)
+            .expect("acknowledged-write table opens");
+        assert!(
+            table.remove(0).expect("first WAL row removes").is_some(),
+            "test requires an acknowledged write at sequence zero"
+        );
+    }
+    txn.commit().expect("corruption transaction commits");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cold_start_wal_rejection_stays_scrapeable_in_recovery_only_mode() {
+    let _process_test_guard = PROCESS_TEST_LOCK.lock().await;
+    let root = ProcessTestRoot::new("restore-failure-metrics");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+
+    let writer = spawn_api(root.data_dir(), root.admin_key_path(), 60_000).await;
+    wait_for_health(&client, &writer.base_url).await;
+    writer.kill().await;
+    remove_first_acknowledged_write(root.data_dir());
+
+    let failed = spawn_api(root.data_dir(), root.admin_key_path(), 60_000).await;
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        if let Ok(response) = client
+            .get(format!("{}/v1/health", failed.base_url))
+            .send()
+            .await
+        {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            if status == StatusCode::SERVICE_UNAVAILABLE {
+                let health: Value = serde_json::from_str(&body).expect("health response is JSON");
+                assert_eq!(health["status"], "restore_failed");
+                break;
+            }
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "failed restore did not enter recovery-only mode"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    let metrics = client
+        .get(format!("{}/metrics", failed.base_url))
+        .send()
+        .await
+        .expect("recovery metrics endpoint responds")
+        .text()
+        .await
+        .expect("recovery metrics body reads");
+    assert!(
+        metrics.contains("sybil_restore_acknowledged_write_failures_total{kind=\"stored_log\"} 1"),
+        "restore-failure counter must survive the cold-start boundary: {metrics}"
+    );
+
+    let write = client
+        .post(format!("{}/v1/accounts", failed.base_url))
+        .json(&json!({ "initial_balance_nanos": 1u64 }))
+        .send()
+        .await
+        .expect("recovery-only server responds to unmounted writes");
+    assert_eq!(write.status(), StatusCode::NOT_FOUND);
+
+    failed.kill().await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn admin_feed_key_is_created_once_and_reused_after_process_restart() {
+    let _process_test_guard = PROCESS_TEST_LOCK.lock().await;
     let root = ProcessTestRoot::new("admin-feed-key-restart");
     assert!(
         !root.admin_key_path().exists(),
@@ -262,6 +348,7 @@ fn assert_funding_history_once(history: &Value) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_next_block() {
+    let _process_test_guard = PROCESS_TEST_LOCK.lock().await;
     let root = ProcessTestRoot::new("process-restart");
     // This WAL/replay drill intentionally uses nano-sized balances and orders;
     // minimum-notional admission has focused API/sequencer coverage.
@@ -550,6 +637,7 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn extracted_history_survives_process_restart_and_canonical_block_pruning() {
+    let _process_test_guard = PROCESS_TEST_LOCK.lock().await;
     let root = ProcessTestRoot::new("process-restart-history");
     let retention_env = [
         ("SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS", "2"),
@@ -689,6 +777,7 @@ async fn extracted_history_survives_process_restart_and_canonical_block_pruning(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn deferred_bundle_revalidates_against_replayed_admit_after_process_restart() {
+    let _process_test_guard = PROCESS_TEST_LOCK.lock().await;
     let root = ProcessTestRoot::new("process-restart-deferred");
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))

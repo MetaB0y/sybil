@@ -492,6 +492,22 @@
       }
     },
     {
+      "title": "Acknowledged-write Restore Failures",
+      "type": "timeseries",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 109 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "sum by (kind) (sybil_restore_acknowledged_write_failures_total)", "legendFormat": "{{kind}}", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "custom": { "drawStyle": "bars", "fillOpacity": 50 }, "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "red", "value": 1 }
+        ] } },
+        "overrides": []
+      }
+    },
+    {
       "title": "Resources and Memory Attribution",
       "type": "row",
       "collapsed": false,

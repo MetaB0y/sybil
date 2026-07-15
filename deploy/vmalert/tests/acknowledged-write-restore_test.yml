@@ -1,0 +1,57 @@
+# Prometheus-compatible tests for acknowledged-write restore incident paging.
+# Run: promtool test rules deploy/vmalert/tests/acknowledged-write-restore_test.yml
+
+rule_files:
+  - ../rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: cold-start and semantic failures page separately by kind
+    interval: 1m
+    input_series:
+      - series: 'sybil_restore_acknowledged_write_failures_total{kind="stored_log",job="sybil-api",instance="sybil-api:3000"}'
+        values: "1+0x5"
+      - series: 'sybil_restore_acknowledged_write_failures_total{kind="authenticated_cancel",job="sybil-api",instance="sybil-api:3000"}'
+        values: "0 1+0x4"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: AcknowledgedWriteRestoreFailure
+        exp_alerts:
+          - exp_labels:
+              kind: stored_log
+              severity: critical
+              component: sequencer
+            exp_annotations:
+              summary: "Acknowledged-write restore failed"
+              description: "The sequencer rejected its durable acknowledged-write suffix (kind=stored_log). Preserve the store and stop writes; never bypass, edit, or discard the failed row."
+              runbook_url: "https://github.com/MetaB0y/sybil/blob/main/docs/runbooks/store-backup-restore.md#acknowledged-write-restore-failure"
+          - exp_labels:
+              kind: authenticated_cancel
+              severity: critical
+              component: sequencer
+            exp_annotations:
+              summary: "Acknowledged-write restore failed"
+              description: "The sequencer rejected its durable acknowledged-write suffix (kind=authenticated_cancel). Preserve the store and stop writes; never bypass, edit, or discard the failed row."
+              runbook_url: "https://github.com/MetaB0y/sybil/blob/main/docs/runbooks/store-backup-restore.md#acknowledged-write-restore-failure"
+
+  - name: clean process restart clears the latched incident
+    interval: 1m
+    input_series:
+      - series: 'sybil_restore_acknowledged_write_failures_total{kind="stored_log",job="sybil-api",instance="sybil-api:3000"}'
+        values: "1 0+0x4"
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: AcknowledgedWriteRestoreFailure
+        exp_alerts:
+          - exp_labels:
+              kind: stored_log
+              severity: critical
+              component: sequencer
+            exp_annotations:
+              summary: "Acknowledged-write restore failed"
+              description: "The sequencer rejected its durable acknowledged-write suffix (kind=stored_log). Preserve the store and stop writes; never bypass, edit, or discard the failed row."
+              runbook_url: "https://github.com/MetaB0y/sybil/blob/main/docs/runbooks/store-backup-restore.md#acknowledged-write-restore-failure"
+      - eval_time: 1m
+        alertname: AcknowledgedWriteRestoreFailure
+        exp_alerts: []

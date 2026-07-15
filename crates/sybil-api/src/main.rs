@@ -2,6 +2,10 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::extract::State;
+use axum::http::StatusCode;
+use axum::routing::get;
+use axum::{Json, Router};
 use clap::Parser;
 use opentelemetry::trace::TracerProvider;
 use tokio::net::TcpListener;
@@ -20,6 +24,7 @@ use sybil_oracle::{FeedPubkey, ResolutionPolicy, ResolutionTemplate, TemplateId}
 use sybil_api::app::create_router;
 use sybil_api::config::ApiConfig;
 use sybil_api::state::AppState;
+use sybil_api::types::response::HealthResponse;
 
 const SEQUENCER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(8);
 const WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(8);
@@ -27,6 +32,60 @@ const WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(8);
 struct Telemetry {
     prometheus_handle: metrics_exporter_prometheus::PrometheusHandle,
     tracer_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
+}
+
+#[derive(Clone)]
+struct RestoreFailureState {
+    prometheus: metrics_exporter_prometheus::PrometheusHandle,
+}
+
+async fn restore_failure_metrics(State(state): State<RestoreFailureState>) -> String {
+    state.prometheus.render()
+}
+
+async fn restore_failure_health() -> (StatusCode, Json<HealthResponse>) {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(HealthResponse {
+            status: "restore_failed".to_string(),
+            height: None,
+            genesis_hash: None,
+        }),
+    )
+}
+
+/// Keep the integrity signal scrapeable without mounting any exchange surface.
+///
+/// A process-local counter incremented during cold-start recovery would be lost
+/// if startup simply exited before the HTTP listener existed. This deliberately
+/// unhealthy mode holds the process at the incident boundary until an operator
+/// preserves/repairs the store and restarts it.
+async fn serve_restore_failure_mode(
+    port: u16,
+    prometheus: metrics_exporter_prometheus::PrometheusHandle,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let app = Router::new()
+        .route("/metrics", get(restore_failure_metrics))
+        .route("/v1/health", get(restore_failure_health))
+        .with_state(RestoreFailureState { prometheus });
+    let addr = format!("0.0.0.0:{port}");
+    let listener = TcpListener::bind(&addr).await?;
+    tracing::error!(
+        address = %addr,
+        "persistent restore failed; serving only unhealthy health and metrics endpoints"
+    );
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
+    Ok(())
+}
+
+fn shutdown_tracer_provider(tracer_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>) {
+    if let Some(provider) = tracer_provider
+        && let Err(e) = provider.shutdown()
+    {
+        tracing::warn!(error = %e, "failed to flush OpenTelemetry spans on shutdown");
+    }
 }
 
 async fn run_process_metrics(cancel: CancellationToken) {
@@ -273,17 +332,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if config.import_witness {
         let result = run_witness_import(&config).await;
-        if let Some(provider) = tracer_provider
-            && let Err(e) = provider.shutdown()
-        {
-            tracing::warn!(error = %e, "failed to flush OpenTelemetry spans on shutdown");
-        }
+        shutdown_tracer_provider(tracer_provider);
         return result;
     }
-
-    let worker_cancel = CancellationToken::new();
-    let workers = TaskTracker::new();
-    workers.spawn(run_process_metrics(worker_cancel.child_token()));
 
     // Deployment-profile preflight (SYB-133): log the active profile + every
     // knob diverging from the prod-intended baseline, and fail closed when a
@@ -340,10 +391,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(state) => state,
             Err(e) => {
                 tracing::error!(error = %e, "failed to restore persistent state");
-                return Err(std::io::Error::other(format!(
-                    "failed to restore persistent state: {e}"
-                ))
-                .into());
+                let result = serve_restore_failure_mode(config.port, prometheus_handle).await;
+                shutdown_tracer_provider(tracer_provider);
+                return result;
             }
         }
     } else {
@@ -363,10 +413,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "Restored from persistent store"
         );
 
-        let mut sequencer =
-            BlockSequencer::try_restore(state, oracle, seq_config).map_err(|e| {
-                std::io::Error::other(format!("failed to replay acknowledged writes: {e}"))
-            })?;
+        let mut sequencer = match BlockSequencer::try_restore(state, oracle, seq_config) {
+            Ok(sequencer) => sequencer,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to replay acknowledged writes");
+                let result = serve_restore_failure_mode(config.port, prometheus_handle).await;
+                shutdown_tracer_provider(tracer_provider);
+                return result;
+            }
+        };
 
         // Add any seed markets not already present
         for name in &config.seed_markets {
@@ -404,6 +459,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "Committed initial persistence baseline before accepting writes"
         );
     }
+
+    let worker_cancel = CancellationToken::new();
+    let workers = TaskTracker::new();
+    workers.spawn(run_process_metrics(worker_cancel.child_token()));
 
     tracing::info!(
         block_interval_ms = config.block_interval_ms,
@@ -499,11 +558,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    if let Some(provider) = tracer_provider
-        && let Err(e) = provider.shutdown()
-    {
-        tracing::warn!(error = %e, "failed to flush OpenTelemetry spans on shutdown");
-    }
+    shutdown_tracer_provider(tracer_provider);
 
     tracing::info!("Server shut down cleanly");
     Ok(())
