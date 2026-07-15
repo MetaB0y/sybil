@@ -126,9 +126,7 @@ test.describe("mobile viewport smoke", () => {
       }),
     ).toHaveCount(0);
 
-    await page
-      .getByRole("button", { name: "Open navigation menu" })
-      .click();
+    await page.getByRole("button", { name: "Open navigation menu" }).click();
     const navigation = page.getByRole("dialog", { name: "Navigation menu" });
     const search = navigation.getByRole("combobox", {
       name: "search markets",
@@ -223,7 +221,7 @@ test.describe("mobile viewport smoke", () => {
         .filter({ hasText: "open-batch data unavailable" }),
     ).toBeVisible({ timeout: 30_000 });
     await expect(
-      hero.getByText("last clearing price", { exact: true }),
+      hero.getByRole("button", { name: "What is Last price?" }),
     ).toBeVisible();
     await expect(
       hero.getByText("indicative price", { exact: true }),
