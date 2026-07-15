@@ -91,7 +91,10 @@ scrapes `sybil-l1-indexer:9102` independently of ingestion. A fatal integrity
 error leaves that listener alive, returns 503 from `/healthz`, and pages through
 `L1IndexerFatalFailure` on the first nonzero sample. `L1IndexerNotReady`,
 `L1IndexerRpcFailureBurst`, and `L1IndexerConfirmedLagHigh` cover sustained
-unready state, repeated RPC failures, and checkpoint lag. Their firing and
+unready state, whole-quorum RPC failures, and authenticated-prefix checkpoint
+lag. Provider disagreement, invalid hash binding, and finality regression are
+stable fatal kinds; the active trust mode and provider count are exported as
+metrics. Their firing and
 recovery fixtures live in
 `deploy/vmalert/tests/l1-indexer-health_test.yml`; the Compose smoke gate checks
 the packaged binary, durable cursor mount, healthcheck, and scrape target.

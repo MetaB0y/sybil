@@ -4,9 +4,10 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sybil_l1_protocol::Bytes32;
 
+use super::source::SourceIdentity;
 use super::{IndexerError, Result};
 
-const CURSOR_SCHEMA_VERSION: u32 = 2;
+const CURSOR_SCHEMA_VERSION: u32 = 3;
 
 /// Canonical hash of the last fully processed L1 block.
 ///
@@ -45,29 +46,29 @@ impl BlockCheckpoint {
     }
 }
 
-/// Durable evidence that a processed L1 prefix no longer matches the RPC's
-/// canonical chain. Restarts refuse this state until operator recovery replaces
+/// Durable evidence that the authenticated L1 source violated the configured
+/// trust policy. Restarts refuse this state until operator recovery replaces
 /// the whole deployment-bound cursor after preserving the incident artifact.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(super) struct ReorgIncident {
+pub(super) struct IntegrityIncident {
     pub(super) context: String,
     pub(super) block_number: u64,
-    pub(super) expected_hash_hex: String,
-    pub(super) observed_hash_hex: String,
+    pub(super) expected: String,
+    pub(super) observed: String,
 }
 
-impl ReorgIncident {
+impl IntegrityIncident {
     pub(super) fn new(
         context: &'static str,
         block_number: u64,
-        expected: Bytes32,
-        observed: Bytes32,
+        expected: String,
+        observed: String,
     ) -> Self {
         Self {
             context: context.to_string(),
             block_number,
-            expected_hash_hex: hex::encode(expected),
-            observed_hash_hex: hex::encode(observed),
+            expected,
+            observed,
         }
     }
 }
@@ -82,9 +83,13 @@ pub(super) struct CursorState {
     vault_address_hex: String,
     chain_id: u64,
     #[serde(default)]
+    source_identity: SourceIdentity,
+    #[serde(default)]
     pub(super) checkpoint: Option<BlockCheckpoint>,
+    #[serde(default)]
+    pub(super) source_tip: Option<BlockCheckpoint>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    reorg_incident: Option<ReorgIncident>,
+    integrity_incident: Option<IntegrityIncident>,
 }
 
 impl CursorState {
@@ -92,15 +97,19 @@ impl CursorState {
         next_from: u64,
         vault_address_hex: &str,
         chain_id: u64,
+        source_identity: SourceIdentity,
         checkpoint: BlockCheckpoint,
+        source_tip: BlockCheckpoint,
     ) -> Self {
         Self {
             schema_version: CURSOR_SCHEMA_VERSION,
             next_from,
             vault_address_hex: vault_address_hex.to_string(),
             chain_id,
+            source_identity,
             checkpoint: Some(checkpoint),
-            reorg_incident: None,
+            source_tip: Some(source_tip),
+            integrity_incident: None,
         }
     }
 
@@ -108,27 +117,32 @@ impl CursorState {
         next_from: u64,
         vault_address_hex: &str,
         chain_id: u64,
+        source_identity: SourceIdentity,
         checkpoint: Option<BlockCheckpoint>,
-        incident: ReorgIncident,
+        source_tip: Option<BlockCheckpoint>,
+        incident: IntegrityIncident,
     ) -> Self {
         Self {
             schema_version: CURSOR_SCHEMA_VERSION,
             next_from,
             vault_address_hex: vault_address_hex.to_string(),
             chain_id,
+            source_identity,
             checkpoint,
-            reorg_incident: Some(incident),
+            source_tip,
+            integrity_incident: Some(incident),
         }
     }
 }
 
 /// Load the persisted scan cursor, or `None` if no file exists. Fails closed on
 /// a different deployment, unsupported legacy schema, invalid checkpoint, or
-/// previously latched reorg incident.
+/// previously latched source-integrity incident.
 pub(super) fn load_cursor(
     path: &Path,
     vault_hex: &str,
     chain_id: u64,
+    source_identity: &SourceIdentity,
 ) -> Result<Option<CursorState>> {
     if !path.exists() {
         return Ok(None);
@@ -151,13 +165,22 @@ pub(super) fn load_cursor(
             arg_chain: chain_id,
         });
     }
-    if let Some(incident) = state.reorg_incident.as_ref() {
-        return Err(IndexerError::ReorgIncidentLatched {
+    if &state.source_identity != source_identity {
+        return Err(IndexerError::CursorSourceMismatch {
+            path: path.display().to_string(),
+            stored_mode: state.source_identity.trust_mode,
+            stored_providers: state.source_identity.provider_ids,
+            configured_mode: source_identity.trust_mode.clone(),
+            configured_providers: source_identity.provider_ids.clone(),
+        });
+    }
+    if let Some(incident) = state.integrity_incident.as_ref() {
+        return Err(IndexerError::IntegrityIncidentLatched {
             path: path.display().to_string(),
             context: incident.context.clone(),
             block_number: incident.block_number,
-            expected: incident.expected_hash_hex.clone(),
-            observed: incident.observed_hash_hex.clone(),
+            expected: incident.expected.clone(),
+            observed: incident.observed.clone(),
         });
     }
     let checkpoint =
@@ -169,12 +192,30 @@ pub(super) fn load_cursor(
                 message: "active cursor is missing its canonical block checkpoint".to_string(),
             })?;
     checkpoint.block_hash(path)?;
+    let source_tip =
+        state
+            .source_tip
+            .as_ref()
+            .ok_or_else(|| IndexerError::CursorCheckpointInvalid {
+                path: path.display().to_string(),
+                message: "active cursor is missing its authenticated source-tip header".to_string(),
+            })?;
+    source_tip.block_hash(path)?;
     if checkpoint.block_number.saturating_add(1) != state.next_from {
         return Err(IndexerError::CursorCheckpointInvalid {
             path: path.display().to_string(),
             message: format!(
                 "checkpoint block {} does not precede next_from {}",
                 checkpoint.block_number, state.next_from
+            ),
+        });
+    }
+    if source_tip.block_number < checkpoint.block_number {
+        return Err(IndexerError::CursorCheckpointInvalid {
+            path: path.display().to_string(),
+            message: format!(
+                "authenticated source tip {} is behind processed checkpoint {}",
+                source_tip.block_number, checkpoint.block_number
             ),
         });
     }

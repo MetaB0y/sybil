@@ -17,7 +17,7 @@ pub(super) struct IndexerMetrics {
 #[derive(Default)]
 struct MetricsSnapshot {
     ready: bool,
-    reorg_latched: bool,
+    integrity_latched: bool,
     started_timestamp_seconds: u64,
     last_successful_poll_timestamp_seconds: u64,
     latest_block: Option<u64>,
@@ -31,18 +31,22 @@ struct MetricsSnapshot {
     consecutive_rpc_failures: u64,
     cursor_persistence_failures_total: u64,
     fatal_kind: Option<&'static str>,
+    trust_mode: String,
+    provider_count: u64,
 }
 
 #[derive(Debug, Serialize)]
 struct HealthResponse {
     status: &'static str,
     ready: bool,
-    reorg_latched: bool,
+    integrity_latched: bool,
     fatal_kind: Option<&'static str>,
     checkpoint_block: Option<u64>,
     next_from_block: u64,
     confirmed_lag_blocks: u64,
     last_successful_poll_timestamp_seconds: u64,
+    trust_mode: String,
+    provider_count: u64,
 }
 
 impl IndexerMetrics {
@@ -54,6 +58,12 @@ impl IndexerMetrics {
             .expect("metrics lock poisoned")
             .started_timestamp_seconds = now_seconds();
         metrics
+    }
+
+    pub(super) fn configure_source(&self, trust_mode: &str, provider_count: usize) {
+        let mut state = self.inner.write().expect("metrics lock poisoned");
+        state.trust_mode = trust_mode.to_string();
+        state.provider_count = u64::try_from(provider_count).unwrap_or(u64::MAX);
     }
 
     pub(super) fn mark_ready(&self, next_from: u64, checkpoint_block: Option<u64>) {
@@ -101,18 +111,18 @@ impl IndexerMetrics {
             .cursor_persistence_failures_total += 1;
     }
 
-    pub(super) fn mark_reorg_latched(&self) {
+    pub(super) fn mark_integrity_latched(&self) {
         self.inner
             .write()
             .expect("metrics lock poisoned")
-            .reorg_latched = true;
+            .integrity_latched = true;
     }
 
-    pub(super) fn record_fatal(&self, kind: &'static str, reorg_latched: bool) {
+    pub(super) fn record_fatal(&self, kind: &'static str, integrity_latched: bool) {
         let mut state = self.inner.write().expect("metrics lock poisoned");
         state.ready = false;
         state.fatal_kind = Some(kind);
-        state.reorg_latched |= reorg_latched;
+        state.integrity_latched |= integrity_latched;
         *state.fatal_failures.entry(kind).or_default() += 1;
     }
 
@@ -127,12 +137,14 @@ impl IndexerMetrics {
                 "starting"
             },
             ready: state.ready,
-            reorg_latched: state.reorg_latched,
+            integrity_latched: state.integrity_latched,
             fatal_kind: state.fatal_kind,
             checkpoint_block: state.checkpoint_block,
             next_from_block: state.next_from_block,
             confirmed_lag_blocks: state.confirmed_lag_blocks,
             last_successful_poll_timestamp_seconds: state.last_successful_poll_timestamp_seconds,
+            trust_mode: state.trust_mode.clone(),
+            provider_count: state.provider_count,
         }
     }
 
@@ -147,10 +159,25 @@ impl IndexerMetrics {
         );
         gauge(
             &mut out,
-            "sybil_l1_indexer_reorg_latched",
-            "Whether a canonical L1 reorg incident is durably latched.",
-            u64::from(state.reorg_latched),
+            "sybil_l1_indexer_integrity_latched",
+            "Whether an L1 reorg, provider disagreement, or invalid authenticated view is durably latched.",
+            u64::from(state.integrity_latched),
         );
+        gauge(
+            &mut out,
+            "sybil_l1_indexer_provider_count",
+            "Number of configured L1 JSON-RPC providers in the durable trust policy.",
+            state.provider_count,
+        );
+        out.push_str(
+            "# HELP sybil_l1_indexer_source_policy Active L1 source trust policy.\n\
+             # TYPE sybil_l1_indexer_source_policy gauge\n",
+        );
+        if !state.trust_mode.is_empty() {
+            out.push_str("sybil_l1_indexer_source_policy{mode=\"");
+            out.push_str(&state.trust_mode);
+            out.push_str("\"} 1\n");
+        }
         gauge(
             &mut out,
             "sybil_l1_indexer_started_timestamp_seconds",
@@ -166,13 +193,13 @@ impl IndexerMetrics {
         optional_gauge(
             &mut out,
             "sybil_l1_indexer_latest_block",
-            "Latest L1 block observed during a successful poll.",
+            "Authenticated source tip observed during a successful poll (finalized in public mode).",
             state.latest_block,
         );
         optional_gauge(
             &mut out,
             "sybil_l1_indexer_confirmed_tip_block",
-            "Highest L1 block below the configured confirmation window.",
+            "Highest authenticated L1 block eligible for ingestion.",
             state.confirmed_tip_block,
         );
         optional_gauge(
@@ -196,7 +223,7 @@ impl IndexerMetrics {
         gauge(
             &mut out,
             "sybil_l1_indexer_confirmed_lag_blocks",
-            "Confirmed L1 blocks not yet covered by the durable checkpoint.",
+            "Authenticated source-prefix blocks not yet covered by the durable checkpoint.",
             state.confirmed_lag_blocks,
         );
         counter(
@@ -338,9 +365,10 @@ mod tests {
     #[tokio::test]
     async fn fatal_state_remains_scrapeable_and_unhealthy() {
         let metrics = IndexerMetrics::new();
+        metrics.configure_source("unanimous-finalized", 2);
         metrics.mark_ready(9, Some(8));
         metrics.record_successful_poll(10, 8, 9, Some(8));
-        metrics.mark_reorg_latched();
+        metrics.mark_integrity_latched();
         metrics.record_fatal("canonical_hash_mismatch", true);
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -353,8 +381,10 @@ mod tests {
         assert_eq!(health.status(), StatusCode::SERVICE_UNAVAILABLE);
         let health_body = health.text().await.unwrap();
         assert!(health_body.contains("\"status\":\"fatal\""));
-        assert!(health_body.contains("\"reorg_latched\":true"));
+        assert!(health_body.contains("\"integrity_latched\":true"));
         assert!(health_body.contains("\"fatal_kind\":\"canonical_hash_mismatch\""));
+        assert!(health_body.contains("\"trust_mode\":\"unanimous-finalized\""));
+        assert!(health_body.contains("\"provider_count\":2"));
 
         let body = reqwest::get(format!("http://{address}/metrics"))
             .await
@@ -363,7 +393,9 @@ mod tests {
             .await
             .unwrap();
         assert!(body.contains("sybil_l1_indexer_ready 0"));
-        assert!(body.contains("sybil_l1_indexer_reorg_latched 1"));
+        assert!(body.contains("sybil_l1_indexer_integrity_latched 1"));
+        assert!(body.contains("sybil_l1_indexer_provider_count 2"));
+        assert!(body.contains("sybil_l1_indexer_source_policy{mode=\"unanimous-finalized\"} 1"));
         assert!(
             body.contains(
                 "sybil_l1_indexer_fatal_failures_total{kind=\"canonical_hash_mismatch\"} 1"

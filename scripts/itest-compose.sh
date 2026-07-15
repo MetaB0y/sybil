@@ -5,15 +5,18 @@ set -euo pipefail
 #
 # Usage:
 #   scripts/itest-compose.sh             # operator/CI: runs Docker E2E
+#   scripts/itest-compose.sh --skip-escape # omit custody proof drill
 #   scripts/itest-compose.sh --dry-run   # sandbox-safe static + assertion tests
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 DRY_RUN=0
+SKIP_ESCAPE=0
 case "${1:-}" in
     "") ;;
     --dry-run) DRY_RUN=1 ;;
+    --skip-escape) SKIP_ESCAPE=1 ;;
     -h|--help)
         sed -n '3,8p' "$0" | sed 's/^# \{0,1\}//'
         exit 0
@@ -24,14 +27,19 @@ esac
 
 for file in docker-compose.yml docker-compose.itest.yml \
     crates/sybil-client/examples/seed_book.rs crates/sybil-client/examples/smoke_sign.rs \
-    crates/sybil-custody/src/main.rs contracts/script/UnsafeAnvilBridgeSetup.s.sol \
-    contracts/script/UnsafeAnvilEscapeSetup.s.sol scripts/assert-seed-book.py; do
+    contracts/script/UnsafeAnvilBridgeSetup.s.sol scripts/assert-seed-book.py; do
     [[ -f "$file" ]] || { echo "missing required harness file: $file" >&2; exit 1; }
 done
+if [[ "$SKIP_ESCAPE" -eq 0 ]]; then
+    for file in crates/sybil-custody/src/main.rs \
+        contracts/script/UnsafeAnvilEscapeSetup.s.sol; do
+        [[ -f "$file" ]] || { echo "missing required escape harness file: $file" >&2; exit 1; }
+    done
+fi
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
     python3 scripts/assert-seed-book.py --self-test
-    printf 'dry-run: docker compose -p <isolated-project> -f docker-compose.yml -f docker-compose.itest.yml up -d --build sybil-api\n'
+    printf 'dry-run: docker compose -p <isolated-project> -f docker-compose.yml -f docker-compose.itest.yml up -d --build sybil-history sybil-api\n'
     printf 'dry-run: wait health -> seed -> snapshot/reconstruct -> unsafe Anvil escape payout -> unsafe Anvil normal deposit/index/withdraw/finalize -> down -v\n'
     exit 0
 fi
@@ -112,12 +120,14 @@ print("true" if value is True else "false" if value is False else value)
 ' "$1" "$2"
 }
 
-step "Build and start isolated sybil-api"
-compose up -d --build sybil-api
+step "Build and start isolated sybil-api + history projector"
+compose up -d --build sybil-history sybil-api
 
 ready=0
 for _ in $(seq 1 90); do
-    if http_json GET /v1/health "$WORK/health.json" 200 2>/dev/null \
+    if compose exec -T sybil-history curl -fsS http://127.0.0.1:3003/healthz \
+           >/dev/null 2>&1 \
+       && http_json GET /v1/health "$WORK/health.json" 200 2>/dev/null \
        && [[ "$(jget "$WORK/health.json" status)" == "ok" ]] \
        && [[ "$(jget "$WORK/health.json" genesis_hash 2>/dev/null || true)" =~ ^[0-9a-f]{64}$ ]]; then
         ready=1
@@ -125,8 +135,8 @@ for _ in $(seq 1 90); do
     fi
     sleep 1
 done
-[[ "$ready" -eq 1 ]] || { echo "sybil-api did not become healthy with a genesis hash" >&2; exit 1; }
-pass "GET /v1/health -> 200, status=ok, genesis_hash present"
+[[ "$ready" -eq 1 ]] || { echo "sybil-api/history did not become healthy with a genesis hash" >&2; exit 1; }
+pass "history health + GET /v1/health -> 200, status=ok, genesis_hash present"
 
 step "Pause and seed the deterministic signed fixture"
 http_json POST /v1/simulation/pause "$WORK/pause.json" 200
@@ -184,14 +194,6 @@ python3 scripts/assert-seed-book.py \
     --no-fills "$WORK/no-fills.json"
 pass "matched_volume=1000, YES/NO prices=500000000, marked balance conserved exactly"
 
-step "Run the anyone-can-prove custody escape fixture drill"
-http_json POST /v1/simulation/pause "$WORK/escape-pause.json" 200
-[[ "$(jget "$WORK/escape-pause.json" status)" == "paused" ]]
-
-http_json GET /v1/blocks/latest "$WORK/escape-block.json" 200
-ESCAPE_HEIGHT="$(jget "$WORK/escape-block.json" height)"
-http_json GET "/v1/da/$ESCAPE_HEIGHT/manifest" "$WORK/escape-manifest-api.json" 200
-
 ANVIL_PORT="${SYBIL_ITEST_ANVIL_PORT:-18545}"
 ANVIL_RPC="http://127.0.0.1:$ANVIL_PORT"
 ANVIL_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
@@ -203,8 +205,17 @@ for _ in $(seq 1 30); do
     sleep 1
 done
 cast chain-id --rpc-url "$ANVIL_RPC" >/dev/null
-
 export PRIVATE_KEY="$ANVIL_KEY"
+
+if [[ "$SKIP_ESCAPE" -eq 0 ]]; then
+step "Run the anyone-can-prove custody escape fixture drill"
+http_json POST /v1/simulation/pause "$WORK/escape-pause.json" 200
+[[ "$(jget "$WORK/escape-pause.json" status)" == "paused" ]]
+
+http_json GET /v1/blocks/latest "$WORK/escape-block.json" 200
+ESCAPE_HEIGHT="$(jget "$WORK/escape-block.json" height)"
+http_json GET "/v1/da/$ESCAPE_HEIGHT/manifest" "$WORK/escape-manifest-api.json" 200
+
 export ROOT_HEIGHT="$ESCAPE_HEIGHT"
 export STATE_ROOT="0x$(jget "$WORK/escape-manifest-api.json" state_root)"
 export BLOCK_HASH="0x$(jget "$WORK/escape-manifest-api.json" block_hash)"
@@ -279,6 +290,11 @@ assert user_after > user_before, (user_before, user_after)
 assert user_after - user_before == vault_before - vault_after
 PY
 pass "escape activation -> fixture adapter proof -> custody calldata submission paid exact claim"
+else
+step "Skip custody escape proof drill by explicit request"
+http_json POST /v1/simulation/pause "$WORK/bridge-initial-pause.json" 200
+[[ "$(jget "$WORK/bridge-initial-pause.json" status)" == "paused" ]]
+fi
 
 step "Run the UNSAFE local-Anvil normal bridge round trip"
 echo "  local-only: accept-all adapters validate plumbing, not withdrawal proof soundness"
@@ -321,7 +337,9 @@ cast send "$BRIDGE_VAULT" "deposit(uint256,bytes32)" \
 BRIDGE_CURSOR="$WORK/bridge-indexer-cursor.json"
 run_bridge_indexer() {
     target/debug/sybil-l1-indexer \
-        --rpc-url "$ANVIL_RPC" \
+        --rpc-urls "$ANVIL_RPC" \
+        --rpc-ids local-anvil \
+        --trust-mode unsafe-single-dev \
         --sybil-api-url "$BASE" \
         --vault-address "$BRIDGE_VAULT" \
         --chain-id 31337 \
@@ -335,10 +353,16 @@ run_bridge_indexer 2>&1 | tee "$WORK/bridge-indexer-deposit.log"
 python3 - "$BRIDGE_CURSOR" <<'PY'
 import json, sys
 state = json.load(open(sys.argv[1], encoding="utf-8"))
-assert state["schema_version"] == 2, state
+assert state["schema_version"] == 3, state
 assert state["checkpoint"]["block_number"] + 1 == state["next_from"], state
 assert len(state["checkpoint"]["block_hash_hex"]) == 64, state
-assert "reorg_incident" not in state, state
+assert state["source_tip"]["block_number"] >= state["checkpoint"]["block_number"], state
+assert len(state["source_tip"]["block_hash_hex"]) == 64, state
+assert state["source_identity"] == {
+    "trust_mode": "unsafe-single-dev",
+    "provider_ids": ["local-anvil"],
+}, state
+assert "integrity_incident" not in state, state
 PY
 pass "L1 indexer persisted a deployment-bound canonical block checkpoint"
 http_json GET "/v1/accounts/$BRIDGE_ACCOUNT" "$WORK/bridge-funded-account.json" 200
