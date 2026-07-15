@@ -40,18 +40,6 @@ pub struct CuratedMarkets {
     /// Curated events, in listing order.
     #[serde(default)]
     pub events: Vec<CuratedEvent>,
-    /// Exact reviewed child markets. Non-empty makes this the authoritative
-    /// allow-list; event ids are used only to fetch parent metadata.
-    #[serde(default)]
-    pub conditions: Vec<CuratedCondition>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct CuratedCondition {
-    pub condition_id: String,
-    pub event_id: String,
-    #[serde(default)]
-    pub title: String,
 }
 
 /// One curated Polymarket event.
@@ -95,59 +83,27 @@ impl CuratedMarkets {
                 )));
             }
         }
-        let mut seen = HashSet::new();
-        for (i, market) in self.conditions.iter().enumerate() {
-            let condition_id = market.condition_id.trim();
-            if condition_id.len() != 66
-                || !condition_id.starts_with("0x")
-                || !condition_id[2..].chars().all(|ch| ch.is_ascii_hexdigit())
-            {
-                return Err(Error::PolymarketApi(format!(
-                    "curated condition #{i} is not a 32-byte 0x condition id"
-                )));
-            }
-            if market.event_id.trim().is_empty() || !seen.insert(condition_id.to_ascii_lowercase())
-            {
-                return Err(Error::PolymarketApi(format!(
-                    "curated condition #{i} has an empty event id or duplicate condition id"
-                )));
-            }
-        }
         Ok(())
     }
 
     /// De-duplicated, order-preserving list of Polymarket event ids to fetch.
     pub fn event_ids(&self) -> Vec<String> {
         let mut seen = HashSet::new();
-        let ids = self
-            .conditions
+        self.events
             .iter()
-            .map(|market| market.event_id.as_str())
-            .chain(self.events.iter().map(|event| event.event_id.as_str()));
-        ids.map(|id| id.trim().to_string())
+            .map(|event| event.event_id.trim().to_string())
             .filter(|id| !id.is_empty() && seen.insert(id.clone()))
-            .collect()
-    }
-
-    pub fn condition_ids(&self) -> Vec<String> {
-        self.conditions
-            .iter()
-            .map(|market| market.condition_id.trim().to_ascii_lowercase())
             .collect()
     }
 
     /// Number of curated events.
     pub fn len(&self) -> usize {
-        if self.conditions.is_empty() {
-            self.events.len()
-        } else {
-            self.conditions.len()
-        }
+        self.events.len()
     }
 
     /// Whether the curated set is empty.
     pub fn is_empty(&self) -> bool {
-        self.events.is_empty() && self.conditions.is_empty()
+        self.events.is_empty()
     }
 }
 
@@ -209,8 +165,17 @@ mod tests {
         // honest against the parser and accidental catalog expansion.
         let data = include_str!("../curated_markets.json");
         let curated = CuratedMarkets::parse_json(data).unwrap();
-        assert_eq!(curated.len(), 72, "expected exact reviewed mirror children");
-        assert_eq!(curated.condition_ids().len(), 72);
-        assert_eq!(curated.event_ids().len(), 10);
+        assert_eq!(curated.len(), 4, "expected the four reviewed seed events");
+        // Every id is a non-empty numeric string.
+        for id in curated.event_ids() {
+            assert!(
+                id.chars().all(|c| c.is_ascii_digit()),
+                "non-numeric id {id}"
+            );
+        }
+        assert_eq!(
+            curated.event_ids(),
+            ["333737", "79075", "85299", "96557"].map(str::to_string)
+        );
     }
 }

@@ -734,10 +734,7 @@ fn verify_l1_deposit_checkpoint(
             | SystemEventWitness::KeyRegistered { .. }
             | SystemEventWitness::KeyRevoked { .. }
             | SystemEventWitness::ClientActionAuthorized(..)
-            | SystemEventWitness::QuarantineClaimed { .. }
-            | SystemEventWitness::CompleteSetCollateralized { .. }
-            | SystemEventWitness::CompleteSetRedeemed { .. }
-            | SystemEventWitness::LiquidityUniverseActivated { .. } => None,
+            | SystemEventWitness::QuarantineClaimed { .. } => None,
         })
         .collect::<Vec<_>>();
 
@@ -1197,7 +1194,6 @@ mod tests {
                 withdrawals: vec![withdrawal],
                 quarantine: vec![],
             },
-            liquidity_universe: Default::default(),
             markets: vec![market],
             market_groups: vec![market_group],
             resting_orders: vec![sybil_verifier::RestingOrderSnapshot {

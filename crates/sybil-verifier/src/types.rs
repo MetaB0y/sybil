@@ -224,23 +224,6 @@ pub enum SystemEventWitness {
     /// are emitted in actor acknowledgement order alongside key mutations so
     /// guest replay observes the exact key/nonce state used at admission.
     ClientActionAuthorized(ClientActionWitness),
-    CompleteSetCollateralized {
-        account_id: u64,
-        market_id: MarketId,
-        quantity: u64,
-    },
-    CompleteSetRedeemed {
-        account_id: u64,
-        market_id: MarketId,
-        quantity: u64,
-    },
-    /// Atomically replace the exact market allow-list for subsequent admission.
-    LiquidityUniverseActivated {
-        generation: u64,
-        policy_digest: [u8; 32],
-        activated_at_height: u64,
-        market_ids: Vec<MarketId>,
-    },
 }
 
 /// Validity-critical signing-key record committed by `keys_digest` v2.
@@ -492,27 +475,10 @@ pub struct AccountSnapshot {
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct StateSidecarSnapshot {
     pub bridge: BridgeStateSnapshot,
-    /// Committed market-membership generation used by admission and actors.
-    #[serde(default)]
-    pub liquidity_universe: LiquidityUniverseSnapshot,
     pub markets: Vec<MarketSnapshot>,
     pub market_groups: Vec<MarketGroupSnapshot>,
     pub resting_orders: Vec<RestingOrderSnapshot>,
     pub account_reservations: Vec<AccountReservationSnapshot>,
-}
-
-/// Validity-critical subset of markets accepting new orders.
-///
-/// Generation zero is the legacy bootstrap state: all lifecycle-active markets
-/// are tradeable, while actor endpoints remain unready. From generation one
-/// onward `market_ids` is the exact allow-list.
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct LiquidityUniverseSnapshot {
-    pub generation: u64,
-    pub policy_digest: [u8; 32],
-    pub activated_at_height: u64,
-    /// Strictly sorted, duplicate-free market ids.
-    pub market_ids: Vec<MarketId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

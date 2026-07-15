@@ -28,18 +28,9 @@ class BlockMarketStats:
         Attributes:
             matched (int | Unset): Resting orders touching this market that exited the book this
                 block AFTER at least one fill (B5's `has_been_matched`).
-            mm_fill_notional_nanos (int | Unset): MM filled-order notional. Integer nanodollars; 1_000_000_000 = $1.
-                Role-attributed notionals intentionally need not sum to unique economic
-                trade volume because both matched sides appear.
-            mm_matched_orders (int | Unset): Filled orders submitted through the market-maker actor epoch.
-            noise_fill_notional_nanos (int | Unset): Noise filled-order notional. Integer nanodollars; 1_000_000_000 = $1.
-            noise_matched_orders (int | Unset): Filled orders submitted through noise actor epochs.
-            organic_fill_notional_nanos (int | Unset): Organic filled-order notional. Integer nanodollars; 1_000_000_000 =
-                $1.
-            organic_matched_orders (int | Unset): Filled orders from manual, LLM, or ordinary non-actor flow.
             placed (int | Unset): Non-MM admissions counted against this market in this block.
                 Multi-market orders credit each active market.
-            placers (int | Unset): Unique real accounts, including MM, admitted touching this market in
+            placers (int | Unset): Unique placers (non-MM accounts) admitted touching this market in
                 the block. Multi-market orders credit each active market; the
                 platform `unique_placers` scalar counts the account once.
             unmatched (int | Unset): Resting orders touching this market that exited the book this
@@ -50,16 +41,10 @@ class BlockMarketStats:
             welfare_nanos (int | Unset): Per-market welfare contribution from this block's fills (B7). Integer nanodollars;
                 1_000_000_000 = $1. Multi-market fills credit each active market with their
                 full welfare; the platform `total_welfare_nanos` counts each fill once.
-                Encoded as signed nanos to match canonical welfare arithmetic.
+                Signed — solver rounding can yield small negatives.
      """
 
     matched: int | Unset = UNSET
-    mm_fill_notional_nanos: int | Unset = UNSET
-    mm_matched_orders: int | Unset = UNSET
-    noise_fill_notional_nanos: int | Unset = UNSET
-    noise_matched_orders: int | Unset = UNSET
-    organic_fill_notional_nanos: int | Unset = UNSET
-    organic_matched_orders: int | Unset = UNSET
     placed: int | Unset = UNSET
     placers: int | Unset = UNSET
     unmatched: int | Unset = UNSET
@@ -73,18 +58,6 @@ class BlockMarketStats:
 
     def to_dict(self) -> dict[str, Any]:
         matched = self.matched
-
-        mm_fill_notional_nanos = self.mm_fill_notional_nanos
-
-        mm_matched_orders = self.mm_matched_orders
-
-        noise_fill_notional_nanos = self.noise_fill_notional_nanos
-
-        noise_matched_orders = self.noise_matched_orders
-
-        organic_fill_notional_nanos = self.organic_fill_notional_nanos
-
-        organic_matched_orders = self.organic_matched_orders
 
         placed = self.placed
 
@@ -103,18 +76,6 @@ class BlockMarketStats:
         })
         if matched is not UNSET:
             field_dict["matched"] = matched
-        if mm_fill_notional_nanos is not UNSET:
-            field_dict["mm_fill_notional_nanos"] = mm_fill_notional_nanos
-        if mm_matched_orders is not UNSET:
-            field_dict["mm_matched_orders"] = mm_matched_orders
-        if noise_fill_notional_nanos is not UNSET:
-            field_dict["noise_fill_notional_nanos"] = noise_fill_notional_nanos
-        if noise_matched_orders is not UNSET:
-            field_dict["noise_matched_orders"] = noise_matched_orders
-        if organic_fill_notional_nanos is not UNSET:
-            field_dict["organic_fill_notional_nanos"] = organic_fill_notional_nanos
-        if organic_matched_orders is not UNSET:
-            field_dict["organic_matched_orders"] = organic_matched_orders
         if placed is not UNSET:
             field_dict["placed"] = placed
         if placers is not UNSET:
@@ -135,18 +96,6 @@ class BlockMarketStats:
         d = dict(src_dict)
         matched = d.pop("matched", UNSET)
 
-        mm_fill_notional_nanos = d.pop("mm_fill_notional_nanos", UNSET)
-
-        mm_matched_orders = d.pop("mm_matched_orders", UNSET)
-
-        noise_fill_notional_nanos = d.pop("noise_fill_notional_nanos", UNSET)
-
-        noise_matched_orders = d.pop("noise_matched_orders", UNSET)
-
-        organic_fill_notional_nanos = d.pop("organic_fill_notional_nanos", UNSET)
-
-        organic_matched_orders = d.pop("organic_matched_orders", UNSET)
-
         placed = d.pop("placed", UNSET)
 
         placers = d.pop("placers", UNSET)
@@ -159,12 +108,6 @@ class BlockMarketStats:
 
         block_market_stats = cls(
             matched=matched,
-            mm_fill_notional_nanos=mm_fill_notional_nanos,
-            mm_matched_orders=mm_matched_orders,
-            noise_fill_notional_nanos=noise_fill_notional_nanos,
-            noise_matched_orders=noise_matched_orders,
-            organic_fill_notional_nanos=organic_fill_notional_nanos,
-            organic_matched_orders=organic_matched_orders,
             placed=placed,
             placers=placers,
             unmatched=unmatched,

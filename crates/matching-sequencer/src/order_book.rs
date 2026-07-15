@@ -382,10 +382,7 @@ impl OrderBook {
     }
 
     /// Per-account position reservations view (for validation).
-    pub(crate) fn acct_position_reservations(
-        &self,
-        account_id: AccountId,
-    ) -> HashMap<PositionKey, i64> {
+    fn acct_position_reservations(&self, account_id: AccountId) -> HashMap<PositionKey, i64> {
         self.position_reservations
             .iter()
             .filter(|((aid, _), _)| *aid == account_id)

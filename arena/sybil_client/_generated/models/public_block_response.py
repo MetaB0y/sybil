@@ -53,8 +53,7 @@ class PublicBlockResponse:
                 1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
             resolved_market_ids (list[int] | Unset): Market ids resolved in this block. The account-bearing affected-account
                 list from the canonical event is intentionally omitted.
-            unique_placers (int | Unset): Unique real accounts, including MM, admitted into this block. This is an
-                aggregate,
+            unique_placers (int | Unset): Unique non-MM accounts admitted into this block. This is an aggregate,
                 never an account identifier list.
      """
 

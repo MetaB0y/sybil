@@ -88,7 +88,7 @@ impl SequencerActorState {
                 }
             }
 
-            let market_prices = self.sequencer.analytics().last_mark_prices().get(&mid);
+            let market_prices = self.sequencer.analytics().last_clearing_prices().get(&mid);
             let yes_price = market_prices.and_then(|p| p.first().copied());
             let no_price = market_prices.and_then(|p| p.get(1).copied());
             let volume = self.sequencer.analytics().market_volume(mid);

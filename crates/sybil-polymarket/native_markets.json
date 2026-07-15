@@ -16,7 +16,7 @@
             "quote_range": {
               "min": 0.25,
               "max": 0.62,
-              "initial": 0.46
+              "initial": 0.4
             },
             "image_url": "https://www.google.com/s2/favicons?domain=anthropic.com&sz=128"
           },
@@ -207,7 +207,7 @@
             "quote_range": {
               "min": 0.12,
               "max": 0.34,
-              "initial": 0.27
+              "initial": 0.19
             },
             "image_url": "https://www.google.com/s2/favicons?domain=google.com&sz=128"
           },
@@ -286,7 +286,7 @@
             "quote_range": {
               "min": 0.14,
               "max": 0.4,
-              "initial": 0.33
+              "initial": 0.24
             },
             "image_url": "https://www.google.com/s2/favicons?domain=kilocode.ai&sz=128"
           },
@@ -365,7 +365,7 @@
             "quote_range": {
               "min": 0.2,
               "max": 0.55,
-              "initial": 0.42
+              "initial": 0.34
             },
             "image_url": "https://www.google.com/s2/favicons?domain=google.com&sz=128"
           },
@@ -444,7 +444,7 @@
             "quote_range": {
               "min": 0.16,
               "max": 0.5,
-              "initial": 0.37
+              "initial": 0.3
             },
             "image_url": "https://www.google.com/s2/favicons?domain=openai.com&sz=128"
           },
@@ -523,7 +523,7 @@
             "quote_range": {
               "min": 0.15,
               "max": 0.45,
-              "initial": 0.41
+              "initial": 0.28
             },
             "image_url": "https://www.google.com/s2/favicons?domain=anthropic.com&sz=128"
           },
@@ -602,7 +602,7 @@
             "quote_range": {
               "min": 0.32,
               "max": 0.68,
-              "initial": 0.57
+              "initial": 0.5
             },
             "image_url": "https://www.google.com/s2/favicons?domain=anthropic.com&sz=128"
           },
@@ -681,7 +681,7 @@
             "quote_range": {
               "min": 0.02,
               "max": 0.1,
-              "initial": 0.06
+              "initial": 0.03
             }
           },
           {
@@ -756,7 +756,7 @@
             "quote_range": {
               "min": 0.15,
               "max": 0.45,
-              "initial": 0.4
+              "initial": 0.28
             },
             "image_url": "https://www.google.com/s2/favicons?domain=anthropic.com&sz=128"
           },
@@ -835,7 +835,7 @@
             "quote_range": {
               "min": 0.02,
               "max": 0.15,
-              "initial": 0.1
+              "initial": 0.05
             }
           },
           {
@@ -910,7 +910,7 @@
             "quote_range": {
               "min": 0.12,
               "max": 0.38,
-              "initial": 0.34
+              "initial": 0.22
             },
             "image_url": "https://www.google.com/s2/favicons?domain=google.com&sz=128"
           },
@@ -989,7 +989,7 @@
             "quote_range": {
               "min": 0.15,
               "max": 0.45,
-              "initial": 0.38
+              "initial": 0.28
             },
             "image_url": "https://www.google.com/s2/favicons?domain=deepseek.com&sz=128"
           },
@@ -1068,7 +1068,7 @@
             "quote_range": {
               "min": 0.02,
               "max": 0.1,
-              "initial": 0.08
+              "initial": 0.03
             }
           },
           {
@@ -1143,7 +1143,7 @@
             "quote_range": {
               "min": 0.32,
               "max": 0.6,
-              "initial": 0.48
+              "initial": 0.44
             },
             "image_url": "https://www.google.com/s2/favicons?domain=anthropic.com&sz=128"
           },
@@ -1783,7 +1783,7 @@
             "enabled": true,
             "quote_range": {
               "min": 0.4,
-              "initial": 0.62,
+              "initial": 0.55,
               "max": 0.75
             },
             "image_url": "https://www.google.com/s2/favicons?domain=anthropic.com&sz=128"
@@ -1961,7 +1961,7 @@
             "quote_range": {
               "min": 0.45,
               "max": 0.9,
-              "initial": 0.69
+              "initial": 0.66
             },
             "image_url": "https://www.google.com/s2/favicons?domain=anthropic.com&sz=128"
           },
@@ -2040,7 +2040,7 @@
             "quote_range": {
               "min": 0.02,
               "max": 0.25,
-              "initial": 0.17
+              "initial": 0.07
             }
           },
           {

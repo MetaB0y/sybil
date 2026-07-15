@@ -48,7 +48,7 @@ export type StoreState = {
   latestBlockAnchorPerf: number | null;
   /** Ring buffer of recent blocks (newest first), capped. */
   recentBlocks: Block[];
-  /** Current committed YES / NO Sybil mark per market_id, in nanos as bigint. */
+  /** Current YES / NO clearing price per market_id, in nanos as bigint. */
   pricesByMarketId: Record<number, MarketPrice>;
 
   // ── Dispatchers ─────────────────────────────────────────────────────

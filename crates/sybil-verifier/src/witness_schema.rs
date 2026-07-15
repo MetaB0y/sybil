@@ -25,7 +25,7 @@ use crate::types::{
     WithdrawalSnapshot, WitnessBlockHeader, WitnessOrder, WitnessRejection,
 };
 
-pub const WITNESS_FORMAT_VERSION: u8 = 11;
+pub const WITNESS_FORMAT_VERSION: u8 = 10;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum WitnessDecodeError {
@@ -37,7 +37,7 @@ pub enum WitnessDecodeError {
     },
     #[error("trailing bytes after canonical witness at offset {offset}: {trailing} bytes")]
     TrailingBytes { offset: usize, trailing: usize },
-    #[error("unknown witness format version {0}; only v11 is supported")]
+    #[error("unknown witness format version {0}; only v9 is supported")]
     UnknownVersion(u8),
     #[error("invalid tag for {field} at offset {offset}: {tag}")]
     InvalidTag {
@@ -610,23 +610,6 @@ impl<'a> WitnessReader<'a> {
                 };
                 Ok(SystemEventWitness::ClientActionAuthorized(action))
             }
-            15 => Ok(SystemEventWitness::CompleteSetCollateralized {
-                account_id: self.read_u64()?,
-                market_id: self.read_market_id()?,
-                quantity: self.read_u64()?,
-            }),
-            16 => Ok(SystemEventWitness::CompleteSetRedeemed {
-                account_id: self.read_u64()?,
-                market_id: self.read_market_id()?,
-                quantity: self.read_u64()?,
-            }),
-            17 => Ok(SystemEventWitness::LiquidityUniverseActivated {
-                generation: self.read_u64()?,
-                policy_digest: self.read_hash32()?,
-                activated_at_height: self.read_u64()?,
-                market_ids: self
-                    .read_vec("system_event.market_ids", |reader| reader.read_market_id())?,
-            }),
             tag => Err(WitnessDecodeError::InvalidTag {
                 field: "system_event",
                 tag,
@@ -840,14 +823,6 @@ impl<'a> WitnessReader<'a> {
         self.read_domain(domain, field)?;
         Ok(StateSidecarSnapshot {
             bridge: self.read_bridge()?,
-            liquidity_universe: crate::types::LiquidityUniverseSnapshot {
-                generation: self.read_u64()?,
-                policy_digest: self.read_hash32()?,
-                activated_at_height: self.read_u64()?,
-                market_ids: self.read_vec("sidecar.liquidity_universe.market_ids", |reader| {
-                    reader.read_market_id()
-                })?,
-            },
             markets: self.read_vec("sidecar.markets", |reader| reader.read_market_snapshot())?,
             market_groups: self.read_vec("sidecar.market_groups", |reader| {
                 reader.read_market_group_snapshot()
@@ -1264,7 +1239,7 @@ mod tests {
 
         let bytes = canonical_witness_bytes(&witness);
         assert_eq!(bytes[0], WITNESS_FORMAT_VERSION);
-        assert_eq!(bytes.len(), 1743);
+        assert_eq!(bytes.len(), 1631);
     }
 
     #[test]
@@ -1426,7 +1401,6 @@ mod tests {
         let state_sidecar = state_sidecar(accepted_order.clone(), post_bridge);
         let pre_state_sidecar = StateSidecarSnapshot {
             bridge: pre_bridge,
-            liquidity_universe: state_sidecar.liquidity_universe.clone(),
             markets: state_sidecar.markets.clone(),
             market_groups: state_sidecar.market_groups.clone(),
             resting_orders: state_sidecar.resting_orders.clone(),
@@ -1624,7 +1598,6 @@ mod tests {
         };
         StateSidecarSnapshot {
             bridge,
-            liquidity_universe: Default::default(),
             markets: vec![
                 MarketSnapshot {
                     market_id: MarketId::new(3),

@@ -21,7 +21,6 @@ pub mod sequencer;
 pub mod settlement;
 pub mod store;
 pub mod system_event;
-pub mod universe;
 pub mod validation;
 
 #[cfg(test)]
@@ -68,9 +67,9 @@ pub use market_info::{
 };
 pub use portfolio::{PortfolioSummary, PositionValue};
 pub use sequencer::{
-    ActorEpochSubmission, ActorRole, BatchResult, BatchSequencer, BlockSequencer,
-    DEFAULT_MIN_RESTING_ORDER_NOTIONAL_NANOS, DEFAULT_ORDER_TTL_BLOCKS, LeaderboardBase,
-    LeaderboardRow, OrderSubmission, PendingOrderInfo, SequencerConfig,
+    BatchResult, BatchSequencer, BlockSequencer, DEFAULT_MIN_RESTING_ORDER_NOTIONAL_NANOS,
+    DEFAULT_ORDER_TTL_BLOCKS, LeaderboardBase, LeaderboardRow, OrderSubmission, PendingOrderInfo,
+    SequencerConfig,
 };
 pub use store::{
     AcknowledgedProofJobPruneReport, AcknowledgedProofJobRetentionPolicy, AutoResolutionAction,
@@ -81,13 +80,6 @@ pub use store::{
 };
 pub use sybil_verifier::{ClientActionAuth, ClientActionWitness, KeyOpAuth, KeyRecord};
 pub use system_event::SystemEvent;
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct CompleteSetInventoryAction {
-    pub market_id: matching_engine::MarketId,
-    pub quantity: matching_engine::Qty,
-    pub collateralize: bool,
-}
 
 // Re-export oracle types needed by consumers (e.g. sybil-api)
 pub use sybil_oracle::{AdminOracle, MarketStatus, Oracle, ResolutionRecord};

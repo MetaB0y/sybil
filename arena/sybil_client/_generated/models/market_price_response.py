@@ -22,9 +22,9 @@ T = TypeVar("T", bound="MarketPriceResponse")
 class MarketPriceResponse:
     """ 
         Attributes:
-            no_price_nanos (int): Current NO mark. Integer nanodollars; 1_000_000_000 = $1.
+            no_price_nanos (int): NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
-            yes_price_nanos (int): Current YES mark. Integer nanodollars; 1_000_000_000 = $1.
+            yes_price_nanos (int): YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
      """
 

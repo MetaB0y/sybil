@@ -123,8 +123,6 @@ pub enum ViolationKind {
     SidecarMarketStatusMismatch,
     /// Market-group sidecar leaves do not follow resolution or extension events.
     SidecarMarketGroupMismatch,
-    /// Active-market universe changed without one valid monotonic activation.
-    SidecarLiquidityUniverseMismatch,
     /// The pre-state witness does not authenticate to the previous header's state root.
     PreStateRootMismatch,
 }

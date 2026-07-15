@@ -24,62 +24,6 @@ pub enum SettlementArithmeticError {
     BalanceOverflow,
 }
 
-/// Balance and inventory delta for an explicit binary complete-set operation.
-///
-/// A positive `quantity` collateralizes cash into equal YES and NO inventory;
-/// a negative `quantity` redeems equal inventory back into cash. Quantity is
-/// expressed in protocol share-units and the $1/share cash leg is exact because
-/// `NANOS_PER_DOLLAR` is divisible by `SHARE_SCALE`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CompleteSetDelta {
-    pub balance_delta: i64,
-    pub yes_delta: i64,
-    pub no_delta: i64,
-}
-
-/// Compute the deterministic account delta for collateralizing `quantity` of
-/// one binary market into a complete YES+NO pair.
-pub fn collateralize_complete_set(
-    quantity: Qty,
-) -> Result<CompleteSetDelta, SettlementArithmeticError> {
-    complete_set_delta(quantity, true)
-}
-
-/// Compute the deterministic account delta for redeeming `quantity` of an
-/// existing binary complete set.
-pub fn redeem_complete_set(quantity: Qty) -> Result<CompleteSetDelta, SettlementArithmeticError> {
-    complete_set_delta(quantity, false)
-}
-
-fn complete_set_delta(
-    quantity: Qty,
-    collateralize: bool,
-) -> Result<CompleteSetDelta, SettlementArithmeticError> {
-    let position = i64::try_from(quantity.0)
-        .map_err(|_| SettlementArithmeticError::PositionQuantityOverflow)?;
-    let cash = checked_notional_i64(Nanos(crate::types::NANOS_PER_DOLLAR), quantity)
-        .ok_or(SettlementArithmeticError::PriceQuantityOverflow)?;
-    if collateralize {
-        Ok(CompleteSetDelta {
-            balance_delta: cash
-                .checked_neg()
-                .ok_or(SettlementArithmeticError::BalanceOverflow)?,
-            yes_delta: position,
-            no_delta: position,
-        })
-    } else {
-        Ok(CompleteSetDelta {
-            balance_delta: cash,
-            yes_delta: position
-                .checked_neg()
-                .ok_or(SettlementArithmeticError::PositionQuantityOverflow)?,
-            no_delta: position
-                .checked_neg()
-                .ok_or(SettlementArithmeticError::PositionQuantityOverflow)?,
-        })
-    }
-}
-
 /// Compute the balance and position changes for a single fill.
 ///
 /// This is a **pure, deterministic** function with no side effects.
@@ -641,31 +585,6 @@ mod tests {
     }
 
     // --- Minting tests ---
-
-    #[test]
-    fn complete_set_collateralize_and_redeem_are_exact_inverses() {
-        let qty = Qty(12_345);
-        let mint = collateralize_complete_set(qty).unwrap();
-        let burn = redeem_complete_set(qty).unwrap();
-
-        assert_eq!(mint.balance_delta, -12_345_000_000);
-        assert_eq!((mint.yes_delta, mint.no_delta), (12_345, 12_345));
-        assert_eq!(mint.balance_delta + burn.balance_delta, 0);
-        assert_eq!(mint.yes_delta + burn.yes_delta, 0);
-        assert_eq!(mint.no_delta + burn.no_delta, 0);
-    }
-
-    #[test]
-    fn complete_set_zero_quantity_is_a_zero_delta() {
-        assert_eq!(
-            collateralize_complete_set(Qty::ZERO).unwrap(),
-            CompleteSetDelta {
-                balance_delta: 0,
-                yes_delta: 0,
-                no_delta: 0,
-            }
-        );
-    }
 
     #[test]
     fn test_minting_no_imbalance() {

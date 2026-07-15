@@ -48,7 +48,6 @@ pub struct SequencerSnapshot<'a> {
     /// Owned because the snapshot clones the live book — cheap for bounded sizes.
     pub resting_orders: Vec<RestingOrder>,
     pub bridge_state: &'a BridgeState,
-    pub liquidity_universe: &'a crate::universe::LiquidityUniverse,
 }
 
 struct RedbBlockCommit {
@@ -71,7 +70,6 @@ struct RedbBlockCommit {
     data_feed_rows: Vec<(u64, Vec<u8>)>,
     resolution_template_rows: Vec<(String, Vec<u8>)>,
     bridge_state_bytes: Vec<u8>,
-    liquidity_universe_bytes: Vec<u8>,
     trader_tracker_bytes: Vec<u8>,
     price_tracker_volume_bytes: Vec<u8>,
     price_tracker_clearing_history_bytes: Vec<u8>,
@@ -322,7 +320,6 @@ fn build_redb_block_commit(
         data_feed_rows,
         resolution_template_rows,
         bridge_state_bytes: rmp_serde::to_vec(snapshot.bridge_state)?,
-        liquidity_universe_bytes: rmp_serde::to_vec(snapshot.liquidity_universe)?,
         trader_tracker_bytes: rmp_serde::to_vec(&snapshot.analytics.trader_tracker)?,
         price_tracker_volume_bytes: rmp_serde::to_vec(&snapshot.analytics.rolling_volume)?,
         price_tracker_clearing_history_bytes: rmp_serde::to_vec(
@@ -525,13 +522,6 @@ where
         let mut table = txn.open_table(BRIDGE_STATE)?;
         table.insert(KEY_BRIDGE_STATE, commit.bridge_state_bytes.as_slice())?;
     }
-    {
-        let mut table = txn.open_table(LIQUIDITY_UNIVERSE)?;
-        table.insert(
-            KEY_LIQUIDITY_UNIVERSE,
-            commit.liquidity_universe_bytes.as_slice(),
-        )?;
-    }
 
     {
         let mut table = txn.open_table(ACKNOWLEDGED_WRITES)?;
@@ -658,7 +648,6 @@ impl Store {
         txn.open_table(DATA_FEEDS)?;
         txn.open_table(RESOLUTION_TEMPLATES)?;
         txn.open_table(BRIDGE_STATE)?;
-        txn.open_table(LIQUIDITY_UNIVERSE)?;
         txn.open_table(TRADER_TRACKER)?;
         txn.open_table(ROLLING_VOLUME)?;
         txn.open_table(ROLLING_PRICE_ANCHORS)?;
@@ -777,14 +766,13 @@ impl Store {
 
         // Persist the inactive qmdb slot first. It becomes committed only when the
         // redb transaction below flips the fence to point at it.
-        let state_sidecar = state_sidecar_snapshot_from_resting_orders_with_universe(
+        let state_sidecar = state_sidecar_snapshot_from_resting_orders(
             snapshot.bridge_state,
             &snapshot.resting_orders,
             snapshot.markets,
             snapshot.market_groups,
             snapshot.lifecycle,
             snapshot.analytics.last_clearing_prices,
-            snapshot.liquidity_universe,
         );
 
         self.account_state_store

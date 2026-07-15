@@ -26,8 +26,6 @@ class DecisionDB:
                 ("decisions", "article_urls", "TEXT"),
                 ("portfolio_snapshots", "total_fills", "INTEGER DEFAULT 0"),
                 ("portfolio_snapshots", "total_orders", "INTEGER DEFAULT 0"),
-                ("portfolio_snapshots", "account_id", "INTEGER"),
-                ("portfolio_snapshots", "participant_kind", "TEXT DEFAULT 'legacy'"),
                 # SYB-64: per-call USD cost + its source (provider vs price table).
                 ("token_usage", "usd_cost", "REAL DEFAULT 0"),
                 ("token_usage", "cost_source", "TEXT"),
@@ -108,9 +106,7 @@ class DecisionDB:
                     pnl REAL,
                     positions TEXT,
                     total_fills INTEGER DEFAULT 0,
-                    total_orders INTEGER DEFAULT 0,
-                    account_id INTEGER,
-                    participant_kind TEXT DEFAULT 'legacy'
+                    total_orders INTEGER DEFAULT 0
                 );
 
                 CREATE TABLE IF NOT EXISTS bot_accounts (
@@ -402,15 +398,12 @@ class DecisionDB:
         positions: dict,
         total_fills: int = 0,
         total_orders: int = 0,
-        account_id: int | None = None,
-        participant_kind: str = "legacy",
     ) -> int:
         with self._lock:
             cur = self.conn.execute(
                 """INSERT INTO portfolio_snapshots
-                   (trader_name, timestamp, balance, portfolio_value, pnl, positions,
-                    total_fills, total_orders, account_id, participant_kind)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (trader_name, timestamp, balance, portfolio_value, pnl, positions, total_fills, total_orders)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     trader_name,
                     datetime.now(timezone.utc).isoformat(),
@@ -420,8 +413,6 @@ class DecisionDB:
                     json.dumps(positions),
                     total_fills,
                     total_orders,
-                    account_id,
-                    participant_kind,
                 ),
             )
             self.conn.commit()

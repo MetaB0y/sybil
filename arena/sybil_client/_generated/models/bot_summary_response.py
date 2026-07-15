@@ -24,11 +24,8 @@ T = TypeVar("T", bound="BotSummaryResponse")
 class BotSummaryResponse:
     """ 
         Attributes:
-            active (bool): Member of the most recent non-stale Arena runtime cohort.
             decision_count (int):
-            scored (bool): Eligible for public competition totals within the active runtime.
             trader_name (str):
-            account_id (int | None | Unset):
             avg_edge (float | None | Unset):
             latest_balance (float | None | Unset):
             latest_edge (float | None | Unset):
@@ -37,20 +34,15 @@ class BotSummaryResponse:
             latest_market_name (None | str | Unset):
             latest_market_price (float | None | Unset):
             latest_timestamp (None | str | Unset):
-            participant_kind (None | str | Unset):
             pnl (float | None | Unset):
             portfolio_value (float | None | Unset):
-            role (None | str | Unset): Runtime role such as competitor, load, or noise.
             snapshot_timestamp (None | str | Unset):
             total_fills (int | None | Unset):
             total_orders (int | None | Unset):
      """
 
-    active: bool
     decision_count: int
-    scored: bool
     trader_name: str
-    account_id: int | None | Unset = UNSET
     avg_edge: float | None | Unset = UNSET
     latest_balance: float | None | Unset = UNSET
     latest_edge: float | None | Unset = UNSET
@@ -59,10 +51,8 @@ class BotSummaryResponse:
     latest_market_name: None | str | Unset = UNSET
     latest_market_price: float | None | Unset = UNSET
     latest_timestamp: None | str | Unset = UNSET
-    participant_kind: None | str | Unset = UNSET
     pnl: float | None | Unset = UNSET
     portfolio_value: float | None | Unset = UNSET
-    role: None | str | Unset = UNSET
     snapshot_timestamp: None | str | Unset = UNSET
     total_fills: int | None | Unset = UNSET
     total_orders: int | None | Unset = UNSET
@@ -73,19 +63,9 @@ class BotSummaryResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
-        active = self.active
-
         decision_count = self.decision_count
 
-        scored = self.scored
-
         trader_name = self.trader_name
-
-        account_id: int | None | Unset
-        if isinstance(self.account_id, Unset):
-            account_id = UNSET
-        else:
-            account_id = self.account_id
 
         avg_edge: float | None | Unset
         if isinstance(self.avg_edge, Unset):
@@ -135,12 +115,6 @@ class BotSummaryResponse:
         else:
             latest_timestamp = self.latest_timestamp
 
-        participant_kind: None | str | Unset
-        if isinstance(self.participant_kind, Unset):
-            participant_kind = UNSET
-        else:
-            participant_kind = self.participant_kind
-
         pnl: float | None | Unset
         if isinstance(self.pnl, Unset):
             pnl = UNSET
@@ -152,12 +126,6 @@ class BotSummaryResponse:
             portfolio_value = UNSET
         else:
             portfolio_value = self.portfolio_value
-
-        role: None | str | Unset
-        if isinstance(self.role, Unset):
-            role = UNSET
-        else:
-            role = self.role
 
         snapshot_timestamp: None | str | Unset
         if isinstance(self.snapshot_timestamp, Unset):
@@ -181,13 +149,9 @@ class BotSummaryResponse:
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update({
-            "active": active,
             "decision_count": decision_count,
-            "scored": scored,
             "trader_name": trader_name,
         })
-        if account_id is not UNSET:
-            field_dict["account_id"] = account_id
         if avg_edge is not UNSET:
             field_dict["avg_edge"] = avg_edge
         if latest_balance is not UNSET:
@@ -204,14 +168,10 @@ class BotSummaryResponse:
             field_dict["latest_market_price"] = latest_market_price
         if latest_timestamp is not UNSET:
             field_dict["latest_timestamp"] = latest_timestamp
-        if participant_kind is not UNSET:
-            field_dict["participant_kind"] = participant_kind
         if pnl is not UNSET:
             field_dict["pnl"] = pnl
         if portfolio_value is not UNSET:
             field_dict["portfolio_value"] = portfolio_value
-        if role is not UNSET:
-            field_dict["role"] = role
         if snapshot_timestamp is not UNSET:
             field_dict["snapshot_timestamp"] = snapshot_timestamp
         if total_fills is not UNSET:
@@ -226,23 +186,9 @@ class BotSummaryResponse:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        active = d.pop("active")
-
         decision_count = d.pop("decision_count")
 
-        scored = d.pop("scored")
-
         trader_name = d.pop("trader_name")
-
-        def _parse_account_id(data: object) -> int | None | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(int | None | Unset, data)
-
-        account_id = _parse_account_id(d.pop("account_id", UNSET))
-
 
         def _parse_avg_edge(data: object) -> float | None | Unset:
             if data is None:
@@ -324,16 +270,6 @@ class BotSummaryResponse:
         latest_timestamp = _parse_latest_timestamp(d.pop("latest_timestamp", UNSET))
 
 
-        def _parse_participant_kind(data: object) -> None | str | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(None | str | Unset, data)
-
-        participant_kind = _parse_participant_kind(d.pop("participant_kind", UNSET))
-
-
         def _parse_pnl(data: object) -> float | None | Unset:
             if data is None:
                 return data
@@ -352,16 +288,6 @@ class BotSummaryResponse:
             return cast(float | None | Unset, data)
 
         portfolio_value = _parse_portfolio_value(d.pop("portfolio_value", UNSET))
-
-
-        def _parse_role(data: object) -> None | str | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(None | str | Unset, data)
-
-        role = _parse_role(d.pop("role", UNSET))
 
 
         def _parse_snapshot_timestamp(data: object) -> None | str | Unset:
@@ -395,11 +321,8 @@ class BotSummaryResponse:
 
 
         bot_summary_response = cls(
-            active=active,
             decision_count=decision_count,
-            scored=scored,
             trader_name=trader_name,
-            account_id=account_id,
             avg_edge=avg_edge,
             latest_balance=latest_balance,
             latest_edge=latest_edge,
@@ -408,10 +331,8 @@ class BotSummaryResponse:
             latest_market_name=latest_market_name,
             latest_market_price=latest_market_price,
             latest_timestamp=latest_timestamp,
-            participant_kind=participant_kind,
             pnl=pnl,
             portfolio_value=portfolio_value,
-            role=role,
             snapshot_timestamp=snapshot_timestamp,
             total_fills=total_fills,
             total_orders=total_orders,

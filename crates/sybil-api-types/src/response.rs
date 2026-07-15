@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::request::{ActorRole, BridgeWithdrawalL1Status};
+use crate::request::BridgeWithdrawalL1Status;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -131,12 +131,11 @@ pub struct PositionResponse {
 pub struct MarketResponse {
     pub market_id: u32,
     pub name: String,
-    /// Current YES mark: traded clearing price when filled, otherwise the
-    /// committed book midpoint or carried mark. Integer nanodollars;
-    /// 1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
+    /// Current YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub yes_price_nanos: Option<u64>,
-    /// Current NO mark, complementary to the YES mark. Integer nanodollars;
-    /// 1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
+    /// Current NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub no_price_nanos: Option<u64>,
     pub status: String,
     /// Resolution payout per YES share. Integer nanodollars; 1_000_000_000 = $1.
@@ -208,20 +207,20 @@ pub struct MarketResponse {
     /// "since last restart" until prod persistence is enabled.
     #[serde(default)]
     pub volume_24h_nanos: u64,
-    /// YES mark ~24h ago, derived from the per-market
+    /// Clearing YES price ~24h ago, derived from the per-market
     /// hourly snapshot. `None` for markets younger than 24h or wiped on
     /// restart. FE computes the 24h delta as `current - snapshot`.
     /// Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub yes_price_24h_ago_nanos: Option<u64>,
-    /// NO mark ~24h ago. See `yes_price_24h_ago_nanos`.
+    /// Clearing NO price ~24h ago. See `yes_price_24h_ago_nanos`.
     /// Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub no_price_24h_ago_nanos: Option<u64>,
     /// Rolling last-10-batch band depth average. Integer nanodollars;
-    /// 1_000_000_000 = $1. Zero for markets without a committed mark yet.
+    /// 1_000_000_000 = $1. Zero for markets without a clearing price yet.
     /// Pair with `liquidity_band_nanos` for labelling.
     #[serde(default)]
     pub liquidity_avg10_nanos: u64,
@@ -263,18 +262,6 @@ pub struct MarketResponse {
     /// filters closed markets out of the listing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub closed: Option<bool>,
-    /// Actor-only native YES lower guardrail. Integer nanodollars expressed as
-    /// per-share probabilities in [0, 1e9].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actor_min_yes_nanos: Option<u64>,
-    /// Actor-only native YES upper guardrail. Integer nanodollars expressed as
-    /// per-share probabilities in [0, 1e9].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actor_max_yes_nanos: Option<u64>,
-    /// Actor-only native YES initial anchor. Integer nanodollars expressed as
-    /// per-share probabilities in [0, 1e9].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actor_seed_yes_nanos: Option<u64>,
 }
 
 /// Minimal market data for high-throughput dashboards (drops strings & metadata).
@@ -283,12 +270,11 @@ pub struct MarketResponse {
 pub struct MarketSummaryResponse {
     pub market_id: u32,
     pub name: String,
-    /// Current YES mark: traded clearing price when filled, otherwise the
-    /// committed book midpoint or carried mark. Integer nanodollars;
-    /// 1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
+    /// Current YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub yes_price_nanos: Option<u64>,
-    /// Current NO mark, complementary to the YES mark. Integer nanodollars;
-    /// 1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
+    /// Current NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub no_price_nanos: Option<u64>,
     /// Reference price from external system (e.g., Polymarket), display only.
     /// Integer nanodollars; 1_000_000_000 = $1.
@@ -306,11 +292,11 @@ pub struct MarketSummaryResponse {
     /// `MarketResponse.volume_24h_nanos`).
     #[serde(default)]
     pub volume_24h_nanos: u64,
-    /// YES mark ~24h ago. Integer nanodollars; 1_000_000_000 = $1.
+    /// Clearing YES price ~24h ago. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub yes_price_24h_ago_nanos: Option<u64>,
-    /// NO mark ~24h ago. Integer nanodollars; 1_000_000_000 = $1.
+    /// Clearing NO price ~24h ago. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub no_price_24h_ago_nanos: Option<u64>,
@@ -350,10 +336,10 @@ pub struct MarketPricesResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MarketPriceResponse {
-    /// Current YES mark. Integer nanodollars; 1_000_000_000 = $1.
+    /// YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
     pub yes_price_nanos: u64,
-    /// Current NO mark. Integer nanodollars; 1_000_000_000 = $1.
+    /// NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
     pub no_price_nanos: u64,
 }
@@ -364,146 +350,6 @@ pub struct OrderAcceptedResponse {
     pub accepted: bool,
     /// Sequencer-assigned IDs for the admitted orders, in request order.
     pub order_ids: Vec<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct ActorMarketReceipt {
-    pub market_id: u32,
-    pub accepted_order_ids: Vec<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rejection: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub skip_reason: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct ActorEpochResponse {
-    pub accepted: bool,
-    pub principal_id: String,
-    pub target_height: u64,
-    pub universe_generation: u64,
-    pub considered: u32,
-    pub selected: u32,
-    pub accepted_orders: u32,
-    pub skipped: u32,
-    pub markets: Vec<ActorMarketReceipt>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct ActorIdentityResponse {
-    pub account_id: u64,
-    pub principal_id: String,
-    pub role: ActorRole,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_observed_height: Option<u64>,
-    pub ready: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct MmQuoteMarketResponse {
-    pub market_id: u32,
-    /// Economic YES bid. Integer nanodollars per share; 1_000_000_000 = $1.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub yes_bid_nanos: Option<u64>,
-    /// Economic YES ask. Integer nanodollars per share; 1_000_000_000 = $1.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub yes_ask_nanos: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bid_quantity: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ask_quantity: Option<u64>,
-    pub quote_state: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub skip_reason: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct MmQuoteSnapshotResponse {
-    pub target_height: u64,
-    pub universe_generation: u64,
-    pub observed_at_ms: u64,
-    pub markets: Vec<MmQuoteMarketResponse>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct LiquidityUniverseResponse {
-    pub generation: u64,
-    pub policy_digest_hex: String,
-    pub activated_at_height: u64,
-    pub market_ids: Vec<u32>,
-    /// Raw committed allow-list before lifecycle filtering. Controllers use
-    /// this to distinguish a newly created market from a resolved old member.
-    pub committed_market_ids: Vec<u32>,
-    pub actor_ready: bool,
-    /// Present only on the actor-authenticated view. Lets a daemon fail closed
-    /// if its local account configuration does not match its bound credential.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub principal_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actor_role: Option<ActorRole>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub account_id: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct MarketLiquidityHealthResponse {
-    pub market_id: u32,
-    pub mm_orders: u32,
-    pub mm_skip_reason: Option<String>,
-    pub noise_actor_count: u32,
-    pub noise_orders: u32,
-    /// Noise orders that happened to be marketable against the accepted MM
-    /// shape. Computed post-submission; noise actors cannot read that shape.
-    pub noise_crossing_orders: u32,
-    pub other_non_mm_orders: u32,
-    pub clearing_price_present: bool,
-    /// Filled notional on this market. Integer nanodollars; 1_000_000_000 = $1.
-    pub fill_volume_nanos: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct LiquidityHealthResponse {
-    pub height: u64,
-    pub universe_generation: u64,
-    pub active_markets: u32,
-    pub mm_markets_quoted: u32,
-    pub mm_coverage_bps: u32,
-    pub mm_markets_two_sided: u32,
-    pub mm_two_sided_coverage_bps: u32,
-    pub expected_noise_actors: u32,
-    pub observed_noise_actors: u32,
-    pub markets_with_two_noise_actors: u32,
-    pub markets_with_three_noise_actors: u32,
-    pub noise_markets_selected: u32,
-    pub noise_coverage_bps: u32,
-    /// Markets with a naturally MM-marketable noise order, measured
-    /// post-submission rather than coordinated by the noise actor.
-    pub noise_markets_crossing_mm: u32,
-    pub noise_crossing_coverage_bps: u32,
-    pub markets_with_noise_fills: u32,
-    /// Number of committed blocks used for rolling actor coverage.
-    pub rolling_window_blocks: u32,
-    pub rolling_mm_coverage_bps: u32,
-    pub rolling_mm_two_sided_coverage_bps: u32,
-    pub rolling_noise_coverage_bps: u32,
-    pub rolling_noise_crossing_coverage_bps: u32,
-    pub rolling_noise_fill_coverage_bps: u32,
-    pub markets_with_clearing_prices: u32,
-    pub total_fills: u32,
-    pub total_rejections: u32,
-    /// Filled notional across the block. Integer nanodollars; 1_000_000_000 = $1.
-    pub total_volume_nanos: u64,
-    #[serde(default)]
-    pub actors: Vec<ActorIdentityResponse>,
-    pub markets: Vec<MarketLiquidityHealthResponse>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -632,24 +478,6 @@ pub enum SystemEventResponse {
         amount_nanos: i64,
         sybil_account_key_hex: String,
     },
-    CompleteSetCollateralized {
-        account_id: u64,
-        market_id: u32,
-        /// Complete-set size. Integer share-units; 1000 = 1 share.
-        quantity: u64,
-    },
-    CompleteSetRedeemed {
-        account_id: u64,
-        market_id: u32,
-        /// Complete-set size. Integer share-units; 1000 = 1 share.
-        quantity: u64,
-    },
-    LiquidityUniverseActivated {
-        generation: u64,
-        policy_digest_hex: String,
-        activated_at_height: u64,
-        market_ids: Vec<u32>,
-    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -666,7 +494,7 @@ pub struct RejectionResponse {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct BlockMarketStats {
-    /// Unique real accounts, including MM, admitted touching this market in
+    /// Unique placers (non-MM accounts) admitted touching this market in
     /// the block. Multi-market orders credit each active market; the
     /// platform `unique_placers` scalar counts the account once.
     #[serde(default)]
@@ -694,26 +522,6 @@ pub struct BlockMarketStats {
     /// Encoded as signed nanos to match canonical welfare arithmetic.
     #[serde(default)]
     pub welfare_nanos: i64,
-    /// Filled orders submitted through the market-maker actor epoch.
-    #[serde(default)]
-    pub mm_matched_orders: u32,
-    /// Filled orders submitted through noise actor epochs.
-    #[serde(default)]
-    pub noise_matched_orders: u32,
-    /// Filled orders from manual, LLM, or ordinary non-actor flow.
-    #[serde(default)]
-    pub organic_matched_orders: u32,
-    /// MM filled-order notional. Integer nanodollars; 1_000_000_000 = $1.
-    /// Role-attributed notionals intentionally need not sum to unique economic
-    /// trade volume because both matched sides appear.
-    #[serde(default)]
-    pub mm_fill_notional_nanos: u64,
-    /// Noise filled-order notional. Integer nanodollars; 1_000_000_000 = $1.
-    #[serde(default)]
-    pub noise_fill_notional_nanos: u64,
-    /// Organic filled-order notional. Integer nanodollars; 1_000_000_000 = $1.
-    #[serde(default)]
-    pub organic_fill_notional_nanos: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -832,7 +640,7 @@ pub struct PublicBlockResponse {
     /// 1_000_000_000 = $1.
     pub total_volume_nanos: u64,
     pub orders_filled: usize,
-    /// Unique real accounts, including MM, admitted into this block. This is an aggregate,
+    /// Unique non-MM accounts admitted into this block. This is an aggregate,
     /// never an account identifier list.
     #[serde(default)]
     pub unique_placers: u32,
@@ -880,7 +688,7 @@ pub struct BlockResponse {
     /// 1_000_000_000 = $1.
     pub total_volume_nanos: u64,
     pub orders_filled: usize,
-    /// Unique real accounts, including MM, admitted into this block. Platform
+    /// Unique placers (non-MM accounts) admitted into this block. Platform
     /// scalar — `by_market[m].placers` is the per-market split.
     #[serde(default)]
     pub unique_placers: u32,
@@ -1306,12 +1114,10 @@ pub struct PriceHistoryResponse {
 pub struct PricePointResponse {
     pub height: u64,
     pub timestamp_ms: u64,
-    /// YES mark at this point. Integer nanodollars; 1_000_000_000 = $1.
-    /// A filled point uses clearing; a quiet point uses book midpoint/carry.
+    /// YES clearing price at this point. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
     pub yes_price_nanos: u64,
-    /// NO mark at this point. Integer nanodollars; 1_000_000_000 = $1.
-    /// A filled point uses clearing; a quiet point uses book midpoint/carry.
+    /// NO clearing price at this point. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
     pub no_price_nanos: u64,
     /// Traded notional at this point. Integer nanodollars; 1_000_000_000 = $1.
@@ -1579,8 +1385,6 @@ pub struct ActivityOverviewResponse {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct OpenBatchResponse {
-    /// Distinct real accounts with an order staged for the upcoming batch,
-    /// including market makers. The protocol MINT account is excluded.
     pub unique_placers: u32,
     /// Indicative YES price for the open batch. Integer nanodollars;
     /// 1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].

@@ -158,14 +158,9 @@ pub async fn spawn_api_with_env(
         .env("SYBIL_HISTORY_URL", history_url)
         .env("SYBIL_HISTORY_POLL_MS", "1")
         .env_remove("OTEL_EXPORTER_OTLP_ENDPOINT")
-        .stdin(Stdio::null());
-    if std::env::var_os("SYBIL_TEST_API_STDERR").is_some() {
-        command.stdout(Stdio::inherit());
-        command.stderr(Stdio::inherit());
-    } else {
-        command.stdout(Stdio::null());
-        command.stderr(Stdio::null());
-    }
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     for (key, value) in extra_env {
         command.env(key, value);
     }

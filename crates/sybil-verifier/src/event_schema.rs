@@ -227,41 +227,6 @@ pub fn system_event_leaf_value(event: &SystemEventWitness) -> Vec<u8> {
                 }
             }
         }
-        SystemEventWitness::CompleteSetCollateralized {
-            account_id,
-            market_id,
-            quantity,
-        } => {
-            value.push(15);
-            value.extend_from_slice(&account_id.to_le_bytes());
-            value.extend_from_slice(&market_id.0.to_le_bytes());
-            value.extend_from_slice(&quantity.to_le_bytes());
-        }
-        SystemEventWitness::CompleteSetRedeemed {
-            account_id,
-            market_id,
-            quantity,
-        } => {
-            value.push(16);
-            value.extend_from_slice(&account_id.to_le_bytes());
-            value.extend_from_slice(&market_id.0.to_le_bytes());
-            value.extend_from_slice(&quantity.to_le_bytes());
-        }
-        SystemEventWitness::LiquidityUniverseActivated {
-            generation,
-            policy_digest,
-            activated_at_height,
-            market_ids,
-        } => {
-            value.push(17);
-            value.extend_from_slice(&generation.to_le_bytes());
-            value.extend_from_slice(policy_digest);
-            value.extend_from_slice(&activated_at_height.to_le_bytes());
-            value.extend_from_slice(&(market_ids.len() as u64).to_le_bytes());
-            for market_id in market_ids {
-                value.extend_from_slice(&market_id.0.to_le_bytes());
-            }
-        }
     }
     value
 }

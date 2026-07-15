@@ -82,9 +82,8 @@ pub async fn get_open_batch(
     Path(id): Path<u32>,
 ) -> Result<Json<OpenBatchResponse>, AppError> {
     let mid = MarketId::new(id);
-    let now_ms = crate::util::now_ms();
     let (unique_placers, indicative) = tokio::try_join!(
-        state.sequencer.get_open_batch_placers(mid, now_ms),
+        state.sequencer.get_open_batch_placers(mid),
         state.sequencer.get_indicative(mid),
     )?;
     Ok(Json(OpenBatchResponse {

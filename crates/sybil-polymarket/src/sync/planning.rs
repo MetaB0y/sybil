@@ -205,8 +205,5 @@ pub(super) fn build_metadata_request(
         market_start_date_ms,
         group_item_title: market.group_item_title.clone(),
         closed: Some(market.closed),
-        actor_min_yes_nanos: None,
-        actor_max_yes_nanos: None,
-        actor_seed_yes_nanos: None,
     }
 }

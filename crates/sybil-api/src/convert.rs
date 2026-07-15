@@ -166,35 +166,6 @@ fn system_event_to_response(event: &matching_sequencer::SystemEvent) -> SystemEv
             amount_nanos: *amount,
             sybil_account_key_hex: hex::encode(sybil_account_key),
         },
-        matching_sequencer::SystemEvent::CompleteSetCollateralized {
-            account_id,
-            market_id,
-            quantity,
-        } => SystemEventResponse::CompleteSetCollateralized {
-            account_id: account_id.0,
-            market_id: market_id.0,
-            quantity: *quantity,
-        },
-        matching_sequencer::SystemEvent::CompleteSetRedeemed {
-            account_id,
-            market_id,
-            quantity,
-        } => SystemEventResponse::CompleteSetRedeemed {
-            account_id: account_id.0,
-            market_id: market_id.0,
-            quantity: *quantity,
-        },
-        matching_sequencer::SystemEvent::LiquidityUniverseActivated {
-            generation,
-            policy_digest,
-            activated_at_height,
-            market_ids,
-        } => SystemEventResponse::LiquidityUniverseActivated {
-            generation: *generation,
-            policy_digest_hex: hex::encode(policy_digest),
-            activated_at_height: *activated_at_height,
-            market_ids: market_ids.iter().map(|market| market.0).collect(),
-        },
     }
 }
 
@@ -457,42 +428,6 @@ pub fn block_to_response(block: &SealedBlock) -> BlockResponse {
             .entry(mid.0.to_string())
             .or_default()
             .welfare_nanos = *welfare;
-    }
-    for (mid, count) in &block.analytics.mm_matched_orders_by_market {
-        by_market
-            .entry(mid.0.to_string())
-            .or_default()
-            .mm_matched_orders = *count;
-    }
-    for (mid, count) in &block.analytics.noise_matched_orders_by_market {
-        by_market
-            .entry(mid.0.to_string())
-            .or_default()
-            .noise_matched_orders = *count;
-    }
-    for (mid, count) in &block.analytics.organic_matched_orders_by_market {
-        by_market
-            .entry(mid.0.to_string())
-            .or_default()
-            .organic_matched_orders = *count;
-    }
-    for (mid, notional) in &block.analytics.mm_fill_notional_by_market {
-        by_market
-            .entry(mid.0.to_string())
-            .or_default()
-            .mm_fill_notional_nanos = *notional;
-    }
-    for (mid, notional) in &block.analytics.noise_fill_notional_by_market {
-        by_market
-            .entry(mid.0.to_string())
-            .or_default()
-            .noise_fill_notional_nanos = *notional;
-    }
-    for (mid, notional) in &block.analytics.organic_fill_notional_by_market {
-        by_market
-            .entry(mid.0.to_string())
-            .or_default()
-            .organic_fill_notional_nanos = *notional;
     }
 
     BlockResponse {

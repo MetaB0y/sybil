@@ -35,11 +35,9 @@ class TestGeneratedPackageImports:
         assert isinstance(UNSET, Unset)
 
     def test_route_module_imports(self):
-        # One representative operation module from the generated API package.
-        # The utoipa document currently emits no operation tags, so
-        # openapi-python-client places routes in its standard `default` group.
+        # One representative operation module per the tag-based api/ layout.
         list_markets = importlib.import_module(
-            "sybil_client._generated.api.default.list_markets"
+            "sybil_client._generated.api.routesmarkets.list_markets"
         )
         assert hasattr(list_markets, "sync_detailed") or hasattr(list_markets, "asyncio_detailed")
 

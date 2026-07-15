@@ -24,7 +24,7 @@ use crate::types::response::{CancelOrderResponse, OrderAcceptedResponse, Pending
 use crate::webauthn;
 
 /// Derive the MmSide from an OrderSpec for capital calculation.
-pub(crate) fn mm_side_from_spec(spec: &OrderSpec) -> MmSide {
+fn mm_side_from_spec(spec: &OrderSpec) -> MmSide {
     match spec {
         OrderSpec::BuyYes { .. } => MmSide::BuyYes,
         OrderSpec::BuyNo { .. } => MmSide::BuyNo,

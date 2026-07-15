@@ -17,7 +17,7 @@ The generated package is a typed substrate the thin layer draws on — it is not
 - **Layout** (`--meta none`, so it is an importable subpackage, not a standalone distribution):
   - `_generated/client.py` — `Client` / `AuthenticatedClient` (httpx wrappers).
   - `_generated/models/` — `attrs` models for every request/response schema (`to_dict` / `from_dict`).
-  - `_generated/api/default/` — one module per operation (`list_markets`, `get_market`, `submit_order`, …).
+  - `_generated/api/routes*/` — one module per operation (`list_markets`, `get_market`, `submit_order`, …).
   - `_generated/types.py` — `Unset` / `UNSET` sentinels and file-upload helpers.
 - **Runtime deps:** the generated code needs `httpx` and `attrs` only — both already declared in
   `arena/pyproject.toml`. The generator itself is **not** a runtime or dev dependency; it is fetched
@@ -77,7 +77,7 @@ model).
 
 ### Migration path (not done in this pass — deliberately)
 
-Widening the delegation to the generated **route** helpers (`_generated.api.default`) is viable but
+Widening the delegation to the generated **route** helpers (`_generated.api.routes*`) is viable but
 higher-risk because the live bots run on this path:
 
 1. Move plain request/response endpoints (`get_market`, `list_markets`, `get_prices`) onto the

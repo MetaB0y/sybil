@@ -76,33 +76,12 @@ impl BlockSequencer {
         timestamp_ms: u64,
     ) -> Result<PreparedBlock, SequencerError> {
         let mut next_sequencer = self.clone();
-        let target_height = next_sequencer.height.saturating_add(1);
-        next_sequencer
-            .pending_actor_epochs
-            .retain(|(_, height), _| *height >= target_height);
-        let actor_epochs = std::mem::take(&mut next_sequencer.pending_actor_epochs);
-        let mut actor_order_roles = HashMap::new();
-        let actor_submissions = actor_epochs
-            .into_values()
-            .filter(|epoch| {
-                epoch.target_height == target_height && epoch.valid_until_ms >= timestamp_ms
-            })
-            .map(|epoch| {
-                for order in &epoch.submission.orders {
-                    actor_order_roles.insert(order.id, epoch.role);
-                }
-                epoch.submission
-            })
-            .collect::<Vec<_>>();
-        let preassigned_submission_count =
-            next_sequencer.pending_bundles.len() + actor_submissions.len();
+        let preassigned_submission_count = next_sequencer.pending_bundles.len();
         let mut all_submissions = std::mem::take(&mut next_sequencer.pending_bundles);
-        all_submissions.extend(actor_submissions);
         all_submissions.extend(submissions);
         let production = next_sequencer.produce_block_in_place(
             all_submissions,
             preassigned_submission_count,
-            actor_order_roles,
             timestamp_ms,
         )?;
         let prepared = PreparedBlock {
@@ -124,116 +103,8 @@ impl BlockSequencer {
         self.pending_bundles.push(submission);
     }
 
-    /// Validate and atomically stage/supersede one target-block actor package.
-    pub fn stage_actor_epoch(
-        &mut self,
-        mut epoch: ActorEpochSubmission,
-        now_ms: u64,
-    ) -> Result<Vec<u64>, SequencerError> {
-        if self.liquidity_universe.generation == 0 {
-            return Err(SequencerError::InvalidMarketState(
-                "actor operation is unavailable before liquidity universe activation".into(),
-            ));
-        }
-        let expected_height = self.height.saturating_add(1);
-        if epoch.target_height != expected_height {
-            return Err(SequencerError::InvalidMarketState(format!(
-                "actor epoch targets height {}, expected {}",
-                epoch.target_height, expected_height
-            )));
-        }
-        if epoch.universe_generation != self.liquidity_universe.generation {
-            return Err(SequencerError::InvalidMarketState(format!(
-                "actor epoch generation {} does not match committed generation {}",
-                epoch.universe_generation, self.liquidity_universe.generation
-            )));
-        }
-        let expected_markets = self
-            .liquidity_universe
-            .market_ids
-            .iter()
-            .copied()
-            .filter(|market| self.lifecycle.market_status(*market).is_tradeable())
-            .collect::<Vec<_>>();
-        if epoch.covered_market_ids != expected_markets {
-            return Err(SequencerError::InvalidMarketState(
-                "actor epoch does not cover every active market exactly once".into(),
-            ));
-        }
-        let hard_cap = match epoch.role {
-            ActorRole::MarketMaker => 1_024,
-            ActorRole::Noise => 32,
-        };
-        if epoch.submission.orders.len() > hard_cap {
-            return Err(SequencerError::TooManyOrdersInSubmission {
-                count: epoch.submission.orders.len(),
-                limit: hard_cap,
-            });
-        }
-        match epoch.role {
-            ActorRole::MarketMaker if epoch.submission.mm_constraint.is_none() => {
-                return Err(SequencerError::InvalidMarketState(
-                    "market-maker epoch requires one shared MM constraint".into(),
-                ));
-            }
-            ActorRole::Noise if epoch.submission.mm_constraint.is_some() => {
-                return Err(SequencerError::InvalidMarketState(
-                    "noise epoch cannot carry an MM constraint".into(),
-                ));
-            }
-            _ => {}
-        }
-
-        let key = (epoch.principal_id.clone(), epoch.target_height);
-        if let Some(existing) = self.pending_actor_epochs.get(&key)
-            && existing.epoch_id == epoch.epoch_id
-            && existing.payload_digest == epoch.payload_digest
-        {
-            return Ok(existing
-                .submission
-                .orders
-                .iter()
-                .map(|order| order.id)
-                .collect());
-        }
-        let submission = std::mem::replace(
-            &mut epoch.submission,
-            OrderSubmission {
-                account_id: AccountId::MINT,
-                orders: Vec::new(),
-                mm_constraint: None,
-            },
-        );
-        let assigned = match self.prepare_actor_ioc_submission(submission, now_ms) {
-            AdmitOutcome::Deferred {
-                order_ids,
-                submission,
-            } => {
-                epoch.submission = submission;
-                order_ids
-            }
-            AdmitOutcome::Rejected(error) => return Err(error),
-            AdmitOutcome::Admitted { .. } => {
-                return Err(SequencerError::InvalidMarketState(
-                    "actor epoch unexpectedly entered the resting book".into(),
-                ));
-            }
-        };
-        self.pending_actor_epochs.insert(key, epoch);
-        Ok(assigned)
-    }
-
     pub fn pending_bundles_len(&self) -> usize {
         self.pending_bundles.len()
-    }
-
-    pub(crate) fn pending_actor_epoch(
-        &self,
-        principal_id: &str,
-        target_height: u64,
-    ) -> Option<&ActorEpochSubmission> {
-        self.pending_actor_epochs
-            .get(&(principal_id.to_owned(), target_height))
     }
 
     #[cfg(test)]
@@ -294,7 +165,7 @@ impl BlockSequencer {
             &prepared.next_sequencer.markets,
         );
 
-        let prepared_state_root = crate::block::compute_complete_state_root_with_universe(
+        let prepared_state_root = crate::block::compute_complete_state_root(
             &prepared.next_sequencer.accounts,
             prepared.next_sequencer.bridge_state(),
             prepared.next_sequencer.order_book(),
@@ -302,7 +173,6 @@ impl BlockSequencer {
             prepared.next_sequencer.market_groups(),
             prepared.next_sequencer.market_lifecycle(),
             prepared.next_sequencer.analytics().last_clearing_prices(),
-            prepared.next_sequencer.liquidity_universe_state(),
         );
         let block_state_root = prepared.production.block.header.state_root;
         if prepared_state_root != block_state_root {
@@ -344,17 +214,12 @@ impl BlockSequencer {
         &mut self,
         submissions: Vec<OrderSubmission>,
         preassigned_submission_count: usize,
-        actor_order_roles: HashMap<u64, ActorRole>,
         timestamp_ms: u64,
     ) -> Result<BlockProduction, SequencerError> {
         self.height += 1;
         tracing::Span::current().record("height", self.height);
         let pre_state_sidecar = self.committed_state_sidecar.clone();
         let pre_deposit_frontier = self.committed_deposit_frontier;
-        if let Some(candidate) = self.pending_liquidity_universe.take() {
-            debug_assert_eq!(candidate.activated_at_height, self.height);
-            self.liquidity_universe = candidate;
-        }
         let mut system_events = std::mem::take(&mut self.pending_system_events);
         // Authorization-sensitive events form phase 0 because state-bound key
         // signatures are admitted against the pre-block events digest. The
@@ -494,28 +359,6 @@ impl BlockSequencer {
                             crate::digest::update_digest(&account.events_digest, &encoded);
                     }
                 }
-                SystemEvent::CompleteSetCollateralized {
-                    account_id,
-                    market_id,
-                    quantity,
-                }
-                | SystemEvent::CompleteSetRedeemed {
-                    account_id,
-                    market_id,
-                    quantity,
-                } => {
-                    if let Some(account) = self.accounts.get_mut(*account_id) {
-                        let encoded = crate::digest::encode_complete_set_event(
-                            matches!(event, SystemEvent::CompleteSetCollateralized { .. }),
-                            *market_id,
-                            *quantity,
-                            self.height,
-                        );
-                        account.events_digest =
-                            crate::digest::update_digest(&account.events_digest, &encoded);
-                    }
-                }
-                SystemEvent::LiquidityUniverseActivated { .. } => {}
                 // Key-op digests and client-action nonces are folded at
                 // admission so a later action in the same block binds to the
                 // exact running state.
@@ -558,7 +401,7 @@ impl BlockSequencer {
         let active_markets: HashSet<MarketId> = self
             .markets
             .iter()
-            .filter(|m| self.market_is_universe_active(m.id))
+            .filter(|m| self.market_status(m.id).is_tradeable())
             .map(|m| m.id)
             .collect();
 
@@ -690,8 +533,6 @@ impl BlockSequencer {
 
             let mut accepted_orders: Vec<Order> = Vec::new();
             let mut submission_idx_to_order_id: HashMap<usize, u64> = HashMap::new();
-            let mut mm_position_reservations =
-                self.order_book.acct_position_reservations(account_id);
 
             for (sub_idx, mut order) in sub.orders.into_iter().enumerate() {
                 let order_markets_active =
@@ -747,37 +588,7 @@ impl BlockSequencer {
                 }
 
                 if is_mm {
-                    // MM buys use the shared portfolio budget. MM sells remain
-                    // inventory-backed and reserve positions across the epoch.
-                    let has_negative = order.payoffs[..order.num_states as usize]
-                        .iter()
-                        .any(|payoff| *payoff < 0);
-                    let has_positive = order.payoffs[..order.num_states as usize]
-                        .iter()
-                        .any(|payoff| *payoff > 0);
-                    if has_negative && !has_positive {
-                        if let Err(reason) = crate::validation::validate_order_with_reservation(
-                            &order,
-                            account,
-                            0,
-                            &mm_position_reservations,
-                        ) {
-                            witness_rejections.push(WitnessRejection {
-                                order: order.clone(),
-                                account_id: account_id.0,
-                                reason: convert_rejection_reason(&reason),
-                            });
-                            rejections.push(Rejection {
-                                order_id,
-                                account_id,
-                                reason,
-                            });
-                            continue;
-                        }
-                        for (key, quantity) in crate::validation::sell_reservations(&order) {
-                            *mm_position_reservations.entry(key).or_insert(0) += quantity;
-                        }
-                    }
+                    // MM orders: STP check, flash liquidity (skip balance validation)
                     if stp.would_complete_set(account_id, &order) {
                         witness_rejections.push(WitnessRejection {
                             order: order.clone(),
@@ -965,11 +776,14 @@ impl BlockSequencer {
         }
 
         // Capture per-block placers from witness_orders BEFORE it gets
-        // consumed by WitnessAssemblyInput below. Every real account counts,
-        // including MM; only the protocol-owned MINT account is synthetic.
+        // consumed by WitnessAssemblyInput below. MM orders are excluded so
+        // by_market[m].placers tracks real participation (decision Q-table).
         let mut block_placers: HashSet<AccountId> = HashSet::new();
         let mut block_placers_by_market: HashMap<MarketId, HashSet<AccountId>> = HashMap::new();
         for wo in &witness_orders {
+            if wo.is_mm {
+                continue;
+            }
             let aid = AccountId(wo.account_id);
             if aid == AccountId::MINT {
                 continue;
@@ -1017,62 +831,6 @@ impl BlockSequencer {
 
         let total_welfare =
             matching_engine::net_welfare(pipeline_result.result.gross_welfare, minting_cost);
-
-        // Attribute filled actor flow without putting role metadata into the
-        // canonical order/witness domains. Actor IOC order ids are captured
-        // when their target-height epochs are drained above; every other
-        // filled order is organic (manual, LLM, or ordinary resting flow).
-        let order_map: HashMap<u64, &Order> = problem
-            .orders
-            .iter()
-            .map(|order| (order.id, order))
-            .collect();
-        let mut mm_matched = HashSet::<(MarketId, u64)>::new();
-        let mut noise_matched = HashSet::<(MarketId, u64)>::new();
-        let mut organic_matched = HashSet::<(MarketId, u64)>::new();
-        let mut mm_fill_notional_by_market = HashMap::<MarketId, u64>::new();
-        let mut noise_fill_notional_by_market = HashMap::<MarketId, u64>::new();
-        let mut organic_fill_notional_by_market = HashMap::<MarketId, u64>::new();
-        for fill in &fills {
-            if fill.fill_qty.0 == 0 {
-                continue;
-            }
-            let Some(order) = order_map.get(&fill.order_id) else {
-                continue;
-            };
-            let notional = matching_engine::notional_nanos(fill.fill_price, fill.fill_qty).0;
-            for market_id in order.active_markets() {
-                match actor_order_roles.get(&fill.order_id) {
-                    Some(ActorRole::MarketMaker) => {
-                        mm_matched.insert((market_id, fill.order_id));
-                        let slot = mm_fill_notional_by_market.entry(market_id).or_insert(0);
-                        *slot = slot.saturating_add(notional);
-                    }
-                    Some(ActorRole::Noise) => {
-                        noise_matched.insert((market_id, fill.order_id));
-                        let slot = noise_fill_notional_by_market.entry(market_id).or_insert(0);
-                        *slot = slot.saturating_add(notional);
-                    }
-                    None => {
-                        organic_matched.insert((market_id, fill.order_id));
-                        let slot = organic_fill_notional_by_market
-                            .entry(market_id)
-                            .or_insert(0);
-                        *slot = slot.saturating_add(notional);
-                    }
-                }
-            }
-        }
-        let count_by_market = |pairs: HashSet<(MarketId, u64)>| {
-            let mut counts = HashMap::<MarketId, u32>::new();
-            for (market_id, _) in pairs {
-                *counts.entry(market_id).or_insert(0) += 1;
-            }
-            counts
-        };
-        let mm_matched_orders_by_market = count_by_market(mm_matched);
-        let noise_matched_orders_by_market = count_by_market(noise_matched);
-        let organic_matched_orders_by_market = count_by_market(organic_matched);
 
         // Off-block cumulative + 24h platform welfare — accumulate this block's
         // authoritative `total_welfare` scalar (counts each fill once, unlike the
@@ -1228,12 +986,6 @@ impl BlockSequencer {
             volume_by_market,
             orders_by_market: block_orders_by_market,
             welfare_by_market,
-            mm_matched_orders_by_market,
-            noise_matched_orders_by_market,
-            organic_matched_orders_by_market,
-            mm_fill_notional_by_market,
-            noise_fill_notional_by_market,
-            organic_fill_notional_by_market,
         };
         let sealed_for_observe = crate::block::SealedBlock {
             canonical: block.clone(),

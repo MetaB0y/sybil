@@ -3,7 +3,7 @@ tags: [infrastructure, storage, recovery]
 layer: sequencer
 crate: matching-sequencer
 status: current
-last_verified: 2026-07-15
+last_verified: 2026-07-14
 ---
 
 # Acknowledged-write WAL replay
@@ -59,7 +59,6 @@ AcknowledgedWrite =
   | L1Deposit(L1Deposit)
   | BridgeWithdrawal(BridgeWithdrawalRequest)
   | BridgeL1Input(BridgeL1Input)
-  | ActorEpoch(ActorEpochSubmission)
 ```
 
 The variant enum is append-only within an envelope version. Breaking changes
@@ -90,9 +89,6 @@ Existing live-ordering disciplines remain explicit:
 - each signed order/cancel persists its exact RawP256/WebAuthn envelope, trading
   nonce, and state effect in one row; replay cannot recover the action without
   its authorization or advance the nonce without its action;
-- each accepted role-bound actor epoch persists its post-validation,
-  order-id-assigned package; later rows for the same principal and target
-  height deterministically supersede earlier rows during replay;
 - a direct resting-order admit is applied live first, then durably appended;
   append failure rolls the admit back before returning an error;
 - no acknowledged write is allowed before the first committed block snapshot,
@@ -111,8 +107,8 @@ Recovery performs these steps:
 4. validate and decode the exact `[floor, next)` acknowledged-write interval;
 5. dispatch rows in ascending sequence through the normal deterministic
    mutation handlers;
-6. advance `next_order_id` while replaying direct admits, deferred bundles,
-   and actor epochs; and
+6. advance `next_order_id` while replaying both direct admits and deferred
+   bundles; and
 7. rebuild derived indexes only after the whole interval succeeds.
 
 `DeferredBundle` retains its normal meaning: replay places it in the pending
@@ -162,7 +158,7 @@ repin, so old v1 stores are rejected rather than migrated with invented order.
 
 Load-bearing coverage includes:
 
-- mixed control-plane/direct/deferred/actor/deposit/withdrawal/L1-input sequence
+- mixed control-plane/direct/deferred/deposit/withdrawal/L1-input sequence
   preservation;
 - first-row gap detection using the committed floor;
 - lifetime sequence continuity across block fences;

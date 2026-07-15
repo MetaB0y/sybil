@@ -124,68 +124,6 @@ impl SybilClient {
 
     // === Health ===
 
-    pub async fn liquidity_universe(&self) -> Result<LiquidityUniverseResponse, Error> {
-        let resp = self
-            .http
-            .get(self.url("/v1/liquidity/universe"))
-            .send()
-            .await?;
-        self.decode(resp).await
-    }
-
-    pub async fn actor_universe(&self, token: &str) -> Result<LiquidityUniverseResponse, Error> {
-        let resp = self
-            .http
-            .get(self.url("/v1/actor/universe"))
-            .bearer_auth(token)
-            .send()
-            .await?;
-        self.decode(resp).await
-    }
-
-    pub async fn activate_liquidity_universe(
-        &self,
-        request: &ActivateLiquidityUniverseRequest,
-    ) -> Result<LiquidityUniverseResponse, Error> {
-        let resp = self
-            .with_service_auth(self.http.post(self.url("/v1/liquidity/universe/activate")))
-            .json(request)
-            .send()
-            .await?;
-        self.decode(resp).await
-    }
-
-    pub async fn submit_actor_epoch(
-        &self,
-        token: &str,
-        request: &ActorEpochRequest,
-    ) -> Result<ActorEpochResponse, Error> {
-        let resp = self
-            .http
-            .post(self.url("/v1/actor/epochs"))
-            .bearer_auth(token)
-            .json(request)
-            .send()
-            .await?;
-        self.decode(resp).await
-    }
-
-    pub async fn update_complete_set_inventory(
-        &self,
-        token: &str,
-        request: &CompleteSetInventoryRequest,
-    ) -> Result<(), Error> {
-        let resp = self
-            .http
-            .post(self.url("/v1/actor/inventory"))
-            .bearer_auth(token)
-            .json(request)
-            .send()
-            .await?;
-        self.check_response(resp).await?;
-        Ok(())
-    }
-
     pub async fn health(&self) -> Result<HealthResponse, Error> {
         let resp = self
             .with_service_auth(self.http.get(self.url("/v1/health")))

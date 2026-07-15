@@ -10,11 +10,10 @@ use crate::block::hash_header;
 use crate::state_schema;
 use crate::types::{
     AccountReservationSnapshot, AccountSnapshot, BlockWitness, BridgeStateSnapshot,
-    ChallengeSnapshot, ClientActionWitness, KeyOpAuth, LiquidityUniverseSnapshot,
-    MarketGroupSnapshot, MarketSnapshot, MarketStatusSnapshot, OracleSourceSnapshot,
-    RejectionReason, ResolutionProposalSnapshot, ResolutionRecordSnapshot, RestingOrderSnapshot,
-    StateSidecarSnapshot, SystemEventWitness, WithdrawalSnapshot, WitnessBlockHeader, WitnessOrder,
-    WitnessRejection,
+    ChallengeSnapshot, ClientActionWitness, KeyOpAuth, MarketGroupSnapshot, MarketSnapshot,
+    MarketStatusSnapshot, OracleSourceSnapshot, RejectionReason, ResolutionProposalSnapshot,
+    ResolutionRecordSnapshot, RestingOrderSnapshot, StateSidecarSnapshot, SystemEventWitness,
+    WithdrawalSnapshot, WitnessBlockHeader, WitnessOrder, WitnessRejection,
 };
 use crate::witness_schema;
 use crate::{AccountKeyDigestRecord, account_keys_digest, empty_account_keys_digest};
@@ -337,12 +336,6 @@ fn state_sidecar(resting_order: Order) -> StateSidecarSnapshot {
                 nullifier: [11u8; 32],
             }],
             quarantine: vec![],
-        },
-        liquidity_universe: LiquidityUniverseSnapshot {
-            generation: 4,
-            policy_digest: [7u8; 32],
-            activated_at_height: 8,
-            market_ids: vec![MarketId::new(3), MarketId::new(9)],
         },
         markets: vec![
             MarketSnapshot {

@@ -7061,7 +7061,6 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
- "sha2 0.11.0",
  "sybil-api-types",
  "sybil-client",
  "sybil-signing",

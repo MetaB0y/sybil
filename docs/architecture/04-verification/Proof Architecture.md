@@ -2,7 +2,7 @@
 tags: [zk, infrastructure, authenticated-data]
 layer: verification
 status: current
-last_verified: 2026-07-15
+last_verified: 2026-07-14
 ---
 
 # Proof architecture
@@ -95,7 +95,7 @@ It then requires exact header/root/genesis chaining, folds the verified block
 hashes and DA commitments in order, and reveals one epoch public-input hash for
 the claimed start/end range.
 
-Witness v11 retains ordinary order/cancel RawP256/WebAuthn envelopes and the
+Witness v10 retains ordinary order/cancel RawP256/WebAuthn envelopes and the
 account leaf commits `last_trading_nonce`. Shared native/guest verification
 replays both against the actor-ordered active key set; see
 [[P256 Authentication]] and [[Threat Model]].

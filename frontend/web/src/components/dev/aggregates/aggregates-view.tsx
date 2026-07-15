@@ -335,7 +335,7 @@ export function AggregatesView() {
                 label="Unique Placers (open batch)"
                 value={fmtInt(openBatch.unique_placers)}
                 tone="warn"
-                sub="all real accounts"
+                sub="non-MM admits"
               />
               <Stat
                 label="Indicative YES"

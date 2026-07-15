@@ -17,8 +17,8 @@
  *
  * Holdings mark at the live store price — the same source the chart + rail use
  * (`group.outcomes`, fed by `selectPricesByMarketId`) — so the section agrees
- * with the chart on this page. The portfolio endpoint uses the same committed
- * Sybil mark (latest trade price, or book midpoint while quiet); we only fall
+ * with the chart on this page. The portfolio endpoint marks positions at the
+ * backend's last *clearing* price, which can lag the live price; we only fall
  * back to it (`current_price_nanos` / `value_nanos`) when the store has no
  * price for a market yet. Cost basis is `quantity * avg_entry`; unrealized PnL
  * is value − cost. Entry + current price collapse into one `entry → mark` cell;

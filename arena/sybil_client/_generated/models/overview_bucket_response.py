@@ -34,7 +34,7 @@ class OverviewBucketResponse:
                 1_000_000_000 = $1.
             total_welfare_nanos (int | Unset): Cumulative platform welfare for this bucket. Integer nanodollars;
                 1_000_000_000 = $1. Sum of per-block `total_welfare` (each fill counted
-                once). Verified block welfare is non-negative.
+                once). Signed: solver rounding can yield small negatives.
             unique_traders (int | Unset):
      """
 

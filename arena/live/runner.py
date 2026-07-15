@@ -30,7 +30,6 @@ from .fair_value_bus import FairValueBus
 from .market_selection import MarketProfile, select_markets
 from .metrics import ArenaMetrics, start_metrics_server
 from .news_feed import NewsFeed, PairedNewsBatchBarrier
-from .noise_coordinator import NoiseCoordinator
 from .outcomes import DEFAULT_OUTCOME_RECORD_INTERVAL_S, record_outcomes_loop
 from .personas import PERSONAS
 from .strategy import FairValueFreshnessConfig, FlatStrategy, KellyStrategy
@@ -416,21 +415,7 @@ async def snapshot_portfolios_once(
         try:
             portfolio = await trader.client.get_portfolio(trader.account_id)
             positions = {}
-            local_positions = getattr(trader, "positions", None)
-            if local_positions is not None:
-                position_rows = (
-                    (mid, outcome, qty)
-                    for (mid, outcome), qty in local_positions.items()
-                )
-            else:
-                # Coordinator-backed durable actors do not maintain a second
-                # local portfolio cache. Their API portfolio is canonical and
-                # already fetched above for the snapshot.
-                position_rows = (
-                    (position.market_id, position.outcome, position.quantity)
-                    for position in portfolio.positions
-                )
-            for mid, outcome, qty in position_rows:
+            for (mid, outcome), qty in trader.positions.items():
                 if qty != 0:
                     positions.setdefault(str(mid), {})[outcome] = qty
             db.log_snapshot(
@@ -441,12 +426,6 @@ async def snapshot_portfolios_once(
                 positions=positions,
                 total_fills=len(getattr(trader, "_fill_history", [])),
                 total_orders=getattr(trader, "total_orders_submitted", 0),
-                account_id=trader.account_id,
-                participant_kind=getattr(
-                    trader,
-                    "participant_kind",
-                    "noise" if trader.name.startswith(("Noise", "Fast")) else "llm",
-                ),
             )
             recorded += 1
         except Exception as exc:
@@ -737,12 +716,9 @@ async def _start_live_tasks(
     stop_event: asyncio.Event,
     runtime_id: str | None = None,
     required_baseline_trader_names: set[str] | None = None,
-    noise_coordinator: NoiseCoordinator | None = None,
 ) -> list[asyncio.Task]:
     """Persist every account baseline before starting any live worker."""
     snapshot_traders = [*traders, *fast_traders, *noise_traders]
-    if noise_coordinator is not None:
-        snapshot_traders.extend(noise_coordinator.snapshot_agents)
     if runtime_id is not None:
         await snapshot_portfolios_once(
             snapshot_traders,
@@ -778,12 +754,6 @@ async def _start_live_tasks(
     for noise in noise_traders:
         tasks.append(
             asyncio.create_task(supervise_bot(noise, stop_event), name=f"noise:{noise.name}")
-        )
-    if noise_coordinator is not None:
-        tasks.append(
-            asyncio.create_task(
-                noise_coordinator.run(stop_event), name="noise:all-market-coordinator"
-            )
         )
     return tasks
 
@@ -1021,76 +991,67 @@ async def run_live(config: LiveConfig):
             analysts = topology.analysts
             traders = topology.traders
 
-        # 3. Create synthetic fast/noise traders. Production actor credentials
-        # select the exact fifteen-account, sparse IOC coordinator. Without
-        # credentials, preserve the legacy local-dev topology.
-        noise_coordinator = NoiseCoordinator.from_env(client)
-        if noise_coordinator is not None:
-            fast_traders = []
-            noise_traders = []
-            log.info("Using fifteen durable sparse noise actor accounts; legacy synthetic traders disabled")
-        else:
-            # Fast traders only act on
-            # reference-backed mirror markets; noise traders only act on native
-            # no-reference markets. Both consume the same config shape with per-bot
-            # seed offsets for deterministic but non-identical streams.
-            fast_traders = []
-            for i in range(config.fast_count):
-                account = await client.create_account(int(config.noise_balance * NANOS_PER_DOLLAR))
-                fast = FastReferenceTrader(
-                    client=client,
-                    account_id=account.id,
-                    name=f"Fast-{i}",
-                    market_ids=synthetic_market_ids,
-                    markets_info=synthetic_markets_info,
-                    config=config.synthetic_strategy.with_seed(
-                        config.synthetic_strategy.random_seed + i
-                    ),
-                )
-                fast.time_in_force = config.order_time_in_force
-                fast_traders.append(fast)
+        # 3. Create synthetic fast/noise traders. Fast traders only act on
+        # reference-backed mirror markets; noise traders only act on native
+        # no-reference markets. Both consume the same config shape with per-bot
+        # seed offsets for deterministic but non-identical streams.
+        fast_traders = []
+        for i in range(config.fast_count):
+            account = await client.create_account(int(config.noise_balance * NANOS_PER_DOLLAR))
+            fast = FastReferenceTrader(
+                client=client,
+                account_id=account.id,
+                name=f"Fast-{i}",
+                market_ids=synthetic_market_ids,
+                markets_info=synthetic_markets_info,
+                config=config.synthetic_strategy.with_seed(
+                    config.synthetic_strategy.random_seed + i
+                ),
+            )
+            fast.time_in_force = config.order_time_in_force
+            fast_traders.append(fast)
 
         # Noise traders. When crossing is enabled (default), they cover the
         # same selected markets the LLM bots trade and post aggressive
         # two-sided crossing orders on a durable
         # (GTC) book, which is the reliable path to fills. When disabled they
         # fall back to the legacy inventory-aware native-only noise flow.
-            crossing = config.synthetic_strategy.crossing_enabled
-            noise_traders = []
-            for i in range(config.noise_count):
-                account = await client.create_account(int(config.noise_balance * NANOS_PER_DOLLAR))
-                noise_cfg = config.synthetic_strategy.with_seed(
-                    config.synthetic_strategy.random_seed + 10_000 + i
-                )
-                if crossing:
-                    noise = CrossingNoiseTrader(
-                        client=client,
-                        account_id=account.id,
-                        name=f"Noise-{i}",
-                        market_ids=synthetic_market_ids,
-                        markets_info=synthetic_markets_info,
-                        config=noise_cfg,
-                    )
-                    noise.time_in_force = config.noise_time_in_force
-                else:
-                    noise = NativeNoiseTrader(
-                        client=client,
-                        account_id=account.id,
-                        name=f"Noise-{i}",
-                        market_ids=synthetic_market_ids,
-                        markets_info=synthetic_markets_info,
-                        config=noise_cfg,
-                    )
-                    noise.time_in_force = config.order_time_in_force
-                noise_traders.append(noise)
-            log.info(
-                "Created %d fast traders and %d %s noise traders (TIF=%s) over %d selected markets",
-                len(fast_traders),
-                len(noise_traders),
-                "crossing" if crossing else "native",
-                config.noise_time_in_force if crossing else config.order_time_in_force,
-                len(synthetic_markets_info),
+        crossing = config.synthetic_strategy.crossing_enabled
+        noise_traders = []
+        for i in range(config.noise_count):
+            account = await client.create_account(int(config.noise_balance * NANOS_PER_DOLLAR))
+            noise_cfg = config.synthetic_strategy.with_seed(
+                config.synthetic_strategy.random_seed + 10_000 + i
             )
+            if crossing:
+                noise = CrossingNoiseTrader(
+                    client=client,
+                    account_id=account.id,
+                    name=f"Noise-{i}",
+                    market_ids=synthetic_market_ids,
+                    markets_info=synthetic_markets_info,
+                    config=noise_cfg,
+                )
+                noise.time_in_force = config.noise_time_in_force
+            else:
+                noise = NativeNoiseTrader(
+                    client=client,
+                    account_id=account.id,
+                    name=f"Noise-{i}",
+                    market_ids=synthetic_market_ids,
+                    markets_info=synthetic_markets_info,
+                    config=noise_cfg,
+                )
+                noise.time_in_force = config.order_time_in_force
+            noise_traders.append(noise)
+        log.info(
+            "Created %d fast traders and %d %s noise traders (TIF=%s) over %d selected markets",
+            len(fast_traders),
+            len(noise_traders),
+            "crossing" if crossing else "native",
+            config.noise_time_in_force if crossing else config.order_time_in_force,
+            len(synthetic_markets_info),
+        )
 
         # 4. Create the shared news feed and headline relevance gate.
         feed = NewsFeed(
@@ -1124,21 +1085,17 @@ async def run_live(config: LiveConfig):
             len(active),
         )
 
-        runtime_participants = [
-            *((trader.name, "competitor", True) for trader in traders),
-            *((trader.name, "load", False) for trader in fast_traders),
-            *((trader.name, "noise", False) for trader in noise_traders),
-        ]
-        if noise_coordinator is not None:
-            runtime_participants.extend(
-                (agent.name, "noise", False)
-                for agent in noise_coordinator.snapshot_agents
-            )
-        runtime_id = db.activate_runtime(runtime_participants)
+        runtime_id = db.activate_runtime(
+            [
+                *((trader.name, "competitor", True) for trader in traders),
+                *((trader.name, "load", False) for trader in fast_traders),
+                *((trader.name, "noise", False) for trader in noise_traders),
+            ]
+        )
         log.info(
             "Activated Arena runtime %s with %d participants",
             runtime_id,
-            len(runtime_participants),
+            len(traders) + len(fast_traders) + len(noise_traders),
         )
 
         stop_event = asyncio.Event()
@@ -1155,7 +1112,6 @@ async def run_live(config: LiveConfig):
                 required_baseline_trader_names=(
                     {trader.name for trader in traders} if experiment_id is not None else None
                 ),
-                noise_coordinator=noise_coordinator,
             )
         except BaseException:
             db.stop_runtime(runtime_id)

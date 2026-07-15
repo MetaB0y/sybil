@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -12,96 +12,11 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::ApiConfig;
 use crate::history::HistoryClient;
-use crate::types::request::ActorRole;
-use crate::types::response::MmQuoteSnapshotResponse;
 use crate::webauthn::WebAuthnVerifierConfig;
 
 const MAX_HTTP_RATE_LIMIT_CLIENTS: usize = 10_000;
 const OVERFLOW_CLIENT_KEY: &str = "__overflow__";
 type ReadApiKeyOwners = HashMap<[u8; 32], AccountId>;
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct ActorCredential {
-    pub principal_id: String,
-    pub role: ActorRole,
-    pub account_id: u64,
-    pub token: String,
-}
-
-#[derive(Clone, Debug)]
-pub struct ActorMarketObservation {
-    pub order_count: usize,
-    pub skip_reason: Option<String>,
-    pub crosses_mm_quote: bool,
-}
-
-#[derive(Clone, Debug)]
-pub struct ActorEpochObservation {
-    pub principal_id: String,
-    pub role: ActorRole,
-    pub target_height: u64,
-    pub valid_until_ms: u64,
-    pub markets: BTreeMap<u32, ActorMarketObservation>,
-}
-
-#[derive(Deserialize)]
-struct ActorCredentialFile {
-    actors: Vec<ActorCredential>,
-}
-
-fn load_actor_credentials(path: &str) -> Vec<ActorCredential> {
-    if path.trim().is_empty() {
-        return Vec::new();
-    }
-    let payload = match std::fs::read_to_string(path) {
-        Ok(payload) => payload,
-        Err(error) => {
-            tracing::error!(path, %error, "actor credentials unavailable; actor routes fail closed");
-            return Vec::new();
-        }
-    };
-    match serde_json::from_str::<ActorCredentialFile>(&payload) {
-        Ok(file) => {
-            let mut principals = HashSet::new();
-            let mut accounts = HashSet::new();
-            let mut tokens = HashSet::new();
-            let market_makers = file
-                .actors
-                .iter()
-                .filter(|actor| actor.role == ActorRole::MarketMaker)
-                .count();
-            let noise = file
-                .actors
-                .iter()
-                .filter(|actor| actor.role == ActorRole::Noise)
-                .count();
-            let valid = file.actors.len() == 16
-                && market_makers == 1
-                && noise == 15
-                && file.actors.iter().all(|actor| {
-                    !actor.principal_id.trim().is_empty()
-                        && actor.principal_id.len() <= 128
-                        && actor.account_id != AccountId::MINT.0
-                        && actor.token.len() >= 32
-                        && principals.insert(actor.principal_id.clone())
-                        && accounts.insert(actor.account_id)
-                        && tokens.insert(actor.token.clone())
-                });
-            if !valid {
-                tracing::error!(
-                    path,
-                    "actor credential file must contain exactly one MM and fifteen noise actors with unique non-empty principals, non-MINT accounts, and unique >=32-byte tokens; actor routes fail closed"
-                );
-                return Vec::new();
-            }
-            file.actors
-        }
-        Err(error) => {
-            tracing::error!(path, %error, "actor credentials invalid; actor routes fail closed");
-            Vec::new()
-        }
-    }
-}
 
 /// Reference market data mirrored from external systems (e.g., Polymarket).
 ///
@@ -155,12 +70,6 @@ pub struct MarketRefData {
     /// Whether Polymarket has closed this market. Off-block.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub closed: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actor_min_yes_nanos: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actor_max_yes_nanos: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actor_seed_yes_nanos: Option<u64>,
 }
 
 /// Load `market_ref_data` snapshot from disk, or return an empty map if the
@@ -266,13 +175,6 @@ pub struct AppState {
     /// Bearer token for service/operator routes. `None` fails closed when
     /// `dev_mode` is false.
     pub service_token: Option<String>,
-    pub actor_credentials: Arc<Vec<ActorCredential>>,
-    /// Bounded off-block actor receipts for the human liquidity dashboard.
-    pub actor_epoch_observations:
-        Arc<RwLock<BTreeMap<u64, BTreeMap<String, ActorEpochObservation>>>>,
-    /// Accepted economic MM quote shapes keyed by target block. This cache is
-    /// actor-authenticated diagnostics only and is safe to lose on restart.
-    pub mm_quote_snapshots: Arc<RwLock<BTreeMap<u64, MmQuoteSnapshotResponse>>>,
     /// CORS origins allowed in production. Empty means no cross-origin CORS.
     pub cors_origins: Vec<HeaderValue>,
     /// Networks whose direct connections may supply forwarding headers for
@@ -378,9 +280,6 @@ impl AppState {
             read_model_init_lock: Arc::new(AsyncMutex::new(())),
             dev_mode: config.dev_mode,
             service_token,
-            actor_credentials: Arc::new(load_actor_credentials(&config.actor_credentials_path)),
-            actor_epoch_observations: Arc::new(RwLock::new(BTreeMap::new())),
-            mm_quote_snapshots: Arc::new(RwLock::new(BTreeMap::new())),
             cors_origins,
             http_trusted_proxy_cidrs: Arc::new(config.http_trusted_proxy_cidrs.clone()),
             prometheus,
@@ -409,30 +308,6 @@ impl AppState {
             webauthn: WebAuthnVerifierConfig::from_api_config(config),
             account_bootstrap_lock: Arc::new(AsyncMutex::new(())),
             auto_resolutions: crate::auto_resolution::AutoResolutionStore::new(),
-        }
-    }
-
-    pub async fn record_actor_epoch_observation(&self, observation: ActorEpochObservation) {
-        const RETAIN_HEIGHTS: u64 = 256;
-        let mut by_height = self.actor_epoch_observations.write().await;
-        let target_height = observation.target_height;
-        by_height
-            .entry(target_height)
-            .or_default()
-            .insert(observation.principal_id.clone(), observation);
-        let minimum = target_height.saturating_sub(RETAIN_HEIGHTS);
-        by_height.retain(|height, _| *height >= minimum);
-    }
-
-    pub async fn record_mm_quote_snapshot(&self, snapshot: MmQuoteSnapshotResponse) {
-        const RETAINED_HEIGHTS: usize = 128;
-        let mut snapshots = self.mm_quote_snapshots.write().await;
-        snapshots.insert(snapshot.target_height, snapshot);
-        while snapshots.len() > RETAINED_HEIGHTS {
-            let Some(oldest) = snapshots.keys().next().copied() else {
-                break;
-            };
-            snapshots.remove(&oldest);
         }
     }
 

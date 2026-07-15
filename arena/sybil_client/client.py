@@ -103,32 +103,6 @@ class SybilClient:
         """Check server health."""
         return await self._request("GET", "/v1/health")
 
-    async def actor_universe(self, token: str) -> dict[str, Any]:
-        """Get the committed universe plus this credential's account binding."""
-        return await self._request(
-            "GET",
-            "/v1/actor/universe",
-            headers={"authorization": f"Bearer {token}"},
-        )
-
-    async def submit_actor_epoch(self, token: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """Submit one role-bound, target-block actor package."""
-        return await self._request(
-            "POST",
-            "/v1/actor/epochs",
-            headers={"authorization": f"Bearer {token}"},
-            json=payload,
-        )
-
-    async def mm_quote_snapshot(self, token: str, target_height: int) -> dict[str, Any]:
-        """Get accepted economic MM quotes for one target block."""
-        return await self._request(
-            "GET",
-            "/v1/actor/mm-quotes",
-            params={"target_height": target_height},
-            headers={"authorization": f"Bearer {token}"},
-        )
-
     async def state_root(self) -> str:
         """Get current state root hash."""
         data = await self._request("GET", "/v1/state-root")
@@ -273,11 +247,6 @@ class SybilClient:
         data = await self._request("GET", f"/v1/markets/{market_id}")
         return self._parse_market(data)
 
-    async def list_market_groups(self) -> list[dict[str, Any]]:
-        """List protocol market groups used by group-safe actor strategies."""
-        data = await self._request("GET", "/v1/markets/groups")
-        return list(data)
-
     async def create_market(
         self,
         name: str,
@@ -304,7 +273,7 @@ class SybilClient:
         return self._parse_market(data)
 
     async def get_prices(self) -> dict[int, tuple[int, int]]:
-        """Get committed Sybil mark prices for all markets."""
+        """Get clearing prices for all markets."""
         data = await self._request("GET", "/v1/markets/prices")
         # Response is wrapped: {"prices": {"0": {...}, "1": {...}}}
         prices_map = data.get("prices", data) if isinstance(data, dict) else data
@@ -400,9 +369,6 @@ class SybilClient:
             expiry_timestamp_ms=data.get("expiry_timestamp_ms", 0),
             created_at_ms=data.get("created_at_ms", 0),
             volume_nanos=data.get("volume_nanos", 0),
-            actor_min_yes_nanos=data.get("actor_min_yes_nanos"),
-            actor_max_yes_nanos=data.get("actor_max_yes_nanos"),
-            actor_seed_yes_nanos=data.get("actor_seed_yes_nanos"),
         )
 
     # === Orders ===

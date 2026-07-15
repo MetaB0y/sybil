@@ -109,8 +109,8 @@ pub struct BlockAnalytics {
     pub total_welfare: i64,
     pub total_volume: u64,
     pub orders_filled: usize,
-    /// Unique real accounts admitted into this block, including MM. Platform
-    /// scalar — derived from `WitnessOrder.account_id` after filtering MINT.
+    /// Unique placers (non-MM accounts) admitted into this block. Platform
+    /// scalar — derived from `WitnessOrder.account_id` after filtering MM.
     pub unique_placers: u32,
     /// Per-market unique placers in this block. A multi-market order
     /// credits each active market; the platform `unique_placers` counts the
@@ -134,21 +134,6 @@ pub struct BlockAnalytics {
     /// sum-of-per-market over-counts for spreads/bundles. Signed because
     /// stored as `i64` to match the canonical signed welfare arithmetic.
     pub welfare_by_market: HashMap<MarketId, i64>,
-    /// Filled actor-order counts and attributed notionals by market. These are
-    /// off-block diagnostics used by actor controllers; they are deliberately
-    /// excluded from the canonical block and witness.
-    #[serde(default)]
-    pub mm_matched_orders_by_market: HashMap<MarketId, u32>,
-    #[serde(default)]
-    pub noise_matched_orders_by_market: HashMap<MarketId, u32>,
-    #[serde(default)]
-    pub organic_matched_orders_by_market: HashMap<MarketId, u32>,
-    #[serde(default)]
-    pub mm_fill_notional_by_market: HashMap<MarketId, u64>,
-    #[serde(default)]
-    pub noise_fill_notional_by_market: HashMap<MarketId, u64>,
-    #[serde(default)]
-    pub organic_fill_notional_by_market: HashMap<MarketId, u64>,
 }
 
 /// Provenance marker for fields derived by the sequencer read model.
@@ -279,31 +264,6 @@ pub fn compute_complete_state_root(
     lifecycle: &MarketLifecycle,
     last_clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
 ) -> [u8; 32] {
-    compute_complete_state_root_with_universe(
-        accounts,
-        bridge,
-        order_book,
-        markets,
-        market_groups,
-        lifecycle,
-        last_clearing_prices,
-        &crate::universe::LiquidityUniverse::default(),
-    )
-}
-
-// Validity state is intentionally assembled from explicit subsystem owners;
-// hiding these behind a partially initialized bag would make omissions easier.
-#[allow(clippy::too_many_arguments)]
-pub fn compute_complete_state_root_with_universe(
-    accounts: &AccountStore,
-    bridge: &BridgeState,
-    order_book: &OrderBook,
-    markets: &MarketSet,
-    market_groups: &[MarketGroup],
-    lifecycle: &MarketLifecycle,
-    last_clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
-    liquidity_universe: &crate::universe::LiquidityUniverse,
-) -> [u8; 32] {
     let accounts = CanonicalState::from_accounts(accounts);
     sybil_verifier::block::compute_state_root_with_sidecar(
         accounts.as_snapshots(),
@@ -314,7 +274,6 @@ pub fn compute_complete_state_root_with_universe(
             market_groups,
             lifecycle,
             last_clearing_prices,
-            liquidity_universe,
         ),
     )
 }
@@ -326,20 +285,17 @@ pub fn state_sidecar_snapshot(
     market_groups: &[MarketGroup],
     lifecycle: &MarketLifecycle,
     last_clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
-    liquidity_universe: &crate::universe::LiquidityUniverse,
 ) -> sybil_verifier::StateSidecarSnapshot {
-    state_sidecar_snapshot_from_resting_orders_with_universe(
+    state_sidecar_snapshot_from_resting_orders(
         bridge,
         &order_book.snapshot(),
         markets,
         market_groups,
         lifecycle,
         last_clearing_prices,
-        liquidity_universe,
     )
 }
 
-#[cfg(test)]
 pub(crate) fn state_sidecar_snapshot_from_resting_orders(
     bridge: &BridgeState,
     resting_orders: &[RestingOrder],
@@ -348,29 +304,8 @@ pub(crate) fn state_sidecar_snapshot_from_resting_orders(
     lifecycle: &MarketLifecycle,
     last_clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
 ) -> sybil_verifier::StateSidecarSnapshot {
-    state_sidecar_snapshot_from_resting_orders_with_universe(
-        bridge,
-        resting_orders,
-        markets,
-        market_groups,
-        lifecycle,
-        last_clearing_prices,
-        &crate::universe::LiquidityUniverse::default(),
-    )
-}
-
-pub(crate) fn state_sidecar_snapshot_from_resting_orders_with_universe(
-    bridge: &BridgeState,
-    resting_orders: &[RestingOrder],
-    markets: &MarketSet,
-    market_groups: &[MarketGroup],
-    lifecycle: &MarketLifecycle,
-    last_clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
-    liquidity_universe: &crate::universe::LiquidityUniverse,
-) -> sybil_verifier::StateSidecarSnapshot {
     sybil_verifier::StateSidecarSnapshot {
         bridge: bridge_state_snapshot(bridge),
-        liquidity_universe: liquidity_universe.snapshot(),
         markets: market_snapshots(markets, lifecycle, last_clearing_prices),
         market_groups: market_group_snapshots(market_groups),
         resting_orders: resting_order_snapshots(resting_orders),

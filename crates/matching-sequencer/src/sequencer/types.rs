@@ -7,27 +7,6 @@ pub struct OrderSubmission {
     pub mm_constraint: Option<MmConstraint>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ActorRole {
-    MarketMaker,
-    Noise,
-}
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct ActorEpochSubmission {
-    pub principal_id: String,
-    pub role: ActorRole,
-    pub epoch_id: String,
-    pub payload_digest: [u8; 32],
-    pub target_height: u64,
-    /// Last wall-clock timestamp at which this package may enter a block.
-    pub valid_until_ms: u64,
-    pub universe_generation: u64,
-    pub covered_market_ids: Vec<MarketId>,
-    pub submission: OrderSubmission,
-}
-
 /// Result of [`BlockSequencer::try_admit_direct`].
 ///
 /// A submission that targets a single market with a single non-MM order can

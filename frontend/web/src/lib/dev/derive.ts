@@ -8,6 +8,8 @@
  * math. Fields that may arrive as strings on the wire are coerced via `n()`.
  */
 
+const SHARE_SCALE = 1_000;
+
 import type {
   DevMarket,
   DevMarketGroup,
@@ -17,10 +19,8 @@ import type {
   DevBlock,
   DevBlockMarketStats,
   DevOverviewBucket,
-  DevLiquidityHealth,
-  DevBotsResponse,
 } from "./types";
-import { fmtInt, dollars, moneySigned, fmtProb } from "./format";
+import { fmtInt, dollars, dollarsFloat, moneySigned, fmtProb } from "./format";
 
 // ── coercion helpers ──────────────────────────────────────────────────
 
@@ -49,10 +49,10 @@ function marketName(idx: Map<number, DevMarket>, id: number): string {
 
 // ── price state (index.html:1506-1519) ────────────────────────────────
 
-export function priceState(m: DevMarket): "Sybil mark" | "ref only" | "unpriced" {
-  if (present(m.yes_price_nanos)) return "Sybil mark";
+export function priceState(m: DevMarket): "cleared" | "ref only" | "no clears" {
+  if (present(m.yes_price_nanos)) return "cleared";
   if (present(m.reference_price_nanos)) return "ref only";
-  return "unpriced";
+  return "no clears";
 }
 
 export function priceStateClass(m: DevMarket): "yes" | "accent" | "no" {
@@ -126,7 +126,7 @@ function accountPendingCount(byAccount: Map<number, number>, id: number): number
 export interface FilterMarketsOpts {
   search: string;
   group: string;
-  state: string; // "all" | "marked" | "ref" | "none" | "pending" | "mismatch"
+  state: string; // "all" | "cleared" | "ref" | "none" | "pending" | "mismatch"
 }
 
 export function filterMarkets(
@@ -150,7 +150,7 @@ export function filterMarkets(
     );
   }
 
-  if (opts.state === "marked") {
+  if (opts.state === "cleared") {
     list = list.filter((m) => present(m.yes_price_nanos));
   } else if (opts.state === "ref") {
     list = list.filter((m) => !present(m.yes_price_nanos) && present(m.reference_price_nanos));
@@ -257,6 +257,21 @@ export function orderStatsSub(bucket: DevOverviewBucket | null | undefined): str
 
 // ── positions / orders / articles (index.html:1520-1548) ──────────────
 
+export function positionRefValue(
+  p: DevPosition,
+  marketIdx: Map<number, DevMarket>,
+): number {
+  const m = marketIdx.get(Number(p.market_id));
+  const yes =
+    m && present(m.reference_price_nanos)
+      ? n(m.reference_price_nanos) / 1e9
+      : present(p.current_price_nanos)
+        ? n(p.current_price_nanos) / 1e9
+        : 0.5;
+  const price = p.outcome === "YES" ? yes : 1 - yes;
+  return (n(p.quantity) / SHARE_SCALE) * price;
+}
+
 interface OrderLike {
   side?: unknown;
   action?: unknown;
@@ -362,8 +377,7 @@ export function buildInsights(ctx: InsightsContext): Insight[] {
       priced.length +
       " of " +
       markets.length +
-      " markets have committed Sybil marks. A mark uses the latest trade price, " +
-      "or the current two-sided book midpoint when the market is quiet.",
+      " markets have Sybil clearing prices. A market gets a clearing price only after a fill.",
   });
 
   items.push({
@@ -372,7 +386,7 @@ export function buildInsights(ctx: InsightsContext): Insight[] {
       ref.length +
       " markets have external reference prices, and " +
       refOnly.length +
-      " of those have no Sybil mark yet.",
+      " of those have no Sybil clears yet.",
   });
 
   if (pendingOrders.length) {
@@ -437,12 +451,12 @@ export function buildQuickAnswer(
       priced.length +
       " / " +
       markets.length +
-      " markets have committed Sybil marks.\n" +
-      "A mark is the latest trade price, or the live two-sided book midpoint when quiet. " +
+      " markets have Sybil clearing prices.\n" +
+      "A Sybil price appears only after a market has fills. " +
       noClear.length +
-      " markets have no Sybil mark yet.\n" +
+      " markets have no clears, so they show no clearing price.\n" +
       refOnly.length +
-      " markets have an external reference price but no Sybil mark."
+      " markets have an external reference price but still no Sybil fill."
     );
   }
 
@@ -498,130 +512,43 @@ export function buildQuickAnswer(
     (aggregates.accountZeroIsInactive ? "none visible" : "has activity") +
     "\n" +
     "Pending orders: " +
-    aggregates.pendingOrders +
+    aggregates.mmPendingOrders +
     "\n" +
     "Sybil-mark portfolio: $" +
-    dollars(aggregates.portfolioValueNanos) +
+    dollars(aggregates.mmSybilValueNanos) +
     "\n" +
-    "Sybil PnL: " +
-    moneySigned(aggregates.pnlNanos / 1e9) +
+    "Reference-mark portfolio: $" +
+    dollarsFloat(aggregates.mmReferenceTotal) +
+    "\n" +
+    "Reference PnL: " +
+    moneySigned(aggregates.mmReferencePnl) +
     "\n" +
     "Positions: " +
-    aggregates.positionCount
+    aggregates.mmPositionCount
   );
 }
 
-// ── actor roles and canonical Sybil account aggregates ───────────────
-
-export type ParticipantRole = "mm" | "noise" | "llm" | "other" | "system";
-
-export function participantRoleIndex(
-  health: DevLiquidityHealth | null | undefined,
-  bots: DevBotsResponse | null | undefined,
-): Map<number, ParticipantRole> {
-  const roles = new Map<number, ParticipantRole>([[0, "system"]]);
-  for (const actor of health?.actors ?? []) {
-    const accountId = Number(actor.account_id);
-    if (!Number.isFinite(accountId)) continue;
-    roles.set(accountId, actor.role === "market_maker" ? "mm" : "noise");
-  }
-  for (const bot of bots?.summaries ?? []) {
-    const accountId = Number(bot.account_id);
-    if (!Number.isFinite(accountId) || roles.has(accountId)) continue;
-    roles.set(accountId, bot.participant_kind === "llm" ? "llm" : "other");
-  }
-  return roles;
-}
-
-export function participantRoleLabel(
-  accountId: number,
-  roles: Map<number, ParticipantRole>,
-): string {
-  const role = roles.get(accountId) ?? "other";
-  return role === "mm"
-    ? "MM"
-    : role === "noise"
-      ? "Noise"
-      : role === "llm"
-        ? "LLM"
-        : role === "system"
-          ? "System"
-          : "Other";
-}
-
-export interface PnlCohort {
-  accountCount: number;
-  portfolioValueNanos: number;
-  pnlNanos: number;
-}
-
-export interface ActorPnlCohorts {
-  mm: PnlCohort;
-  noise: PnlCohort;
-  llm: PnlCohort;
-  all: PnlCohort;
-  otherAccountCount: number;
-}
-
-function sumCohort(accounts: DevAccountPortfolio[]): PnlCohort {
-  return accounts.reduce<PnlCohort>(
-    (sum, account) => ({
-      accountCount: sum.accountCount + 1,
-      portfolioValueNanos:
-        sum.portfolioValueNanos + (n(account.portfolio_value_nanos) || 0),
-      pnlNanos: sum.pnlNanos + (n(account.pnl_nanos) || 0),
-    }),
-    { accountCount: 0, portfolioValueNanos: 0, pnlNanos: 0 },
-  );
-}
-
-export function actorPnlCohorts(
-  accounts: DevAccountPortfolio[],
-  roles: Map<number, ParticipantRole>,
-): ActorPnlCohorts {
-  const byRole = (role: ParticipantRole) =>
-    accounts.filter((account) => roles.get(account.account_id) === role);
-  const mmAccounts = byRole("mm");
-  const noiseAccounts = byRole("noise");
-  const llmAccounts = byRole("llm");
-  const actorIds = new Set(
-    [...mmAccounts, ...noiseAccounts, ...llmAccounts].map((account) => account.account_id),
-  );
-  return {
-    mm: sumCohort(mmAccounts),
-    noise: sumCohort(noiseAccounts),
-    llm: sumCohort(llmAccounts),
-    all: sumCohort(accounts.filter((account) => actorIds.has(account.account_id))),
-    otherAccountCount: accounts.filter(
-      (account) => account.account_id !== 0 && !actorIds.has(account.account_id),
-    ).length,
-  };
-}
+// ── MM-tab account aggregates (index.html:1179-1226) ──────────────────
 
 export type PositionWithAccount = DevPosition & { account_id: number };
-
-export interface OutcomePositionSummary {
-  count: number;
-  quantity: number;
-  valueNanos: number;
-}
 
 export interface AccountAggregates {
   activeTradingAccounts: DevAccountPortfolio[];
   selectedTradingAccounts: DevAccountPortfolio[];
-  cashNanos: number;
-  portfolioValueNanos: number;
-  pnlNanos: number;
-  positionCount: number;
-  pendingOrders: number;
-  yes: OutcomePositionSummary;
-  no: OutcomePositionSummary;
-  positionsByValue: PositionWithAccount[];
+  mmCashNanos: number;
+  mmSybilValueNanos: number;
+  mmPositionCount: number;
+  mmPendingOrders: number;
+  mmReferencePositionValue: number;
+  mmReferenceTotal: number;
+  mmReferencePnl: number;
+  topMmPositions: PositionWithAccount[];
   accountZeroIsInactive: boolean;
 }
 
 export function accountAggregates(
   accounts: DevAccountPortfolio[],
+  marketIdx: Map<number, DevMarket>,
   selectedAccountId: number | null,
   pendingByAccountIdx?: Map<number, number>,
 ): AccountAggregates {
@@ -654,54 +581,56 @@ export function accountAggregates(
   const accountZeroIsInactive =
     !!zero && (zero.positions || []).length === 0 && pendCount(0) === 0;
 
-  const cashNanos = selectedTradingAccounts.reduce(
+  const mmCashNanos = selectedTradingAccounts.reduce(
     (sum, a) => sum + (n(a.balance_nanos) || 0),
     0,
   );
-  const portfolioValueNanos = selectedTradingAccounts.reduce(
+  const mmSybilValueNanos = selectedTradingAccounts.reduce(
     (sum, a) => sum + (n(a.portfolio_value_nanos) || 0),
     0,
   );
-  const pnlNanos = selectedTradingAccounts.reduce(
-    (sum, a) => sum + (n(a.pnl_nanos) || 0),
-    0,
-  );
-  const positionCount = selectedTradingAccounts.reduce(
+  const mmPositionCount = selectedTradingAccounts.reduce(
     (sum, a) => sum + (a.positions || []).length,
     0,
   );
-  const pendingOrders = selectedTradingAccounts.reduce(
+  const mmPendingOrders = selectedTradingAccounts.reduce(
     (sum, a) => sum + pendCount(a.account_id),
     0,
   );
-  const positionsByValue = selectedTradingAccounts
+  const mmReferencePositionValue = selectedTradingAccounts.reduce(
+    (sum, a) =>
+      sum +
+      (a.positions || []).reduce(
+        (posSum, p) => posSum + positionRefValue(p, marketIdx),
+        0,
+      ),
+    0,
+  );
+  const mmReferenceTotal = mmCashNanos / 1e9 + mmReferencePositionValue;
+  const deposited = selectedTradingAccounts.reduce(
+    (sum, a) => sum + (n(a.total_deposited_nanos) || 0) / 1e9,
+    0,
+  );
+  const mmReferencePnl = mmReferenceTotal - deposited;
+
+  const topMmPositions = selectedTradingAccounts
     .flatMap((a) =>
       (a.positions || []).map((p) => ({ ...p, account_id: a.account_id })),
     )
-    .sort((a, b) => Math.abs(n(b.value_nanos) || 0) - Math.abs(n(a.value_nanos) || 0));
-  const outcomeSummary = (outcome: "YES" | "NO"): OutcomePositionSummary =>
-    positionsByValue
-      .filter((position) => position.outcome === outcome)
-      .reduce<OutcomePositionSummary>(
-        (sum, position) => ({
-          count: sum.count + 1,
-          quantity: sum.quantity + (n(position.quantity) || 0),
-          valueNanos: sum.valueNanos + (n(position.value_nanos) || 0),
-        }),
-        { count: 0, quantity: 0, valueNanos: 0 },
-      );
+    .sort((a, b) => Math.abs(n(b.value_nanos) || 0) - Math.abs(n(a.value_nanos) || 0))
+    .slice(0, 25);
 
   return {
     activeTradingAccounts,
     selectedTradingAccounts,
-    cashNanos,
-    portfolioValueNanos,
-    pnlNanos,
-    positionCount,
-    pendingOrders,
-    yes: outcomeSummary("YES"),
-    no: outcomeSummary("NO"),
-    positionsByValue,
+    mmCashNanos,
+    mmSybilValueNanos,
+    mmPositionCount,
+    mmPendingOrders,
+    mmReferencePositionValue,
+    mmReferenceTotal,
+    mmReferencePnl,
+    topMmPositions,
     accountZeroIsInactive,
   };
 }

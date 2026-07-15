@@ -50,10 +50,6 @@ pub enum SequencerMsg {
         OrderSubmission,
         RpcReplyPort<Result<Vec<u64>, SequencerError>>,
     ),
-    SubmitActorEpoch(
-        ActorEpochSubmission,
-        RpcReplyPort<Result<Vec<u64>, SequencerError>>,
-    ),
     SubmitSignedOrder(SignedOrder, RpcReplyPort<Result<Vec<u64>, SequencerError>>),
     SubmitAuthenticatedOrder(
         AuthenticatedOrder,
@@ -155,29 +151,6 @@ pub enum SequencerMsg {
         RpcReplyPort<Result<(), SequencerError>>,
     ),
     CreateMarket(String, RpcReplyPort<Result<MarketId, SequencerError>>),
-    CollateralizeCompleteSet(
-        AccountId,
-        MarketId,
-        Qty,
-        RpcReplyPort<Result<(), SequencerError>>,
-    ),
-    RedeemCompleteSet(
-        AccountId,
-        MarketId,
-        Qty,
-        RpcReplyPort<Result<(), SequencerError>>,
-    ),
-    ApplyCompleteSetInventoryActions(
-        AccountId,
-        Vec<crate::CompleteSetInventoryAction>,
-        RpcReplyPort<Result<(), SequencerError>>,
-    ),
-    ActivateLiquidityUniverse(
-        u64,
-        [u8; 32],
-        Vec<MarketId>,
-        RpcReplyPort<Result<sybil_verifier::LiquidityUniverseSnapshot, SequencerError>>,
-    ),
     CreateMarketGroup(
         String,
         Vec<MarketId>,
@@ -230,15 +203,12 @@ pub enum SequencerMsg {
     Query(SequencerReadQuery),
     /// Periodic indicative-solve tick (C2). Fires from a dedicated timer
     /// task at ~750ms cadence, decoupled from block production. The arm
-    /// kicks off a `spawn_blocking` shadow-solve over every order lane for
-    /// the next block and self-sends an `IndicativeUpdate` once it returns.
+    /// kicks off a `spawn_blocking` shadow-solve over the resting book and
+    /// self-sends an `IndicativeUpdate` once the solver returns.
     IndicativeTick,
     /// Result of one shadow-solve: a per-market cache of indicative prices
     /// + per-market notional volume + computed_at_ms.
-    IndicativeUpdate {
-        target_height: u64,
-        snapshots: HashMap<MarketId, IndicativeSnapshot>,
-    },
+    IndicativeUpdate(HashMap<MarketId, IndicativeSnapshot>),
     /// Shadow-solve failed before producing a cache update.
     IndicativeSolveFailed {
         solver: String,
@@ -296,15 +266,15 @@ pub(super) enum SequencerTestCrashpoint {}
 #[derive(Clone, Debug, Default)]
 pub struct IndicativeSnapshot {
     /// YES clearing price the solver discovered, or the last-clearing
-    /// fallback when the open batch has orders but no matchable cross. `None`
-    /// when the open batch is empty for this market or the solver is infeasible.
+    /// fallback when the book has orders but no matchable cross. `None`
+    /// when the book is empty for this market or the solver is infeasible.
     pub yes_price_nanos: Option<u64>,
     /// NO clearing price; same semantics as `yes_price_nanos`.
     pub no_price_nanos: Option<u64>,
     /// Sum of `fill_price * fill_qty` over fills the shadow-solve produced
-    /// that touched this market. `0` for fallback (no cross) or an empty batch.
+    /// that touched this market. `0` for fallback (no cross) or empty book.
     pub volume_nanos: u64,
     /// Wall-clock timestamp (ms since UNIX epoch) when this snapshot was
-    /// computed.
+    /// computed. FE renders staleness from it.
     pub computed_at_ms: u64,
 }

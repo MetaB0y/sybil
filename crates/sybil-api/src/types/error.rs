@@ -257,23 +257,6 @@ impl From<matching_sequencer::SequencerError> for AppError {
             matching_sequencer::SequencerError::MarketAlreadyGrouped { group_id } => {
                 AppError::conflict(format!("Market already belongs to group {group_id}"))
             }
-            matching_sequencer::SequencerError::CompleteSetAccountNotFound => {
-                AppError::not_found(format!("{err}"))
-            }
-            matching_sequencer::SequencerError::CompleteSetInvalidQuantity
-            | matching_sequencer::SequencerError::CompleteSetInsufficientCash { .. }
-            | matching_sequencer::SequencerError::CompleteSetInsufficientInventory { .. }
-            | matching_sequencer::SequencerError::LiquidityUniverseEmpty
-            | matching_sequencer::SequencerError::LiquidityUniverseInvalidMarket(_)
-            | matching_sequencer::SequencerError::LiquidityUniversePartialGroup(_) => {
-                AppError::bad_request(format!("{err}"))
-            }
-            matching_sequencer::SequencerError::LiquidityUniverseGeneration { .. } => {
-                AppError::conflict(format!("{err}"))
-            }
-            matching_sequencer::SequencerError::CompleteSetArithmetic => {
-                AppError::internal("Complete-set arithmetic overflow")
-            }
             matching_sequencer::SequencerError::BlockNotFound => {
                 AppError::not_found("Block not found")
             }

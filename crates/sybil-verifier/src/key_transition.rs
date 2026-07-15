@@ -487,9 +487,7 @@ fn event_account_ids(event: &SystemEventWitness) -> Vec<u64> {
         | SystemEventWitness::WithdrawalFinalized { account_id, .. }
         | SystemEventWitness::OrderCancelled { account_id, .. }
         | SystemEventWitness::KeyRegistered { account_id, .. }
-        | SystemEventWitness::KeyRevoked { account_id, .. }
-        | SystemEventWitness::CompleteSetCollateralized { account_id, .. }
-        | SystemEventWitness::CompleteSetRedeemed { account_id, .. } => vec![*account_id],
+        | SystemEventWitness::KeyRevoked { account_id, .. } => vec![*account_id],
         SystemEventWitness::ClientActionAuthorized(action) => match action {
             ClientActionWitness::Order { account_id, .. }
             | ClientActionWitness::Cancel { account_id, .. } => vec![*account_id],
@@ -500,8 +498,7 @@ fn event_account_ids(event: &SystemEventWitness) -> Vec<u64> {
         } => affected_accounts.clone(),
         SystemEventWitness::L1BlockObserved { .. }
         | SystemEventWitness::MarketGroupExtended { .. }
-        | SystemEventWitness::DepositQuarantined { .. }
-        | SystemEventWitness::LiquidityUniverseActivated { .. } => Vec::new(),
+        | SystemEventWitness::DepositQuarantined { .. } => Vec::new(),
     }
 }
 

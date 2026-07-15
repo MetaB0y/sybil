@@ -23,11 +23,7 @@ the intended posture and drives the preflight guardrail. It is the only new
 config concept; every other row below already existed.
 
 - **local** — developer laptop / CI. `docker compose up` (base + override) or
-  `cargo run`. Dev conveniences on, no durability expected. The opt-in
-  `docker-compose.soak.yml` profile uses a fixed local Docker context, separate
-  ports/volumes, generated actor credentials, and a fresh local chain for
-  multi-hour Actor Liquidity observation; see
-  `docs/runbooks/local-actor-liquidity-soak.md`.
+  `cargo run`. Dev conveniences on, no durability expected.
 - **devnet** — the current shared public box (base `docker-compose.yml` alone).
   Dev-tuned but multi-user; no production guarantees. Operators should export
   `SYBIL_DEPLOYMENT_PROFILE=devnet` on this host so its startup log self-labels.

@@ -43,7 +43,6 @@ pub struct RestoredState {
     pub analytics: AnalyticsRestoredState,
     /// L1 bridge sidecar state restored from the last committed block.
     pub bridge_state: BridgeState,
-    pub liquidity_universe: crate::universe::LiquidityUniverse,
 }
 
 fn read_acknowledged_writes(
@@ -348,13 +347,6 @@ impl Store {
                 None => BridgeState::default(),
             }
         };
-        let liquidity_universe: crate::universe::LiquidityUniverse = {
-            let table = txn.open_table(LIQUIDITY_UNIVERSE)?;
-            match table.get(KEY_LIQUIDITY_UNIVERSE)? {
-                Some(value) => rmp_serde::from_slice(value.value())?,
-                None => crate::universe::LiquidityUniverse::default(),
-            }
-        };
 
         if latest_witness_exists {
             let Some(header) = last_header.as_ref() else {
@@ -373,7 +365,6 @@ impl Store {
                 &resting_orders,
                 &bridge_state,
                 &last_clearing_prices,
-                &liquidity_universe,
                 header,
             )
             .await?;
@@ -526,7 +517,6 @@ impl Store {
                 next_product_event_seq,
             },
             bridge_state,
-            liquidity_universe,
         }))
     }
 
@@ -542,7 +532,6 @@ impl Store {
         resting_orders: &[RestingOrder],
         bridge_state: &BridgeState,
         last_clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
-        liquidity_universe: &crate::universe::LiquidityUniverse,
         header: &BlockHeader,
     ) -> Result<(), StoreError> {
         let state_root = self
@@ -570,14 +559,13 @@ impl Store {
         for (&market_id, metadata) in market_metadata {
             lifecycle.set_market_metadata(market_id, metadata.clone());
         }
-        let state_sidecar = state_sidecar_snapshot_from_resting_orders_with_universe(
+        let state_sidecar = state_sidecar_snapshot_from_resting_orders(
             bridge_state,
             resting_orders,
             markets,
             market_groups,
             &lifecycle,
             last_clearing_prices,
-            liquidity_universe,
         );
 
         self.account_state_store

@@ -351,7 +351,7 @@ impl SequencerHandle {
 
     pub async fn get_state_root(&self) -> Result<[u8; 32], SequencerError> {
         self.read_query(|state| {
-            crate::block::compute_complete_state_root_with_universe(
+            crate::block::compute_complete_state_root(
                 &state.sequencer.accounts,
                 state.sequencer.bridge_state(),
                 state.sequencer.order_book(),
@@ -359,7 +359,6 @@ impl SequencerHandle {
                 state.sequencer.market_groups(),
                 state.sequencer.market_lifecycle(),
                 state.sequencer.analytics().last_clearing_prices(),
-                state.sequencer.liquidity_universe_state(),
             )
         })
         .await
@@ -420,63 +419,6 @@ impl SequencerHandle {
     pub async fn create_market(&self, name: String) -> Result<MarketId, SequencerError> {
         self.rpc(|reply| SequencerMsg::CreateMarket(name, reply))
             .await?
-    }
-
-    pub async fn collateralize_complete_set(
-        &self,
-        account_id: AccountId,
-        market_id: MarketId,
-        quantity: Qty,
-    ) -> Result<(), SequencerError> {
-        self.rpc(|reply| {
-            SequencerMsg::CollateralizeCompleteSet(account_id, market_id, quantity, reply)
-        })
-        .await?
-    }
-
-    pub async fn redeem_complete_set(
-        &self,
-        account_id: AccountId,
-        market_id: MarketId,
-        quantity: Qty,
-    ) -> Result<(), SequencerError> {
-        self.rpc(|reply| SequencerMsg::RedeemCompleteSet(account_id, market_id, quantity, reply))
-            .await?
-    }
-
-    pub async fn apply_complete_set_inventory_actions(
-        &self,
-        account_id: AccountId,
-        actions: Vec<crate::CompleteSetInventoryAction>,
-    ) -> Result<(), SequencerError> {
-        self.rpc(|reply| SequencerMsg::ApplyCompleteSetInventoryActions(account_id, actions, reply))
-            .await?
-    }
-
-    pub async fn activate_liquidity_universe(
-        &self,
-        generation: u64,
-        policy_digest: [u8; 32],
-        market_ids: Vec<MarketId>,
-    ) -> Result<sybil_verifier::LiquidityUniverseSnapshot, SequencerError> {
-        self.rpc(|reply| {
-            SequencerMsg::ActivateLiquidityUniverse(generation, policy_digest, market_ids, reply)
-        })
-        .await?
-    }
-
-    pub async fn get_liquidity_universe(
-        &self,
-    ) -> Result<sybil_verifier::LiquidityUniverseSnapshot, SequencerError> {
-        self.read_query(|state| state.sequencer.liquidity_universe())
-            .await
-    }
-
-    pub async fn get_committed_liquidity_universe(
-        &self,
-    ) -> Result<sybil_verifier::LiquidityUniverseSnapshot, SequencerError> {
-        self.read_query(|state| state.sequencer.committed_liquidity_universe())
-            .await
     }
 
     pub async fn create_market_group(
@@ -662,10 +604,7 @@ impl SequencerHandle {
 
     #[tracing::instrument(skip_all)]
     pub async fn get_market_prices(&self) -> Result<HashMap<MarketId, Vec<Nanos>>, SequencerError> {
-        // Serving price: traded clearing price when the market filled, the
-        // committed book midpoint when it did not, otherwise the carried mark.
-        // Block payloads retain clearing-price vectors separately.
-        self.read_query(|state| state.sequencer.analytics().last_mark_prices().clone())
+        self.read_query(|state| state.sequencer.analytics().last_clearing_prices().clone())
             .await
     }
 
@@ -828,12 +767,8 @@ impl SequencerHandle {
     }
 
     #[tracing::instrument(skip_all, fields(market_id = market_id.0))]
-    pub async fn get_open_batch_placers(
-        &self,
-        market_id: MarketId,
-        now_ms: u64,
-    ) -> Result<u32, SequencerError> {
-        self.read_query(move |state| state.sequencer.open_batch_unique_placers(market_id, now_ms))
+    pub async fn get_open_batch_placers(&self, market_id: MarketId) -> Result<u32, SequencerError> {
+        self.read_query(move |state| state.sequencer.open_batch_unique_placers(market_id))
             .await
     }
 
@@ -918,7 +853,8 @@ impl SequencerHandle {
 
     /// Cached indicative snapshot for one market (C2). Returns a default
     /// `(None, None, 0, 0)` snapshot if the market hasn't been touched by
-    /// the shadow-solver yet — e.g. on cold start or for an empty open batch.
+    /// the shadow-solver yet — e.g. on cold start or for markets with no
+    /// resting orders.
     #[tracing::instrument(skip_all)]
     pub async fn get_indicative(
         &self,
@@ -945,9 +881,7 @@ mod tests {
     use crate::sequencer::SequencerConfig;
     use crate::store::AcknowledgedWrite;
     use crate::system_event::SystemEvent;
-    use matching_engine::{
-        MarketSet, MmConstraint, MmId, MmSide, NANOS_PER_DOLLAR, Nanos, outcome_buy,
-    };
+    use matching_engine::{MarketSet, NANOS_PER_DOLLAR, outcome_buy};
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -3698,86 +3632,6 @@ mod tests {
             assert!(
                 Instant::now() < deadline,
                 "indicative tick should have written a snapshot by now"
-            );
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn indicative_volume_includes_crossing_actor_mm_orders() {
-        let mut accounts = AccountStore::new();
-        let mm_account = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-        let noise_account = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-        let mut markets = MarketSet::new();
-        let market = markets.add_binary("Actor cross");
-        let config = SequencerConfig {
-            block_interval: Duration::from_secs(60),
-            min_resting_order_notional_nanos: 0,
-            ..SequencerConfig::default()
-        };
-        let mut seq = BlockSequencer::with_default_solver(
-            accounts,
-            markets.clone(),
-            vec![],
-            Arc::new(AdminOracle::new()),
-            config,
-        );
-        seq.activate_liquidity_universe(1, [9; 32], vec![market])
-            .unwrap();
-        seq.produce_block(vec![], 1_000);
-
-        let mut mm_constraint = MmConstraint::new(MmId(mm_account.0), Nanos(10 * NANOS_PER_DOLLAR));
-        mm_constraint.add_order(0, MmSide::BuyYes);
-        seq.stage_actor_epoch(
-            ActorEpochSubmission {
-                principal_id: "mm".to_string(),
-                role: crate::sequencer::ActorRole::MarketMaker,
-                epoch_id: "mm-cross".to_string(),
-                payload_digest: *blake3::hash(b"mm-cross").as_bytes(),
-                target_height: seq.height() + 1,
-                valid_until_ms: u64::MAX,
-                universe_generation: seq.liquidity_universe().generation,
-                covered_market_ids: vec![market],
-                submission: OrderSubmission {
-                    account_id: mm_account,
-                    orders: vec![outcome_buy(&markets, 0, market, 0, 600_000_000, 1_000)],
-                    mm_constraint: Some(mm_constraint),
-                },
-            },
-            1_100,
-        )
-        .unwrap();
-        seq.stage_actor_epoch(
-            ActorEpochSubmission {
-                principal_id: "noise".to_string(),
-                role: crate::sequencer::ActorRole::Noise,
-                epoch_id: "noise-cross".to_string(),
-                payload_digest: *blake3::hash(b"noise-cross").as_bytes(),
-                target_height: seq.height() + 1,
-                valid_until_ms: u64::MAX,
-                universe_generation: seq.liquidity_universe().generation,
-                covered_market_ids: vec![market],
-                submission: OrderSubmission {
-                    account_id: noise_account,
-                    orders: vec![outcome_buy(&markets, 0, market, 1, 600_000_000, 1_000)],
-                    mm_constraint: None,
-                },
-            },
-            1_100,
-        )
-        .unwrap();
-
-        let handle = SequencerHandle::spawn(seq);
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            let snapshot = handle.get_indicative(market).await.unwrap();
-            if snapshot.volume_nanos > 0 {
-                assert!(snapshot.yes_price_nanos.is_some());
-                break;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "actor MM/noise cross never reached indicative volume"
             );
             tokio::time::sleep(Duration::from_millis(50)).await;
         }

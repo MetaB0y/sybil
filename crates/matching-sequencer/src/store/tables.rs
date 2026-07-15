@@ -108,10 +108,6 @@ pub(super) const ACKNOWLEDGED_WRITES: TableDefinition<u64, &[u8]> =
 pub(super) const BRIDGE_STATE: TableDefinition<&str, &[u8]> = TableDefinition::new("bridge_state");
 pub(super) const KEY_BRIDGE_STATE: &str = "state";
 
-/// Committed active-market generation and exact admission allow-list.
-pub(super) const LIQUIDITY_UNIVERSE: TableDefinition<&str, &[u8]> =
-    TableDefinition::new("liquidity_universe");
-pub(super) const KEY_LIQUIDITY_UNIVERSE: &str = "active";
 /// Trader tracker snapshot — one row keyed "snapshot" holding the full
 /// `TraderTrackerSnapshot` payload. Off-block sidecar; missing table on
 /// load yields `Default::default()` (cold start until activity accumulates).

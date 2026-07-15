@@ -42,7 +42,7 @@ flowchart TB
         SETTLE["Settlement<br/>balances · positions · minting · resolution"]
         STORE["Commit<br/>qMDB state + redb fence/WAL<br/>product-history outbox"]
         BLOCK["Sealed block<br/>canonical data + derived sidecar"]
-        WIT["BlockWitness v11<br/>private transition package"]
+        WIT["BlockWitness v10<br/>private transition package"]
         HIST["sybil-history<br/>private raw batches · indexes · candles"]
 
         ACTOR --> ADMIT --> BATCH --> SOLVE --> LAND --> SETTLE --> STORE
@@ -109,7 +109,7 @@ sequenceDiagram
     A->>P: Write inactive qMDB slot and redb transaction
     P-->>A: Root checked, commit fence flipped
     A-->>C: Publish committed SealedBlock
-    A->>V: Persist/export BlockWitness v11
+    A->>V: Persist/export BlockWitness v10
     V->>V: Recompute commitments and transition rules
     V-->>L: Proof/public inputs and canonical DA payload
 ```
@@ -129,7 +129,7 @@ If persistence fails, the prepared state is discarded and acknowledged inputs re
 | Canonical block, witness, derived sidecar | Validity and product consumers need different data | Analytics stay outside roots; the witness remains transition-complete |
 | Verifier-owned bytes | Soundness cannot depend on hand-synchronized encoders | Native, guest, state, event, witness, and signing domains have explicit owners and vectors |
 | State-bound P256/WebAuthn key mutations | The active signing-key set must change only with user authority | Key operations and their signatures are committed and checked in the guest |
-| Genesis-bound ordinary signed actions | Captured orders/cancels must not cross chain domains or replay | Witness v11 retains exact envelopes; verification replays active keys, committed trading nonces, and action effects |
+| Genesis-bound ordinary signed actions | Captured orders/cancels must not cross chain domains or replay | Witness v10 retains exact envelopes; verification replays active keys, committed trading nonces, and action effects |
 | Validium with two exit paths | Correctness, availability, and recovery are different problems | Proofs anchor roots; DA enables reconstruction; escape claims provide a conservative cash floor |
 
 ## Current versus forward-looking
@@ -145,7 +145,7 @@ The vault frontmatter is authoritative about document status: `current` means im
   history projector behind a transactional outbox, backup/restore, witness
   import, and user-side custody/reconstruction/escape tooling.
 - WebAuthn/P256 admission, atomic authorization WAL rows, committed per-account trading nonces, and shared native/guest verification of key operations plus ordinary order/cancel intent.
-- Witness v11, committed last clearing prices and actor-liquidity universe, deposit quarantine, exact-keyspace proofs, and guest/native commitment agreement. Deployment repinning is coordinated with the epoch guest.
+- Witness v10, committed last clearing prices, deposit quarantine, exact-keyspace proofs, and guest/native commitment agreement. Deployment repinning is coordinated with the epoch guest.
 - REST, resumable WebSocket, convenience SSE, OpenAPI, shared Rust client, Python agents, and the Polymarket integration.
 
 ### Still incomplete as a production trust system

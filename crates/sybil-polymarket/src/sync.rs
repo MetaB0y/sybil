@@ -2,7 +2,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use sha2::{Digest as _, Sha256};
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
@@ -44,7 +43,6 @@ pub struct SyncActor {
     /// sync fetches exactly these events by id instead of the volume-ranked
     /// category scan.
     curated_event_ids: Vec<String>,
-    curated_condition_ids: HashSet<String>,
     /// Native market templates to ensure on Sybil before the mirror scan.
     native_catalog: NativeMarketCatalog,
 }
@@ -72,7 +70,6 @@ impl SyncActor {
         mm_tx: mpsc::Sender<MmMessage>,
         mm_live_rx: watch::Receiver<usize>,
         curated_event_ids: Vec<String>,
-        curated_condition_ids: Vec<String>,
         native_catalog: NativeMarketCatalog,
     ) -> Self {
         Self {
@@ -85,7 +82,6 @@ impl SyncActor {
             mm_live_rx,
             first_sync: true,
             curated_event_ids,
-            curated_condition_ids: curated_condition_ids.into_iter().collect(),
             native_catalog,
         }
     }
@@ -123,7 +119,7 @@ impl SyncActor {
 
         // Curated mode (SYB-150): mirror exactly the allowlisted events by id.
         // Otherwise fall back to the volume-ranked category scan.
-        let mut events = if self.curated_event_ids.is_empty() {
+        let events = if self.curated_event_ids.is_empty() {
             self.gamma_client
                 .fetch_active_events(
                     self.config.max_events,
@@ -137,15 +133,6 @@ impl SyncActor {
                 .fetch_curated_events(&self.curated_event_ids)
                 .await?
         };
-        if !self.curated_condition_ids.is_empty() {
-            for event in &mut events {
-                event.markets.retain(|market| {
-                    self.curated_condition_ids
-                        .contains(&market.condition_id.to_ascii_lowercase())
-                });
-            }
-            events.retain(|event| !event.markets.is_empty());
-        }
 
         // Baseline live-set size for MM admission this cycle (PM-8). Copied out
         // of the watch so we never hold the borrow across an await, and bumped
@@ -593,104 +580,6 @@ impl SyncActor {
             warn!(error = %e, "failed to notify feed about new token subscriptions");
         }
 
-        self.reconcile_liquidity_universe().await?;
-
-        Ok(())
-    }
-
-    async fn reconcile_liquidity_universe(&self) -> Result<(), crate::error::Error> {
-        if self.curated_condition_ids.is_empty() {
-            return Ok(());
-        }
-        let native_specs = self.native_catalog.enabled_market_specs();
-        let mapping = self.mapping.read().await;
-        let mut entries = Vec::<(String, u32)>::new();
-        for condition_id in &self.curated_condition_ids {
-            let Some(market_id) = mapping.sybil_market_id(condition_id) else {
-                warn!(
-                    condition_id,
-                    "universe activation waiting for mirror mapping"
-                );
-                return Ok(());
-            };
-            entries.push((format!("mirror:{condition_id}"), market_id));
-        }
-        for spec in &native_specs {
-            let Some(market_id) = mapping.native_market_id(&spec.market_key) else {
-                warn!(market_key = %spec.market_key, "universe activation waiting for native mapping");
-                return Ok(());
-            };
-            entries.push((format!("native:{}", spec.market_key), market_id));
-        }
-        drop(mapping);
-
-        entries.sort_by(|left, right| left.0.cmp(&right.0));
-        if self.curated_condition_ids.len() == 72
-            && native_specs.len() == 134
-            && entries.len() != 206
-        {
-            return Err(crate::error::Error::PolymarketApi(format!(
-                "reviewed liquidity universe must contain 206 entries, got {}",
-                entries.len()
-            )));
-        }
-        let current = self.sybil_client.liquidity_universe().await?;
-        let effective = current.market_ids.iter().copied().collect::<HashSet<_>>();
-        let committed = current
-            .committed_market_ids
-            .iter()
-            .copied()
-            .collect::<HashSet<_>>();
-        // Keep newly discovered reviewed markets (not yet committed), and keep
-        // existing members only while the sequencer still considers them
-        // lifecycle-tradeable. This avoids one GET per market while ensuring a
-        // resolved member is not accidentally reactivated on every sync.
-        entries.retain(|(_, market_id)| {
-            effective.contains(market_id) || !committed.contains(market_id)
-        });
-        if entries.is_empty() {
-            warn!("liquidity universe reconciliation found no tradeable reviewed markets");
-            return Ok(());
-        }
-        let mut hasher = Sha256::new();
-        hasher.update(b"sybil/liquidity-policy/v1");
-        for (source_id, market_id) in &entries {
-            hasher.update((source_id.len() as u64).to_le_bytes());
-            hasher.update(source_id.as_bytes());
-            hasher.update(market_id.to_le_bytes());
-        }
-        let policy_digest_hex = hex::encode(hasher.finalize());
-        let mut market_ids = entries.iter().map(|(_, id)| *id).collect::<Vec<_>>();
-        market_ids.sort_unstable();
-        market_ids.dedup();
-        if market_ids.len() != entries.len() {
-            return Err(crate::error::Error::PolymarketApi(
-                "multiple universe source identities map to one Sybil market".into(),
-            ));
-        }
-
-        if current
-            .policy_digest_hex
-            .eq_ignore_ascii_case(&policy_digest_hex)
-            && current.market_ids == market_ids
-        {
-            return Ok(());
-        }
-        let requested = ActivateLiquidityUniverseRequest {
-            generation: current.generation.saturating_add(1),
-            policy_digest_hex,
-            market_ids,
-        };
-        let staged = self
-            .sybil_client
-            .activate_liquidity_universe(&requested)
-            .await?;
-        info!(
-            generation = staged.generation,
-            markets = staged.market_ids.len(),
-            activated_at_height = staged.activated_at_height,
-            "staged exact liquidity universe activation"
-        );
         Ok(())
     }
 
@@ -979,8 +868,6 @@ impl SyncActor {
                         quote_range: to_mm_quote_range(pending.spec.quote_range),
                         group_key,
                         group_size,
-                        coherence_key: pending.spec.coherence_key.clone(),
-                        coherence_rank: pending.spec.coherence_rank,
                     })
                     .await
                 {

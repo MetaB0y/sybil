@@ -23,16 +23,14 @@ T = TypeVar("T", bound="SystemEventResponseType13")
 class SystemEventResponseType13:
     """ 
         Attributes:
-            amount_nanos (int): Amount parked in the system ledger. Integer nanodollars; 1_000_000_000 = $1.
-            deposit_id (int):
-            deposit_root_hex (str):
+            account_id (int):
+            amount_nanos (int): Amount moved into the account. Integer nanodollars; 1_000_000_000 = $1.
             sybil_account_key_hex (str):
             type_ (SystemEventResponseType13Type):
      """
 
+    account_id: int
     amount_nanos: int
-    deposit_id: int
-    deposit_root_hex: str
     sybil_account_key_hex: str
     type_: SystemEventResponseType13Type
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
@@ -42,11 +40,9 @@ class SystemEventResponseType13:
 
 
     def to_dict(self) -> dict[str, Any]:
+        account_id = self.account_id
+
         amount_nanos = self.amount_nanos
-
-        deposit_id = self.deposit_id
-
-        deposit_root_hex = self.deposit_root_hex
 
         sybil_account_key_hex = self.sybil_account_key_hex
 
@@ -56,9 +52,8 @@ class SystemEventResponseType13:
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update({
+            "account_id": account_id,
             "amount_nanos": amount_nanos,
-            "deposit_id": deposit_id,
-            "deposit_root_hex": deposit_root_hex,
             "sybil_account_key_hex": sybil_account_key_hex,
             "type": type_,
         })
@@ -70,11 +65,9 @@ class SystemEventResponseType13:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
+        account_id = d.pop("account_id")
+
         amount_nanos = d.pop("amount_nanos")
-
-        deposit_id = d.pop("deposit_id")
-
-        deposit_root_hex = d.pop("deposit_root_hex")
 
         sybil_account_key_hex = d.pop("sybil_account_key_hex")
 
@@ -84,9 +77,8 @@ class SystemEventResponseType13:
 
 
         system_event_response_type_13 = cls(
+            account_id=account_id,
             amount_nanos=amount_nanos,
-            deposit_id=deposit_id,
-            deposit_root_hex=deposit_root_hex,
             sybil_account_key_hex=sybil_account_key_hex,
             type_=type_,
         )

@@ -26,10 +26,7 @@ pub(super) fn bridge_block_data(
             | SystemEvent::L1BlockObserved { .. }
             | SystemEvent::MarketResolved { .. }
             | SystemEvent::OrderCancelled { .. }
-            | SystemEvent::MarketGroupExtended { .. }
-            | SystemEvent::CompleteSetCollateralized { .. }
-            | SystemEvent::CompleteSetRedeemed { .. }
-            | SystemEvent::LiquidityUniverseActivated { .. } => {}
+            | SystemEvent::MarketGroupExtended { .. } => {}
         }
     }
     BridgeBlockData {
@@ -283,35 +280,6 @@ pub(super) fn convert_system_event(event: &SystemEvent) -> SystemEventWitness {
         SystemEvent::ClientActionAuthorized(action) => {
             SystemEventWitness::ClientActionAuthorized(action.clone())
         }
-        SystemEvent::CompleteSetCollateralized {
-            account_id,
-            market_id,
-            quantity,
-        } => SystemEventWitness::CompleteSetCollateralized {
-            account_id: account_id.0,
-            market_id: *market_id,
-            quantity: *quantity,
-        },
-        SystemEvent::CompleteSetRedeemed {
-            account_id,
-            market_id,
-            quantity,
-        } => SystemEventWitness::CompleteSetRedeemed {
-            account_id: account_id.0,
-            market_id: *market_id,
-            quantity: *quantity,
-        },
-        SystemEvent::LiquidityUniverseActivated {
-            generation,
-            policy_digest,
-            activated_at_height,
-            market_ids,
-        } => SystemEventWitness::LiquidityUniverseActivated {
-            generation: *generation,
-            policy_digest: *policy_digest,
-            activated_at_height: *activated_at_height,
-            market_ids: market_ids.clone(),
-        },
     }
 }
 
@@ -347,7 +315,6 @@ impl BlockSequencer {
             &self.market_groups,
             &self.lifecycle,
             self.analytics.last_clearing_prices(),
-            &self.liquidity_universe,
         );
         let system_event_witnesses: Vec<SystemEventWitness> =
             system_events.iter().map(convert_system_event).collect();
@@ -370,10 +337,7 @@ impl BlockSequencer {
                 | SystemEvent::L1BlockObserved { .. }
                 | SystemEvent::MarketResolved { .. }
                 | SystemEvent::OrderCancelled { .. }
-                | SystemEvent::MarketGroupExtended { .. }
-                | SystemEvent::CompleteSetCollateralized { .. }
-                | SystemEvent::CompleteSetRedeemed { .. }
-                | SystemEvent::LiquidityUniverseActivated { .. } => None,
+                | SystemEvent::MarketGroupExtended { .. } => None,
             })
             .collect();
         let events_root = sybil_verifier::event_commitment::events_root_from_event_bytes(

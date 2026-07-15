@@ -38,39 +38,12 @@ SYBIL_WEBAUTHN_ORIGIN=https://app.172-104-31-54.nip.io
 GF_SECURITY_ADMIN_PASSWORD=<strong grafana admin password>
 CADDY_OPS_AUTH_USER=ops
 CADDY_OPS_AUTH_HASH='<bcrypt hash from caddy hash-password>'
-SYBIL_ACTOR_CREDENTIALS_FILE=/opt/sybil/secrets/actor-credentials.json
-SYBIL_MM_ACTOR_TOKEN=<same token as the market_maker row in that file>
 ```
 
 `SYBIL_SERVICE_TOKEN` is injected into `sybil-api`, `sybil-polymarket`, and
 `sybil-arena`. In prod, service routes fail closed when it is missing. Optional
 `SYBIL_CORS_ORIGINS` may be set to a comma-separated browser-origin allowlist;
 empty/unset keeps CORS same-origin only.
-
-Actor Liquidity v2.1 is fail-closed in the production overlay. Create sixteen
-durable, funded accounts first, then write a root-readable credentials file
-with exactly one MM row and fifteen noise rows:
-
-```json
-{
-  "actors": [
-    {"principal_id":"mm","role":"market_maker","account_id":101,"token":"<32+ random bytes>"},
-    {"principal_id":"noise-0","role":"noise","account_id":102,"token":"<32+ random bytes>"},
-    {"principal_id":"noise-1","role":"noise","account_id":103,"token":"<32+ random bytes>"},
-    {"principal_id":"noise-14","role":"noise","account_id":116,"token":"<32+ random bytes>"}
-  ]
-}
-```
-
-Principals, tokens, and account ids must be unique; account `0` is reserved.
-The remaining twelve noise rows are omitted from this example only for brevity.
-The API rejects any file other than exactly one MM plus fifteen noise actors. The
-MM process derives its account from the authenticated binding (not its old
-mapping file), and Arena derives all fifteen noise bindings from the same mounted
-file. Fund the MM for both its quote budget and complete-set collateral across
-the full active universe. Preserve the approved aggregate noise capital/loss
-budget when splitting it across the fifteen accounts (local uses $300,000
-total, or $20,000 each). Never commit this file or its tokens.
 
 `SYBIL_HTTP_TRUSTED_PROXY_CIDRS` is also optional and empty by default. Empty
 means the API ignores `X-Forwarded-For`/`X-Real-IP` and conservatively shares

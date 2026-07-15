@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use sybil_api_types::{NANOS_PER_DOLLAR, OrderSpec};
 
-use super::{QuoteRange, shares_to_qty_units};
+use super::{QuoteRange, shares_to_qty_units, whole_shares_to_qty_units};
 
 // QuoteEngine — pure pricing logic, no IO
 // --------------------------------------------------------------------------- //
@@ -19,9 +19,6 @@ pub struct QuoteInput {
     pub group_key: Option<String>,
     pub group_size: usize,
     pub quote_range: Option<QuoteRange>,
-    /// Per-market degradation controls (1.0 in normal/native operation).
-    pub spread_multiplier: f64,
-    pub size_multiplier: f64,
 }
 
 /// Configuration for quote generation.
@@ -35,26 +32,12 @@ pub struct QuoteConfig {
     pub quote_size_dollars: f64,
 }
 
-const PRICE_TICK: f64 = 1.0 / NANOS_PER_DOLLAR as f64;
-
-/// Interior in which a reservation price can still emit an integer bid and
-/// ask while keeping both actor prices inside the configured native range.
-pub(super) fn quoteable_bounds(range: QuoteRange, config: &QuoteConfig) -> Option<(f64, f64)> {
-    let edge_room = config.min_spread.max(PRICE_TICK) + PRICE_TICK;
-    let min = range.min + edge_room;
-    let max = range.max - edge_room;
-    (min < max).then_some((min, max))
-}
-
 /// Generate orders for one market. Pure function — no IO, no state mutation.
 pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpec> {
     let mut orders = Vec::new();
     let (reservation_min, reservation_max, yes_order_min, yes_order_max) =
         if let Some(range) = input.quote_range {
-            let Some((reservation_min, reservation_max)) = quoteable_bounds(range, config) else {
-                return orders;
-            };
-            (reservation_min, reservation_max, range.min, range.max)
+            (range.min, range.max, range.min, range.max)
         } else {
             (0.02, 0.98, 0.01, 0.99)
         };
@@ -66,26 +49,38 @@ pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpe
         .clamp(reservation_min, reservation_max);
 
     // Adaptive spread: wider when volatile
-    let vol_spread = config.base_spread * input.spread_multiplier * (1.0 + input.sigma_sq * 200.0);
-    let edge_room = (r - yes_order_min).min(yes_order_max - r);
-    if edge_room < PRICE_TICK {
-        return orders;
-    }
-    let half_spread = vol_spread
-        .max(config.min_spread)
-        .min(edge_room - PRICE_TICK);
+    let vol_spread = config.base_spread * (1.0 + input.sigma_sq * 200.0);
+    let edge_room = if input.quote_range.is_some() {
+        (r - yes_order_min).min(yes_order_max - r)
+    } else {
+        r.min(1.0 - r)
+    };
+    let half_spread =
+        vol_spread.clamp(config.min_spread, (edge_room - 0.01).max(config.min_spread));
+
+    // Position limits
+    let max_position_units = whole_shares_to_qty_units(config.max_position);
+    let yes_buy_room = max_position_units.saturating_sub(input.yes_position.max(0)) as u64;
+    let no_buy_room = max_position_units.saturating_sub(input.no_position.max(0)) as u64;
 
     // Inventory-adjusted sizing
     let inv_ratio = (input.net_inventory.abs() / config.max_position as f64).min(1.0);
-    let sell_size = config.quote_size_dollars * input.size_multiplier * (1.0 + inv_ratio * 0.5);
+    let buy_size = config.quote_size_dollars * (1.0 - inv_ratio * 0.8);
+    let sell_size = config.quote_size_dollars * (1.0 + inv_ratio * 0.5);
 
     // ── YES side ──
-    let yes_bid = (r - half_spread).clamp(yes_order_min, yes_order_max);
-    let yes_ask = (r + half_spread).clamp(yes_order_min, yes_order_max);
-    let yes_bid_nanos = (yes_bid * NANOS_PER_DOLLAR as f64).round() as u64;
-    let yes_ask_nanos = (yes_ask * NANOS_PER_DOLLAR as f64).round() as u64;
-    if yes_bid_nanos >= yes_ask_nanos {
-        return orders;
+    let yes_bid = r - half_spread;
+    let yes_ask = r + half_spread;
+
+    if yes_buy_room > 0 && price_in_band(yes_bid, yes_order_min, yes_order_max) {
+        let quantity = shares_to_qty_units(buy_size / yes_bid).min(yes_buy_room);
+        if quantity > 0 {
+            orders.push(OrderSpec::BuyYes {
+                market_id: input.market_id,
+                limit_price_nanos: (yes_bid * NANOS_PER_DOLLAR as f64) as u64,
+                quantity,
+            });
+        }
     }
 
     if input.yes_position > 0 && price_in_band(yes_ask, yes_order_min, yes_order_max) {
@@ -93,20 +88,37 @@ pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpe
         let desired = shares_to_qty_units(sell_size / yes_ask);
         orders.push(OrderSpec::SellYes {
             market_id: input.market_id,
-            limit_price_nanos: yes_ask_nanos,
+            limit_price_nanos: (yes_ask * NANOS_PER_DOLLAR as f64) as u64,
             quantity: desired.min(max_sell),
         });
     }
 
-    // Economic YES bid: sell pre-collateralized NO at `1 - bid_yes`.
-    // This is group-safe because sell orders add no buy-side outcome coverage.
-    let no_ask = 1.0 - yes_bid;
+    // ── NO side ──
+    //
+    // Buying NO at price (1 - ask_yes) is the collateralized way to provide
+    // the YES ask without requiring existing YES inventory. This matters most
+    // for Polymarket NegRisk groups: disabling the NO side left the live MM as
+    // a one-sided YES bidder on the mirrored multi-outcome markets.
+    let no_bid = (1.0 - r) - half_spread;
+    let no_ask = (1.0 - r) + half_spread;
+
+    if no_buy_room > 0 && price_in_band(no_bid, no_order_min, no_order_max) {
+        let quantity = shares_to_qty_units(buy_size / no_bid).min(no_buy_room);
+        if quantity > 0 {
+            orders.push(OrderSpec::BuyNo {
+                market_id: input.market_id,
+                limit_price_nanos: (no_bid * NANOS_PER_DOLLAR as f64) as u64,
+                quantity,
+            });
+        }
+    }
+
     if input.no_position > 0 && price_in_band(no_ask, no_order_min, no_order_max) {
         let max_sell = input.no_position as u64;
-        let desired = shares_to_qty_units(sell_size / yes_bid.max(0.01));
+        let desired = shares_to_qty_units(sell_size / no_ask);
         orders.push(OrderSpec::SellNo {
             market_id: input.market_id,
-            limit_price_nanos: (no_ask * NANOS_PER_DOLLAR as f64).round() as u64,
+            limit_price_nanos: (no_ask * NANOS_PER_DOLLAR as f64) as u64,
             quantity: desired.min(max_sell),
         });
     }

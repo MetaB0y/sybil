@@ -48,10 +48,6 @@ pub fn state_root_leaves(
         b"sys/next_withdrawal_id".to_vec(),
         sys_u64_leaf_value(b"next_withdrawal_id", sidecar.bridge.next_withdrawal_id),
     ));
-    leaves.push((
-        b"sys/liquidity_universe".to_vec(),
-        liquidity_universe_leaf_value(&sidecar.liquidity_universe),
-    ));
 
     let mut markets: Vec<&MarketSnapshot> = sidecar.markets.iter().collect();
     markets.sort_by_key(|market| market.market_id.0);
@@ -163,21 +159,6 @@ fn sys_bytes32_leaf_value(name: &[u8], raw: &[u8; 32]) -> Vec<u8> {
     value.push(name.len() as u8);
     value.extend_from_slice(name);
     value.extend_from_slice(raw);
-    value
-}
-
-fn liquidity_universe_leaf_value(universe: &crate::types::LiquidityUniverseSnapshot) -> Vec<u8> {
-    let mut value = Vec::new();
-    value.extend_from_slice(b"sybil/state/liquidity-universe/v1");
-    value.extend_from_slice(&universe.generation.to_le_bytes());
-    value.extend_from_slice(&universe.policy_digest);
-    value.extend_from_slice(&universe.activated_at_height.to_le_bytes());
-    let mut markets = universe.market_ids.clone();
-    markets.sort_by_key(|market| market.0);
-    value.extend_from_slice(&(markets.len() as u64).to_le_bytes());
-    for market in markets {
-        value.extend_from_slice(&market.0.to_le_bytes());
-    }
     value
 }
 

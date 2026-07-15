@@ -121,13 +121,8 @@ impl Actor for SequencerActor {
             SequencerMsg::IndicativeTick => {
                 state.on_indicative_tick(myself.clone());
             }
-            SequencerMsg::IndicativeUpdate {
-                target_height,
-                snapshots,
-            } => {
-                if state.sequencer.height().saturating_add(1) == target_height {
-                    state.indicative_cache = snapshots;
-                }
+            SequencerMsg::IndicativeUpdate(snapshots) => {
+                state.indicative_cache = snapshots;
                 state.indicative_solve_gate.finish();
             }
             SequencerMsg::IndicativeSolveFailed { solver, error } => {
@@ -163,12 +158,6 @@ impl Actor for SequencerActor {
                     Err(err) => Err(err),
                 };
                 state.record_submission_metrics("unsigned", order_count, &result);
-                let _ = reply.send(result);
-            }
-            SequencerMsg::SubmitActorEpoch(epoch, reply) => {
-                let order_count = epoch.submission.orders.len();
-                let result = state.handle_actor_epoch(epoch).await;
-                state.record_submission_metrics("actor_epoch", order_count, &result);
                 let _ = reply.send(result);
             }
             SequencerMsg::SubmitSignedOrder(signed, reply) => {
@@ -317,39 +306,6 @@ impl Actor for SequencerActor {
             }
             SequencerMsg::CreateMarket(name, reply) => {
                 let _ = reply.send(state.handle_create_market(name).await);
-            }
-            SequencerMsg::CollateralizeCompleteSet(account_id, market_id, quantity, reply) => {
-                let _ = reply.send(
-                    state
-                        .handle_collateralize_complete_set(account_id, market_id, quantity)
-                        .await,
-                );
-            }
-            SequencerMsg::RedeemCompleteSet(account_id, market_id, quantity, reply) => {
-                let _ = reply.send(
-                    state
-                        .handle_redeem_complete_set(account_id, market_id, quantity)
-                        .await,
-                );
-            }
-            SequencerMsg::ApplyCompleteSetInventoryActions(account_id, actions, reply) => {
-                let _ = reply.send(
-                    state
-                        .handle_complete_set_inventory_actions(account_id, actions)
-                        .await,
-                );
-            }
-            SequencerMsg::ActivateLiquidityUniverse(
-                generation,
-                policy_digest,
-                market_ids,
-                reply,
-            ) => {
-                let _ = reply.send(
-                    state
-                        .handle_activate_liquidity_universe(generation, policy_digest, market_ids)
-                        .await,
-                );
             }
             SequencerMsg::CreateMarketGroup(name, market_ids, reply) => {
                 let _ = reply.send(state.handle_create_market_group(name, market_ids).await);

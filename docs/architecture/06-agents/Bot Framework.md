@@ -19,36 +19,6 @@ live for at most 15 minutes without a heartbeat. Historical decisions and snapsh
 are retained, but score aggregates are computed only from the current live cohort;
 they never infer membership from name patterns or mix prior runs into current PnL.
 
-The production noise flow is deliberately stricter than the generic bot
-framework. `live.noise_coordinator.NoiseCoordinator` owns exactly fifteen
-durable role-bound accounts. After each live block every actor independently
-samples about 1.9% of the committed universe and submits a sparse IOC epoch for
-`height + 1`; aggregate touched-market coverage is about 25%. Random lanes
-include principal, generation, height, market, and purpose, so selection,
-direction, group holes, size, and aggressiveness differ by actor but replay
-deterministically. Every order prices from the previous committed Sybil mark:
-clearing when traded, otherwise the committed book midpoint or carried mark.
-Sixty percent are independently aggressive and 40% passive, with randomized
-distance bounded by the frontend Lite-tax curve. The coordinator never reads
-the MM's upcoming quote; natural MM crosses are measured only after submission.
-Inventory-marked direction bias increases real YES/NO selling as holdings
-accumulate. Categorical groups retain an actor-specific uncovered hole, native
-prices stay inside complementary actor guardrails, and anti-starvation raises
-selection probability gradually after eight untouched blocks.
-
-The Rust mirror process is the production MM. It quotes every effective mirror
-and native market in one actor epoch, using `SellYes` as the ask and `SellNo` as
-the economic YES bid from pre-collateralized complete sets. It replenishes a
-neutral YES+NO inventory floor before quoting. Fresh mirror anchors quote
-normally, soft-stale anchors quote smaller and wider, and hard-stale/extreme
-anchors carry typed skips. Native anchors start from coherent catalog seeds,
-accept only qualifying organic fills, use a capped weighted median and bounded
-EWMA, mean-revert when quiet, project categorical and threshold cohorts, and
-stay in the two-sided quoteable interior.
-Inventory, volatility, exposure, stale feeds, extreme prices, and insufficient
-cash can widen, reduce, or explicitly skip quotes; the operational coverage
-target is 100%, with at least 98% two-sided in healthy steady state.
-
 ## Key Properties
 - `BaseAgent.on_block(block) -> list[OrderSpec]` — the core interface
 - Event-driven: bots react to blocks, not poll
@@ -56,8 +26,6 @@ target is 100%, with at least 98% two-sided in healthy steady state.
 - `market_ids` filter for focused trading strategies
 - Competition runner for multi-bot simulations
 - Explicit, heartbeating live cohort separates scored competitors from load/noise
-- Production sparse noise coordinator: exactly 15 durable IOC actors, ~25% aggregate market coverage
-- Production MM: complete-set-funded, all-market actor epochs with native guardrails
 - Adding a bot: extend BaseAgent, implement on_block, export, configure
 
 ## Where This Lives

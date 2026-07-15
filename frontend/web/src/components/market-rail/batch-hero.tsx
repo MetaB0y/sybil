@@ -9,7 +9,7 @@
  * All values are real:
  *  - circular countdown progress + batch number
  *  - traders in this batch — polled open-batch unique placers
- *  - last price — committed Sybil mark (trade when filled, midpoint/carry while quiet)
+ *  - last price — most recent batch where this market actually traded
  *  - indicative volume — polled open-batch shadow-solve
  *  - liquidity — average near-price resting depth per batch
  *  - past-batch bar heights (matched volume)
@@ -47,7 +47,8 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
 
   const batchNumber = latestHeight == null ? null : latestHeight + 1;
   const placers = live?.uniquePlacers ?? null;
-  const lastPriceNanos = outcome.yesPriceNanos;
+  const lastPriceNanos =
+    lastTradedYesNanos(outcome.marketId, recent) ?? outcome.yesPriceNanos;
   const liquidityNanos = avgLiquidityNanos(outcome.liquidityNanos);
 
   // Honest connection pill: only claim a "live batch" when the block stream is
@@ -161,10 +162,7 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
                 boxShadow: "0 0 6px var(--yes)",
               }}
             />
-            <span
-              style={{ color: "var(--fg-1)", fontWeight: 600 }}
-              title="Distinct accounts with an order staged for the open batch, including market makers — updates live"
-            >
+            <span style={{ color: "var(--fg-1)", fontWeight: 600 }}>
               {placers ?? "—"}
             </span>
             <span>{placers === 1 ? "trader" : "traders"} in this batch</span>
@@ -235,6 +233,22 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
       </div>
     </div>
   );
+}
+
+/** Most recent clearing YES price from a block where this market had matched
+ * volume. Recent blocks are newest-first, so the first hit is the last trade. */
+function lastTradedYesNanos(
+  marketId: number,
+  blocks: import("@/lib/api/schema").components["schemas"]["BlockResponse"][],
+): bigint | null {
+  const key = String(marketId);
+  for (const block of blocks) {
+    const volume = block.by_market?.[key]?.volume_nanos;
+    if (volume == null || parseNanos(volume) <= 0n) continue;
+    const price = block.clearing_prices_nanos?.[key]?.[0];
+    if (price != null) return parseNanos(price);
+  }
+  return null;
 }
 
 export function deriveOpenBatchPrice(

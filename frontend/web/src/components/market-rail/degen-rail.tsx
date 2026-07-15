@@ -106,19 +106,19 @@ export function DegenRail({
   const { data: pricePoints } = usePriceHistory(selected?.marketId ?? -1);
   const tracking = useDegenBetTracker(active);
 
-  // Mark price for the selected side: last history point, else current Sybil mark.
+  // mark price for the selected side: last price-history point, else clearing.
   const markNanos = useMemo(() => {
     if (!selected) return ONE_DOLLAR_NANOS / 2n;
     const last = pricePoints?.[pricePoints.length - 1];
     const histYes = last ? parseNanos(last.yes_price_nanos) : null;
     const histNo = last ? parseNanos(last.no_price_nanos) : null;
-    // Precise YES mark in nanos (not the rounded `yesCents`) so the fallback
-    // retains sub-cent precision.
-    const servingYes = selected.yesPriceNanos;
-    const servingNo = servingYes == null ? null : ONE_DOLLAR_NANOS - servingYes;
+    // Precise YES price in nanos (not the rounded `yesCents`) so the fallback
+    // mark matches the real clearing price to sub-cent precision.
+    const clearYes = selected.yesPriceNanos;
+    const clearNo = clearYes == null ? null : ONE_DOLLAR_NANOS - clearYes;
     return side === "YES"
-      ? resolveMarkNanos(histYes, servingYes)
-      : resolveMarkNanos(histNo, servingNo);
+      ? resolveMarkNanos(histYes, clearYes)
+      : resolveMarkNanos(histNo, clearNo);
   }, [pricePoints, selected, side]);
 
   const amountNum = parseFloat(amount) || 0;
@@ -293,8 +293,8 @@ export function DegenRail({
     }
   }
 
-  // A market without a committed mark or price history falls back internally
-  // to neutral 50¢, which we must NOT present as a real quote.
+  // A never-traded market has no clearing price and no price history — the mark
+  // then falls back to a neutral 50¢, which we must NOT present as a real quote.
   // Surface it as a "seed the book" state instead of a fabricated payout.
   const hasPrice =
     selected.yesPriceNanos != null ||

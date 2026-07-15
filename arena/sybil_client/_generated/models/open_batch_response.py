@@ -26,8 +26,7 @@ class OpenBatchResponse:
     `unique_placers`; indicative fields stub `None`/`0` until C2.
 
         Attributes:
-            unique_placers (int): Distinct real accounts with an order staged for the upcoming batch,
-                including market makers. The protocol MINT account is excluded.
+            unique_placers (int):
             indicative_computed_at_ms (int | Unset):
             indicative_no_price_nanos (int | None | Unset): Indicative NO price for the open batch. Integer nanodollars;
                 1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].

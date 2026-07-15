@@ -16,8 +16,7 @@ use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
 use serde_json::{Value, json};
 use sybil_api::app::{
-    ACTOR_ROUTE_TABLE, DEV_ROUTE_TABLE, OWNER_ROUTE_TABLE, PUBLIC_ROUTE_TABLE, RouteMount,
-    SERVICE_ROUTE_TABLE,
+    DEV_ROUTE_TABLE, OWNER_ROUTE_TABLE, PUBLIC_ROUTE_TABLE, RouteMount, SERVICE_ROUTE_TABLE,
 };
 use sybil_api::config::ApiConfig;
 use tower::ServiceExt;
@@ -103,14 +102,6 @@ fn exact_public_routes() -> &'static [RouteMount] {
         RouteMount {
             method: "GET",
             path: "/v1/markets",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/liquidity/universe",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/liquidity/health",
         },
         RouteMount {
             method: "GET",
@@ -244,10 +235,6 @@ fn exact_service_routes() -> &'static [RouteMount] {
         },
         RouteMount {
             method: "POST",
-            path: "/v1/liquidity/universe/activate",
-        },
-        RouteMount {
-            method: "POST",
             path: "/v1/orders",
         },
         RouteMount {
@@ -345,27 +332,6 @@ fn exact_service_routes() -> &'static [RouteMount] {
         RouteMount {
             method: "POST",
             path: "/v1/admin/auto-resolutions/{id}/reject",
-        },
-    ]
-}
-
-fn exact_actor_routes() -> &'static [RouteMount] {
-    &[
-        RouteMount {
-            method: "GET",
-            path: "/v1/actor/universe",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/actor/mm-quotes",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/actor/epochs",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/actor/inventory",
         },
     ]
 }
@@ -661,7 +627,6 @@ fn route_policy_mount_tables_are_exact() {
     assert_eq!(PUBLIC_ROUTE_TABLE, exact_public_routes());
     assert_eq!(OWNER_ROUTE_TABLE, exact_owner_routes());
     assert_eq!(SERVICE_ROUTE_TABLE, exact_service_routes());
-    assert_eq!(ACTOR_ROUTE_TABLE, exact_actor_routes());
     assert_eq!(DEV_ROUTE_TABLE, exact_dev_routes());
 }
 
