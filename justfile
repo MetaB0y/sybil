@@ -827,6 +827,11 @@ contracts-test:
 contracts-coverage:
     ./scripts/check-contract-coverage.sh
 
+# Deploy and validate the explicitly unsafe Sepolia-only mock bridge. Requires
+# SEPOLIA_RPC_URL, PRIVATE_KEY, and the confirmation phrase documented by the runbook.
+contracts-sepolia-mock-deploy:
+    ./scripts/deploy-sepolia-mock-l1.sh
+
 # Run a local Anvil bridge smoke with the explicit unsafe accept-all verifier.
 # Start anvil separately, or point rpc_url at an existing Anvil-compatible RPC.
 contracts-anvil-unsafe-smoke rpc_url="http://127.0.0.1:8545" private_key="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80":

@@ -195,7 +195,9 @@ adapter. Never silently regenerate pins during an ordinary test.
 - Adapter upgrades, proof latency, prover capacity, and emergency governance
   need production runbooks and deployed monitoring.
 - `UnsafeAcceptAllVerifierAdapter` is Anvil-only plumbing and must never be used
-  on a public network.
+  on a public network. The separately named Sepolia mock adapter is chain-bound
+  and paired only with fresh publicly mintable collateral; it remains explicit
+  non-validity plumbing rather than a production verifier.
 
 ## Verification and Ownership
 

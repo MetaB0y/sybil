@@ -12,6 +12,7 @@ just contracts-fmt-check
 just contracts-build
 just contracts-test
 just contracts-coverage
+just contracts-sepolia-mock-deploy
 ```
 
 Or from this directory:

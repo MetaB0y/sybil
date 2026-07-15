@@ -13,6 +13,11 @@ Local Anvil/devnet plumbing can use
 proof while preserving the same `IOpenVmVerifierAdapter` boundary. Do not use
 that adapter in any production or public testnet deployment.
 
+The separate `UnsafeSepoliaMockVerifierAdapter` is constructor-bound to Sepolia
+and may be used only by the documented mock profile with a freshly deployed
+publicly mintable `MintableMockUSDC`. It is public-testnet plumbing, not proof
+verification or a real-funds deployment.
+
 ```bash
 forge fmt
 forge build
@@ -28,5 +33,6 @@ From the repository root:
 ```bash
 just contracts-test
 just contracts-coverage
+just contracts-sepolia-mock-deploy
 just contracts-anvil-unsafe-smoke
 ```
