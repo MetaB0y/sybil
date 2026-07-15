@@ -482,7 +482,7 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
     normalizePublicKeyHex(recoveredPublicKeyHex!),
   );
 
-  // 8. Confirm the reconnected account has its demo balance (capped $5k).
+  // 8. Confirm the reconnected account has the server-assigned demo grant.
   const pf0 = await getJson<Portfolio>(
     request,
     `${REQUEST_API_BASE}/v1/accounts/${accountId}/portfolio`,

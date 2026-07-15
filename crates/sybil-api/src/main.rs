@@ -472,6 +472,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         order_ttl_blocks = config.order_ttl_blocks,
         max_open_orders_per_account = config.max_open_orders_per_account,
         max_global_submissions_per_second = config.max_global_submissions_per_second,
+        public_account_capacity = config.public_account_capacity,
+        public_account_grant_nanos = config.public_account_grant_nanos,
         "Sequencer started"
     );
 

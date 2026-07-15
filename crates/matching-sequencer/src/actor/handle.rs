@@ -397,6 +397,14 @@ impl SequencerHandle {
             .await?
     }
 
+    /// Number of non-system account ids allocated for this chain lifetime.
+    /// Account ids are monotonic and never reused, so this is the durable stock
+    /// counter used by the public onboarding ceiling.
+    pub async fn account_stock(&self) -> Result<u64, SequencerError> {
+        self.read_query(|state| state.sequencer.accounts.next_id())
+            .await
+    }
+
     /// Allocate an account and install its first signing key under one actor
     /// command and one durable control-plane WAL row. `meta.account_id` is
     /// replaced with the newly allocated id.
@@ -1692,6 +1700,10 @@ mod tests {
             .create_account(50 * NANOS_PER_DOLLAR as i64)
             .await
             .unwrap();
+        assert_eq!(
+            handle.account_stock().await.unwrap(),
+            created.id.0.saturating_add(1)
+        );
         handle
             .fund_account(aid, 25 * NANOS_PER_DOLLAR as i64)
             .await
@@ -2804,6 +2816,7 @@ mod tests {
         ));
 
         let mut replayed = BlockSequencer::restore(pending, Arc::new(AdminOracle::new()), config);
+        assert_eq!(replayed.accounts.next_id(), created.id.0.saturating_add(1));
         let account = replayed.accounts.get(created.id).unwrap();
         assert_eq!(account.balance, 17);
         assert_eq!(account.total_deposited, 17);

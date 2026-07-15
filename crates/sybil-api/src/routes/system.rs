@@ -12,6 +12,7 @@ use crate::types::response::{AttestationResponse, HealthResponse, StateRootRespo
 /// Development-only shape stub. The route is mounted only when `dev_mode` is
 /// enabled; none of these empty fields are cryptographic evidence.
 #[utoipa::path(
+    tag = "routessystem",
     get,
     path = "/v1/attestation",
     responses(
@@ -37,6 +38,7 @@ pub async fn attestation() -> Json<AttestationResponse> {
 /// Downstream services and Docker healthchecks should treat any non-200 as
 /// unhealthy and stop routing traffic.
 #[utoipa::path(
+    tag = "routessystem",
     get,
     path = "/v1/health",
     responses(
@@ -110,6 +112,7 @@ fn operational_health(
 
 /// GET /v1/state-root
 #[utoipa::path(
+    tag = "routessystem",
     get,
     path = "/v1/state-root",
     responses(
@@ -129,6 +132,7 @@ pub async fn state_root(
 ///
 /// Dev-mode only: pauses block production. Returns 403 outside dev mode.
 #[utoipa::path(
+    tag = "routessystem",
     post,
     path = "/v1/simulation/pause",
     responses(
@@ -148,6 +152,7 @@ pub async fn pause(State(state): State<AppState>) -> Result<Json<serde_json::Val
 ///
 /// Dev-mode only: resumes block production. Returns 403 outside dev mode.
 #[utoipa::path(
+    tag = "routessystem",
     post,
     path = "/v1/simulation/resume",
     responses(

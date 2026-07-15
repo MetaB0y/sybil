@@ -71,7 +71,7 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
 dry-run: GET $BASE/v1/health and require status=ok plus a positive height and 64-hex genesis_hash
 dry-run: GET $BASE/v1/blocks/latest twice, ${INTERVAL}s block interval aware, and require height advancement
 dry-run: GET $BASE/v1/markets and require a nonempty JSON array
-dry-run: OPTIONS $BASE/v1/accounts from Origin: $APP_ORIGIN and require POST CORS permission
+dry-run: OPTIONS $BASE/v1/onboarding/accounts from Origin: $APP_ORIGIN and require POST CORS permission
 dry-run: require /proofs/latest height within $PROOF_LAG_MAX blocks of /v1/blocks/latest (mode: $PROOF_LAG_MODE; source: ${PROVER_BASE:-docker exec into compose service sybil-prover})
 dry-run: inspect compose project '$COMPOSE_PROJECT' containers ($([[ -n "$DOCKER_SSH" ]] && echo "ssh $DOCKER_SSH" || echo local-docker)) when Docker is available
 dry-run: write sybil_synthetic_probe_failure=0 or 1 plus sybil_synthetic_proof_lag_blocks and sybil_synthetic_proof_lag_limit_blocks to ${VM_URL:-compose victoriametrics service}
@@ -172,7 +172,7 @@ printf '%s' "$HTTP_BODY" | python3 -c \
     2>/dev/null || die "/v1/markets was empty or not a JSON array"
 
 curl -sS --max-time 20 -D "$TMP/cors-headers" -o /dev/null -X OPTIONS \
-    "$BASE/v1/accounts" \
+    "$BASE/v1/onboarding/accounts" \
     -H "Origin: $APP_ORIGIN" \
     -H 'Access-Control-Request-Method: POST' \
     -H 'Access-Control-Request-Headers: content-type' >/dev/null 2>&1 \

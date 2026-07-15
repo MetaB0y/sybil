@@ -166,6 +166,7 @@ fn build_market_response(args: BuildMarketResponseArgs<'_>) -> MarketResponse {
 
 /// GET /v1/markets
 #[utoipa::path(
+    tag = "routesmarkets",
     get,
     path = "/v1/markets",
     responses(
@@ -261,6 +262,7 @@ pub async fn list_markets(
 /// (description, tags, resolution criteria, external URL). ~5-10x smaller
 /// wire size than /v1/markets.
 #[utoipa::path(
+    tag = "routesmarkets",
     get,
     path = "/v1/markets/summary",
     responses(
@@ -351,6 +353,7 @@ pub async fn list_markets_summary(
 
 /// GET /v1/markets/{id}
 #[utoipa::path(
+    tag = "routesmarkets",
     get,
     path = "/v1/markets/{id}",
     params(("id" = u32, Path, description = "Market ID")),
@@ -428,6 +431,7 @@ pub async fn get_market(
 
 /// POST /v1/markets
 #[utoipa::path(
+    tag = "routesmarkets",
     post,
     path = "/v1/markets",
     request_body = CreateMarketRequest,
@@ -487,6 +491,7 @@ pub async fn create_market(
 
 /// GET /v1/markets/groups
 #[utoipa::path(
+    tag = "routesmarkets",
     get,
     path = "/v1/markets/groups",
     responses(
@@ -511,6 +516,7 @@ pub async fn list_market_groups(
 
 /// POST /v1/markets/groups
 #[utoipa::path(
+    tag = "routesmarkets",
     post,
     path = "/v1/markets/groups",
     request_body = CreateMarketGroupRequest,
@@ -538,6 +544,7 @@ pub async fn create_market_group(
 
 /// POST /v1/markets/groups/{group_id}/members
 #[utoipa::path(
+    tag = "routesmarkets",
     post,
     path = "/v1/markets/groups/{group_id}/members",
     params(
@@ -569,6 +576,7 @@ pub async fn extend_market_group(
 
 /// GET /v1/markets/prices
 #[utoipa::path(
+    tag = "routesmarkets",
     get,
     path = "/v1/markets/prices",
     responses(
@@ -584,6 +592,7 @@ pub async fn get_prices(
 
 /// POST /v1/markets/{id}/resolve
 #[utoipa::path(
+    tag = "routesmarkets",
     post,
     path = "/v1/markets/{id}/resolve",
     params(("id" = u32, Path, description = "Market ID")),
@@ -645,6 +654,7 @@ pub async fn resolve_market(
 
 /// GET /v1/markets/{id}/prices/history
 #[utoipa::path(
+    tag = "routesmarkets",
     get,
     path = "/v1/markets/{id}/prices/history",
     params(
@@ -710,6 +720,7 @@ pub async fn get_price_history(
 
 /// GET /v1/markets/{id}/prices/candles
 #[utoipa::path(
+    tag = "routesmarkets",
     get,
     path = "/v1/markets/{id}/prices/candles",
     params(
@@ -841,6 +852,7 @@ fn parse_candle_resolution(input: &str) -> Result<u32, AppError> {
 
 /// GET /v1/markets/search
 #[utoipa::path(
+    tag = "routesmarkets",
     get,
     path = "/v1/markets/search",
     params(
@@ -943,6 +955,7 @@ pub async fn search_markets(
 
 /// POST /v1/markets/prices/reference — set reference prices from external system.
 #[utoipa::path(
+    tag = "routesmarkets",
     post,
     path = "/v1/markets/prices/reference",
     request_body = SetReferencePricesRequest,
@@ -964,6 +977,7 @@ pub async fn set_reference_prices(
 
 /// GET /v1/markets/{id}/resolution
 #[utoipa::path(
+    tag = "routesmarkets",
     get,
     path = "/v1/markets/{id}/resolution",
     params(("id" = u32, Path, description = "Market ID")),
@@ -1028,6 +1042,7 @@ pub async fn get_resolution(
 
 /// POST /v1/markets/{id}/metadata — set external metadata for a market.
 #[utoipa::path(
+    tag = "routesmarkets",
     post,
     path = "/v1/markets/{id}/metadata",
     params(("id" = u32, Path, description = "Market ID")),

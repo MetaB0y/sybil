@@ -25,6 +25,7 @@ use crate::util::now_ms;
 #[openapi(
     components(schemas(
         CreateAccountRequest,
+        OnboardAccountRequest,
         FundAccountRequest,
         SubmitL1DepositRequest,
         SubmitL1WithdrawalEventRequest,
@@ -64,6 +65,7 @@ use crate::util::now_ms;
         OrderSpec,
         MarketSearchParams,
         AccountResponse,
+        OnboardingPolicyResponse,
         PositionResponse,
         BridgeStatusResponse,
         BridgeAccountKeyResponse,
@@ -435,6 +437,26 @@ async fn order_rate_limit(
     next.run(req).await
 }
 
+fn is_onboarding_write_path(path: &str) -> bool {
+    path == "/v1/onboarding/accounts"
+}
+
+async fn onboarding_rate_limit(
+    State(state): State<AppState>,
+    req: Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+    if req.method() == axum::http::Method::POST && is_onboarding_write_path(req.uri().path()) {
+        let client_key =
+            http_rate_limit_client_key(&req, state.http_trusted_proxy_cidrs.as_slice());
+        if let Err(retry_after_secs) = state.http_onboarding_limiter.allow(&client_key) {
+            metrics::counter!("sybil_http_onboarding_rate_limited_total").increment(1);
+            return AppError::rate_limited(retry_after_secs).into_response();
+        }
+    }
+    next.run(req).await
+}
+
 fn is_da_read_path(path: &str) -> bool {
     let mut segments = path.trim_matches('/').split('/');
     matches!(segments.next(), Some("v1"))
@@ -512,8 +534,12 @@ pub const PUBLIC_ROUTE_TABLE: &[RouteMount] = &[
         path: "/v1/da/{height}/manifest",
     },
     RouteMount {
+        method: "GET",
+        path: "/v1/onboarding",
+    },
+    RouteMount {
         method: "POST",
-        path: "/v1/accounts",
+        path: "/v1/onboarding/accounts",
     },
     RouteMount {
         method: "GET",
@@ -679,6 +705,10 @@ pub const OWNER_ROUTE_TABLE: &[RouteMount] = &[
 
 pub const SERVICE_ROUTE_TABLE: &[RouteMount] = &[
     RouteMount {
+        method: "POST",
+        path: "/v1/accounts",
+    },
+    RouteMount {
         method: "GET",
         path: "/v1/blocks/ws",
     },
@@ -816,9 +846,10 @@ fn public_routes() -> OpenApiRouter<AppState> {
         .routes(openapi_routes!(routes::system::health))
         .routes(openapi_routes!(routes::system::state_root))
         .routes(openapi_routes!(routes::da::get_da_manifest))
-        // Self-service onboarding is public only in its atomic form. The
-        // deprecated unsigned forms enforce service auth in their handlers.
-        .routes(openapi_routes!(routes::accounts::create_account))
+        .routes(openapi_routes!(
+            routes::accounts::get_onboarding_policy,
+            routes::accounts::onboard_account,
+        ))
         .routes(openapi_routes!(routes::accounts::get_account))
         .routes(openapi_routes!(routes::accounts::get_keyop_state))
         .routes(openapi_routes!(routes::accounts::list_account_keys))
@@ -869,6 +900,7 @@ fn public_routes() -> OpenApiRouter<AppState> {
 
 fn service_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::default()
+        .routes(openapi_routes!(routes::accounts::create_account))
         .routes(openapi_routes!(routes::blocks::ws_service_blocks))
         // Unsigned orders can name arbitrary accounts and MM budgets.
         .routes(openapi_routes!(routes::orders::submit_orders))
@@ -952,10 +984,9 @@ fn bearer_token(req: &Request<axum::body::Body>) -> Option<&str> {
 /// Returns true iff `headers` carry a bearer token that matches the configured
 /// service token, using the SAME source of truth (`state.service_token`) and the
 /// SAME constant-time comparison the `service_auth` middleware applies. Public
-/// handlers on the public tier call this to grant trusted service infra an
-/// elevated privilege (e.g. skipping the demo-balance cap) without moving the
-/// whole route behind `service_auth`. A missing/garbage header, or an unset
-/// service token, simply returns false (never an error).
+/// owner-scoped handlers call this to grant trusted service infrastructure
+/// read access without moving the whole route behind `service_auth`. A
+/// missing/garbage header, or an unset service token, simply returns false.
 pub(crate) fn request_has_valid_service_token(
     state: &AppState,
     headers: &axum::http::HeaderMap,
@@ -1049,6 +1080,10 @@ pub fn create_router(state: AppState) -> Router {
     app.layer(middleware::from_fn_with_state(
         state.clone(),
         order_rate_limit,
+    ))
+    .layer(middleware::from_fn_with_state(
+        state.clone(),
+        onboarding_rate_limit,
     ))
     .layer(middleware::from_fn_with_state(state.clone(), da_read_limit))
     .layer(middleware::from_fn(http_metrics))

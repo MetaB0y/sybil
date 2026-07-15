@@ -16,6 +16,7 @@ services:
     memswap_limit: "1600m"
     environment:
       SYBIL_PORT: "3000"
+      SYBIL_DEPLOYMENT_PROFILE: "${SYBIL_DEPLOYMENT_PROFILE:-devnet}"
       SYBIL_DEV_MODE: "true"
       SYBIL_BLOCK_INTERVAL_MS: "10000"
       SYBIL_ARENA_DB_PATH: "/arena-data/decisions.db"
@@ -29,6 +30,15 @@ services:
       SYBIL_WEBAUTHN_ORIGIN: "${SYBIL_WEBAUTHN_ORIGIN:-http://localhost:3005}"
       SYBIL_MAX_RECENT_PRICE_POINTS_PER_MARKET: "2000"
       SYBIL_MAX_RECENT_FILLS_PER_ACCOUNT: "5000"
+      # Anonymous onboarding receives one server-selected play-money grant and
+      # can consume at most this many lifetime account ids. Account ids are not
+      # reclaimed; service-authenticated bot/operator creation is separate.
+      SYBIL_PUBLIC_ACCOUNT_CAPACITY: "${SYBIL_PUBLIC_ACCOUNT_CAPACITY:-1000}"
+      SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS: "${SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS:-1000000000000}"
+      SYBIL_HTTP_ONBOARDING_GLOBAL_RPS: "5"
+      SYBIL_HTTP_ONBOARDING_GLOBAL_BURST: "20"
+      SYBIL_HTTP_ONBOARDING_CLIENT_RPS: "1"
+      SYBIL_HTTP_ONBOARDING_CLIENT_BURST: "3"
       # The shared mock-prover devnet transfers durable ownership quickly; keep
       # one day of acknowledged source jobs as a bounded recovery cushion.
       # Direct cargo runs retain the conservative no-prune default.

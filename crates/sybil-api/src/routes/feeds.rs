@@ -19,6 +19,7 @@ fn feed_to_response(feed: &sybil_oracle::DataFeed) -> RegisteredFeedResponse {
 
 /// POST /v1/feeds — register a data feed.
 #[utoipa::path(
+    tag = "routesfeeds",
     post,
     path = "/v1/feeds",
     request_body = RegisterFeedRequest,
@@ -67,6 +68,7 @@ pub async fn register_feed(
 
 /// GET /v1/feeds — list registered data feeds.
 #[utoipa::path(
+    tag = "routesfeeds",
     get,
     path = "/v1/feeds",
     responses(

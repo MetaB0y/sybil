@@ -14,6 +14,7 @@ use crate::types::response::{DaManifestResponse, DaProviderRefResponse};
 
 /// GET /v1/da/{height}/manifest
 #[utoipa::path(
+    tag = "routesda",
     get,
     path = "/v1/da/{height}/manifest",
     description = "Typed DA manifest for a retained canonical witness payload. Retention follows the store-backed block-history window: with SYBIL_DATA_DIR unset there are no retained DA artifacts; with pruning disabled rows are retained until the store is reset. Clients MUST verify the SYB-80 section 3 binding chain themselves: payload_root -> witness_root -> da_commitment -> L1 RootRecord, and must not trust this server.",
@@ -34,6 +35,7 @@ pub async fn get_da_manifest(
 
 /// GET /v1/da/{height}/payload
 #[utoipa::path(
+    tag = "routesda",
     get,
     path = "/v1/da/{height}/payload",
     description = "Canonical witness payload bytes for a retained height, served as application/octet-stream with Content-Length. Retention follows the store-backed block-history window: with SYBIL_DATA_DIR unset there are no retained DA artifacts; with pruning disabled rows are retained until the store is reset. Clients MUST verify the SYB-80 section 3 binding chain themselves: payload_root -> witness_root -> da_commitment -> L1 RootRecord, and must not trust this server.",

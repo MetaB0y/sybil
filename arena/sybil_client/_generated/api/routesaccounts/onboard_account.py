@@ -9,14 +9,14 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.account_response import AccountResponse
-from ...models.create_account_request import CreateAccountRequest
+from ...models.onboard_account_request import OnboardAccountRequest
 from typing import cast
 
 
 
 def _get_kwargs(
     *,
-    body: CreateAccountRequest,
+    body: OnboardAccountRequest,
 
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
@@ -28,7 +28,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "post",
-        "url": "/v1/accounts",
+        "url": "/v1/onboarding/accounts",
     }
 
     _kwargs["json"] = body.to_dict()
@@ -52,13 +52,13 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         response_400 = cast(Any, None)
         return response_400
 
-    if response.status_code == 401:
-        response_401 = cast(Any, None)
-        return response_401
+    if response.status_code == 409:
+        response_409 = cast(Any, None)
+        return response_409
 
-    if response.status_code == 403:
-        response_403 = cast(Any, None)
-        return response_403
+    if response.status_code == 429:
+        response_429 = cast(Any, None)
+        return response_429
 
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
@@ -78,16 +78,21 @@ def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
-    body: CreateAccountRequest,
+    body: OnboardAccountRequest,
 
 ) -> Response[AccountResponse | Any]:
-    """ POST /v1/accounts — service/dev account creation with explicit funding.
+    """ POST /v1/onboarding/accounts — allocate one capped public account.
 
-     This operator surface may install an initial key atomically or create the
-    deprecated bare account used by local tooling. It is never public.
+     The server supplies the fixed grant. The API lock covers the durable-stock
+    read and atomic account/key command, so concurrent callers cannot overshoot
+    the lifetime ceiling.
 
     Args:
-        body (CreateAccountRequest):
+        body (OnboardAccountRequest): Public self-service account onboarding.
+
+            The server, not the caller, chooses the play-money grant. Keeping funding
+            out of this DTO prevents anonymous callers from turning account allocation
+            into an arbitrary minting interface.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -112,16 +117,21 @@ def sync_detailed(
 def sync(
     *,
     client: AuthenticatedClient | Client,
-    body: CreateAccountRequest,
+    body: OnboardAccountRequest,
 
 ) -> AccountResponse | Any | None:
-    """ POST /v1/accounts — service/dev account creation with explicit funding.
+    """ POST /v1/onboarding/accounts — allocate one capped public account.
 
-     This operator surface may install an initial key atomically or create the
-    deprecated bare account used by local tooling. It is never public.
+     The server supplies the fixed grant. The API lock covers the durable-stock
+    read and atomic account/key command, so concurrent callers cannot overshoot
+    the lifetime ceiling.
 
     Args:
-        body (CreateAccountRequest):
+        body (OnboardAccountRequest): Public self-service account onboarding.
+
+            The server, not the caller, chooses the play-money grant. Keeping funding
+            out of this DTO prevents anonymous callers from turning account allocation
+            into an arbitrary minting interface.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -141,16 +151,21 @@ body=body,
 async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
-    body: CreateAccountRequest,
+    body: OnboardAccountRequest,
 
 ) -> Response[AccountResponse | Any]:
-    """ POST /v1/accounts — service/dev account creation with explicit funding.
+    """ POST /v1/onboarding/accounts — allocate one capped public account.
 
-     This operator surface may install an initial key atomically or create the
-    deprecated bare account used by local tooling. It is never public.
+     The server supplies the fixed grant. The API lock covers the durable-stock
+    read and atomic account/key command, so concurrent callers cannot overshoot
+    the lifetime ceiling.
 
     Args:
-        body (CreateAccountRequest):
+        body (OnboardAccountRequest): Public self-service account onboarding.
+
+            The server, not the caller, chooses the play-money grant. Keeping funding
+            out of this DTO prevents anonymous callers from turning account allocation
+            into an arbitrary minting interface.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -175,16 +190,21 @@ async def asyncio_detailed(
 async def asyncio(
     *,
     client: AuthenticatedClient | Client,
-    body: CreateAccountRequest,
+    body: OnboardAccountRequest,
 
 ) -> AccountResponse | Any | None:
-    """ POST /v1/accounts — service/dev account creation with explicit funding.
+    """ POST /v1/onboarding/accounts — allocate one capped public account.
 
-     This operator surface may install an initial key atomically or create the
-    deprecated bare account used by local tooling. It is never public.
+     The server supplies the fixed grant. The API lock covers the durable-stock
+    read and atomic account/key command, so concurrent callers cannot overshoot
+    the lifetime ceiling.
 
     Args:
-        body (CreateAccountRequest):
+        body (OnboardAccountRequest): Public self-service account onboarding.
+
+            The server, not the caller, chooses the play-money grant. Keeping funding
+            out of this DTO prevents anonymous callers from turning account allocation
+            into an arbitrary minting interface.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

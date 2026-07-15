@@ -67,6 +67,7 @@ pub struct RecentBlocksQuery {
 
 /// GET /v1/blocks?limit=N&before_height=H — blocks newest-first, paged by height.
 #[utoipa::path(
+    tag = "routesblocks",
     get,
     path = "/v1/blocks",
     params(
@@ -92,6 +93,7 @@ pub async fn get_recent_blocks(
 
 /// GET /v1/blocks/latest
 #[utoipa::path(
+    tag = "routesblocks",
     get,
     path = "/v1/blocks/latest",
     responses(
@@ -112,6 +114,7 @@ pub async fn get_latest_block(
 
 /// GET /v1/blocks/{height}
 #[utoipa::path(
+    tag = "routesblocks",
     get,
     path = "/v1/blocks/{height}",
     params(("height" = u64, Path, description = "Block height")),
@@ -134,6 +137,7 @@ pub async fn get_block_by_height(
 /// `GET /v2/blocks/ws?from_block=N` for versioned replay/resume and explicit
 /// lag/retention-gap signalling.
 #[utoipa::path(
+    tag = "routesblocks",
     get,
     path = "/v1/blocks/stream",
     description = "Third-party convenience SSE stream of public block aggregates. First-party clients should use GET /v2/blocks/ws?from_block=N for replay/resume, versioned envelopes, and lag/retention-gap signalling.",
@@ -160,6 +164,7 @@ pub async fn stream_blocks(
 ///   current head before switching to live. Used by clients to resume
 ///   after a `lagged` close without gaps.
 #[utoipa::path(
+    tag = "routesblocks",
     get,
     path = "/v2/blocks/ws",
     description = "Privacy-preserving public WebSocket block stream. Supports ?from_block=N replay and exposes only commitments, prices, aggregate analytics, and sanitized market lifecycle.",
@@ -193,6 +198,7 @@ pub async fn ws_blocks(
 
 /// GET /v1/blocks/ws — authenticated canonical service stream.
 #[utoipa::path(
+    tag = "routesblocks",
     get,
     path = "/v1/blocks/ws",
     description = "Authenticated service WebSocket stream containing the full canonical block response.",

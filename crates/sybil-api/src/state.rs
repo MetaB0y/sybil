@@ -204,6 +204,14 @@ pub struct AppState {
     /// Cheap pre-handler limiter for order endpoints. Sequencer admission has
     /// authoritative account/global limits; this bounds parsing/signature work.
     pub http_order_limiter: Arc<HttpRateLimiter>,
+    /// Lifetime public account-id stock. The current stock comes from the
+    /// sequencer's durable next account id; zero disables public onboarding.
+    pub public_account_capacity: u64,
+    /// Server-selected balance for public onboarding. Caller-selected funding
+    /// remains confined to service/dev account creation.
+    pub public_account_grant_nanos: u64,
+    /// Cheap pre-handler budget for anonymous onboarding key material.
+    pub http_onboarding_limiter: Arc<HttpRateLimiter>,
     /// Public DA reads have their own low-rate bucket and a hard in-flight cap
     /// so retained-history serving cannot monopolize the sequencer/store.
     pub http_da_limiter: Arc<HttpRateLimiter>,
@@ -295,6 +303,14 @@ impl AppState {
                 config.http_order_client_rps,
                 config.http_order_client_burst,
             )),
+            public_account_capacity: config.public_account_capacity,
+            public_account_grant_nanos: config.public_account_grant_nanos,
+            http_onboarding_limiter: Arc::new(HttpRateLimiter::new(
+                config.http_onboarding_global_rps,
+                config.http_onboarding_global_burst,
+                config.http_onboarding_client_rps,
+                config.http_onboarding_client_burst,
+            )),
             http_da_limiter: Arc::new(HttpRateLimiter::new(
                 config.http_da_global_rps,
                 config.http_da_global_burst,
@@ -326,7 +342,20 @@ impl AppState {
         let owners = self.sequencer.active_api_key_owners().await?;
         *self.read_api_key_owners.write().await = Some(owners.into_iter().collect());
         *self.leaderboard_bases.write().await = Some(self.sequencer.leaderboard_bases().await?);
+        self.record_public_account_stock(self.sequencer.account_stock().await?);
         Ok(())
+    }
+
+    /// Publish the configured lifetime ceiling beside the durable account-id
+    /// stock. Re-running this after each allocation makes restart and live
+    /// capacity visible without maintaining a second mutable counter.
+    pub fn record_public_account_stock(&self, accounts_allocated: u64) {
+        metrics::gauge!("sybil_public_account_capacity").set(self.public_account_capacity as f64);
+        metrics::gauge!("sybil_public_account_stock").set(accounts_allocated as f64);
+        metrics::gauge!("sybil_public_account_remaining").set(
+            self.public_account_capacity
+                .saturating_sub(accounts_allocated) as f64,
+        );
     }
 
     pub async fn read_api_key_owner(

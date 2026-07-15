@@ -3,7 +3,7 @@
 /**
  * Connect modal — wired into the layout so any "connect to trade" CTA can
  * just call `setConnectModalOpen(true)`. Two tabs:
- *  - **Create demo**: balance chip selector → POST /v1/accounts (dev-mode)
+ *  - **Create demo**: fixed server grant → capped public onboarding command
  *  - **Import existing**: paste account_id + JWK
  *
  * Render-gated: only mounted when `connectModalOpen` is true. Uses a portal
@@ -33,13 +33,6 @@ import {
 } from "@/lib/account/use-account";
 import { isWebAuthnAvailable } from "@/lib/auth/webauthn";
 import { trapTabFocus } from "@/lib/accessibility/focus-trap";
-
-const BALANCE_OPTIONS: Array<{ label: string; nanos: bigint }> = [
-  { label: "$100", nanos: 100_000_000_000n },
-  { label: "$500", nanos: 500_000_000_000n },
-  { label: "$1,000", nanos: 1_000_000_000_000n },
-  { label: "$5,000", nanos: 5_000_000_000_000n },
-];
 
 type Tab = "saved" | "create" | "passkey" | "import";
 
@@ -318,9 +311,6 @@ function TabButton({
 
 function CreateTab() {
   const setOpen = useSetConnectModalOpen();
-  const [balanceNanos, setBalanceNanos] = useState<bigint>(
-    BALANCE_OPTIONS[2]!.nanos,
-  );
   const [mode, setMode] = useState<CreateAccountKeyMode>(
     isWebAuthnAvailable() ? "passkey" : "local_key",
   );
@@ -337,7 +327,7 @@ function CreateTab() {
     setRecovery(null);
     setBusy(true);
     try {
-      await createDemoAccount(balanceNanos, mode);
+      await createDemoAccount(mode);
     } catch (e) {
       if (e instanceof AccountError && e.kind === "account_created_recovery") {
         const saved = readStoredAccount();
@@ -357,7 +347,9 @@ function CreateTab() {
         }
       }
       const msg =
-        e instanceof AccountError && e.kind === "dev_mode_off"
+        e instanceof AccountError && e.kind === "capacity_exhausted"
+          ? "All public demo account spots are currently allocated. Reconnect an existing account or contact the operator."
+          : e instanceof AccountError && e.kind === "dev_mode_off"
           ? "Demo accounts are disabled on this server. Import an existing account instead."
           : e instanceof AccountError && e.kind === "webauthn_unavailable"
             ? "Passkeys are not available in this browser."
@@ -407,8 +399,10 @@ function CreateTab() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <p style={{ ...bodyText, margin: 0 }}>
-        Create a demo account with a starting balance. Use a passkey for
-        device-backed signing, or a local key for browser-only testing.
+        Create one of the limited demo accounts. Sybil assigns the same fixed
+        play-money grant to everyone; callers cannot choose or mint a balance.
+        Use a passkey for device-backed signing, or a local key for
+        browser-only testing.
       </p>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -429,25 +423,6 @@ function CreateTab() {
           >
             Local browser key
           </button>
-        </div>
-      </div>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        <Label>Starting balance</Label>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {BALANCE_OPTIONS.map((opt) => {
-            const active = opt.nanos === balanceNanos;
-            return (
-              <button
-                key={opt.label}
-                type="button"
-                onClick={() => setBalanceNanos(opt.nanos)}
-                style={chipStyle(active)}
-              >
-                {opt.label}
-              </button>
-            );
-          })}
         </div>
       </div>
 

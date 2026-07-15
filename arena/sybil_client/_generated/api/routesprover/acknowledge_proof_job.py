@@ -8,42 +8,54 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
-from ...models.pending_order_response import PendingOrderResponse
+from ...models.proof_job_ack_request import ProofJobAckRequest
+from ...models.proof_job_ack_response import ProofJobAckResponse
 from typing import cast
 
 
 
 def _get_kwargs(
-    
+    height: int,
+    *,
+    body: ProofJobAckRequest,
+
 ) -> dict[str, Any]:
-    
+    headers: dict[str, Any] = {}
+
 
     
 
     
 
     _kwargs: dict[str, Any] = {
-        "method": "get",
-        "url": "/v1/orders/pending",
+        "method": "post",
+        "url": "/v1/prover/jobs/{height}/ack".format(height=quote(str(height), safe=""),),
     }
 
+    _kwargs["json"] = body.to_dict()
 
+    headers["Content-Type"] = "application/json"
+
+    _kwargs["headers"] = headers
     return _kwargs
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> list[PendingOrderResponse] | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | ProofJobAckResponse | None:
     if response.status_code == 200:
-        response_200 = []
-        _response_200 = response.json()
-        for response_200_item_data in (_response_200):
-            response_200_item = PendingOrderResponse.from_dict(response_200_item_data)
+        response_200 = ProofJobAckResponse.from_dict(response.json())
 
 
-
-            response_200.append(response_200_item)
 
         return response_200
+
+    if response.status_code == 400:
+        response_400 = cast(Any, None)
+        return response_400
+
+    if response.status_code == 503:
+        response_503 = cast(Any, None)
+        return response_503
 
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
@@ -51,7 +63,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[list[PendingOrderResponse]]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | ProofJobAckResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -61,23 +73,31 @@ def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
 
 def sync_detailed(
+    height: int,
     *,
     client: AuthenticatedClient | Client,
+    body: ProofJobAckRequest,
 
-) -> Response[list[PendingOrderResponse]]:
-    """ GET /v1/orders/pending — all pending orders (dev mode)
+) -> Response[Any | ProofJobAckResponse]:
+    """ POST /v1/prover/jobs/{height}/ack
+
+    Args:
+        height (int):
+        body (ProofJobAckRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[list[PendingOrderResponse]]
+        Response[Any | ProofJobAckResponse]
      """
 
 
     kwargs = _get_kwargs(
-        
+        height=height,
+body=body,
+
     )
 
     response = client.get_httpx_client().request(
@@ -87,44 +107,60 @@ def sync_detailed(
     return _build_response(client=client, response=response)
 
 def sync(
+    height: int,
     *,
     client: AuthenticatedClient | Client,
+    body: ProofJobAckRequest,
 
-) -> list[PendingOrderResponse] | None:
-    """ GET /v1/orders/pending — all pending orders (dev mode)
+) -> Any | ProofJobAckResponse | None:
+    """ POST /v1/prover/jobs/{height}/ack
+
+    Args:
+        height (int):
+        body (ProofJobAckRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        list[PendingOrderResponse]
+        Any | ProofJobAckResponse
      """
 
 
     return sync_detailed(
-        client=client,
+        height=height,
+client=client,
+body=body,
 
     ).parsed
 
 async def asyncio_detailed(
+    height: int,
     *,
     client: AuthenticatedClient | Client,
+    body: ProofJobAckRequest,
 
-) -> Response[list[PendingOrderResponse]]:
-    """ GET /v1/orders/pending — all pending orders (dev mode)
+) -> Response[Any | ProofJobAckResponse]:
+    """ POST /v1/prover/jobs/{height}/ack
+
+    Args:
+        height (int):
+        body (ProofJobAckRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[list[PendingOrderResponse]]
+        Response[Any | ProofJobAckResponse]
      """
 
 
     kwargs = _get_kwargs(
-        
+        height=height,
+body=body,
+
     )
 
     response = await client.get_async_httpx_client().request(
@@ -134,22 +170,30 @@ async def asyncio_detailed(
     return _build_response(client=client, response=response)
 
 async def asyncio(
+    height: int,
     *,
     client: AuthenticatedClient | Client,
+    body: ProofJobAckRequest,
 
-) -> list[PendingOrderResponse] | None:
-    """ GET /v1/orders/pending — all pending orders (dev mode)
+) -> Any | ProofJobAckResponse | None:
+    """ POST /v1/prover/jobs/{height}/ack
+
+    Args:
+        height (int):
+        body (ProofJobAckRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        list[PendingOrderResponse]
+        Any | ProofJobAckResponse
      """
 
 
     return (await asyncio_detailed(
-        client=client,
+        height=height,
+client=client,
+body=body,
 
     )).parsed

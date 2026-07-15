@@ -49,6 +49,7 @@ async fn store_snapshot(path: &FsPath, body: &[u8]) -> std::io::Result<()> {
 /// PUT /v1/events/{event_id}/raw — store the full Polymarket event JSON.
 /// Service/operator route. Body must be valid JSON.
 #[utoipa::path(
+    tag = "routesevents",
     put,
     path = "/v1/events/{event_id}/raw",
     params(("event_id" = String, Path, description = "Event identifier (alphanumeric, '_' or '-')")),
@@ -84,6 +85,7 @@ pub async fn put_event_raw(
 /// Readable in any mode (only the PUT is dev-mode gated) so the frontend can
 /// fetch snapshots without dev mode. Public read route.
 #[utoipa::path(
+    tag = "routesevents",
     get,
     path = "/v1/events/{event_id}/raw",
     params(("event_id" = String, Path, description = "Event identifier (alphanumeric, '_' or '-')")),

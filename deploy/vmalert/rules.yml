@@ -678,6 +678,26 @@ groups:
           summary: "Committed account stock is growing unusually fast"
           description: "More than 100 accounts were added over 15m (growth: {{ $value }}). Every account recurs in later full-state witnesses; check onboarding traffic and the public account-creation boundary. See docs/runbooks/resource-liveness.md."
 
+      - alert: PublicAccountCapacityLow
+        expr: (sybil_public_account_remaining / sybil_public_account_capacity <= 0.1) and sybil_public_account_remaining > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "Public onboarding account stock is nearly exhausted"
+          description: "At most 10% of the configured lifetime public account stock remains. Account ids are permanent and are not reclaimed; plan an explicit policy change or direct users to reconnect existing accounts. See docs/runbooks/resource-liveness.md."
+
+      - alert: PublicAccountCapacityExhausted
+        expr: sybil_public_account_remaining == 0 and sybil_public_account_capacity > 0
+        for: 2m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "Public onboarding account stock is exhausted"
+          description: "No lifetime public account allocations remain. Anonymous onboarding now returns PUBLIC_ACCOUNT_CAPACITY_EXHAUSTED; account ids are not reclaimed automatically. See docs/runbooks/resource-liveness.md."
+
       - alert: WitnessPayloadLarge
         expr: max(sybil_witness_payload_bytes{quantile="0.99"}) > 8 * 1024 * 1024
         for: 5m

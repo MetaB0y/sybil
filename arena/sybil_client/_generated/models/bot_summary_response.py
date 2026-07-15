@@ -24,7 +24,9 @@ T = TypeVar("T", bound="BotSummaryResponse")
 class BotSummaryResponse:
     """ 
         Attributes:
+            active (bool): Member of the most recent non-stale Arena runtime cohort.
             decision_count (int):
+            scored (bool): Eligible for public competition totals within the active runtime.
             trader_name (str):
             avg_edge (float | None | Unset):
             latest_balance (float | None | Unset):
@@ -36,12 +38,15 @@ class BotSummaryResponse:
             latest_timestamp (None | str | Unset):
             pnl (float | None | Unset):
             portfolio_value (float | None | Unset):
+            role (None | str | Unset): Runtime role such as competitor, load, or noise.
             snapshot_timestamp (None | str | Unset):
             total_fills (int | None | Unset):
             total_orders (int | None | Unset):
      """
 
+    active: bool
     decision_count: int
+    scored: bool
     trader_name: str
     avg_edge: float | None | Unset = UNSET
     latest_balance: float | None | Unset = UNSET
@@ -53,6 +58,7 @@ class BotSummaryResponse:
     latest_timestamp: None | str | Unset = UNSET
     pnl: float | None | Unset = UNSET
     portfolio_value: float | None | Unset = UNSET
+    role: None | str | Unset = UNSET
     snapshot_timestamp: None | str | Unset = UNSET
     total_fills: int | None | Unset = UNSET
     total_orders: int | None | Unset = UNSET
@@ -63,7 +69,11 @@ class BotSummaryResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
+        active = self.active
+
         decision_count = self.decision_count
+
+        scored = self.scored
 
         trader_name = self.trader_name
 
@@ -127,6 +137,12 @@ class BotSummaryResponse:
         else:
             portfolio_value = self.portfolio_value
 
+        role: None | str | Unset
+        if isinstance(self.role, Unset):
+            role = UNSET
+        else:
+            role = self.role
+
         snapshot_timestamp: None | str | Unset
         if isinstance(self.snapshot_timestamp, Unset):
             snapshot_timestamp = UNSET
@@ -149,7 +165,9 @@ class BotSummaryResponse:
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update({
+            "active": active,
             "decision_count": decision_count,
+            "scored": scored,
             "trader_name": trader_name,
         })
         if avg_edge is not UNSET:
@@ -172,6 +190,8 @@ class BotSummaryResponse:
             field_dict["pnl"] = pnl
         if portfolio_value is not UNSET:
             field_dict["portfolio_value"] = portfolio_value
+        if role is not UNSET:
+            field_dict["role"] = role
         if snapshot_timestamp is not UNSET:
             field_dict["snapshot_timestamp"] = snapshot_timestamp
         if total_fills is not UNSET:
@@ -186,7 +206,11 @@ class BotSummaryResponse:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
+        active = d.pop("active")
+
         decision_count = d.pop("decision_count")
+
+        scored = d.pop("scored")
 
         trader_name = d.pop("trader_name")
 
@@ -290,6 +314,16 @@ class BotSummaryResponse:
         portfolio_value = _parse_portfolio_value(d.pop("portfolio_value", UNSET))
 
 
+        def _parse_role(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        role = _parse_role(d.pop("role", UNSET))
+
+
         def _parse_snapshot_timestamp(data: object) -> None | str | Unset:
             if data is None:
                 return data
@@ -321,7 +355,9 @@ class BotSummaryResponse:
 
 
         bot_summary_response = cls(
+            active=active,
             decision_count=decision_count,
+            scored=scored,
             trader_name=trader_name,
             avg_edge=avg_edge,
             latest_balance=latest_balance,
@@ -333,6 +369,7 @@ class BotSummaryResponse:
             latest_timestamp=latest_timestamp,
             pnl=pnl,
             portfolio_value=portfolio_value,
+            role=role,
             snapshot_timestamp=snapshot_timestamp,
             total_fills=total_fills,
             total_orders=total_orders,

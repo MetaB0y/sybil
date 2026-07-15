@@ -66,6 +66,8 @@ from .market_search_params import MarketSearchParams
 from .market_summary_response import MarketSummaryResponse
 from .observe_l1_height_request import ObserveL1HeightRequest
 from .observe_l1_height_response import ObserveL1HeightResponse
+from .onboard_account_request import OnboardAccountRequest
+from .onboarding_policy_response import OnboardingPolicyResponse
 from .open_batch_response import OpenBatchResponse
 from .order_accepted_response import OrderAcceptedResponse
 from .order_spec_type_0 import OrderSpecType0
@@ -88,6 +90,8 @@ from .price_candles_response import PriceCandlesResponse
 from .price_history_response import PriceHistoryResponse
 from .price_point_response import PricePointResponse
 from .private_account_summary_response import PrivateAccountSummaryResponse
+from .proof_job_ack_request import ProofJobAckRequest
+from .proof_job_ack_response import ProofJobAckResponse
 from .public_block_response import PublicBlockResponse
 from .public_block_response_by_market import PublicBlockResponseByMarket
 from .public_block_response_clearing_prices_nanos import PublicBlockResponseClearingPricesNanos
@@ -133,6 +137,8 @@ from .system_event_response_type_12 import SystemEventResponseType12
 from .system_event_response_type_12_type import SystemEventResponseType12Type
 from .system_event_response_type_13 import SystemEventResponseType13
 from .system_event_response_type_13_type import SystemEventResponseType13Type
+from .system_event_response_type_14 import SystemEventResponseType14
+from .system_event_response_type_14_type import SystemEventResponseType14Type
 from .system_event_response_type_1_type import SystemEventResponseType1Type
 from .system_event_response_type_2 import SystemEventResponseType2
 from .system_event_response_type_2_type import SystemEventResponseType2Type
@@ -222,6 +228,8 @@ __all__ = (
     "MarketSummaryResponse",
     "ObserveL1HeightRequest",
     "ObserveL1HeightResponse",
+    "OnboardAccountRequest",
+    "OnboardingPolicyResponse",
     "OpenBatchResponse",
     "OrderAcceptedResponse",
     "OrderSpecType0",
@@ -244,6 +252,8 @@ __all__ = (
     "PriceHistoryResponse",
     "PricePointResponse",
     "PrivateAccountSummaryResponse",
+    "ProofJobAckRequest",
+    "ProofJobAckResponse",
     "PublicBlockResponse",
     "PublicBlockResponseByMarket",
     "PublicBlockResponseClearingPricesNanos",
@@ -289,6 +299,8 @@ __all__ = (
     "SystemEventResponseType12Type",
     "SystemEventResponseType13",
     "SystemEventResponseType13Type",
+    "SystemEventResponseType14",
+    "SystemEventResponseType14Type",
     "SystemEventResponseType1Type",
     "SystemEventResponseType2",
     "SystemEventResponseType2Type",

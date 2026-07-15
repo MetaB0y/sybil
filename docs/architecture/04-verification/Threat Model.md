@@ -72,20 +72,21 @@ flowchart TB
 | Register/revoke a key for another account | 🟢 | State-bound signed key operations, service-tier checks, committed `keys_digest`, and guest replay. |
 | Overspend through concurrent/resting orders | 🟢 | Direct-admission reservations, atomic deferred admission, Layer 4 accumulation, and deterministic settlement. |
 | Double-withdraw or reuse an escape claim | 🟢 | Typed withdrawal/claim leaves, root binding, freshness rules, and nullifiers. |
-| Exhaust parsing, signatures, actor queues, solver work, or persistent state | 🔴 | Order token buckets and per-account caps limit some flow, but unlimited free accounts, unbounded API-key records, zero-reservation orders, key-op churn, unpruned histories, and expensive public DA-manifest reads leave stock/liveness attacks open. |
+| Exhaust parsing, signatures, actor queues, solver work, or persistent state | 🟠 / 🔴 | Public onboarding has route/client flow limits plus a durable lifetime account cap; read-key records, resting-order admission, and DA reads are also bounded. Product-history outbox growth during a prolonged projector outage remains an open stock/liveness attack. |
 
 ## Resource exhaustion and free state
 
 The current public surface does **not** satisfy the assumption that persistent
 state is bounded by deposited capital. The highest-priority gaps are:
 
-- API-key records/labels can grow an account beyond its qMDB value limit;
-- account creation is unbounded and can mint a caller-selected demo balance;
-- zero-price or zero-quantity resting orders can reserve no capital;
-- key operations can exceed the verifier's per-block limit before admission
-  stops them;
-- durable histories and public full-payload manifest hashing lack appropriate
-  retention/read budgets.
+- the product-history outbox can grow without a byte/row budget while its
+  projector is unavailable;
+- some durable histories still require explicit retention economics.
+
+Anonymous account creation no longer accepts caller-selected funding: it uses a
+fixed server grant, a durable lifetime account-id ceiling, and a dedicated rate
+budget. IDs are not reclaimed. Service-authenticated creation is a trusted
+operator bypass, not a permissionless resource path.
 
 These are availability and persistence-safety defects even when every state
 transition is cryptographically valid. The detailed evidence and remediation

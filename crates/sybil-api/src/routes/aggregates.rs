@@ -18,6 +18,7 @@ use crate::util::now_ms;
 
 /// GET /v1/activity/overview
 #[utoipa::path(
+    tag = "routesaggregates",
     get,
     path = "/v1/activity/overview",
     responses(
@@ -69,6 +70,7 @@ pub async fn get_activity_overview(
 
 /// GET /v1/markets/{id}/open-batch
 #[utoipa::path(
+    tag = "routesaggregates",
     get,
     path = "/v1/markets/{id}/open-batch",
     params(("id" = u32, Path, description = "Market ID")),
@@ -97,6 +99,7 @@ pub async fn get_open_batch(
 
 /// GET /v1/events/{event_id}/traders
 #[utoipa::path(
+    tag = "routesaggregates",
     get,
     path = "/v1/events/{event_id}/traders",
     params(("event_id" = String, Path, description = "Polymarket event id")),

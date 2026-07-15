@@ -55,6 +55,7 @@ pub struct LeaderboardParams {
 
 /// GET /v1/leaderboard?window&limit
 #[utoipa::path(
+    tag = "routesleaderboard",
     get,
     path = "/v1/leaderboard",
     params(

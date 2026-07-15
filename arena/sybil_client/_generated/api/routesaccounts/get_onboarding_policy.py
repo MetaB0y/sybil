@@ -8,14 +8,13 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
-from ...models.pending_order_response import PendingOrderResponse
+from ...models.onboarding_policy_response import OnboardingPolicyResponse
 from typing import cast
 
 
 
 def _get_kwargs(
-    id: int,
-
+    
 ) -> dict[str, Any]:
     
 
@@ -25,7 +24,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/v1/markets/{id}/orderbook".format(id=quote(str(id), safe=""),),
+        "url": "/v1/onboarding",
     }
 
 
@@ -33,18 +32,17 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> list[PendingOrderResponse] | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | OnboardingPolicyResponse | None:
     if response.status_code == 200:
-        response_200 = []
-        _response_200 = response.json()
-        for response_200_item_data in (_response_200):
-            response_200_item = PendingOrderResponse.from_dict(response_200_item_data)
+        response_200 = OnboardingPolicyResponse.from_dict(response.json())
 
 
-
-            response_200.append(response_200_item)
 
         return response_200
+
+    if response.status_code == 500:
+        response_500 = cast(Any, None)
+        return response_500
 
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
@@ -52,7 +50,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[list[PendingOrderResponse]]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | OnboardingPolicyResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -62,28 +60,23 @@ def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
 
 def sync_detailed(
-    id: int,
     *,
     client: AuthenticatedClient | Client,
 
-) -> Response[list[PendingOrderResponse]]:
-    """ GET /v1/markets/{id}/orderbook — all pending orders for a market (dev mode)
-
-    Args:
-        id (int):
+) -> Response[Any | OnboardingPolicyResponse]:
+    """ GET /v1/onboarding — public account stock and fixed grant policy.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[list[PendingOrderResponse]]
+        Response[Any | OnboardingPolicyResponse]
      """
 
 
     kwargs = _get_kwargs(
-        id=id,
-
+        
     )
 
     response = client.get_httpx_client().request(
@@ -93,54 +86,44 @@ def sync_detailed(
     return _build_response(client=client, response=response)
 
 def sync(
-    id: int,
     *,
     client: AuthenticatedClient | Client,
 
-) -> list[PendingOrderResponse] | None:
-    """ GET /v1/markets/{id}/orderbook — all pending orders for a market (dev mode)
-
-    Args:
-        id (int):
+) -> Any | OnboardingPolicyResponse | None:
+    """ GET /v1/onboarding — public account stock and fixed grant policy.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        list[PendingOrderResponse]
+        Any | OnboardingPolicyResponse
      """
 
 
     return sync_detailed(
-        id=id,
-client=client,
+        client=client,
 
     ).parsed
 
 async def asyncio_detailed(
-    id: int,
     *,
     client: AuthenticatedClient | Client,
 
-) -> Response[list[PendingOrderResponse]]:
-    """ GET /v1/markets/{id}/orderbook — all pending orders for a market (dev mode)
-
-    Args:
-        id (int):
+) -> Response[Any | OnboardingPolicyResponse]:
+    """ GET /v1/onboarding — public account stock and fixed grant policy.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[list[PendingOrderResponse]]
+        Response[Any | OnboardingPolicyResponse]
      """
 
 
     kwargs = _get_kwargs(
-        id=id,
-
+        
     )
 
     response = await client.get_async_httpx_client().request(
@@ -150,27 +133,22 @@ async def asyncio_detailed(
     return _build_response(client=client, response=response)
 
 async def asyncio(
-    id: int,
     *,
     client: AuthenticatedClient | Client,
 
-) -> list[PendingOrderResponse] | None:
-    """ GET /v1/markets/{id}/orderbook — all pending orders for a market (dev mode)
-
-    Args:
-        id (int):
+) -> Any | OnboardingPolicyResponse | None:
+    """ GET /v1/onboarding — public account stock and fixed grant policy.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        list[PendingOrderResponse]
+        Any | OnboardingPolicyResponse
      """
 
 
     return (await asyncio_detailed(
-        id=id,
-client=client,
+        client=client,
 
     )).parsed

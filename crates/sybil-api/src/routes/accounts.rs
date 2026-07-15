@@ -21,8 +21,8 @@ use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::request::{
     AuthScheme, CreateAccountRequest, CreateApiKeyRequest, FundAccountRequest,
-    KeyScope as KeyScopeDto, RegisterKeyRequest, RevokeApiKeyRequest, RevokeKeyRequest,
-    SetProfileRequest, SignedRegisterKeyRequest, WebAuthnAssertion,
+    KeyScope as KeyScopeDto, OnboardAccountRequest, RegisterKeyRequest, RevokeApiKeyRequest,
+    RevokeKeyRequest, SetProfileRequest, SignedRegisterKeyRequest, WebAuthnAssertion,
 };
 use crate::types::response::*;
 use crate::util::now_ms;
@@ -39,14 +39,6 @@ pub use history::{get_account_fills, get_account_history, get_equity, get_portfo
 #[cfg(test)]
 use matching_sequencer::AccountFillCursor;
 
-/// Ceiling on the play-money grant an unauthenticated caller may mint via the
-/// public onboarding path (POST /v1/accounts). Mirrors the largest demo option
-/// the web onboarding modal offers ($5,000). Real balances arrive through the
-/// service-gated `fund_account` / L1 bridge-deposit paths, so this cap only
-/// bounds self-service demo accounts; dev mode is unrestricted for tests and
-/// operator onboarding.
-const MAX_PUBLIC_DEMO_BALANCE_NANOS: i64 = 5_000_000_000_000;
-
 fn sequencer_auth_scheme(scheme: AuthScheme) -> AccountAuthScheme {
     match scheme {
         AuthScheme::RawP256 => AccountAuthScheme::RawP256,
@@ -58,25 +50,130 @@ fn validate_signing_key_label(label: Option<&str>) -> Result<(), AppError> {
     RegisteredPubkey::validate_label(label).map_err(AppError::from)
 }
 
-/// POST /v1/accounts — create an account with its initial signing key.
-///
-/// Public onboarding must provide `initial_key`; account allocation and
-/// first-key registration are serialized as one API operation. The legacy
-/// bare request shape (no `initial_key`) is deprecated and service-tier only.
+/// GET /v1/onboarding — public account stock and fixed grant policy.
 #[utoipa::path(
+    tag = "routesaccounts",
+    get,
+    path = "/v1/onboarding",
+    responses(
+        (status = 200, description = "Public onboarding stock policy", body = OnboardingPolicyResponse),
+        (status = 500, description = "Sequencer unavailable")
+    )
+)]
+pub async fn get_onboarding_policy(
+    State(state): State<AppState>,
+) -> Result<Json<OnboardingPolicyResponse>, AppError> {
+    let accounts_allocated = state.sequencer.account_stock().await?;
+    state.record_public_account_stock(accounts_allocated);
+    let accounts_remaining = state
+        .public_account_capacity
+        .saturating_sub(accounts_allocated);
+    Ok(Json(OnboardingPolicyResponse {
+        enabled: accounts_remaining > 0,
+        account_capacity: state.public_account_capacity,
+        accounts_allocated,
+        accounts_remaining,
+        grant_nanos: state.public_account_grant_nanos,
+    }))
+}
+
+/// POST /v1/onboarding/accounts — allocate one capped public account.
+///
+/// The server supplies the fixed grant. The API lock covers the durable-stock
+/// read and atomic account/key command, so concurrent callers cannot overshoot
+/// the lifetime ceiling.
+#[utoipa::path(
+    tag = "routesaccounts",
+    post,
+    path = "/v1/onboarding/accounts",
+    request_body = OnboardAccountRequest,
+    responses(
+        (status = 200, description = "Public account and initial key created", body = AccountResponse),
+        (status = 400, description = "Invalid initial key"),
+        (status = 409, description = "Key conflict or public account capacity exhausted"),
+        (status = 429, description = "Onboarding request rate exceeded")
+    )
+)]
+pub async fn onboard_account(
+    State(state): State<AppState>,
+    Json(req): Json<OnboardAccountRequest>,
+) -> Result<Json<AccountResponse>, AppError> {
+    validate_signing_key_label(req.initial_key.label.as_deref())?;
+    let balance_nanos = i64::try_from(state.public_account_grant_nanos).map_err(|_| {
+        AppError::internal("SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS exceeds the signed-balance range")
+    })?;
+    // Parse caller-controlled key material before occupying the allocation
+    // lock or sequencer mailbox.
+    let pubkey = parse_new_key(
+        &state,
+        &req.initial_key.public_key_hex,
+        req.initial_key.auth_scheme,
+        req.initial_key.webauthn_registration.as_ref(),
+    )?;
+
+    let _bootstrap_guard = state.account_bootstrap_lock.lock().await;
+    if state
+        .sequencer
+        .lookup_registered_pubkey(pubkey.clone())
+        .await?
+        .is_some()
+    {
+        return Err(AppError::conflict(
+            "Initial signing key is already registered",
+        ));
+    }
+    let accounts_allocated = state.sequencer.account_stock().await?;
+    state.record_public_account_stock(accounts_allocated);
+    if accounts_allocated >= state.public_account_capacity {
+        metrics::counter!(
+            "sybil_public_account_creation_total",
+            "result" => "capacity_exhausted"
+        )
+        .increment(1);
+        return Err(AppError::public_account_capacity_exhausted(
+            state.public_account_capacity,
+        ));
+    }
+
+    let key = req.initial_key;
+    let account = state
+        .sequencer
+        .create_account_with_initial_key(
+            balance_nanos,
+            pubkey,
+            RegisteredPubkey {
+                account_id: AccountId(0),
+                auth_scheme: sequencer_auth_scheme(key.auth_scheme),
+                label: key.label,
+                scope: sequencer_key_scope(key.scope),
+                created_at_ms: now_ms(),
+            },
+        )
+        .await?;
+    let stock = account.id.0.saturating_add(1);
+    state.record_public_account_stock(stock);
+    metrics::counter!("sybil_public_account_creation_total", "result" => "created").increment(1);
+    Ok(Json(account_to_response(&account, 0)))
+}
+
+/// POST /v1/accounts — service/dev account creation with explicit funding.
+///
+/// This operator surface may install an initial key atomically or create the
+/// deprecated bare account used by local tooling. It is never public.
+#[utoipa::path(
+    tag = "routesaccounts",
     post,
     path = "/v1/accounts",
     request_body = CreateAccountRequest,
     responses(
-        (status = 200, description = "Account and initial signing key created", body = AccountResponse),
+        (status = 200, description = "Service account created", body = AccountResponse),
         (status = 400, description = "Invalid initial balance or key"),
-        (status = 401, description = "Bare creation requires the service token"),
+        (status = 401, description = "Service token required"),
         (status = 403, description = "Invalid service token")
     )
 )]
 pub async fn create_account(
     State(state): State<AppState>,
-    headers: HeaderMap,
     Json(req): Json<CreateAccountRequest>,
 ) -> Result<Json<AccountResponse>, AppError> {
     validate_signing_key_label(
@@ -90,21 +187,6 @@ pub async fn create_account(
             req.initial_balance_nanos
         ))
     })?;
-    // The deprecated bare-account variant is retained for operator/dev tooling,
-    // but is no longer a public onboarding path.
-    if req.initial_key.is_none() {
-        crate::app::require_service_token(&state, &headers)?;
-    }
-
-    // Anonymous atomic onboarding remains demo-capped. Trusted service callers
-    // may create larger operational accounts.
-    let service_authed = crate::app::request_has_valid_service_token(&state, &headers);
-    if !state.dev_mode && !service_authed && balance_nanos > MAX_PUBLIC_DEMO_BALANCE_NANOS {
-        return Err(AppError::bad_request(format!(
-            "initial_balance_nanos {} exceeds the demo account limit of {}",
-            req.initial_balance_nanos, MAX_PUBLIC_DEMO_BALANCE_NANOS
-        )));
-    }
     // Validate all caller-controlled key material before allocating an account.
     let initial_key = req
         .initial_key
@@ -154,11 +236,16 @@ pub async fn create_account(
         }
         None => state.sequencer.create_account(balance_nanos).await?,
     };
+    // Service allocations consume the same monotonic id space. Keep the public
+    // remaining-stock gauge honest even though this trusted path bypasses the
+    // anonymous admission ceiling.
+    state.record_public_account_stock(account.id.0.saturating_add(1));
     Ok(Json(account_to_response(&account, 0)))
 }
 
 /// POST /v1/accounts/{id}/fund
 #[utoipa::path(
+    tag = "routesaccounts",
     post,
     path = "/v1/accounts/{id}/fund",
     params(("id" = u64, Path, description = "Account ID")),
@@ -194,6 +281,7 @@ pub async fn fund_account(
 
 /// GET /v1/accounts/{id}
 #[utoipa::path(
+    tag = "routesaccounts",
     get,
     path = "/v1/accounts/{id}",
     params(("id" = u64, Path, description = "Account ID")),
@@ -225,6 +313,7 @@ pub async fn get_account(
 /// portfolio data. A client must fetch them immediately before signing a
 /// registration or revocation; admission rejects stale values with 409.
 #[utoipa::path(
+    tag = "routesaccounts",
     get,
     path = "/v1/accounts/{id}/keyop-state",
     params(("id" = u64, Path, description = "Account ID")),
@@ -291,6 +380,7 @@ fn parse_new_key(
 /// has a key, every subsequent key must be added via the SIGNED path
 /// (`POST /v1/accounts/{id}/keys/register`), authorized by an existing key.
 #[utoipa::path(
+    tag = "routesaccounts",
     post,
     path = "/v1/accounts/{id}/keys",
     params(("id" = u64, Path, description = "Account ID")),
@@ -356,6 +446,7 @@ pub async fn register_key(
 /// re-verified by the sequencer; the WebAuthn path is verified at the edge and
 /// again by the shared verifier before the authenticated intent is forwarded.
 #[utoipa::path(
+    tag = "routesaccounts",
     post,
     path = "/v1/accounts/{id}/keys/register",
     params(("id" = u64, Path, description = "Account ID")),
@@ -587,6 +678,7 @@ fn validate_profile_fields(
 
 /// POST /v1/accounts/{id}/profile — set/clear opt-in profile (signed) (SYB-60)
 #[utoipa::path(
+    tag = "routesaccounts",
     post,
     path = "/v1/accounts/{id}/profile",
     params(("id" = u64, Path, description = "Account ID")),
@@ -651,6 +743,7 @@ pub async fn set_profile(
 
 /// GET /v1/accounts/{id}/keys — list registered signing keys with metadata
 #[utoipa::path(
+    tag = "routesaccounts",
     get,
     path = "/v1/accounts/{id}/keys",
     params(("id" = u64, Path, description = "Account ID")),
@@ -689,6 +782,7 @@ pub async fn list_account_keys(
 
 /// POST /v1/accounts/{id}/keys/revoke — revoke a signing key (signed) (SYB-60)
 #[utoipa::path(
+    tag = "routesaccounts",
     post,
     path = "/v1/accounts/{id}/keys/revoke",
     params(("id" = u64, Path, description = "Account ID")),
@@ -797,6 +891,7 @@ pub async fn revoke_key(
 
 /// GET /v1/accounts/{id}/api-keys — list read API keys (metadata only) (SYB-60)
 #[utoipa::path(
+    tag = "routesaccounts",
     get,
     path = "/v1/accounts/{id}/api-keys",
     params(("id" = u64, Path, description = "Account ID")),
@@ -830,6 +925,7 @@ pub async fn list_api_keys(
 ///
 /// The bearer token is returned exactly once; only its blake3 hash is stored.
 #[utoipa::path(
+    tag = "routesaccounts",
     post,
     path = "/v1/accounts/{id}/api-keys",
     params(("id" = u64, Path, description = "Account ID")),
@@ -963,6 +1059,7 @@ async fn resolve_webauthn_login_signer(
 
 /// POST /v1/accounts/{id}/api-keys/revoke — revoke a read API key (signed)
 #[utoipa::path(
+    tag = "routesaccounts",
     post,
     path = "/v1/accounts/{id}/api-keys/revoke",
     params(("id" = u64, Path, description = "Account ID")),
@@ -1082,6 +1179,7 @@ pub(crate) async fn authorize_account_read(
 /// the same account data the public endpoints already expose, but only to a
 /// read key that belongs to the requested account.
 #[utoipa::path(
+    tag = "routesaccounts",
     get,
     path = "/v1/accounts/{id}/private-summary",
     params(("id" = u64, Path, description = "Account ID")),

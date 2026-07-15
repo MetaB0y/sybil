@@ -60,8 +60,12 @@ fn exact_public_routes() -> &'static [RouteMount] {
             path: "/v1/da/{height}/manifest",
         },
         RouteMount {
+            method: "GET",
+            path: "/v1/onboarding",
+        },
+        RouteMount {
             method: "POST",
-            path: "/v1/accounts",
+            path: "/v1/onboarding/accounts",
         },
         RouteMount {
             method: "GET",
@@ -230,6 +234,10 @@ fn exact_owner_routes() -> &'static [RouteMount] {
 fn exact_service_routes() -> &'static [RouteMount] {
     &[
         RouteMount {
+            method: "POST",
+            path: "/v1/accounts",
+        },
+        RouteMount {
             method: "GET",
             path: "/v1/blocks/ws",
         },
@@ -392,10 +400,9 @@ async fn create_owner_with_read_key(app: axum::Router, key_byte: u8) -> (u64, St
     let (status, body) = request_json(
         app.clone(),
         Method::POST,
-        "/v1/accounts",
+        "/v1/onboarding/accounts",
         None,
         json!({
-            "initial_balance_nanos": 1_000_000_000u64,
             "initial_key": {"public_key_hex": public_key_hex}
         }),
     )
@@ -697,7 +704,7 @@ async fn service_routes_fail_closed_when_token_is_unset_in_prod() {
 }
 
 #[tokio::test]
-async fn onboarding_is_public_and_demo_capped_in_prod() {
+async fn onboarding_is_public_and_caller_funding_is_service_only() {
     let app = prod_app().await;
 
     // A fresh browser user creates a demo account and its first key atomically
@@ -707,10 +714,9 @@ async fn onboarding_is_public_and_demo_capped_in_prod() {
     let (status, body) = request_json(
         app.clone(),
         Method::POST,
-        "/v1/accounts",
+        "/v1/onboarding/accounts",
         None,
         json!({
-            "initial_balance_nanos": 1_000_000_000_000u64,
             "initial_key": {"public_key_hex": pubkey_hex}
         }),
     )
@@ -739,11 +745,11 @@ async fn onboarding_is_public_and_demo_capped_in_prod() {
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
-    // Minting above the public demo ceiling is rejected (no unbounded mint).
+    // Public onboarding has no caller-controlled funding field.
     let (status, _) = request_json(
         app.clone(),
         Method::POST,
-        "/v1/accounts",
+        "/v1/onboarding/accounts",
         None,
         json!({
             "initial_balance_nanos": 5_000_000_000_001u64,
@@ -751,7 +757,7 @@ async fn onboarding_is_public_and_demo_capped_in_prod() {
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
 #[tokio::test]

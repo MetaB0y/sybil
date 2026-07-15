@@ -3,6 +3,7 @@
  *
  * Run:  pnpm smoke
  * Override server: SYBIL_API_BASE=https://other.example.com pnpm smoke
+ * Zero-grant prod: SYBIL_SERVICE_TOKEN=... pnpm smoke (operator funding only)
  *
  * The live suite is skipped during the default `pnpm test`; only `pnpm smoke`
  * enables it. Run the live suite only when you've changed canonical-byte
@@ -11,7 +12,7 @@
  *
  * Each run:
  *   1. Generate an ephemeral P-256 keypair (never persisted)
- *   2. Atomically POST /v1/accounts with that initial key
+ *   2. Atomically POST /v1/onboarding/accounts with that initial key
  *   3. Mint a signed read bearer for owner-scoped account reads
  *   4. GET  /v1/markets/summary → pick first active binary market
  *   5. Build canonical bytes + sign + POST /v1/orders/signed
@@ -39,8 +40,8 @@ import {
 } from "../src/lib/auth/canonical";
 
 const BASE = process.env.SYBIL_API_BASE ?? "https://172-104-31-54.nip.io";
-const INITIAL_BALANCE_NANOS = 1_000_000_000_000n; // $1000
-
+const SERVICE_TOKEN = process.env.SYBIL_SERVICE_TOKEN;
+const SMOKE_FUND_NANOS = 1_000_000_000_000;
 interface RestResult<T = unknown> {
   status: number;
   ok: boolean;
@@ -115,7 +116,6 @@ interface HealthResp {
 
 function initialAccountBody(publicKeyHex: string) {
   return {
-    initial_balance_nanos: Number(INITIAL_BALANCE_NANOS),
     initial_key: {
       public_key_hex: publicKeyHex,
       auth_scheme: "raw_p256",
@@ -130,7 +130,6 @@ function ownerReadHeaders(token: string): HeadersInit {
 describe("signed-flow smoke request contracts", () => {
   it("uses atomic public onboarding with an initial signing key", () => {
     expect(initialAccountBody("02abcd")).toEqual({
-      initial_balance_nanos: Number(INITIAL_BALANCE_NANOS),
       initial_key: {
         public_key_hex: "02abcd",
         auth_scheme: "raw_p256",
@@ -161,16 +160,38 @@ describe.skipIf(!RUN)("signed-flow smoke (live)", () => {
       log(`pubkey = ${pubHex}`);
 
       // 2. Create the account and initial key in one public request.
-      const created = await rest<AccountResponse>("/v1/accounts", {
+      const created = await rest<AccountResponse>("/v1/onboarding/accounts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(initialAccountBody(pubHex)),
       });
       expect(
         created.ok,
-        `POST /v1/accounts returned ${created.status}: ${JSON.stringify(created.body)}`,
+        `POST /v1/onboarding/accounts returned ${created.status}: ${JSON.stringify(created.body)}`,
       ).toBe(true);
       const accountId = created.body.account_id;
+      let initialBalanceNanos = BigInt(created.body.balance_nanos);
+      if (initialBalanceNanos === 0n) {
+        expect(
+          SERVICE_TOKEN,
+          "zero-grant production onboarding requires SYBIL_SERVICE_TOKEN for operator smoke funding",
+        ).toBeTruthy();
+        const funded = await rest<AccountResponse>(
+          `/v1/accounts/${accountId}/fund`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ amount_nanos: SMOKE_FUND_NANOS }),
+          },
+          SERVICE_TOKEN,
+        );
+        expect(
+          funded.ok,
+          `operator smoke funding returned ${funded.status}: ${JSON.stringify(funded.body)}`,
+        ).toBe(true);
+        initialBalanceNanos = BigInt(funded.body.balance_nanos);
+      }
+      expect(initialBalanceNanos).toBeGreaterThan(0n);
       log(`account_id = ${accountId}, balance = ${created.body.balance_nanos}`);
 
       const health = await rest<HealthResp>("/v1/health");
@@ -291,7 +312,7 @@ describe.skipIf(!RUN)("signed-flow smoke (live)", () => {
       log(`open orders: ${openOrders.body.length}`);
       log(`fills: ${fills.body.fills.length}`);
 
-      const balanceChanged = balanceAfter < INITIAL_BALANCE_NANOS;
+      const balanceChanged = balanceAfter < initialBalanceNanos;
       const hasPending = openOrders.body.length > 0;
       const hasFill = fills.body.fills.length > 0;
       expect(

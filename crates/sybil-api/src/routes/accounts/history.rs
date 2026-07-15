@@ -21,6 +21,7 @@ pub(super) const MAX_ACCOUNT_FILL_QUERY_LIMIT: usize = 500;
 
 /// GET /v1/accounts/{id}/portfolio
 #[utoipa::path(
+    tag = "routesaccounts",
     get,
     path = "/v1/accounts/{id}/portfolio",
     params(("id" = u64, Path, description = "Account ID")),
@@ -81,6 +82,7 @@ pub async fn get_portfolio(
 
 /// GET /v1/accounts/{id}/fills
 #[utoipa::path(
+    tag = "routesaccounts",
     get,
     path = "/v1/accounts/{id}/fills",
     params(
@@ -222,6 +224,7 @@ fn parse_cursor(s: &str) -> Option<(u64, u64)> {
 
 /// GET /v1/accounts/{id}/events?limit&before&category
 #[utoipa::path(
+    tag = "routesaccounts",
     get,
     path = "/v1/accounts/{id}/events",
     params(
@@ -338,6 +341,7 @@ pub struct EquityRangeParams {
 
 /// GET /v1/accounts/{id}/equity?range=
 #[utoipa::path(
+    tag = "routesaccounts",
     get,
     path = "/v1/accounts/{id}/equity",
     params(

@@ -91,6 +91,7 @@ async fn ensure_registered_scheme(
 
 /// POST /v1/orders
 #[utoipa::path(
+    tag = "routesorders",
     post,
     path = "/v1/orders",
     request_body = SubmitOrderRequest,
@@ -154,6 +155,7 @@ pub async fn submit_orders(
 
 /// POST /v1/orders/signed
 #[utoipa::path(
+    tag = "routesorders",
     post,
     path = "/v1/orders/signed",
     request_body = SubmitSignedOrderRequest,
@@ -221,6 +223,7 @@ pub async fn submit_signed_order(
 
 /// POST /v1/orders/cancel/signed
 #[utoipa::path(
+    tag = "routesorders",
     post,
     path = "/v1/orders/cancel/signed",
     request_body = CancelSignedOrderRequest,
@@ -306,6 +309,7 @@ fn to_pending_response(info: &PendingOrderInfo) -> PendingOrderResponse {
 
 /// GET /v1/accounts/{id}/orders — pending orders for an account
 #[utoipa::path(
+    tag = "routesorders",
     get,
     path = "/v1/accounts/{id}/orders",
     params(("id" = u64, Path, description = "Account ID")),
@@ -331,6 +335,7 @@ pub async fn get_account_orders(
 
 /// GET /v1/markets/{id}/orderbook — all pending orders for a market (dev mode)
 #[utoipa::path(
+    tag = "routesorders",
     get,
     path = "/v1/markets/{id}/orderbook",
     params(("id" = u32, Path, description = "Market ID")),
@@ -354,6 +359,7 @@ pub async fn get_market_orderbook(
 
 /// GET /v1/orders/pending — all pending orders (dev mode)
 #[utoipa::path(
+    tag = "routesorders",
     get,
     path = "/v1/orders/pending",
     responses(

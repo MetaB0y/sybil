@@ -153,6 +153,58 @@ pub struct ApiConfig {
     #[arg(long, default_value = "1000", env = "SYBIL_HTTP_ORDER_CLIENT_BURST")]
     pub http_order_client_burst: u32,
 
+    /// Lifetime ceiling for anonymous self-service account allocations. This
+    /// is compared with the durable next account id; zero disables public
+    /// onboarding. Service/dev account creation remains an operator action.
+    #[arg(long, default_value = "1000", env = "SYBIL_PUBLIC_ACCOUNT_CAPACITY")]
+    pub public_account_capacity: u64,
+
+    /// Fixed play-money grant assigned by the server to a public account.
+    /// Anonymous callers cannot choose this value. Production should use zero
+    /// so capital arrives only through authenticated bridge deposits.
+    #[arg(
+        long,
+        default_value = "1000000000000",
+        env = "SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS"
+    )]
+    pub public_account_grant_nanos: u64,
+
+    /// Pre-handler global request rate for public account onboarding.
+    #[arg(
+        long,
+        default_value = "5",
+        env = "SYBIL_HTTP_ONBOARDING_GLOBAL_RPS",
+        value_parser = clap::value_parser!(u32).range(1..)
+    )]
+    pub http_onboarding_global_rps: u32,
+
+    /// Global public-onboarding burst allowance.
+    #[arg(
+        long,
+        default_value = "20",
+        env = "SYBIL_HTTP_ONBOARDING_GLOBAL_BURST",
+        value_parser = clap::value_parser!(u32).range(1..)
+    )]
+    pub http_onboarding_global_burst: u32,
+
+    /// Per-client public-onboarding request rate.
+    #[arg(
+        long,
+        default_value = "1",
+        env = "SYBIL_HTTP_ONBOARDING_CLIENT_RPS",
+        value_parser = clap::value_parser!(u32).range(1..)
+    )]
+    pub http_onboarding_client_rps: u32,
+
+    /// Per-client public-onboarding burst allowance.
+    #[arg(
+        long,
+        default_value = "3",
+        env = "SYBIL_HTTP_ONBOARDING_CLIENT_BURST",
+        value_parser = clap::value_parser!(u32).range(1..)
+    )]
+    pub http_onboarding_client_burst: u32,
+
     /// Pre-handler global request rate for retained DA manifest/payload reads.
     #[arg(long, default_value = "20", env = "SYBIL_HTTP_DA_GLOBAL_RPS")]
     pub http_da_global_rps: u32,
@@ -384,6 +436,12 @@ impl Default for ApiConfig {
             http_order_global_burst: 2_000,
             http_order_client_rps: 250,
             http_order_client_burst: 1_000,
+            public_account_capacity: 1_000,
+            public_account_grant_nanos: 1_000_000_000_000,
+            http_onboarding_global_rps: 5,
+            http_onboarding_global_burst: 20,
+            http_onboarding_client_rps: 1,
+            http_onboarding_client_burst: 3,
             http_da_global_rps: 20,
             http_da_global_burst: 40,
             http_da_client_rps: 10,

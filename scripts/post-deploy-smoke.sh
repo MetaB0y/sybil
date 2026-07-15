@@ -9,8 +9,8 @@
 #   * CORS preflight from the real app origin (the browser-breakage class).
 #   * Deployed web shell + one Next.js static asset (the broken-web-promotion
 #     class that API-only checks cannot see).
-#   * Passkey onboarding: unauthenticated account create + first-key bootstrap
-#     (the HTTP-401 regression that shipped would FAIL here, not skip).
+#   * Passkey onboarding: policy discovery + unauthenticated key-only account
+#     allocation (or the stable lifetime-cap exhaustion response).
 #   * Fills-after-seed: a deterministic crossing seed MUST increase matched
 #     orders (the zero-fills regression would FAIL here, not skip).
 #   * Service-token gating matrix: gated routes 401 without the token and
@@ -564,7 +564,7 @@ PY
 # ── 2b. CORS preflight from the app origin ──────────────────────────────────
 check_cors() {
     section "2b. CORS preflight (browser origin: $APP_ORIGIN)"
-    local path="/v1/accounts"
+    local path="/v1/onboarding/accounts"
     local hdr code allow
     curl -sS -m 20 -D "$TMP/cors_hdr" -o /dev/null -X OPTIONS "$BASE$path" \
         -H "Origin: $APP_ORIGIN" \
@@ -582,7 +582,7 @@ check_cors() {
     if [[ "$allow" == "$APP_ORIGIN" ]]; then
         pass "access-control-allow-origin == $APP_ORIGIN"
     else
-        fail "access-control-allow-origin='$allow' (expected '$APP_ORIGIN') — browser POST /v1/accounts would be blocked"
+        fail "access-control-allow-origin='$allow' (expected '$APP_ORIGIN') — browser POST /v1/onboarding/accounts would be blocked"
     fi
     if echo "$methods" | grep -qi 'POST'; then
         pass "access-control-allow-methods includes POST ($methods)"
@@ -592,10 +592,9 @@ check_cors() {
 }
 
 # ── 3. Passkey onboarding (atomic create-with-initial-key) ───────────────────
-# SYB-237/271 shipped the atomic onboarding model: public onboarding is
-# `POST /v1/accounts` WITH `initial_key` (create + first key in one request);
-# the deprecated bare create and the unsigned first-key endpoint are now
-# service-tier only. These are hard assertions.
+# Public onboarding accepts only `initial_key`; the server assigns a fixed
+# grant and enforces a durable lifetime account-id ceiling. Explicit funding
+# and the unsigned first-key endpoint are service-tier only.
 mint_p256_pub() {
     python3 - <<'PY'
 try:
@@ -618,36 +617,54 @@ check_onboarding() {
         return
     fi
 
-    # 3a. atomic create WITH initial_key, no token -> 200 (public onboarding path)
-    http POST /v1/accounts "{\"initial_balance_nanos\":1000000000000,\"initial_key\":{\"public_key_hex\":\"$pub\"}}" none
-    local acct; acct="$(echo "$HTTP_BODY" | jget account_id)"
-    if is_2xx "$HTTP_CODE" && [[ -n "$acct" ]]; then
-        pass "atomic POST /v1/accounts + initial_key (no token) -> $HTTP_CODE, account_id=$acct"
+    # 3a. Policy discovery must expose the lifetime stock and fixed grant.
+    http GET /v1/onboarding "" none
+    local enabled capacity remaining grant
+    enabled="$(echo "$HTTP_BODY" | jget enabled)"
+    capacity="$(echo "$HTTP_BODY" | jget account_capacity)"
+    remaining="$(echo "$HTTP_BODY" | jget accounts_remaining)"
+    grant="$(echo "$HTTP_BODY" | jget grant_nanos)"
+    if is_2xx "$HTTP_CODE" && [[ "$enabled" =~ ^(true|false|True|False)$ ]] \
+       && [[ "$capacity" =~ ^[0-9]+$ && "$remaining" =~ ^[0-9]+$ && "$grant" =~ ^[0-9]+$ ]]; then
+        pass "GET /v1/onboarding -> policy enabled=$enabled remaining=$remaining/$capacity grant_nanos=$grant"
     else
-        fail "atomic POST /v1/accounts + initial_key (no token) -> $HTTP_CODE: $HTTP_BODY (onboarding broken?)"
+        fail "GET /v1/onboarding -> $HTTP_CODE malformed policy: $HTTP_BODY"
         return
     fi
 
-    # 3b. over-cap initial_balance_nanos (> 5_000_000_000_000) -> 400
+    # 3b. A caller-supplied funding field is rejected by the key-only DTO.
     local pubb; pubb="$(mint_p256_pub)"
-    http POST /v1/accounts "{\"initial_balance_nanos\":5000000000001,\"initial_key\":{\"public_key_hex\":\"$pubb\"}}" none
-    if [[ "$HTTP_CODE" == "400" ]]; then
-        pass "over-cap initial_balance_nanos -> 400 (demo cap enforced)"
+    http POST /v1/onboarding/accounts "{\"initial_balance_nanos\":1,\"initial_key\":{\"public_key_hex\":\"$pubb\"}}" none
+    if [[ "$HTTP_CODE" == "422" ]]; then
+        pass "caller-selected onboarding funding -> 422 (key-only DTO enforced)"
     else
-        fail "over-cap initial_balance_nanos -> $HTTP_CODE (expected 400): $HTTP_BODY"
+        fail "caller-selected onboarding funding -> $HTTP_CODE (expected 422): $HTTP_BODY"
     fi
 
-    # 3c. deprecated bare create (no initial_key), no token -> 401 (service-tiered, SYB-271)
+    # 3c. Key-only public allocation succeeds while stock remains, or returns
+    # the stable exhaustion response after all lifetime ids are consumed.
+    http POST /v1/onboarding/accounts "{\"initial_key\":{\"public_key_hex\":\"$pub\"}}" none
+    local acct code; acct="$(echo "$HTTP_BODY" | jget account_id)"; code="$(echo "$HTTP_BODY" | jget code)"
+    if [[ "$enabled" =~ ^(true|True)$ ]] && is_2xx "$HTTP_CODE" && [[ -n "$acct" ]]; then
+        pass "POST /v1/onboarding/accounts (no token) -> $HTTP_CODE, account_id=$acct"
+    elif [[ "$HTTP_CODE" == "409" && "$code" == "PUBLIC_ACCOUNT_CAPACITY_EXHAUSTED" ]]; then
+        pass "exhausted public onboarding -> 409 PUBLIC_ACCOUNT_CAPACITY_EXHAUSTED (policy sample enabled=$enabled)"
+    else
+        fail "POST /v1/onboarding/accounts contradicted policy enabled=$enabled -> $HTTP_CODE: $HTTP_BODY"
+    fi
+
+    # 3d. Explicitly funded service creation, no token -> 401.
     http POST /v1/accounts '{"initial_balance_nanos":1000000000000}' none
     if [[ "$HTTP_CODE" == "401" ]]; then
-        pass "bare create (no initial_key, no token) -> 401 (deprecated path service-tiered)"
+        pass "explicitly funded POST /v1/accounts (no token) -> 401 (service-tiered)"
     else
-        fail "bare create (no initial_key, no token) -> $HTTP_CODE (expected 401): $HTTP_BODY"
+        fail "explicitly funded POST /v1/accounts (no token) -> $HTTP_CODE (expected 401): $HTTP_BODY"
     fi
 
-    # 3d. unsigned bare first-key endpoint, no token -> 401 (service-tiered, SYB-237)
+    # 3e. Unsigned first-key endpoint, no token -> 401. Account existence is
+    # deliberately irrelevant because service auth runs before the handler.
     local pubd; pubd="$(mint_p256_pub)"
-    http POST "/v1/accounts/$acct/keys" "{\"public_key_hex\":\"$pubd\"}" none
+    http POST "/v1/accounts/${acct:-0}/keys" "{\"public_key_hex\":\"$pubd\"}" none
     if [[ "$HTTP_CODE" == "401" ]]; then
         pass "unsigned first-key POST (no token) -> 401 (service-tiered)"
     else
@@ -817,9 +834,14 @@ check_orders_and_fills() {
 check_gating() {
     section "6. Service-token gating matrix"
 
-    # Discover a real account id to fund (fund requires an existing account).
-    http POST /v1/accounts '{"initial_balance_nanos":1000000000}' none
-    local acct; acct="$(echo "$HTTP_BODY" | jget account_id)"
+    # Create a real service-owned account when credentials are available (fund
+    # requires an existing account). Without a token, use an arbitrary id: the
+    # no-token/wrong-token assertions are evaluated before handler lookup.
+    local acct=""
+    if [[ -n "$SERVICE_TOKEN" ]]; then
+        http POST /v1/accounts '{"initial_balance_nanos":1000000000}' token
+        acct="$(echo "$HTTP_BODY" | jget account_id)"
+    fi
     [[ -z "$acct" ]] && acct=1
 
     # A well-formed (64 hex) but almost-certainly-absent leaf key so the
@@ -896,6 +918,21 @@ setup_signing() {
         sed 's/^/       /' "$TMP/build.log" | tail -10
     fi
 }
+
+# Operator smoke accounts use the explicitly funded service route whenever the
+# deploy credential is present. A direct devnet diagnostic without that token
+# falls back to the bounded public fixed-grant route.
+create_funded_smoke_account() {
+    local pub="$1"
+    if [[ -n "$SERVICE_TOKEN" ]]; then
+        http POST /v1/accounts \
+            "{\"initial_balance_nanos\":1000000000000,\"initial_key\":{\"public_key_hex\":\"$pub\"}}" token
+    else
+        http POST /v1/onboarding/accounts \
+            "{\"initial_key\":{\"public_key_hex\":\"$pub\"}}" none
+    fi
+}
+
 check_signed_order() {
     section "7. Signed order acceptance"
     setup_signing
@@ -912,12 +949,12 @@ check_signed_order() {
         return
     fi
 
-    # Fresh account created atomically with the signing key as initial_key.
+    # Fresh operator-funded account created atomically with its signing key.
     local kp priv pub
     kp="$("$SIGN_BIN" keygen 2>/dev/null)"
     priv="$(echo "$kp" | jget private_key_hex)"
     pub="$(echo "$kp" | jget public_key_hex)"
-    http POST /v1/accounts "{\"initial_balance_nanos\":1000000000000,\"initial_key\":{\"public_key_hex\":\"$pub\"}}" none
+    create_funded_smoke_account "$pub"
     local acct; acct="$(echo "$HTTP_BODY" | jget account_id)"
     if ! is_2xx "$HTTP_CODE" || [[ -z "$acct" ]]; then
         fail "signed-order prep: atomic create -> $HTTP_CODE: $HTTP_BODY"; return
@@ -969,12 +1006,12 @@ check_signed_cancel_lifecycle() {
         return
     fi
 
-    # Fresh funded account created atomically with the signing key as initial_key.
+    # Fresh operator-funded account created atomically with its signing key.
     local kp priv pub
     kp="$("$SIGN_BIN" keygen 2>/dev/null)"
     priv="$(echo "$kp" | jget private_key_hex)"
     pub="$(echo "$kp" | jget public_key_hex)"
-    http POST /v1/accounts "{\"initial_balance_nanos\":1000000000000,\"initial_key\":{\"public_key_hex\":\"$pub\"}}" none
+    create_funded_smoke_account "$pub"
     local acct; acct="$(echo "$HTTP_BODY" | jget account_id)"
     if ! is_2xx "$HTTP_CODE" || [[ -z "$acct" ]]; then
         fail "cancel-lifecycle prep: atomic create -> $HTTP_CODE: $HTTP_BODY"; return

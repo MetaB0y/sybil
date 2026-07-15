@@ -5,7 +5,7 @@
 > pages to endpoint families and records trust/durability boundaries; it does
 > not duplicate every rendered field or serve as a product backlog.
 
-Last implementation audit: 2026-07-13. A Vitest guard checks that every path
+Last implementation audit: 2026-07-15. A Vitest guard checks that every path
 named here exists in generated OpenAPI types and that every path called through
 the frontend API client appears here.
 
@@ -52,7 +52,7 @@ its placeholder values as backend capabilities.
 
 | Endpoint | Role | Authorization |
 |---|---|---|
-| `POST /v1/accounts` | Create demo/onboarding account | Public creation policy; server limits apply |
+| `POST /v1/onboarding/accounts` | Create a fixed-grant demo account | Public lifetime stock cap plus route/client rate budget |
 | `POST /v1/accounts/{id}/keys` | Bootstrap first key only | Service-gated and zero-key-only |
 | `POST /v1/accounts/{id}/fund` | Demo/service funding | Service-gated |
 | `POST /v1/orders/signed` | Place GTC/IOC/GTD order | Registered RawP256/WebAuthn key + nonce |
