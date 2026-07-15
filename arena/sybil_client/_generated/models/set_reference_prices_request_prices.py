@@ -22,6 +22,7 @@ T = TypeVar("T", bound="SetReferencePricesRequestPrices")
 class SetReferencePricesRequestPrices:
     """ Map of market_id -> reference price. Integer nanodollars;
     1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
+    Zero explicitly evicts the current reference for that market.
 
      """
 

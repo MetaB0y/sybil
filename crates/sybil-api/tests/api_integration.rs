@@ -23,7 +23,9 @@ use matching_sequencer::SequencerConfig;
 use matching_sequencer::SequencerHandle;
 use matching_sequencer::crypto::{canonical_cancel_bytes, canonical_order_bytes};
 use std::time::Duration;
+use sybil_api::app::create_router;
 use sybil_api::config::ApiConfig;
+use sybil_api::state::AppState;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1154,6 +1156,84 @@ async fn market_search_by_tag() {
     let results = results.as_array().unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0]["name"].as_str().unwrap(), "Rain?");
+}
+
+#[tokio::test]
+async fn market_reads_expire_each_reference_token_and_restart_empty() {
+    let config = ApiConfig {
+        dev_mode: true,
+        reference_price_ttl_ms: 500,
+        ..ApiConfig::default()
+    };
+    let (app, handle) = test_app_with_config(config.clone()).await;
+    let (_, first_body) = post_json(
+        app.clone(),
+        "/v1/markets",
+        json!({ "name": "Fresh reference" }),
+    )
+    .await;
+    let first_id = parse_json(&first_body)["market_id"].as_u64().unwrap();
+    let (_, second_body) = post_json(
+        app.clone(),
+        "/v1/markets",
+        json!({ "name": "Expired reference" }),
+    )
+    .await;
+    let second_id = parse_json(&second_body)["market_id"].as_u64().unwrap();
+
+    let (status, _) = post_json(
+        app.clone(),
+        "/v1/markets/prices/reference",
+        json!({ "prices": std::collections::HashMap::from([
+            (first_id, 400_000_000u64),
+            (second_id, 600_000_000u64),
+        ])}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let (status, _) = post_json(
+        app.clone(),
+        "/v1/markets/prices/reference",
+        json!({ "prices": std::collections::HashMap::from([
+            (first_id, 450_000_000u64),
+        ])}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let (status, body) = get(app, "/v1/markets").await;
+    assert_eq!(status, StatusCode::OK);
+    let markets = parse_json(&body).as_array().unwrap().clone();
+    let first = markets
+        .iter()
+        .find(|market| market["market_id"].as_u64() == Some(first_id))
+        .unwrap();
+    let second = markets
+        .iter()
+        .find(|market| market["market_id"].as_u64() == Some(second_id))
+        .unwrap();
+    assert_eq!(first["reference_price_nanos"].as_u64(), Some(450_000_000));
+    assert!(first["reference_price_expires_at_ms"].is_u64());
+    assert!(second["reference_price_nanos"].is_null());
+    assert!(second["reference_price_expires_at_ms"].is_null());
+
+    let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new()
+        .build_recorder()
+        .handle();
+    let restarted = create_router(AppState::new(handle, &config, prometheus));
+    let (status, body) = get(restarted, "/v1/markets").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        parse_json(&body)
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|market| market["reference_price_nanos"].is_null()
+                && market["reference_price_expires_at_ms"].is_null())
+    );
 }
 
 #[tokio::test]

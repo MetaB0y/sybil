@@ -75,6 +75,9 @@ class MarketResponse:
                 Payouts are per-share probabilities in [0, 1e9].
             polymarket_condition_id (None | str | Unset): Polymarket on-chain condition id — FE join key into
                 `GET /v1/events/{event_id}/raw` `markets[].conditionId`. Off-block.
+            reference_price_expires_at_ms (int | None | Unset): Server-side expiry of `reference_price_nanos`, as Unix
+                milliseconds.
+                The price is omitted once this boundary has passed.
             reference_price_nanos (int | None | Unset): Reference price from external system (e.g., Polymarket), display
                 only.
                 Integer nanodollars; 1_000_000_000 = $1.
@@ -128,6 +131,7 @@ class MarketResponse:
     orders_unmatched_total: int | Unset = UNSET
     payout_nanos: int | None | Unset = UNSET
     polymarket_condition_id: None | str | Unset = UNSET
+    reference_price_expires_at_ms: int | None | Unset = UNSET
     reference_price_nanos: int | None | Unset = UNSET
     resolution_criteria: None | str | Unset = UNSET
     tags: list[str] | None | Unset = UNSET
@@ -301,6 +305,12 @@ class MarketResponse:
         else:
             polymarket_condition_id = self.polymarket_condition_id
 
+        reference_price_expires_at_ms: int | None | Unset
+        if isinstance(self.reference_price_expires_at_ms, Unset):
+            reference_price_expires_at_ms = UNSET
+        else:
+            reference_price_expires_at_ms = self.reference_price_expires_at_ms
+
         reference_price_nanos: int | None | Unset
         if isinstance(self.reference_price_nanos, Unset):
             reference_price_nanos = UNSET
@@ -405,6 +415,8 @@ class MarketResponse:
             field_dict["payout_nanos"] = payout_nanos
         if polymarket_condition_id is not UNSET:
             field_dict["polymarket_condition_id"] = polymarket_condition_id
+        if reference_price_expires_at_ms is not UNSET:
+            field_dict["reference_price_expires_at_ms"] = reference_price_expires_at_ms
         if reference_price_nanos is not UNSET:
             field_dict["reference_price_nanos"] = reference_price_nanos
         if resolution_criteria is not UNSET:
@@ -683,6 +695,16 @@ class MarketResponse:
         polymarket_condition_id = _parse_polymarket_condition_id(d.pop("polymarket_condition_id", UNSET))
 
 
+        def _parse_reference_price_expires_at_ms(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        reference_price_expires_at_ms = _parse_reference_price_expires_at_ms(d.pop("reference_price_expires_at_ms", UNSET))
+
+
         def _parse_reference_price_nanos(data: object) -> int | None | Unset:
             if data is None:
                 return data
@@ -779,6 +801,7 @@ class MarketResponse:
             orders_unmatched_total=orders_unmatched_total,
             payout_nanos=payout_nanos,
             polymarket_condition_id=polymarket_condition_id,
+            reference_price_expires_at_ms=reference_price_expires_at_ms,
             reference_price_nanos=reference_price_nanos,
             resolution_criteria=resolution_criteria,
             tags=tags,

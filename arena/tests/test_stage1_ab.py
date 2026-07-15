@@ -416,7 +416,8 @@ async def test_stage1_ab_prompt_contracts_differ_only_where_intended(
         db.close()
 
     feed = MagicMock()
-    feed.polymarket_prices.get_price.return_value = 0.55
+    feed.reference_prices.get_price.return_value = 0.55
+    feed.require_reference_prices = True
     article = LiveArticle(
         url="https://example.test/a",
         title="Event update",
@@ -560,12 +561,12 @@ async def test_stage1_ab_analysts_share_one_paired_feed_subscription(
             ArenaMetrics(),
         )
         feed = NewsFeed([], api_key=None)
+        feed.reference_prices._prices[7] = (0.55, 4_000_000_000_000)
         _wire_live_inputs(
             topology.analysts,
             topology.traders,
             feed,
             topology.paired_analyst_groups,
-            {7: 0.55, 11: 0.60},
         )
     finally:
         db.close()
@@ -607,13 +608,12 @@ async def test_paired_analysts_use_same_snapped_price_when_provider_moves(
             ArenaMetrics(),
         )
         feed = NewsFeed([], api_key=None)
-        feed.polymarket_prices._prices[7] = 0.55
+        feed.reference_prices._prices[7] = (0.55, 4_000_000_000_000)
         _wire_live_inputs(
             topology.analysts,
             topology.traders,
             feed,
             topology.paired_analyst_groups,
-            {7: 0.50},
         )
         article = LiveArticle(
             url="https://example.test/price-snapshot",
@@ -637,7 +637,7 @@ async def test_paired_analysts_use_same_snapped_price_when_provider_moves(
             )
 
         await control.on_block(_block())
-        feed.polymarket_prices._prices[7] = 0.80
+        feed.reference_prices._prices[7] = (0.80, 4_000_000_000_000)
         await stage1.on_block(_block())
 
         control_prompt = control._call_llm.await_args.args[0]

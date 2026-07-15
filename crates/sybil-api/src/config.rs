@@ -66,6 +66,17 @@ pub struct ApiConfig {
     #[arg(long, default_value = "500", env = "SYBIL_BLOCK_INTERVAL_MS")]
     pub block_interval_ms: u64,
 
+    /// Maximum age of one externally published reference price before public
+    /// market reads omit it. Freshness is tracked per market, so a partial
+    /// publisher update cannot keep untouched tokens alive.
+    #[arg(
+        long,
+        default_value = "60000",
+        env = "SYBIL_REFERENCE_PRICE_TTL_MS",
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    pub reference_price_ttl_ms: u64,
+
     /// Seed markets to create on startup (comma-separated names).
     #[arg(long, env = "SYBIL_SEED_MARKETS", value_delimiter = ',')]
     pub seed_markets: Vec<String>,
@@ -421,6 +432,7 @@ impl Default for ApiConfig {
             cors_origins: Vec::new(),
             http_trusted_proxy_cidrs: Vec::new(),
             block_interval_ms: 500,
+            reference_price_ttl_ms: 60_000,
             seed_markets: Vec::new(),
             order_ttl_blocks: 63_072_000,
             max_pending_bundles: 10_000,

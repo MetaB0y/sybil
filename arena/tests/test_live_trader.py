@@ -18,7 +18,8 @@ from sybil_client import BuyYes, SellYes
 
 def _make_trader(db=None, **kwargs):
     news_feed = MagicMock()
-    news_feed.polymarket_prices.get_price.return_value = 0.55
+    news_feed.reference_prices.get_price.return_value = 0.55
+    news_feed.require_reference_prices = False
     market = MagicMock()
     market.id = 7
     market.name = "Test Market"
@@ -101,38 +102,36 @@ def _price_block():
 
 
 def test_market_price_prefers_fresh_polymarket_poll():
-    # AR-1: the fresh Polymarket poll wins over the frozen startup snapshot so
-    # sizing sees the same price shown to the LLM.
+    # The API-owned fresh reference wins over the frozen startup object so
+    # sizing sees the same bounded price shown to the LLM.
     trader = _make_trader()
     trader.markets_info[7].reference_price_nanos = 120_000_000  # stale snapshot
-    trader.news_feed.polymarket_prices.get_price.return_value = 0.55  # fresh poll
+    trader.news_feed.reference_prices.get_price.return_value = 0.55
 
     assert trader._get_market_price(7, _price_block()) == 0.55
 
 
-def test_market_price_falls_back_to_reference_snapshot():
-    # AR-1: when the fresh poll is unavailable, fall back to the snapshot.
+def test_market_price_ignores_the_frozen_startup_snapshot():
     trader = _make_trader()
     trader.markets_info[7].reference_price_nanos = 120_000_000
-    trader.news_feed.polymarket_prices.get_price.return_value = None
-
-    assert trader._get_market_price(7, _price_block()) == 0.12
-
-
-def test_market_price_falls_back_to_clearing_price():
-    # AR-1: with neither poll nor snapshot, use on-chain clearing.
-    trader = _make_trader()
-    trader.markets_info[7].reference_price_nanos = None
-    trader.news_feed.polymarket_prices.get_price.return_value = None
+    trader.news_feed.reference_prices.get_price.return_value = None
 
     assert trader._get_market_price(7, _price_block()) == 0.90
+
+
+def test_required_reference_does_not_fall_back_to_clearing_price():
+    trader = _make_trader()
+    trader.news_feed.reference_prices.get_price.return_value = None
+    trader.news_feed.require_reference_prices = True
+
+    assert trader._get_market_price(7, _price_block()) == 0.0
 
 
 def test_observed_market_prices_do_not_invent_default_prices():
     from sybil_client.types import Block
 
     trader = _make_trader()
-    trader.news_feed.polymarket_prices.get_price.return_value = 0
+    trader.news_feed.reference_prices.get_price.return_value = 0
     block = Block(
         height=1,
         parent_hash="",
@@ -248,7 +247,7 @@ async def test_rebalance_records_no_order_rejection_reason(
     trader.balance_history = [balance]
     if position:
         trader.positions = {(7, "YES"): position}
-    trader.news_feed.polymarket_prices.get_price.return_value = price
+    trader.news_feed.reference_prices.get_price.return_value = price
     await bus.publish(
         FairValueUpdate(
             market_id=7,

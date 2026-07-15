@@ -125,6 +125,23 @@ Market raw price history is served through
 The endpoint is bounded by `limit` and pages older committed points with
 `before_height` / `next_before_height`.
 
+External reference prices have a separate off-block freshness contract.
+`POST /v1/markets/prices/reference` records one server receive timestamp per
+named market; a partial update refreshes only those names, and zero explicitly
+evicts one value. `SYBIL_REFERENCE_PRICE_TTL_MS` defaults to 60 seconds. After
+that age, market list, summary, search, and detail responses omit both
+`reference_price_nanos` and `reference_price_expires_at_ms`, even if the
+publisher process died before it could send an eviction. A present response
+includes the exact server expiry so a caching client can enforce the same
+boundary between polls. The map is intentionally volatile, so an API restart
+also starts with no usable references until the mirror republishes. Arena
+refreshes this API view every ten seconds, clears it immediately on refresh
+failure, and applies the exact expiry locally; `--require-reference-prices`
+therefore cannot select or trade from an expired/pre-republish value.
+`sybil_reference_prices_expired_total` and per-market age/available/expired
+gauges expose the fail-closed decision; feed-level last-update age remains
+distinct from per-token age.
+
 Long-window charting uses `GET /v1/markets/{id}/prices/candles`. The history
 service builds candles only from committed batch price facts:
 open/high/low/close are over sealed YES/NO prices, volume is post-seal traded

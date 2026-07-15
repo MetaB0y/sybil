@@ -16,6 +16,7 @@ Usage (standalone test):
 import asyncio
 import logging
 import os
+import time
 import urllib.parse
 from collections import Counter, defaultdict, deque
 from dataclasses import dataclass, field
@@ -27,7 +28,7 @@ import httpx
 import openai
 import trafilatura
 
-from sybil_client.types import Market
+from sybil_client.types import NANOS_PER_DOLLAR, Market
 
 from .metrics import ArenaMetrics
 
@@ -43,103 +44,45 @@ MAX_GATE_HEADLINES_PER_MARKET = 8
 # up for a single market.
 MAX_SUBSCRIBER_QUEUE = 500
 
-# Default path where sybil-polymarket writes the mapping
-DEFAULT_MAPPING_PATH = "/data/polymarket_mapping.json"
-CLOB_URL = "https://clob.polymarket.com"
-
-
 # --------------------------------------------------------------------------- #
-# Polymarket price fetcher
+# API-owned reference-price view
 # --------------------------------------------------------------------------- #
-class PolymarketPrices:
-    """Fetches mid prices from Polymarket CLOB REST API using the mapping file."""
+class ReferencePrices:
+    """Exact-expiry cache of the API's already validated external prices."""
 
-    def __init__(self, mapping_path: str | None = None):
-        self._mapping_path = mapping_path
-        self._sybil_to_tokens: dict[int, str] = {}  # sybil_market_id -> YES token_id
-        self._prices: dict[int, float] = {}  # sybil_market_id -> YES mid price
-        self._loaded = False
+    def __init__(self, clock_ms: Callable[[], int] | None = None):
+        self._clock_ms = clock_ms or (lambda: int(time.time() * 1000))
+        self._prices: dict[int, tuple[float, int]] = {}
 
-    def _load_mapping(self):
-        """Load the sybil-polymarket mapping file to get token IDs."""
-        import json
-        from pathlib import Path
+    def replace(self, markets: list[Market], selected_market_ids: set[int]) -> None:
+        now_ms = self._clock_ms()
+        prices: dict[int, tuple[float, int]] = {}
+        for market in markets:
+            if market.id not in selected_market_ids:
+                continue
+            price_nanos = market.reference_price_nanos
+            expires_at_ms = market.reference_price_expires_at_ms
+            if (
+                isinstance(price_nanos, int)
+                and 0 < price_nanos <= NANOS_PER_DOLLAR
+                and isinstance(expires_at_ms, int)
+                and now_ms <= expires_at_ms
+            ):
+                prices[market.id] = (price_nanos / NANOS_PER_DOLLAR, expires_at_ms)
+        self._prices = prices
 
-        paths_to_try = [
-            self._mapping_path,
-            DEFAULT_MAPPING_PATH,
-            # Local Docker volume
-            str(Path.home() / "polymarket_mapping.json"),
-        ]
-        # Also check local Docker volume paths.
-        for p in paths_to_try:
-            if p and Path(p).exists():
-                try:
-                    data = json.loads(Path(p).read_text())
-                    token_to_sybil = data.get("token_to_sybil", {})
-                    for token_id, mapping in token_to_sybil.items():
-                        if isinstance(mapping, list) and len(mapping) == 2:
-                            sybil_id, outcome = mapping
-                            if outcome == 0:  # YES token
-                                self._sybil_to_tokens[sybil_id] = token_id
-                    self._loaded = True
-                    log.info("Loaded Polymarket mapping: %d markets from %s",
-                             len(self._sybil_to_tokens), p)
-                    return
-                except Exception as e:
-                    log.warning("Failed to load mapping from %s: %s", p, e)
-        log.warning("No Polymarket mapping file found — prices unavailable")
-
-    async def fetch_prices(self, http: httpx.AsyncClient, market_ids: list[int]) -> dict[int, float]:
-        """Fetch Polymarket mid prices for the given Sybil market IDs.
-
-        Returns dict of sybil_market_id -> YES probability (0.0-1.0).
-        """
-        if not self._loaded:
-            self._load_mapping()
-
-        # Collect token IDs we need
-        tokens_to_fetch = []
-        token_to_sybil = {}
-        for mid in market_ids:
-            token = self._sybil_to_tokens.get(mid)
-            if token:
-                tokens_to_fetch.append(token)
-                token_to_sybil[token] = mid
-
-        if not tokens_to_fetch:
-            return {}
-
-        # Batch midpoint request — returns {token_id: "price_string"}
-        try:
-            payload = [{"token_id": t} for t in tokens_to_fetch]
-            resp = await http.post(
-                f"{CLOB_URL}/midpoints",
-                json=payload,
-                timeout=10.0,
-            )
-            if resp.status_code != 200:
-                log.warning("Polymarket midpoints returned %d", resp.status_code)
-                return {}
-
-            results = resp.json()  # {token_id: "0.55", ...}
-            for token_id in tokens_to_fetch:
-                mid_str = results.get(token_id, "0")
-                mid = float(mid_str) if mid_str else 0.0
-                sybil_id = token_to_sybil[token_id]
-                if mid > 0:
-                    self._prices[sybil_id] = mid
-
-            log.info("Fetched %d Polymarket prices", len(self._prices))
-            return dict(self._prices)
-
-        except Exception as e:
-            log.warning("Polymarket price fetch failed: %s", e)
-            return dict(self._prices)  # return cached
+    def clear(self) -> None:
+        self._prices.clear()
 
     def get_price(self, sybil_market_id: int) -> float | None:
-        """Get cached Polymarket YES price for a market."""
-        return self._prices.get(sybil_market_id)
+        value = self._prices.get(sybil_market_id)
+        if value is None:
+            return None
+        price, expires_at_ms = value
+        if self._clock_ms() > expires_at_ms:
+            self._prices.pop(sybil_market_id, None)
+            return None
+        return price
 
 
 # --------------------------------------------------------------------------- #
@@ -355,23 +298,22 @@ class PairedNewsBatchBarrier:
 
     The barrier owns exactly one ordinary feed subscription. The first arm to
     drain a market snapshots that subscription's current pending list and one
-    fresh-or-startup reference price; both arm views receive that same immutable
-    batch exactly once. Further upstream articles remain queued until both arms
-    have consumed the active batch.
+    fresh API-bounded reference price; both arm views receive that same
+    immutable batch exactly once. Further upstream articles remain queued until
+    both arms have consumed the active batch. If the reference is unavailable,
+    the pending articles remain queued rather than falling back to startup data.
     """
 
     def __init__(
         self,
         subscription: NewsSubscription,
         arm_names: tuple[str, str],
-        startup_reference_prices: dict[int, float],
         fresh_reference_price: Callable[[int], float | None],
     ):
         if len(set(arm_names)) != 2:
             raise ValueError("paired news barrier requires two distinct arm names")
         self.subscription = subscription
         self.arm_names = frozenset(arm_names)
-        self.startup_reference_prices = dict(startup_reference_prices)
         self.fresh_reference_price = fresh_reference_price
         self._active: dict[int, tuple[PairedNewsBatch, set[str]]] = {}
         self._lock = asyncio.Lock()
@@ -392,20 +334,13 @@ class PairedNewsBatchBarrier:
         async with self._lock:
             active = self._active.get(market_id)
             if active is None:
+                fresh = self.fresh_reference_price(market_id)
+                if fresh is None or not 0 < float(fresh) <= 1:
+                    return None
                 articles = await self.subscription.drain(market_id)
                 if not articles:
                     return None
-                fresh = self.fresh_reference_price(market_id)
-                reference_price = (
-                    float(fresh)
-                    if fresh is not None and 0 < float(fresh) <= 1
-                    else self.startup_reference_prices.get(market_id, 0.0)
-                )
-                if not 0 < reference_price <= 1:
-                    raise RuntimeError(
-                        f"paired analysis batch has no positive reference price for market {market_id}"
-                    )
-                active = (PairedNewsBatch(articles, reference_price), set())
+                active = (PairedNewsBatch(articles, float(fresh)), set())
                 self._active[market_id] = active
 
             batch, consumed = active
@@ -429,7 +364,7 @@ class NewsFeed:
         api_key: str | None = None,
         poll_interval_s: int = 300,
         max_seen: int = 100_000,
-        mapping_path: str | None = None,
+        require_reference_prices: bool = False,
         metrics: ArenaMetrics | None = None,
     ):
         self.markets = markets
@@ -437,7 +372,9 @@ class NewsFeed:
         self.poll_interval = poll_interval_s
         self.max_seen = max_seen
         self.metrics = metrics
-        self.polymarket_prices = PolymarketPrices(mapping_path)
+        self.require_reference_prices = require_reference_prices
+        self.reference_prices = ReferencePrices()
+        self.reference_prices.replace(markets, {market.id for market in markets})
 
         # Dedup
         self._seen_urls: deque[str] = deque()
@@ -691,10 +628,6 @@ class NewsFeed:
                 if self.metrics is not None:
                     self.metrics.record_news_poll_start()
                 try:
-                    # Fetch Polymarket reference prices each cycle
-                    market_ids = [m.id for m in self.markets]
-                    await self.polymarket_prices.fetch_prices(http, market_ids)
-
                     n, candidates = await self._poll_once(http)
                     if self.metrics is not None:
                         self.metrics.record_news_poll_success(candidates, n)

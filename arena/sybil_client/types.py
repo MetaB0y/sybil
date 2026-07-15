@@ -59,6 +59,7 @@ class Market:
     no_price_nanos: int
     status: str
     reference_price_nanos: int | None = None
+    reference_price_expires_at_ms: int | None = None
     polymarket_condition_id: str | None = None
     description: str = ""
     category: str = ""
