@@ -147,6 +147,13 @@ failures use the acknowledged-write variant kind.
 Any restore failure is an integrity incident. Preserve the store, stop writes,
 and investigate the missing/corrupt row or deterministic replay divergence.
 
+A runtime block-invariant failure uses the same fail-stop principle: the actor
+mailbox rejects all canonical writes before they can append another WAL row.
+This bounds the acknowledged suffix while block production is unavailable and
+prevents clients receiving success for work that cannot be fenced. Rejections
+increment `sybil_integrity_halted_write_rejections_total{kind}`; health remains
+readable with the last committed chain identity.
+
 ## Compatibility
 
 This change is store layout v2 and intentionally does not infer a fake global

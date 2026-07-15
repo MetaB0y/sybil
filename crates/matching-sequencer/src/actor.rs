@@ -67,7 +67,9 @@ use self::supervisor::{
 };
 
 pub use self::handle::SequencerHandle;
-pub use self::messages::{IndicativeSnapshot, SequencerMsg, SequencerReadQuery};
+pub use self::messages::{
+    IndicativeSnapshot, SequencerMsg, SequencerOperationalStatus, SequencerReadQuery,
+};
 #[cfg(test)]
 pub use self::messages::{SequencerTestCrashpoint, SequencerTestTickHold};
 pub use self::queries::{

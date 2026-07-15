@@ -2,6 +2,7 @@ mod admission;
 mod bridge;
 mod control_plane;
 mod dispatch;
+mod integrity;
 
 fn current_timestamp_ms() -> u64 {
     std::time::SystemTime::now()

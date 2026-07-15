@@ -3,7 +3,7 @@ tags: [infrastructure, crate]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-13
+last_verified: 2026-07-15
 ---
 
 The REST API is the external interface to the exchange. Built with Axum, it
@@ -123,6 +123,15 @@ bundles/MM submissions. Current block/account reads also come from actor
 snapshots. Historical range queries take the independent private service path
 and therefore cannot occupy the sequencer actor or scan its database.
 
+The same atomic operational snapshot includes the sequencer's integrity-halt
+state. After a hard block invariant fails, `/v1/health` returns `503` with
+`status = "integrity_halted"` and the last committed height/genesis for
+diagnosis. Canonical writes return `503` with code
+`SEQUENCER_INTEGRITY_HALTED`; the actor rejects them before signature work,
+nonce advancement, WAL append, or live mutation. Read endpoints continue to
+serve the last trusted state. Dev-mode resume cannot clear an integrity halt;
+recovery requires an operator restart from the last committed fence.
+
 Per-client HTTP buckets use the socket peer by default and ignore forwarding
 headers. `SYBIL_HTTP_TRUSTED_PROXY_CIDRS` may name the exact reverse-proxy
 networks allowed to supply `X-Forwarded-For`/`X-Real-IP`. For a trusted peer,
@@ -171,6 +180,7 @@ row. In-memory API instances return 503 because they have no durable outbox.
 - All values in [[Nanos and Integer Arithmetic|nanos]] (u64)
 - Service bearer auth gates operator writes in production; dev mode is limited to local conveniences and diagnostics
 - Order-write endpoints return `429 Too Many Requests` with `Retry-After` under abnormal load
+- Integrity-halted canonical writes return `503 SEQUENCER_INTEGRITY_HALTED` while read-only diagnostics retain the last committed identity
 - Retained DA reads return `429` when their dedicated rate or concurrency budget is exhausted
 - State proof endpoint returns inclusion or exclusion proofs for the latest committed qMDB root
 - DA endpoints expose public typed manifests and service-gated retained witness payload bytes

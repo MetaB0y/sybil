@@ -105,6 +105,9 @@ impl Actor for SequencerActor {
         state: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
         state.mailbox_monitor.started();
+        let Some(message) = state.reject_canonical_write_if_halted(message) else {
+            return Ok(());
+        };
         match message {
             SequencerMsg::Tick => {
                 let _ = state.on_tick().await?;
@@ -112,6 +115,11 @@ impl Actor for SequencerActor {
             #[cfg(test)]
             SequencerMsg::TestCrashOnNextBlock(crashpoint) => {
                 let _ = state.on_tick_inner(Some(crashpoint)).await?;
+            }
+            #[cfg(test)]
+            SequencerMsg::TestEnterIntegrityHalt(error, reply) => {
+                state.halt_after_invariant_failure(error);
+                let _ = reply.send(());
             }
             #[cfg(test)]
             SequencerMsg::TestHoldNextTick(hold, reply) => {
@@ -466,11 +474,11 @@ impl Actor for SequencerActor {
             }
             SequencerMsg::PauseBlockProduction(reply) => {
                 state.pause_count = state.pause_count.saturating_add(1);
-                let _ = reply.send(());
+                let _ = reply.send(Ok(()));
             }
             SequencerMsg::ResumeBlockProduction(reply) => {
                 state.pause_count = state.pause_count.saturating_sub(1);
-                let _ = reply.send(());
+                let _ = reply.send(Ok(()));
             }
         }
         Ok(())
