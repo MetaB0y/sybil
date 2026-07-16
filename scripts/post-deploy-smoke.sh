@@ -364,6 +364,20 @@ check_proof_freshness() {
         return
     fi
 
+    # The product topology deliberately omits the validity profile. Do not
+    # spend the prover catch-up deadline polling a service that was never
+    # selected; explicit validity promotions still retain the bounded retry
+    # loop below and fail closed.
+    if [[ "$REQUIRE_PROOF_FRESHNESS" == "0" ]]; then
+        local service_rows
+        service_rows="$(smoke_compose_service_rows "$DOCKER_SSH" "$COMPOSE_PROJECT")"
+        if ! awk '$1 == "sybil-prover" && $3 == "running" { found = 1 } END { exit !found }' \
+            <<<"$service_rows"; then
+            skip "validity profile is not running; proof freshness not applicable"
+            return
+        fi
+    fi
+
     local deadline=$((SECONDS + PROOF_TIMEOUT)) attempts=0
     local chain_height="" proof_body="" canonical_root="" result="ERR no-response"
     local proof_state="ERR" proof_height="" proof_lag=""
