@@ -9,23 +9,16 @@ default-run = "sybil-prover"
 [features]
 default = []
 sequencer-store = ["dep:matching-engine", "dep:matching-sequencer", "dep:p256", "dep:sybil-oracle"]
-mock-live = ["dep:sybil-api-types"]
 
 [[bin]]
 name = "sybil-prover"
 path = "src/main.rs"
-
-[[bin]]
-name = "sybil-prover-mock"
-path = "src/bin/sybil_prover_mock.rs"
-required-features = ["mock-live"]
 
 [dependencies]
 alloy = { workspace = true, features = ["sol-types", "std"] }
 axum = { version = "0.8", features = ["json"] }
 blake3 = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
-getrandom = { workspace = true }
 hex = { workspace = true }
 matching-engine = { path = "../matching-engine", optional = true }
 matching-sequencer = { path = "../matching-sequencer", optional = true }
@@ -35,8 +28,6 @@ redb = "4"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-sha3 = { workspace = true }
-sybil-api-types = { path = "../sybil-api-types", optional = true }
 sybil-oracle = { path = "../sybil-oracle", optional = true }
 sybil-proof-protocol = { path = "../sybil-proof-protocol" }
 sybil-verifier = { path = "../sybil-verifier" }

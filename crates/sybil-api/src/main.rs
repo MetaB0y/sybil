@@ -7,13 +7,10 @@ use axum::http::StatusCode;
 use axum::routing::get;
 use axum::{Json, Router};
 use clap::Parser;
-use opentelemetry::trace::TracerProvider;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing_subscriber::EnvFilter;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
 
 use matching_engine::MarketSet;
 use matching_sequencer::{
@@ -28,11 +25,6 @@ use sybil_api::types::response::HealthResponse;
 
 const SEQUENCER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(8);
 const WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(8);
-
-struct Telemetry {
-    prometheus_handle: metrics_exporter_prometheus::PrometheusHandle,
-    tracer_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
-}
 
 #[derive(Clone)]
 struct RestoreFailureState {
@@ -78,14 +70,6 @@ async fn serve_restore_failure_mode(
         .with_graceful_shutdown(shutdown_signal())
         .await?;
     Ok(())
-}
-
-fn shutdown_tracer_provider(tracer_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>) {
-    if let Some(provider) = tracer_provider
-        && let Err(e) = provider.shutdown()
-    {
-        tracing::warn!(error = %e, "failed to flush OpenTelemetry spans on shutdown");
-    }
 }
 
 async fn run_process_metrics(cancel: CancellationToken) {
@@ -269,74 +253,28 @@ async fn run_witness_import(config: &ApiConfig) -> Result<(), Box<dyn std::error
     Ok(())
 }
 
-fn init_telemetry() -> Telemetry {
+fn init_telemetry() -> metrics_exporter_prometheus::PrometheusHandle {
     // Prometheus metrics recorder
     let prometheus_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
         .install_recorder()
         .expect("failed to install Prometheus metrics recorder");
 
-    // OpenTelemetry trace export is intentionally opt-in. The public demo runs
-    // on a small 2 GB host; metrics and alerts are the default observability path.
-    let otel_enabled = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
-        .ok()
-        .is_some_and(|endpoint| !endpoint.trim().is_empty());
-    let (otel_layer, tracer_provider) = if otel_enabled {
-        match opentelemetry_otlp::SpanExporter::builder()
-            .with_tonic()
-            .build()
-        {
-            Ok(exporter) => {
-                let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
-                    .with_batch_exporter(exporter)
-                    .with_resource(
-                        opentelemetry_sdk::Resource::builder()
-                            .with_service_name("sybil-api")
-                            .build(),
-                    )
-                    .build();
-                opentelemetry::global::set_tracer_provider(provider.clone());
-                let tracer = provider.tracer("sybil-api");
-                (
-                    Some(tracing_opentelemetry::layer().with_tracer(tracer)),
-                    Some(provider),
-                )
-            }
-            Err(e) => {
-                eprintln!(
-                    "OpenTelemetry OTLP exporter unavailable, traces will not be exported: {e}"
-                );
-                (None, None)
-            }
-        }
-    } else {
-        (None, None)
-    };
-
-    // Layered subscriber: console fmt + optional OTel export
-    tracing_subscriber::registry()
-        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
-        .with(tracing_subscriber::fmt::layer())
-        .with(otel_layer)
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
         .init();
 
-    Telemetry {
-        prometheus_handle,
-        tracer_provider,
-    }
+    prometheus_handle
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let Telemetry {
-        prometheus_handle,
-        tracer_provider,
-    } = init_telemetry();
+    let prometheus_handle = init_telemetry();
     let config = ApiConfig::parse();
 
     if config.import_witness {
-        let result = run_witness_import(&config).await;
-        shutdown_tracer_provider(tracer_provider);
-        return result;
+        return run_witness_import(&config).await;
     }
 
     // Deployment-profile preflight (SYB-133): log the active profile + every
@@ -394,9 +332,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(state) => state,
             Err(e) => {
                 tracing::error!(error = %e, "failed to restore persistent state");
-                let result = serve_restore_failure_mode(config.port, prometheus_handle).await;
-                shutdown_tracer_provider(tracer_provider);
-                return result;
+                return serve_restore_failure_mode(config.port, prometheus_handle).await;
             }
         }
     } else {
@@ -420,9 +356,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(sequencer) => sequencer,
             Err(e) => {
                 tracing::error!(error = %e, "failed to replay acknowledged writes");
-                let result = serve_restore_failure_mode(config.port, prometheus_handle).await;
-                shutdown_tracer_provider(tracer_provider);
-                return result;
+                return serve_restore_failure_mode(config.port, prometheus_handle).await;
             }
         };
 
@@ -567,8 +501,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             SEQUENCER_SHUTDOWN_TIMEOUT.as_secs()
         );
     }
-
-    shutdown_tracer_provider(tracer_provider);
 
     tracing::info!("Server shut down cleanly");
     Ok(())

@@ -54,7 +54,7 @@ pub struct WorkerArgs {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct WorkerStatusJson {
     pub version: u8,
-    /// Which producer wrote this artifact (`worker`, `mock-live`, ...). Older
+    /// Which producer wrote this artifact (`worker`, `daemon`, ...). Older
     /// status files predate the field, so decode falls back to `unknown`.
     #[serde(default = "unknown_status_producer")]
     pub producer: String,

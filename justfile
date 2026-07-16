@@ -466,16 +466,12 @@ viz snapshot="/tmp/snapshot.json":
 
 # Generate snapshot and launch visualization in one command
 viz-run preset="small":
-    cargo run --bin matching-sim --release --features viz -- --preset {{preset}} --export-json /tmp/snapshot.json
+    cargo run --bin matching-sim --release -- --preset {{preset}} --export-json /tmp/snapshot.json
     cd viz && uv run streamlit run app.py -- /tmp/snapshot.json
 
 # Install viz dependencies
 viz-install:
     cd viz && uv sync
-
-# Run EG (Eisenberg-Gale / Fisher market) solver
-sim-eg preset="quick":
-    cargo run --bin matching-sim --release --features lp -- --preset {{preset}} --solver eg -v
 
 # Run arena demo (starts server, syncs deps, runs backtest)
 arena-demo:
