@@ -247,11 +247,18 @@ smoke_compose_service_curl() {
     fi
 }
 
-# Print one row per compose container: "<name> <status> <health|none>".
+# Print one row per compose container:
+#   "<service> <name> <status> <health|none> <exit-code>".
 smoke_compose_service_rows() {
     local docker_ssh=$1 compose_project=$2
     smoke_docker_run "$docker_ssh" \
-        "docker ps -aq --filter label=com.docker.compose.project=$compose_project | xargs -r docker inspect --format '{{.Name}} {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}'"
+        "docker ps -aq --filter label=com.docker.compose.project=$compose_project | xargs -r docker inspect --format '{{index .Config.Labels \"com.docker.compose.service\"}} {{.Name}} {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} {{.State.ExitCode}}'"
+}
+
+# Native catalog installation is an explicit one-shot deployment service. No
+# other stopped container is healthy merely because it happened to exit zero.
+smoke_service_allows_successful_completion() {
+    [[ "${1:-}" == "sybil-native-admin" ]]
 }
 
 # Apply the shared compose health policy and invoke callbacks supplied by the
@@ -270,15 +277,18 @@ smoke_check_compose_services() {
         return
     fi
 
-    local saw_api=0 name status health
-    while read -r name status health; do
-        [[ -z "$name" ]] && continue
+    local saw_api=0 service name status health exit_code
+    while read -r service name status health exit_code; do
+        [[ -z "$service" || -z "$name" ]] && continue
         name="${name#/}"
-        [[ "$name" == *sybil-api* ]] && saw_api=1
+        [[ "$service" == "sybil-api" ]] && saw_api=1
         if [[ "$status" == "running" && ( "$health" == "none" || "$health" == "healthy" ) ]]; then
             "$pass_cb" "service $name: $status/$health"
+        elif smoke_service_allows_successful_completion "$service" \
+            && [[ "$status" == "exited" && "$exit_code" == "0" ]]; then
+            "$pass_cb" "service $name: completed successfully (exit 0)"
         else
-            "$fail_cb" "service $name: $status/$health (not running-and-healthy)"
+            "$fail_cb" "service $name: $status/$health exit=$exit_code (not healthy or expected successful completion)"
         fi
     done <<< "$rows"
     if [[ "$saw_api" -ne 1 ]]; then

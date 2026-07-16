@@ -97,4 +97,33 @@ assert_proof_result '{"block_height":"98"}' 100 5 "$root_a" "ERR invalid-block-h
 assert_proof_result '{"error":"empty"}' 100 5 "$root_a" "ERR invalid-block-height" 1
 assert_proof_result 'not json' 100 5 "$root_a" "ERR malformed-json" 1
 
+# Long-lived services must be running/healthy. The native catalog admin is the
+# sole explicit one-shot and passes only after exit 0; arbitrary stopped
+# services and failed catalog installs remain fatal.
+service_passes=()
+service_failures=()
+service_skips=()
+record_service_pass() { service_passes+=("$1"); }
+record_service_failure() { service_failures+=("$1"); }
+record_service_skip() { service_skips+=("$1"); }
+smoke_docker_available() { return 0; }
+smoke_compose_service_rows() {
+    printf '%s\n' \
+        'sybil-api /stack-sybil-api-1 running healthy 0' \
+        'sybil-native-admin /stack-sybil-native-admin-1 exited none 0' \
+        'arbitrary-job /stack-arbitrary-job-1 exited none 0' \
+        'sybil-native-admin /stack-failed-native-admin-1 exited none 1'
+}
+smoke_check_compose_services "" stack \
+    record_service_pass record_service_failure record_service_skip
+assert_eq "${#service_passes[@]}" "2" "compose service pass count"
+assert_eq "${#service_failures[@]}" "2" "compose service failure count"
+assert_eq "${#service_skips[@]}" "0" "compose service skip count"
+[[ "${service_passes[1]}" == *'completed successfully (exit 0)'* ]] \
+    || fail "native admin exit 0 was not reported as successful completion"
+[[ "${service_failures[0]}" == *'stack-arbitrary-job-1'* ]] \
+    || fail "arbitrary exit 0 service did not fail closed"
+[[ "${service_failures[1]}" == *'stack-failed-native-admin-1'* ]] \
+    || fail "native admin nonzero exit did not fail closed"
+
 echo "smoke-common tests: ok"
