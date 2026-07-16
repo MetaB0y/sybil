@@ -3,12 +3,12 @@ tags: [infrastructure, operations, deployment]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-15
+last_verified: 2026-07-16
 ---
 
 Sybil runs the same API/history images in three very different postures. The
 public 2 GB devnet box is deliberately tuned with dev-only tradeoffs —
-`SYBIL_DEV_MODE=true`, reduced caches, same-host storage — and nothing used to
+`SYBIL_DEV_MODE=true`, bounded hot serving state, same-host storage — and nothing used to
 stop those tradeoffs from silently leaking into a production / devnet-v2
 deploy. This note is the source of truth for which durability, cache, and
 prover knob is meant to hold which value in each profile, and it documents the
@@ -64,10 +64,6 @@ reflects base `docker-compose.yml`; "prod" reflects base + `docker-compose.prod.
 
 | Knob | default | current devnet | prod (intended) | Dev-only in prod? |
 | --- | --- | --- | --- | --- |
-| `SYBIL_MAX_RECENT_FILLS_PER_ACCOUNT` | `5000` | `5000` | `5000` | no (diagnostic cache only) |
-| `SYBIL_MAX_RECENT_PRICE_POINTS_PER_MARKET` | `2000` | `2000` | `2000` | no (rolling analytics only) |
-| `SYBIL_MAX_RECENT_EQUITY_POINTS_PER_ACCOUNT` | `0` | `0` | `0` | no (history served remotely) |
-| `SYBIL_MAX_RECENT_ACCOUNT_EVENTS_PER_ACCOUNT` | `0` | `0` | `0` | no (history served remotely) |
 | `SYBIL_RECENT_BLOCK_CACHE_CAPACITY` | `100` | `100` | `100` | no |
 | `SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS` | `0` (no prune) | `0` | `60480` (7 days at 10s/block) | no |
 | `SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS` | `8640` in Compose; `0` for direct runs | `8640` (1 day at 10s/block) | `60480` (7 days at 10s/block) | no |
@@ -85,11 +81,11 @@ reflects base `docker-compose.yml`; "prod" reflects base + `docker-compose.prod.
 | `SYBIL_HTTP_ONBOARDING_GLOBAL_RPS` / `BURST` | `5` / `20` | `5` / `20` | `5` / `20` | no |
 | `SYBIL_HTTP_ONBOARDING_CLIENT_RPS` / `BURST` | `1` / `3` | `1` / `3` | `1` / `3` | no |
 
-The per-account values above bound recent in-memory diagnostic/current-value
-caches only. They are neither durable history nor historical query policy.
-Product-history stock lives in `sybil-history`; the initial service retains raw
-batches and projections without an age/row cap. Canonical portfolio state is
-unaffected.
+The sequencer has no general fill, account-event, equity, or chart-price history
+cache. Product-history stock and historical query policy live in
+`sybil-history`; the initial service retains raw batches and projections without
+an age/row cap. The remaining recent-block ring and compact rolling aggregate
+anchors support hot block serving and current-value calculations only.
 
 The 256 anonymous-stream ceiling is a hard admission budget shared by public
 SSE and WebSocket connections, not a capacity claim. Run `just ws-load` with at
@@ -279,9 +275,9 @@ independent backup mandatory. Network-lifetime preservation still requires an
 off-host immutable raw-batch archive and restore drills; the same-host named
 volume is not an archival SLO.
 
-The sequencer's `MAX_*_HISTORY_*` values now bound only optional hot analytics
-caches. They do not select the public history source, which is always the
-remote projector after this cutover.
+The former sequencer `MAX_RECENT_*` history knobs no longer exist. The remote
+projector is the sole public source for fill, event, equity, price-history, and
+candle queries.
 
 The history service accepts authenticated MessagePack batches, limits active
 blocking queries to `SYBIL_HISTORY_MAX_QUERY_CONCURRENCY`, and persists the

@@ -81,13 +81,12 @@ failure and inspect logs before restarting.
    successful remote apply is safe: redelivery is idempotent and the next
    acknowledgement removes the source row. A permanent validation conflict is
    an integrity incident; preserve both stores.
-3. For RSS growth, correlate `sybil_recent_price_point_entries`,
-   `sybil_recent_fill_entries`, `sybil_recent_equity_point_entries`,
-   `sybil_recent_account_event_entries`, `sybil_recent_block_cache_len`,
-   `sybil_product_history_outbox_backlog_rows`, witness size, and actor queue.
-   A flat queue with growing cache entries is retention; a growing queue with
-   flat caches is backpressure. Once PSI is high, treat queue growth as possibly
-   downstream of host starvation.
+3. For RSS growth, correlate `sybil_recent_block_cache_len`,
+   `sybil_product_history_outbox_backlog_rows`, outbox payload bytes, witness
+   size, `sybil_state_accounts_total`, pending orders, and actor queue. A flat
+   queue with growing durable state or outbox stock suggests retained data; a
+   growing queue with flat state suggests backpressure. Once PSI is high, treat
+   queue growth as possibly downstream of host starvation.
 4. For account growth, compare `sybil_state_accounts_total` with
    `sybil_public_account_stock`, `sybil_public_account_remaining`, and
    `sybil_public_account_creation_total{result=...}`. Anonymous creation uses

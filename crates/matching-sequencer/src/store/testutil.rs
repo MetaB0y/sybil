@@ -178,7 +178,6 @@ impl TestEnv {
             analytics: AnalyticsSnapshot {
                 last_clearing_prices: &self.empty_prices,
                 market_volumes: market_volumes.unwrap_or(&self.empty_volumes),
-                account_fills: Vec::new(),
                 trader_tracker: Default::default(),
                 rolling_volume: Default::default(),
                 rolling_price_anchors: Default::default(),
@@ -220,7 +219,6 @@ impl TestEnv {
             analytics: AnalyticsSnapshot {
                 last_clearing_prices: &self.empty_prices,
                 market_volumes: &self.empty_volumes,
-                account_fills: Vec::new(),
                 trader_tracker: Default::default(),
                 rolling_volume: Default::default(),
                 rolling_price_anchors: Default::default(),

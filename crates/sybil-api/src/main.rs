@@ -123,7 +123,6 @@ fn sequencer_config_from_api(config: &ApiConfig) -> SequencerConfig {
         min_resting_order_notional_nanos: config.min_resting_order_notional_nanos,
         max_pending_bundles_per_account: config.max_pending_bundles_per_account,
         recent_block_cache_capacity: config.recent_block_cache_capacity,
-        max_recent_price_points_per_market: config.max_recent_price_points_per_market,
         canonical_archive_retention_blocks: config.canonical_archive_retention_blocks,
         canonical_archive_maintenance_interval_blocks: config
             .canonical_archive_maintenance_interval_blocks,
@@ -132,9 +131,6 @@ fn sequencer_config_from_api(config: &ApiConfig) -> SequencerConfig {
         acknowledged_proof_job_maintenance_interval_blocks: config
             .acknowledged_proof_job_maintenance_interval_blocks,
         acknowledged_proof_job_max_rows_per_pass: config.acknowledged_proof_job_max_rows_per_pass,
-        max_recent_fills_per_account: config.max_recent_fills_per_account,
-        max_recent_equity_points_per_account: config.max_recent_equity_points_per_account,
-        max_recent_account_events_per_account: config.max_recent_account_events_per_account,
         actor_queue_warn_depth: config.actor_queue_warn_depth,
         actor_queue_error_depth: config.actor_queue_error_depth,
         liquidity_band_nanos: config.liquidity_band_nanos,

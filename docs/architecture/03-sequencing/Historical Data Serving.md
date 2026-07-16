@@ -2,7 +2,7 @@
 tags: [infrastructure, storage, history]
 layer: sequencer
 status: current
-last_verified: 2026-07-15
+last_verified: 2026-07-16
 ---
 
 # Historical data serving
@@ -36,10 +36,11 @@ sequencer actor and the commit path. The publisher deletes a row only after the
 history checkpoint covers its height. A service outage therefore makes history
 lag and grows the durable backlog; it does not stop trading or block production.
 
-The sequencer does not also maintain durable fill, event, equity, price, or
-candle query tables. Those former projections were removed after this boundary
-landed; keeping them would restore the write amplification and ambiguous
-retention ownership that the service extraction was meant to eliminate.
+The sequencer does not also maintain durable or in-memory query history for
+fills, events, equity, prices, or candles. It keeps only current aggregates and
+the uncommitted fact buffers copied into the next fenced outbox row. Those
+former projections and cache fallbacks were removed after this boundary landed;
+keeping them would restore duplicate ownership and ambiguous retention policy.
 
 `CommittedHistoryBatchV1` is genesis-bound and contains the block/state hashes,
 commit timestamp, account-attributed fill/event/equity facts, public committed

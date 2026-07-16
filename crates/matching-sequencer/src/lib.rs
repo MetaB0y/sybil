@@ -61,9 +61,8 @@ pub use crypto::{
 };
 pub use error::{Rejection, RejectionReason, SequencerError};
 pub use market_info::{
-    AccountFillCursor, AccountFillRecord, MarketMetadata, MarketSearchQuery, MarketSortField,
-    PriceCandle, PriceCandlePage, PriceHistoryPage, PricePoint, ResolutionConfig,
-    RetainedHistoryPage,
+    AccountFillRecord, MarketMetadata, MarketSearchQuery, MarketSortField, PricePoint,
+    ResolutionConfig,
 };
 pub use portfolio::{PortfolioSummary, PositionValue};
 pub use sequencer::{

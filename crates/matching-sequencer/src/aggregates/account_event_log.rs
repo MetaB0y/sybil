@@ -1,16 +1,11 @@
-//! Off-block per-account history feed (the Portfolio "History" tab).
+//! Block-local account-event fact accumulator.
 //!
-//! Append-on-hook log of an account's lifecycle events. The in-memory bounded
-//! ring is a recent diagnostic cache; committed block deltas are exported
-//! through the product-history outbox.
+//! Append-on-hook facts are retained only until the next fenced history batch.
+//! Queryable account history belongs to `sybil-history`.
 //! Never enters state_root/events_root.
-
-use std::collections::{HashMap, VecDeque};
 
 use crate::account::AccountId;
 use matching_engine::{MarketId, Order};
-
-pub const DEFAULT_MAX_RECENT_ACCOUNT_EVENTS_PER_ACCOUNT: usize = 5_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum HistoryKind {
@@ -209,33 +204,25 @@ impl StoredHistoryEvent {
 
 #[derive(Clone)]
 pub struct AccountEventLog {
-    events: HashMap<AccountId, VecDeque<HistoryEvent>>,
     next_seq: u64,
-    max_events: usize,
     /// Events appended since the last `clear_pending`. Cleared after commit.
     pending: Vec<HistoryEvent>,
 }
 
 impl Default for AccountEventLog {
     fn default() -> Self {
-        Self::with_retention(DEFAULT_MAX_RECENT_ACCOUNT_EVENTS_PER_ACCOUNT)
+        Self::new()
     }
 }
 
 impl AccountEventLog {
     pub fn new() -> Self {
-        Self::with_retention(DEFAULT_MAX_RECENT_ACCOUNT_EVENTS_PER_ACCOUNT)
+        Self::with_next_seq(0)
     }
 
-    pub fn with_retention(max_events: usize) -> Self {
-        Self::with_retention_and_next_seq(max_events, 0)
-    }
-
-    pub fn with_retention_and_next_seq(max_events: usize, next_seq: u64) -> Self {
+    pub fn with_next_seq(next_seq: u64) -> Self {
         Self {
-            events: HashMap::new(),
             next_seq,
-            max_events,
             pending: Vec::new(),
         }
     }
@@ -271,54 +258,11 @@ impl AccountEventLog {
         self.pending.clear();
     }
 
-    pub fn retained_account_count(&self) -> usize {
-        self.events.len()
-    }
-
-    pub fn retained_event_count(&self) -> usize {
-        self.events.values().map(VecDeque::len).sum()
-    }
-
-    pub fn retention_per_account(&self) -> usize {
-        self.max_events
-    }
-
-    /// Append one event (assigns the global seq, trims the per-account ring).
+    /// Append one event and assign its globally monotonic product-event id.
     pub fn append(&mut self, mut event: HistoryEvent) {
         event.seq = self.next_seq;
         self.next_seq += 1;
-        if self.max_events > 0 {
-            let ring = self.events.entry(event.account_id).or_default();
-            ring.push_back(event.clone());
-            while ring.len() > self.max_events {
-                ring.pop_front();
-            }
-        }
         self.pending.push(event);
-    }
-
-    /// Newest-first page. `before` = exclusive cursor `(block_height, seq)`;
-    /// `category` filters by `HistoryKind::category`.
-    pub fn query(
-        &self,
-        account_id: AccountId,
-        limit: usize,
-        before: Option<(u64, u64)>,
-        category: Option<&str>,
-    ) -> Vec<HistoryEvent> {
-        let Some(ring) = self.events.get(&account_id) else {
-            return Vec::new();
-        };
-        ring.iter()
-            .rev() // newest-first
-            .filter(|e| match before {
-                Some((b, s)) => (e.block_height, e.seq) < (b, s),
-                None => true,
-            })
-            .filter(|e| category.is_none_or(|c| e.kind.category() == c))
-            .take(limit)
-            .cloned()
-            .collect()
     }
 }
 
@@ -382,7 +326,7 @@ mod tests {
     }
 
     #[test]
-    fn newest_first_with_category_filter_and_cursor() {
+    fn pending_facts_filter_by_account_category_and_cursor() {
         let mut log = AccountEventLog::new();
         ev(&mut log, 1, HistoryKind::Created, 1, 100); // funding
         ev(&mut log, 1, HistoryKind::Placed, 2, 200); // trades
@@ -390,27 +334,27 @@ mod tests {
         ev(&mut log, 2, HistoryKind::Deposit, 4, 400); // other account
 
         // Newest-first for account 1.
-        let all = log.query(AccountId(1), 10, None, None);
+        let all = log.query_pending(AccountId(1), None, None);
         assert_eq!(all.len(), 3);
         assert_eq!(all[0].kind, HistoryKind::Filled);
 
         // Category filter.
-        let trades = log.query(AccountId(1), 10, None, Some("trades"));
+        let trades = log.query_pending(AccountId(1), None, Some("trades"));
         assert_eq!(trades.len(), 2);
         assert!(trades.iter().all(|e| e.kind.category() == "trades"));
 
         // Cursor: before (3, seq_of_filled) excludes Filled.
         let filled_seq = all[0].seq;
-        let page = log.query(AccountId(1), 10, Some((3, filled_seq)), None);
+        let page = log.query_pending(AccountId(1), Some((3, filled_seq)), None);
         assert!(page.iter().all(|e| e.kind != HistoryKind::Filled));
     }
 
     #[test]
     fn restored_next_seq_is_used_for_new_events() {
-        let mut log = AccountEventLog::with_retention_and_next_seq(10, 42);
+        let mut log = AccountEventLog::with_next_seq(42);
         ev(&mut log, 1, HistoryKind::Placed, 9, 900);
 
-        let all = log.query(AccountId(1), 10, None, None);
+        let all = log.query_pending(AccountId(1), None, None);
         assert_eq!(all[0].seq, 42);
         assert_eq!(log.next_seq(), 43);
     }

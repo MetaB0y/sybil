@@ -1,4 +1,5 @@
-//! Tracks clearing prices, price history, and per-market volume.
+//! Tracks current prices, rolling anchors, per-market volume, and the next
+//! committed history-fact delta.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -8,13 +9,6 @@ use matching_engine::{
 use serde::{Deserialize, Serialize};
 
 use crate::market_info::PricePoint;
-
-/// Bounded in-memory price history retained per market.
-///
-/// This cache supports recent in-process diagnostics and rolling values.
-/// Historical price ranges are served by `sybil-history`, so the sequencer
-/// never needs to retain every committed point in RAM or in query tables.
-pub const DEFAULT_MAX_RECENT_PRICE_POINTS_PER_MARKET: usize = 2_000;
 
 /// Milliseconds in one hour — bucket granularity for the 24h volume window.
 const HOUR_MS: u64 = 3_600_000;
@@ -49,7 +43,7 @@ pub struct RollingPriceAnchorsSnapshot {
     pub hourly_clearing_prices: HashMap<MarketId, VecDeque<(u64, Vec<Nanos>)>>,
 }
 
-/// Tracks clearing prices, price history, and per-market trading volume.
+/// Tracks current price/volume state and block-local history facts.
 #[derive(Clone)]
 pub struct PriceTracker {
     /// Persisted clearing prices across blocks (fallback when no trades happen).
@@ -60,15 +54,11 @@ pub struct PriceTracker {
     /// `last_clearing_prices` on restore so the portfolio has a mark before the
     /// first post-restart block.
     last_mark_prices: HashMap<MarketId, Vec<Nanos>>,
-    /// Price history per market.
-    price_history: HashMap<MarketId, Vec<PricePoint>>,
     /// Price points appended since the last committed snapshot. Store-backed
     /// history persists these rows, then the actor clears them after commit.
     pending_price_points: Vec<(MarketId, PricePoint)>,
     /// Cumulative per-market volume in nanos.
     market_volumes: HashMap<MarketId, u64>,
-    /// Maximum retained price points per market in the in-memory serving cache.
-    max_history_points_per_market: usize,
     /// Running platform-wide volume total. Computed from raw fills so
     /// multi-market orders don't double-count (per-market entries credit each
     /// active market; the platform scalar counts each fill once).
@@ -93,17 +83,11 @@ impl Default for PriceTracker {
 
 impl PriceTracker {
     pub fn new() -> Self {
-        Self::with_retention(DEFAULT_MAX_RECENT_PRICE_POINTS_PER_MARKET)
-    }
-
-    pub fn with_retention(max_history_points_per_market: usize) -> Self {
         Self {
             last_clearing_prices: HashMap::new(),
             last_mark_prices: HashMap::new(),
-            price_history: HashMap::new(),
             pending_price_points: Vec::new(),
             market_volumes: HashMap::new(),
-            max_history_points_per_market,
             platform_volume: 0,
             hourly_per_market: VecDeque::new(),
             hourly_platform: VecDeque::new(),
@@ -117,26 +101,12 @@ impl PriceTracker {
         last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
         market_volumes: HashMap<MarketId, u64>,
     ) -> Self {
-        Self::with_state_and_retention(
-            last_clearing_prices,
-            market_volumes,
-            DEFAULT_MAX_RECENT_PRICE_POINTS_PER_MARKET,
-        )
-    }
-
-    pub fn with_state_and_retention(
-        last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
-        market_volumes: HashMap<MarketId, u64>,
-        max_history_points_per_market: usize,
-    ) -> Self {
         let last_clearing_prices_seed = last_clearing_prices.clone();
         Self {
             last_clearing_prices,
             last_mark_prices: last_clearing_prices_seed,
-            price_history: HashMap::new(),
             pending_price_points: Vec::new(),
             market_volumes,
-            max_history_points_per_market,
             platform_volume: 0,
             hourly_per_market: VecDeque::new(),
             hourly_platform: VecDeque::new(),
@@ -271,12 +241,10 @@ impl PriceTracker {
             // Coalesce flat no-trade ticks: skip the append when the price is
             // unchanged AND nothing traded. Trades always produce a point.
             let unchanged = vol == 0
-                && self
-                    .price_history
-                    .get(&mid)
-                    .and_then(|h| h.last())
-                    .map(|p| p.yes_price == yes_price && p.no_price == no_price)
-                    .unwrap_or(false);
+                && self.last_mark_prices.get(&mid).is_some_and(|prices| {
+                    prices.first().copied() == Some(yes_price)
+                        && prices.get(1).copied() == Some(no_price)
+                });
             if !unchanged {
                 let point = PricePoint {
                     height,
@@ -285,16 +253,6 @@ impl PriceTracker {
                     no_price,
                     volume_nanos: vol,
                 };
-                {
-                    let history = self.price_history.entry(mid).or_default();
-                    history.push(point.clone());
-                    let overflow = history
-                        .len()
-                        .saturating_sub(self.max_history_points_per_market);
-                    if overflow > 0 {
-                        history.drain(0..overflow);
-                    }
-                }
                 self.pending_price_points.push((mid, point));
             }
 
@@ -358,31 +316,8 @@ impl PriceTracker {
         }
     }
 
-    /// Get price history for a market, optionally filtered by time range.
-    pub fn price_history(
-        &self,
-        market_id: MarketId,
-        from_ms: Option<u64>,
-        to_ms: Option<u64>,
-    ) -> Vec<PricePoint> {
-        let Some(history) = self.price_history.get(&market_id) else {
-            return Vec::new();
-        };
-        history
-            .iter()
-            .filter(|p| from_ms.is_none_or(|f| p.timestamp_ms >= f))
-            .filter(|p| to_ms.is_none_or(|t| p.timestamp_ms <= t))
-            .cloned()
-            .collect()
-    }
-
     pub fn pending_price_points(&self) -> &[(MarketId, PricePoint)] {
         &self.pending_price_points
-    }
-
-    /// Number of price points held by the bounded in-process recent cache.
-    pub fn retained_point_count(&self) -> usize {
-        self.price_history.values().map(Vec::len).sum()
     }
 
     pub fn clear_pending(&mut self) {
@@ -502,38 +437,6 @@ mod tests {
 
     fn q(shares: u64) -> u64 {
         shares_to_qty(shares).0
-    }
-
-    #[test]
-    fn price_history_is_bounded_per_market() {
-        let mut markets = MarketSet::new();
-        let market = markets.add_binary("bounded");
-        let order = outcome_buy(&markets, 1, market, 0, NANOS_PER_DOLLAR / 2, 1);
-        let mut orders = HashMap::new();
-        orders.insert(order.id, &order);
-        let mut clearing_prices = HashMap::new();
-        clearing_prices.insert(
-            market,
-            vec![Nanos(NANOS_PER_DOLLAR / 2), Nanos(NANOS_PER_DOLLAR / 2)],
-        );
-
-        let max_points = 8;
-        let mut tracker = PriceTracker::with_retention(max_points);
-        for height in 1..=(max_points as u64 + 5) {
-            tracker.record_block(
-                &[Fill::new(order.id, Qty(1), Nanos(NANOS_PER_DOLLAR / 2))],
-                &orders,
-                &clearing_prices,
-                &HashMap::new(),
-                height,
-                height * 1_000,
-            );
-        }
-
-        let history = tracker.price_history(market, None, None);
-        assert_eq!(history.len(), max_points);
-        assert_eq!(history.first().unwrap().height, 6);
-        assert_eq!(history.last().unwrap().height, max_points as u64 + 5);
     }
 
     fn single_market_setup() -> (MarketSet, MarketId, Order, HashMap<MarketId, Vec<Nanos>>) {
@@ -871,7 +774,7 @@ mod tests {
     }
 
     #[test]
-    fn record_block_emits_midpoint_point_for_no_cross_market() {
+    fn record_block_exports_changed_midpoint_without_flat_duplicates() {
         use matching_engine::{MarketId, NANOS_PER_DOLLAR};
         let mut pt = PriceTracker::new();
 
@@ -892,22 +795,17 @@ mod tests {
             ])
         );
 
-        let hist = pt.price_history(m0, None, None);
-        assert_eq!(hist.len(), 1);
-        assert_eq!(hist[0].yes_price, Nanos(450_000_000));
-        assert_eq!(hist[0].volume_nanos, 0);
+        assert_eq!(pt.pending_price_points().len(), 1);
+        assert_eq!(pt.pending_price_points()[0].1.yes_price, Nanos(450_000_000));
+        assert_eq!(pt.pending_price_points()[0].1.volume_nanos, 0);
 
         // A second identical no-cross block coalesces (no new flat point).
         pt.record_block(&[], &orders, &clearing, &midpoints, 2, 2_000);
-        assert_eq!(
-            pt.price_history(m0, None, None).len(),
-            1,
-            "flat tick coalesced"
-        );
+        assert_eq!(pt.pending_price_points().len(), 1, "flat tick coalesced");
 
         // Midpoint moves => new point.
         midpoints.insert(m0, Nanos(470_000_000));
         pt.record_block(&[], &orders, &clearing, &midpoints, 3, 3_000);
-        assert_eq!(pt.price_history(m0, None, None).len(), 2);
+        assert_eq!(pt.pending_price_points().len(), 2);
     }
 }

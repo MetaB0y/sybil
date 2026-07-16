@@ -798,7 +798,6 @@ fn empty_import_analytics(
     AnalyticsRestoredState {
         last_clearing_prices,
         market_volumes: HashMap::new(),
-        account_fills: Vec::new(),
         trader_tracker: Default::default(),
         rolling_volume: Default::default(),
         rolling_price_anchors: Default::default(),

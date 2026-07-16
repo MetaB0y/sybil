@@ -3,7 +3,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 
 use matching_engine::MarketId;
-use matching_sequencer::{AccountFillCursor, AccountId};
+use matching_sequencer::AccountId;
 use sybil_history_types::{
     AccountEventQuery, EquityQuery, FillCursor, FillQuery, ProjectionStatus,
 };
@@ -117,8 +117,8 @@ pub async fn get_account_fills(
         AppError::history_unavailable("Historical data service is not configured")
     })?;
     let page = if let Some(after) = params.after.as_deref() {
-        let cursor = AccountFillCursor::parse(after)
-            .ok_or_else(|| AppError::bad_request("Invalid fill cursor"))?;
+        let cursor =
+            FillCursor::parse(after).ok_or_else(|| AppError::bad_request("Invalid fill cursor"))?;
         requested_cursor = Some(cursor);
         history
             .fills(&FillQuery {
@@ -325,7 +325,7 @@ pub(super) fn account_fill_query_limit(limit: Option<usize>) -> usize {
 }
 
 pub(super) fn fill_cursor_has_gap(
-    cursor: Option<AccountFillCursor>,
+    cursor: Option<FillCursor>,
     pruned_through_height: Option<u64>,
 ) -> bool {
     cursor.is_some_and(|cursor| {

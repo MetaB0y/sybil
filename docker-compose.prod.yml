@@ -48,10 +48,6 @@ services:
       # key on later boots. Keep it in sybil-data so the admin resolution feed
       # identity survives container replacement and host reboots.
       SYBIL_ADMIN_FEED_KEY_PATH: "/data/admin-feed.key"
-      # History serving lives in sybil-history; these only bound optional hot
-      # analytics caches in the sequencer process.
-      SYBIL_MAX_RECENT_EQUITY_POINTS_PER_ACCOUNT: "0"
-      SYBIL_MAX_RECENT_ACCOUNT_EVENTS_PER_ACCOUNT: "0"
       # Seven days at the inherited 10-second block cadence: 6 blocks/minute
       # * 60 * 24 * 7 = 60,480 blocks. This applies only to full canonical
       # blocks and paired local DA artifacts, not product history.
