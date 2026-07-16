@@ -79,6 +79,12 @@ and the private deployment log.
 
 5. Take a store backup and restore-drill it, even when the state will be
    discarded. The backup is incident evidence and the rollback reference.
+   Drill it with the preserved deployed/source image that would actually be
+   used to roll back the old chain. Do not require a schema-breaking target
+   image to open the old store: that would be a migration test, and its
+   expected failure is why this procedure selects a fresh genesis. If state is
+   meant to survive, stop here and require the target image to pass the drill
+   under a reviewed migration instead.
 
 Do not copy commitments from a runbook, ticket, or chat message. The checked-in
 commitment JSON, its fingerprint lock, and ultimately the deployed adapter are
