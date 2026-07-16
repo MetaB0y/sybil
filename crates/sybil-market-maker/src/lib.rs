@@ -29,6 +29,21 @@ pub struct PriceSnapshot {
     pub source: PriceUpdateSource,
 }
 
+/// Read-only operational progress published by the MM actor.
+///
+/// Owning processes may project this snapshot into health policy and metrics;
+/// it is not a second coordination surface and cannot drive quote generation.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MmProgress {
+    pub tracked_markets: usize,
+    pub last_observed_block: Option<u64>,
+    pub last_completed_quote_block: Option<u64>,
+    pub last_successful_submission_block: Option<u64>,
+    pub successful_submissions: u64,
+    pub failed_submissions: u64,
+    pub last_progress_timestamp_ms: u64,
+}
+
 impl PriceSnapshot {
     pub fn record_midpoint(&mut self, token_id: String, price: f64, now_ms: u64) {
         self.token_updated_ms.insert(token_id.clone(), now_ms);
@@ -371,6 +386,7 @@ struct MmState {
     markets: HashMap<u32, MarketState>,
     last_sync_block: u64,
     next_quote_index: usize,
+    progress: MmProgress,
 }
 
 impl MmState {
@@ -379,6 +395,7 @@ impl MmState {
             markets: HashMap::new(),
             last_sync_block: 0,
             next_quote_index: 0,
+            progress: MmProgress::default(),
         }
     }
 }
@@ -398,10 +415,16 @@ pub struct MmActor {
     account_id: u64,
     price_rx: watch::Receiver<PriceSnapshot>,
     mm_rx: mpsc::Receiver<MmMessage>,
-    /// Publishes the count of markets the MM is actively quoting so SyncActor
-    /// can recycle `mm_max_markets` slots as markets are untracked (PM-8).
-    live_tx: watch::Sender<usize>,
+    /// Publishes actor-owned progress. SyncActor consumes only
+    /// `tracked_markets`; owning processes may expose the rest as monitoring.
+    progress_tx: watch::Sender<MmProgress>,
     state: MmState,
+}
+
+enum SubmissionOutcome {
+    Skipped,
+    Succeeded,
+    Failed { poisoned_market: Option<u32> },
 }
 
 impl MmActor {
@@ -411,7 +434,7 @@ impl MmActor {
         account_id: u64,
         price_rx: watch::Receiver<PriceSnapshot>,
         mm_rx: mpsc::Receiver<MmMessage>,
-        live_tx: watch::Sender<usize>,
+        progress_tx: watch::Sender<MmProgress>,
     ) -> Self {
         Self {
             config: config.0,
@@ -419,14 +442,20 @@ impl MmActor {
             account_id,
             price_rx,
             mm_rx,
-            live_tx,
+            progress_tx,
             state: MmState::new(),
         }
     }
 
-    /// Publish the current live-market count to SyncActor's watch channel.
-    fn publish_live_count(&self) {
-        let _ = self.live_tx.send(self.state.markets.len());
+    fn publish_progress(&mut self) {
+        self.state.progress.tracked_markets = self.state.markets.len();
+        let _ = self.progress_tx.send(self.state.progress.clone());
+    }
+
+    fn complete_quote_cycle(&mut self, block_height: u64) {
+        self.state.progress.last_completed_quote_block = Some(block_height);
+        self.state.progress.last_progress_timestamp_ms = now_ms();
+        self.publish_progress();
     }
 
     /// Stop quoting a market and free its live-set slot. Returns `true` if the
@@ -435,7 +464,7 @@ impl MmActor {
     fn untrack_market(&mut self, market_id: u32, reason: &str) -> bool {
         if self.state.markets.remove(&market_id).is_some() {
             info!(market_id, reason, "MM untracking market");
-            self.publish_live_count();
+            self.publish_progress();
             true
         } else {
             false
@@ -572,7 +601,7 @@ impl MmActor {
                         self.config.mm_vol_window,
                     ),
                 );
-                self.publish_live_count();
+                self.publish_progress();
             }
             MmMessage::MarketNative {
                 sybil_market_id,
@@ -601,7 +630,7 @@ impl MmActor {
                         self.config.mm_vol_window,
                     ),
                 );
-                self.publish_live_count();
+                self.publish_progress();
             }
         }
     }
@@ -681,6 +710,8 @@ impl MmActor {
     async fn on_block(&mut self, block: &PublicBlockResponse) {
         let snapshot = self.price_rx.borrow().clone();
         let now = now_ms();
+        self.state.progress.last_observed_block = Some(block.height);
+        self.publish_progress();
 
         // 0. Observe lifecycle. The same state-only observation also runs
         //    during replay, while the quote side effects below are live-only.
@@ -693,6 +724,7 @@ impl MmActor {
         let budget_nanos = self.compute_budget(&snapshot);
         if budget_nanos == 0 {
             debug!("budget exhausted (exposure at max), skipping block");
+            self.complete_quote_cycle(block.height);
             return;
         }
 
@@ -778,11 +810,23 @@ impl MmActor {
         //    market lets us drop the poison defensively (PM-1 defence in depth)
         //    even if we never saw its `MarketResolved` (e.g. missed block, or a
         //    market that became untradeable for another reason).
-        if let Some(poisoned) = self
+        match self
             .submit_orders(&orders, budget_nanos, block.height)
             .await
         {
-            self.untrack_market(poisoned, "batch_rejected_untradeable");
+            SubmissionOutcome::Skipped => {}
+            SubmissionOutcome::Succeeded => {
+                self.state.progress.successful_submissions =
+                    self.state.progress.successful_submissions.saturating_add(1);
+                self.state.progress.last_successful_submission_block = Some(block.height);
+            }
+            SubmissionOutcome::Failed { poisoned_market } => {
+                self.state.progress.failed_submissions =
+                    self.state.progress.failed_submissions.saturating_add(1);
+                if let Some(poisoned) = poisoned_market {
+                    self.untrack_market(poisoned, "batch_rejected_untradeable");
+                }
+            }
         }
 
         // 6. Push reference prices (IO)
@@ -791,6 +835,7 @@ impl MmActor {
         {
             warn!(error = %error, prices = ref_prices.len(), "reference-price update failed");
         }
+        self.complete_quote_cycle(block.height);
     }
 
     async fn maybe_sync_positions(&mut self, block_height: u64) {
@@ -803,17 +848,16 @@ impl MmActor {
         }
     }
 
-    /// Submit the IOC batch. Returns `Some(market_id)` when the whole batch was
-    /// rejected because that market is non-tradeable, so the caller can untrack
-    /// it (defence in depth for PM-1).
+    /// Submit the IOC batch and report the operational outcome. A failure may
+    /// name a non-tradeable market that the caller should untrack (PM-1).
     async fn submit_orders(
         &self,
         orders: &[OrderSpec],
         budget_nanos: u64,
         block_height: u64,
-    ) -> Option<u32> {
+    ) -> SubmissionOutcome {
         if orders.is_empty() {
-            return None;
+            return SubmissionOutcome::Skipped;
         }
         let req = SubmitOrderRequest {
             account_id: self.account_id,
@@ -831,12 +875,14 @@ impl MmActor {
                     budget_dollars = budget_nanos as f64 / NANOS_PER_DOLLAR as f64,
                     "submitted MM orders"
                 );
-                None
+                SubmissionOutcome::Succeeded
             }
             Err(e) => {
                 let poisoned = poisoned_market_from_error(&e);
                 warn!(block = block_height, error = %e, poisoned, "order submission failed");
-                poisoned
+                SubmissionOutcome::Failed {
+                    poisoned_market: poisoned,
+                }
             }
         }
     }
@@ -1003,7 +1049,9 @@ mod tests {
         );
     }
 
-    fn test_actor(live_tx: watch::Sender<usize>) -> (MmActor, watch::Sender<PriceSnapshot>) {
+    fn test_actor(
+        progress_tx: watch::Sender<MmProgress>,
+    ) -> (MmActor, watch::Sender<PriceSnapshot>) {
         let (price_tx, price_rx) = watch::channel(PriceSnapshot::default());
         let (_mm_tx, mm_rx) = mpsc::channel(16);
         let client = SybilClient::new(reqwest::Client::new(), "http://localhost".into(), None);
@@ -1013,7 +1061,7 @@ mod tests {
             1,
             price_rx,
             mm_rx,
-            live_tx,
+            progress_tx,
         );
         (actor, price_tx)
     }
@@ -1065,12 +1113,12 @@ mod tests {
 
     #[test]
     fn resolved_market_is_untracked_and_frees_live_slot() {
-        let (live_tx, live_rx) = watch::channel(0usize);
+        let (live_tx, live_rx) = watch::channel(MmProgress::default());
         let (mut actor, _price_tx) = test_actor(live_tx);
 
         track(&mut actor, 10);
         track(&mut actor, 11);
-        assert_eq!(*live_rx.borrow(), 2);
+        assert_eq!(live_rx.borrow().tracked_markets, 2);
         assert!(actor.state.markets.contains_key(&10));
 
         actor.untrack_resolved(&block_resolving(&[10]));
@@ -1078,12 +1126,12 @@ mod tests {
         assert!(!actor.state.markets.contains_key(&10));
         assert!(actor.state.markets.contains_key(&11));
         // PM-8: the freed slot is published back to Sync.
-        assert_eq!(*live_rx.borrow(), 1);
+        assert_eq!(live_rx.borrow().tracked_markets, 1);
     }
 
     #[test]
     fn native_midpoint_does_not_learn_from_internal_clearing_price() {
-        let (live_tx, _live_rx) = watch::channel(0usize);
+        let (live_tx, _live_rx) = watch::channel(MmProgress::default());
         let (mut actor, _price_tx) = test_actor(live_tx);
         track_native(&mut actor, 7, 0.4);
 
@@ -1099,15 +1147,35 @@ mod tests {
 
     #[test]
     fn untrack_market_defensive_drop_publishes_live_count() {
-        let (live_tx, live_rx) = watch::channel(0usize);
+        let (live_tx, live_rx) = watch::channel(MmProgress::default());
         let (mut actor, _price_tx) = test_actor(live_tx);
         track(&mut actor, 5);
-        assert_eq!(*live_rx.borrow(), 1);
+        assert_eq!(live_rx.borrow().tracked_markets, 1);
 
         assert!(actor.untrack_market(5, "batch_rejected_untradeable"));
-        assert_eq!(*live_rx.borrow(), 0);
+        assert_eq!(live_rx.borrow().tracked_markets, 0);
         // Dropping an already-gone market is a no-op.
         assert!(!actor.untrack_market(5, "batch_rejected_untradeable"));
+    }
+
+    #[test]
+    fn completed_quote_cycle_publishes_operational_progress() {
+        let (progress_tx, progress_rx) = watch::channel(MmProgress::default());
+        let (mut actor, _price_tx) = test_actor(progress_tx);
+        track_native(&mut actor, 9, 0.5);
+        actor.state.progress.last_observed_block = Some(17);
+        actor.state.progress.successful_submissions = 3;
+        actor.state.progress.last_successful_submission_block = Some(17);
+
+        actor.complete_quote_cycle(17);
+
+        let progress = progress_rx.borrow().clone();
+        assert_eq!(progress.tracked_markets, 1);
+        assert_eq!(progress.last_observed_block, Some(17));
+        assert_eq!(progress.last_completed_quote_block, Some(17));
+        assert_eq!(progress.last_successful_submission_block, Some(17));
+        assert_eq!(progress.successful_submissions, 3);
+        assert_ne!(progress.last_progress_timestamp_ms, 0);
     }
 
     fn default_config() -> QuoteConfig {
@@ -1246,7 +1314,7 @@ mod tests {
 
     #[test]
     fn budget_decays_to_zero_at_max_exposure() {
-        let (live_tx, _live_rx) = watch::channel(0usize);
+        let (live_tx, _live_rx) = watch::channel(MmProgress::default());
         let (mut actor, _price_tx) = test_actor(live_tx);
         actor.config.mm_max_exposure_dollars = 100.0;
         actor.config.mm_budget_dollars = 1000.0;
@@ -1543,7 +1611,7 @@ mod tests {
 
     #[test]
     fn native_market_budget_uses_template_mid_without_snapshot() {
-        let (live_tx, live_rx) = watch::channel(0usize);
+        let (live_tx, live_rx) = watch::channel(MmProgress::default());
         let (mut actor, _price_tx) = test_actor(live_tx);
         actor.config.mm_max_exposure_dollars = 100.0;
         actor.config.mm_budget_dollars = 1000.0;
@@ -1560,7 +1628,7 @@ mod tests {
         });
         actor.state.markets.get_mut(&99).unwrap().yes_position = q(50);
 
-        assert_eq!(*live_rx.borrow(), 1);
+        assert_eq!(live_rx.borrow().tracked_markets, 1);
         let budget = actor.compute_budget(&PriceSnapshot::default());
         assert!(budget > 0, "native budget should not require feed prices");
     }

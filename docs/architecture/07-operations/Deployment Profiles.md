@@ -310,6 +310,15 @@ retry after acknowledged-write recovery, and rejects conflicting reuse. The
 admin therefore never discovers identity from titles, tags, or the off-block
 reference metadata written after creation.
 
+The long-running native MM owns its operational contract on private port 9104.
+`/healthz` reports process liveness, while `/readyz` requires at least one
+tracked market and a recently completed live quote cycle. `/metrics` projects
+the actor's read-only progress snapshot: tracked markets, observed/completed
+block heights, last accepted submission block, progress time, and submission
+success/failure counters. Compose checks readiness directly and
+VictoriaMetrics scrapes the same owner; `sybil-api` does not infer native MM
+health from orders or fills.
+
 The initial history redb retains raw batches, fills, events, equity, prices,
 and candles without the former 30/31-day and global-row ceilings. This removes
 arbitrary product truncation but makes outbox/service volume monitoring and
