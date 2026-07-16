@@ -3,13 +3,13 @@ tags: [oracle, resolution, lifecycle]
 layer: oracle
 crate: sybil-oracle
 status: current
-last_verified: 2026-07-11
+last_verified: 2026-07-16
 ---
 
 # Market resolution
 
 > [!summary] In one paragraph
-> External processes decide what happened; the trusted core accepts only a typed P256-signed attestation from the feed named by the market's resolution template. The implemented core policy is immediate: one valid attestation moves an active market irreversibly to resolved, pays YES at `payout_nanos`, pays NO at `$1 - payout`, and records the transition in the next witness.
+> External processes decide what happened; the trusted core accepts either an explicit trusted-admin decision or a typed P256-signed attestation from the feed named by the market's resolution template. The implemented core policy is immediate: one authorized result moves an active market irreversibly to resolved, pays YES at `payout_nanos`, pays NO at `$1 - payout`, and records the transition in the next witness.
 
 ## Trust boundary
 
@@ -42,7 +42,9 @@ stateDiagram-v2
     Resolved --> [*]
 ```
 
-`Proposed`, `Challenged`, and `Voided` remain reserved type variants; the core policy does not enter them.
+These are the only canonical states. Proposal, challenge, dispute, abstention,
+and void semantics remain product/governance design questions until their
+authority, economics, timeouts, and executable transitions are specified.
 
 ## Payout and groups
 
@@ -53,8 +55,8 @@ stateDiagram-v2
 
 ## Invariants
 
-1. The signer is the feed required by the market template.
-2. The signed market id equals the market being resolved.
+1. An attested signer is the feed required by the market template; the unsigned path is restricted to trusted admin control.
+2. A signed market id equals the market being resolved.
 3. Payout lies in `[0, NANOS_PER_DOLLAR]`.
 4. Resolution is irreversible and witness-visible.
 5. External I/O and subjective decision logic remain outside the oracle/sequencer core.

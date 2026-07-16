@@ -4,14 +4,13 @@
 //! only checks with `eprintln` warnings (sequencer.rs:650-715).
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use matching_engine::{
     MarketId, MarketSet, NANOS_PER_DOLLAR, Nanos, Qty, compute_fill_settlement, derive_minting,
     net_welfare, outcome_buy, signed_notional_nanos,
 };
-use matching_sequencer::{AccountId, AccountStore, AdminOracle, BlockSequencer, OrderSubmission};
+use matching_sequencer::{AccountId, AccountStore, BlockSequencer, OrderSubmission};
 use proptest::prelude::*;
 use sybil_verifier::BlockWitness;
 
@@ -117,15 +116,13 @@ fn make_sequencer() -> (BlockSequencer, MarketSet) {
         accounts.create_account(INITIAL_BALANCE);
     }
     let markets = make_markets();
-    let oracle = Arc::new(AdminOracle::new());
     // These properties target settlement conservation over generated dust as
     // well as ordinary orders, independently of deployment admission policy.
     let config = matching_sequencer::SequencerConfig {
         min_resting_order_notional_nanos: 0,
         ..matching_sequencer::SequencerConfig::default()
     };
-    let seq =
-        BlockSequencer::with_default_solver(accounts, markets.clone(), vec![], oracle, config);
+    let seq = BlockSequencer::with_default_solver(accounts, markets.clone(), vec![], config);
     (seq, markets)
 }
 

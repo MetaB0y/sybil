@@ -547,7 +547,7 @@ impl Store {
             "typed qMDB root mismatch during restore; rebuilding fenced state slot from redb snapshot"
         );
 
-        let mut lifecycle = MarketLifecycle::new(Arc::new(AdminOracle::new()));
+        let mut lifecycle = MarketLifecycle::new();
         for (&market_id, status) in market_statuses {
             lifecycle.set_market_status(market_id, status.clone());
         }

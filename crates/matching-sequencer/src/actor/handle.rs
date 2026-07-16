@@ -88,7 +88,6 @@ impl SequencerHandle {
         sequencer: BlockSequencer,
         store: Option<Arc<crate::store::Store>>,
     ) -> Self {
-        let oracle = sequencer.oracle();
         let config = sequencer.config.clone();
         let (block_broadcast, _) = broadcast::channel(64);
         let recent_blocks = Arc::new(RwLock::new(VecDeque::new()));
@@ -108,7 +107,6 @@ impl SequencerHandle {
         let supervisor_args = SequencerSupervisorArgs {
             config,
             store: store.clone(),
-            oracle,
             handle: inner.clone(),
         };
         let (supervisor, _) =
@@ -946,7 +944,7 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::time::Duration;
-    use sybil_oracle::{AdminOracle, FeedPubkey, ResolutionPolicy, ResolutionTemplate, TemplateId};
+    use sybil_oracle::{FeedPubkey, ResolutionPolicy, ResolutionTemplate, TemplateId};
     use sybil_verifier::SystemEventWitness;
 
     static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
@@ -978,9 +976,8 @@ mod tests {
         let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
         let mut markets = MarketSet::new();
         markets.add_binary("Test");
-        let oracle = Arc::new(AdminOracle::new());
         (
-            BlockSequencer::with_default_solver(accounts, markets, vec![], oracle, config),
+            BlockSequencer::with_default_solver(accounts, markets, vec![], config),
             aid,
         )
     }
@@ -1268,13 +1265,8 @@ mod tests {
         let counterparty = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
         let mut markets = MarketSet::new();
         let market = markets.add_binary("IOC race");
-        let sequencer = BlockSequencer::with_default_solver(
-            accounts,
-            markets.clone(),
-            vec![],
-            Arc::new(AdminOracle::new()),
-            config,
-        );
+        let sequencer =
+            BlockSequencer::with_default_solver(accounts, markets.clone(), vec![], config);
         let handle = SequencerHandle::spawn(sequencer);
 
         // Model the old API's separate latest-block RPC, then commit a block
@@ -1369,13 +1361,7 @@ mod tests {
         let b = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("Test");
-        let seq = BlockSequencer::with_default_solver(
-            accounts,
-            markets.clone(),
-            vec![],
-            Arc::new(AdminOracle::new()),
-            config,
-        );
+        let seq = BlockSequencer::with_default_solver(accounts, markets.clone(), vec![], config);
         let handle = SequencerHandle::spawn(seq);
 
         let sub = |account_id| OrderSubmission {
@@ -1611,7 +1597,6 @@ mod tests {
             accounts,
             markets.clone(),
             vec![],
-            Arc::new(AdminOracle::new()),
             SequencerConfig::default(),
         );
         let handle = SequencerHandle::spawn(seq);
@@ -1734,7 +1719,7 @@ mod tests {
         store.save_block(baseline.snapshot()).await.unwrap();
 
         let restored = store.load_state().await.unwrap().unwrap();
-        let seq = BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
+        let seq = BlockSequencer::restore(restored, config.clone());
         let handle = SequencerHandle::spawn_with_store_arc(seq, Some(store.clone()));
 
         let created = handle
@@ -1938,8 +1923,7 @@ mod tests {
                 1,
                 "restart round {restart_round} should replay the direct admit before the cancel command"
             );
-            let restored_seq =
-                BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
+            let restored_seq = BlockSequencer::restore(restored, config.clone());
             assert_replayed(&restored_seq);
             let created_history =
                 restored_seq
@@ -2030,11 +2014,7 @@ mod tests {
                 restored_after_commit.acknowledged_writes.is_empty(),
                 "admit WAL should clear once a block commits the direct admit and cancel"
             );
-            let restored_seq = BlockSequencer::restore(
-                restored_after_commit,
-                Arc::new(AdminOracle::new()),
-                config.clone(),
-            );
+            let restored_seq = BlockSequencer::restore(restored_after_commit, config.clone());
             assert_replayed(&restored_seq);
 
             let mut probe = restored_seq.clone();
@@ -2067,7 +2047,7 @@ mod tests {
         store.save_block(baseline.snapshot()).await.unwrap();
 
         let restored = store.load_state().await.unwrap().unwrap();
-        let seq = BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
+        let seq = BlockSequencer::restore(restored, config.clone());
         let handle = SequencerHandle::spawn_with_store_arc(seq, Some(store.clone()));
         let markets = handle.list_markets().await.unwrap();
 
@@ -2157,8 +2137,7 @@ mod tests {
                 .count(),
             1
         );
-        let restored_seq =
-            BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
+        let restored_seq = BlockSequencer::restore(restored, config.clone());
 
         assert!(
             restored_seq.pending_orders_info(Some(aid)).is_empty(),
@@ -2212,7 +2191,7 @@ mod tests {
         store.save_block(baseline.snapshot()).await.unwrap();
 
         let restored = store.load_state().await.unwrap().unwrap();
-        let seq = BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config);
+        let seq = BlockSequencer::restore(restored, config);
         let handle = SequencerHandle::spawn_with_store_arc(seq, Some(store.clone()));
         let withdrawal = handle
             .create_bridge_withdrawal(BridgeWithdrawalRequest {
@@ -2807,8 +2786,7 @@ mod tests {
         store.save_block(sequencer.snapshot()).await.unwrap();
 
         let restored = store.load_state().await.unwrap().unwrap();
-        let sequencer =
-            BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
+        let sequencer = BlockSequencer::restore(restored, config.clone());
         let handle = SequencerHandle::spawn_with_store_arc(sequencer, Some(store.clone()));
         let signing_key =
             <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
@@ -2856,7 +2834,7 @@ mod tests {
             }) if label == "primary passkey"
         ));
 
-        let mut replayed = BlockSequencer::restore(pending, Arc::new(AdminOracle::new()), config);
+        let mut replayed = BlockSequencer::restore(pending, config);
         assert_eq!(replayed.accounts.next_id(), created.id.0.saturating_add(1));
         let account = replayed.accounts.get(created.id).unwrap();
         assert_eq!(account.balance, 17);
@@ -2895,8 +2873,7 @@ mod tests {
         store.save_block(sequencer.snapshot()).await.unwrap();
 
         let restored = store.load_state().await.unwrap().unwrap();
-        let sequencer =
-            BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
+        let sequencer = BlockSequencer::restore(restored, config.clone());
         let handle = SequencerHandle::spawn_with_store_arc(sequencer, Some(store.clone()));
         let account_id = handle.create_account(0).await.unwrap().id;
 
@@ -2925,8 +2902,7 @@ mod tests {
             2,
             "only CreateAccount + the accepted bootstrap may enter the control-plane WAL"
         );
-        let replayed =
-            BlockSequencer::restore(pending_restore, Arc::new(AdminOracle::new()), config);
+        let replayed = BlockSequencer::restore(pending_restore, config);
         let keys = replayed.signing_keys_for_account(account_id);
         assert_eq!(keys.len(), 1);
         assert_eq!(
@@ -2951,7 +2927,7 @@ mod tests {
         sequencer.produce_block(Vec::new(), 1);
         store.save_block(sequencer.snapshot()).await.unwrap();
         let restored = store.load_state().await.unwrap().unwrap();
-        let sequencer = BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config);
+        let sequencer = BlockSequencer::restore(restored, config);
         let handle = SequencerHandle::spawn_with_store_arc(sequencer, Some(store.clone()));
         let account = handle.create_account(0).await.unwrap();
         let primary =
@@ -3203,8 +3179,7 @@ mod tests {
         assert!(sybil_verifier::verify_full(&revoke_witness, false).valid);
 
         let restored = store.load_state().await.unwrap().unwrap();
-        let mut restored_sequencer =
-            BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config);
+        let mut restored_sequencer = BlockSequencer::restore(restored, config);
         let restored_keys = restored_sequencer.signing_keys_for_account(account.id);
         assert_eq!(restored_keys.len(), 1);
         assert_eq!(
@@ -3263,7 +3238,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(record.payout_nanos, Nanos(NANOS_PER_DOLLAR));
-        assert_eq!(record.market_id, m0);
     }
 
     #[tokio::test]
@@ -3278,7 +3252,6 @@ mod tests {
             accounts,
             markets,
             vec![],
-            Arc::new(AdminOracle::new()),
             SequencerConfig::default(),
         );
         let handle = SequencerHandle::spawn(seq);
@@ -3400,8 +3373,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         let restored = store.load_state().await.unwrap().unwrap();
-        let restored_seq =
-            BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
+        let restored_seq = BlockSequencer::restore(restored, config.clone());
         let reader = SequencerHandle::spawn_with_store_arc(restored_seq, Some(store.clone()));
 
         let restored_latest = reader
@@ -3564,13 +3536,8 @@ mod tests {
             .positions
             .insert((market_id, 1), 10);
 
-        let seq = BlockSequencer::with_default_solver(
-            accounts,
-            markets.clone(),
-            vec![],
-            Arc::new(AdminOracle::new()),
-            config.clone(),
-        );
+        let seq =
+            BlockSequencer::with_default_solver(accounts, markets.clone(), vec![], config.clone());
         let handle = SequencerHandle::spawn_with_store_arc(seq, Some(store.clone()));
         let baseline = handle.produce_block().await.unwrap();
 
@@ -3700,7 +3667,7 @@ mod tests {
         store.save_block(baseline.snapshot()).await.unwrap();
 
         let restored = store.load_state().await.unwrap().unwrap();
-        let seq = BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
+        let seq = BlockSequencer::restore(restored, config.clone());
         let handle = SequencerHandle::spawn_with_store_arc(seq, Some(store.clone()));
         let markets = handle.list_markets().await.unwrap();
         let market_id = MarketId::new(0);
@@ -3842,7 +3809,6 @@ mod tests {
             accounts,
             markets.clone(),
             vec![],
-            Arc::new(AdminOracle::new()),
             Arc::new(PanicOnceSolver {
                 calls: Arc::clone(&calls),
             }),

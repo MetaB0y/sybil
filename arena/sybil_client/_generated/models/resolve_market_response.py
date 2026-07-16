@@ -8,8 +8,6 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..types import UNSET, Unset
-from typing import cast
 
 
 
@@ -28,13 +26,11 @@ class ResolveMarketResponse:
             payout_nanos (int): Resolution payout per YES share. Integer nanodollars;
                 1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
             status (str):
-            challenge_deadline_ms (int | None | Unset):
      """
 
     market_id: int
     payout_nanos: int
     status: str
-    challenge_deadline_ms: int | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
@@ -48,12 +44,6 @@ class ResolveMarketResponse:
 
         status = self.status
 
-        challenge_deadline_ms: int | None | Unset
-        if isinstance(self.challenge_deadline_ms, Unset):
-            challenge_deadline_ms = UNSET
-        else:
-            challenge_deadline_ms = self.challenge_deadline_ms
-
 
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
@@ -62,8 +52,6 @@ class ResolveMarketResponse:
             "payout_nanos": payout_nanos,
             "status": status,
         })
-        if challenge_deadline_ms is not UNSET:
-            field_dict["challenge_deadline_ms"] = challenge_deadline_ms
 
         return field_dict
 
@@ -78,21 +66,10 @@ class ResolveMarketResponse:
 
         status = d.pop("status")
 
-        def _parse_challenge_deadline_ms(data: object) -> int | None | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(int | None | Unset, data)
-
-        challenge_deadline_ms = _parse_challenge_deadline_ms(d.pop("challenge_deadline_ms", UNSET))
-
-
         resolve_market_response = cls(
             market_id=market_id,
             payout_nanos=payout_nanos,
             status=status,
-            challenge_deadline_ms=challenge_deadline_ms,
         )
 
 

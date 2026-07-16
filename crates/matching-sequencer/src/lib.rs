@@ -80,4 +80,4 @@ pub use sybil_verifier::{ClientActionAuth, ClientActionWitness, KeyOpAuth, KeyRe
 pub use system_event::SystemEvent;
 
 // Re-export oracle types needed by consumers (e.g. sybil-api)
-pub use sybil_oracle::{AdminOracle, MarketStatus, Oracle, ResolutionRecord};
+pub use sybil_oracle::{MarketStatus, ResolutionRecord};

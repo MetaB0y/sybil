@@ -1,13 +1,11 @@
-//! Market lifecycle management: statuses, oracle integration, metadata,
-//! feed + template registries.
-
-use std::collections::HashMap;
-use std::sync::Arc;
+//! Market lifecycle management: statuses, metadata, feeds, and resolution
+//! templates.
 
 use matching_engine::{MarketId, Nanos};
+use std::collections::HashMap;
 use sybil_oracle::{
-    DataFeed, FeedId, FeedPubkey, FeedRegistry, MarketStatus, Oracle, OracleError, PolicyOutcome,
-    ResolutionAction, ResolutionPolicy, ResolutionTemplate, SignedAttestation, TemplateRegistry,
+    DataFeed, FeedId, FeedPubkey, FeedRegistry, MarketStatus, OracleError, ResolutionPolicy,
+    ResolutionRecord, ResolutionTemplate, SignedAttestation, TemplateRegistry,
 };
 
 use crate::error::SequencerError;
@@ -24,12 +22,10 @@ pub const ADMIN_IMMEDIATE_TEMPLATE: &str = "admin_immediate";
 /// Does NOT own accounts or market_groups — those remain on BlockSequencer.
 /// Resolution works in two steps: lifecycle decides (via oracle or policy),
 /// caller executes (settles positions, updates groups).
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MarketLifecycle {
-    /// Oracle-managed lifecycle status per market.
+    /// Canonical lifecycle status per market.
     market_statuses: HashMap<MarketId, MarketStatus>,
-    /// Legacy pluggable oracle. Still used by the unsigned admin path.
-    oracle: Arc<dyn Oracle>,
     /// Market metadata (sequencer-layer, not in matching-engine).
     market_metadata: HashMap<MarketId, MarketMetadata>,
     /// Registry of off-chain signer identities (feeds).
@@ -39,14 +35,8 @@ pub struct MarketLifecycle {
 }
 
 impl MarketLifecycle {
-    pub fn new(oracle: Arc<dyn Oracle>) -> Self {
-        Self {
-            market_statuses: HashMap::new(),
-            oracle,
-            market_metadata: HashMap::new(),
-            feeds: FeedRegistry::new(),
-            templates: TemplateRegistry::new(),
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn market_status(&self, id: MarketId) -> MarketStatus {
@@ -74,10 +64,6 @@ impl MarketLifecycle {
 
     pub fn market_metadata_all(&self) -> &HashMap<MarketId, MarketMetadata> {
         &self.market_metadata
-    }
-
-    pub fn oracle(&self) -> Arc<dyn Oracle> {
-        self.oracle.clone()
     }
 
     // --- Feed registry ---
@@ -121,26 +107,19 @@ impl MarketLifecycle {
             .unwrap_or(ADMIN_IMMEDIATE_TEMPLATE)
     }
 
-    /// Consult the oracle and update status. Returns the action for the caller to execute.
-    ///
-    /// The caller (BlockSequencer) is responsible for acting on the result:
-    /// - `SettleNow` → settle positions, shrink affected market groups
-    /// - `Propose` → no action needed (status already updated here)
-    /// - `Reject` → returned as error
+    /// Apply the trusted admin immediate policy and commit the resulting status.
     pub fn resolve_market(
         &mut self,
         market_id: MarketId,
         payout_nanos: Nanos,
         timestamp_ms: u64,
-    ) -> Result<ResolutionAction, SequencerError> {
+    ) -> Result<ResolutionRecord, SequencerError> {
         let current_status = self.market_status(market_id);
-        let action = self
-            .oracle
-            .resolve(market_id, payout_nanos, &current_status, timestamp_ms)
-            .map_err(|e| SequencerError::OracleError(e.to_string()))?;
-
-        self.apply_action(market_id, &action, timestamp_ms);
-        Ok(action)
+        let record =
+            sybil_oracle::evaluate_admin_immediate(payout_nanos, &current_status, timestamp_ms)
+                .map_err(|e| SequencerError::OracleError(e.to_string()))?;
+        self.commit_resolution(market_id, record.clone());
+        Ok(record)
     }
 
     /// Resolve a market from a signed attestation, dispatched through the
@@ -152,7 +131,7 @@ impl MarketLifecycle {
         market_id: MarketId,
         signed: &SignedAttestation,
         timestamp_ms: u64,
-    ) -> Result<ResolutionAction, SequencerError> {
+    ) -> Result<ResolutionRecord, SequencerError> {
         let template_name = self.template_for_market(market_id).to_string();
         let template = self
             .templates
@@ -166,7 +145,7 @@ impl MarketLifecycle {
 
         let current_status = self.market_status(market_id);
 
-        let outcome = match template.policy {
+        let record = match template.policy {
             ResolutionPolicy::Immediate { feed_id } => {
                 // The signer pubkey must map to an already-registered feed.
                 let signer_feed = self.feeds.resolve_pubkey(&signed.signer).ok_or_else(|| {
@@ -184,50 +163,12 @@ impl MarketLifecycle {
             }
         };
 
-        let action = match outcome {
-            PolicyOutcome::Settle { record } => ResolutionAction::SettleNow {
-                market_id,
-                payout_nanos: record.payout_nanos,
-                record,
-            },
-            PolicyOutcome::Reject { reason } => ResolutionAction::Reject { reason },
-        };
-
-        self.apply_action(market_id, &action, timestamp_ms);
-        Ok(action)
+        self.commit_resolution(market_id, record.clone());
+        Ok(record)
     }
 
-    fn apply_action(
-        &mut self,
-        fallback_market_id: MarketId,
-        action: &ResolutionAction,
-        timestamp_ms: u64,
-    ) {
-        match action {
-            ResolutionAction::SettleNow {
-                market_id, record, ..
-            } => {
-                self.market_statuses.insert(
-                    *market_id,
-                    MarketStatus::Resolved {
-                        record: record.clone(),
-                    },
-                );
-            }
-            ResolutionAction::Propose {
-                proposal,
-                challenge_window_ms,
-            } => {
-                let deadline = timestamp_ms + challenge_window_ms;
-                self.market_statuses.insert(
-                    fallback_market_id,
-                    MarketStatus::Proposed {
-                        proposal: proposal.clone(),
-                        challenge_deadline_ms: deadline,
-                    },
-                );
-            }
-            ResolutionAction::Reject { .. } => {}
-        }
+    fn commit_resolution(&mut self, market_id: MarketId, record: ResolutionRecord) {
+        self.market_statuses
+            .insert(market_id, MarketStatus::Resolved { record });
     }
 }

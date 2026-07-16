@@ -57,8 +57,8 @@ use std::sync::Mutex;
 use matching_engine::{Market, MarketGroup, MarketId, MarketSet, Nanos};
 use redb::{Database, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition};
 use sybil_oracle::{
-    AdminOracle, Challenge, ChallengeId, DataFeed, FeedId, FeedPubkey, MarketStatus, OracleSource,
-    ProposalId, ResolutionProposal, ResolutionRecord, ResolutionTemplate, SignedAttestation,
+    DataFeed, FeedId, FeedPubkey, MarketStatus, OracleSource, ResolutionRecord, ResolutionTemplate,
+    SignedAttestation,
 };
 use sybil_verifier::{
     AccountSnapshot, BlockWitness, DepositAccumulatorWitness, L1DepositWitness,

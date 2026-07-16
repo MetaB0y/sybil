@@ -73,12 +73,11 @@ pub use account_keys::{
 pub use key_op_auth::{EXPECTED_RP_ID_HASH, EXPECTED_WEBAUTHN_RP_ID, verify_keyop_auth};
 pub use types::{
     AccountReservationSnapshot, AccountSnapshot, BlockWitness, BridgeStateSnapshot,
-    ChallengeSnapshot, ClientActionAuth, ClientActionWitness, DepositAccumulatorWitness, KeyOpAuth,
-    KeyRecord, L1DepositWitness, MarketGroupSnapshot, MarketSnapshot, MarketStatusSnapshot,
-    OracleSourceSnapshot, QuarantineEntrySnapshot, RejectionReason, ResolutionProposalSnapshot,
-    ResolutionRecordSnapshot, RestingOrderSnapshot, StateSidecarSnapshot, SystemEventWitness,
-    WithdrawalRefundReasonWitness, WithdrawalSnapshot, WitnessBlockHeader, WitnessOrder,
-    WitnessRejection,
+    ClientActionAuth, ClientActionWitness, DepositAccumulatorWitness, KeyOpAuth, KeyRecord,
+    L1DepositWitness, MarketGroupSnapshot, MarketSnapshot, MarketStatusSnapshot,
+    OracleSourceSnapshot, QuarantineEntrySnapshot, RejectionReason, ResolutionRecordSnapshot,
+    RestingOrderSnapshot, StateSidecarSnapshot, SystemEventWitness, WithdrawalRefundReasonWitness,
+    WithdrawalSnapshot, WitnessBlockHeader, WitnessOrder, WitnessRejection,
 };
 pub use violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
 

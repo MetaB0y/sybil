@@ -505,56 +505,20 @@ pub struct MarketGroupSnapshot {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum MarketStatusSnapshot {
     Active,
-    Proposed {
-        proposal: ResolutionProposalSnapshot,
-        challenge_deadline_ms: u64,
-    },
-    Challenged {
-        proposal: ResolutionProposalSnapshot,
-        challenge: ChallengeSnapshot,
-    },
-    Resolved {
-        record: ResolutionRecordSnapshot,
-    },
-    Voided,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ResolutionProposalSnapshot {
-    pub id: u64,
-    pub market_id: MarketId,
-    pub payout_nanos: Nanos,
-    pub source: OracleSourceSnapshot,
-    pub proposed_at_ms: u64,
-    pub reason: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ChallengeSnapshot {
-    pub id: u64,
-    pub challenger: u64,
-    pub proposal_id: u64,
-    pub bond_amount: Nanos,
-    pub proposed_payout_nanos: Nanos,
-    pub reason: String,
-    pub challenged_at_ms: u64,
+    Resolved { record: ResolutionRecordSnapshot },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ResolutionRecordSnapshot {
-    pub market_id: MarketId,
     pub payout_nanos: Nanos,
     pub resolved_by: OracleSourceSnapshot,
     pub resolved_at_ms: u64,
-    pub proposal: Option<ResolutionProposalSnapshot>,
-    pub challenge: Option<ChallengeSnapshot>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum OracleSourceSnapshot {
     Admin,
     DataFeed(u64),
-    AutomatedL0,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

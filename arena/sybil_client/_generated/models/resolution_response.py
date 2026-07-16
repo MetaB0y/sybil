@@ -22,8 +22,7 @@ T = TypeVar("T", bound="ResolutionResponse")
 
 @_attrs_define
 class ResolutionResponse:
-    """ Detailed view of a market's resolution state. Unresolved markets return
-    `status = "active"` (or `proposed`/`challenged` for future policies) with
+    """ Detailed view of a market's resolution state. Active markets return
     `payout_nanos = None`.
 
         Attributes:

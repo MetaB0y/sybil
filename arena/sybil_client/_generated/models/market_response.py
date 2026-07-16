@@ -32,7 +32,6 @@ class MarketResponse:
                 one for display via its own priority list. None for sybil-native
                 markets (use the singular `category` field instead).
             category (None | str | Unset):
-            challenge_deadline_ms (int | None | Unset):
             closed (bool | None | Unset): Whether Polymarket has closed this market. Off-block; the frontend
                 filters closed markets out of the listing.
             created_at_ms (int | None | Unset):
@@ -105,7 +104,6 @@ class MarketResponse:
     status: str
     categories: list[str] | None | Unset = UNSET
     category: None | str | Unset = UNSET
-    challenge_deadline_ms: int | None | Unset = UNSET
     closed: bool | None | Unset = UNSET
     created_at_ms: int | None | Unset = UNSET
     description: None | str | Unset = UNSET
@@ -168,12 +166,6 @@ class MarketResponse:
             category = UNSET
         else:
             category = self.category
-
-        challenge_deadline_ms: int | None | Unset
-        if isinstance(self.challenge_deadline_ms, Unset):
-            challenge_deadline_ms = UNSET
-        else:
-            challenge_deadline_ms = self.challenge_deadline_ms
 
         closed: bool | None | Unset
         if isinstance(self.closed, Unset):
@@ -363,8 +355,6 @@ class MarketResponse:
             field_dict["categories"] = categories
         if category is not UNSET:
             field_dict["category"] = category
-        if challenge_deadline_ms is not UNSET:
-            field_dict["challenge_deadline_ms"] = challenge_deadline_ms
         if closed is not UNSET:
             field_dict["closed"] = closed
         if created_at_ms is not UNSET:
@@ -473,16 +463,6 @@ class MarketResponse:
             return cast(None | str | Unset, data)
 
         category = _parse_category(d.pop("category", UNSET))
-
-
-        def _parse_challenge_deadline_ms(data: object) -> int | None | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(int | None | Unset, data)
-
-        challenge_deadline_ms = _parse_challenge_deadline_ms(d.pop("challenge_deadline_ms", UNSET))
 
 
         def _parse_closed(data: object) -> bool | None | Unset:
@@ -775,7 +755,6 @@ class MarketResponse:
             status=status,
             categories=categories,
             category=category,
-            challenge_deadline_ms=challenge_deadline_ms,
             closed=closed,
             created_at_ms=created_at_ms,
             description=description,

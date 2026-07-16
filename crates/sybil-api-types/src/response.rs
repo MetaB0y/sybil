@@ -161,8 +161,6 @@ pub struct MarketResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payout_nanos: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub challenge_deadline_ms: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
@@ -1016,12 +1014,9 @@ pub struct ResolveMarketResponse {
     /// 1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
     pub payout_nanos: u64,
     pub status: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub challenge_deadline_ms: Option<u64>,
 }
 
-/// Detailed view of a market's resolution state. Unresolved markets return
-/// `status = "active"` (or `proposed`/`challenged` for future policies) with
+/// Detailed view of a market's resolution state. Active markets return
 /// `payout_nanos = None`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

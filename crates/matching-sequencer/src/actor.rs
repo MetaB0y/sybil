@@ -16,7 +16,7 @@ use tokio_util::task::TaskTracker;
 
 use matching_engine::{MarketGroup, MarketId, MarketSet, Nanos, Order, Problem};
 use sybil_oracle::{
-    DataFeed, FeedId, FeedPubkey, MarketStatus, Oracle, ResolutionRecord, SignedAttestation,
+    DataFeed, FeedId, FeedPubkey, MarketStatus, ResolutionRecord, SignedAttestation,
 };
 
 use crate::account::{Account, AccountId};

@@ -21,15 +21,6 @@ pub enum ResolutionPolicy {
     Immediate { feed_id: FeedId },
 }
 
-/// Decision a policy returns when given an attestation.
-#[derive(Clone, Debug)]
-pub enum PolicyOutcome {
-    /// Market should be settled with this record.
-    Settle { record: ResolutionRecord },
-    /// Attestation was well-formed but the policy refused it.
-    Reject { reason: String },
-}
-
 /// Evaluate `Immediate { feed_id }` against a signed attestation.
 ///
 /// The caller is responsible for verifying the signature against `feed`'s
@@ -44,7 +35,7 @@ pub fn evaluate_immediate(
     signed: &SignedAttestation,
     current_status: &MarketStatus,
     timestamp_ms: u64,
-) -> Result<PolicyOutcome, OracleError> {
+) -> Result<ResolutionRecord, OracleError> {
     if feed.id != policy_feed_id {
         return Err(OracleError::InvalidAttestation(format!(
             "attestation signer is feed {:?}, template requires {:?}",
@@ -68,50 +59,33 @@ pub fn evaluate_immediate(
         return Err(OracleError::InvalidPayout(att.payout_nanos.0));
     }
 
-    match current_status {
-        MarketStatus::Resolved { .. } => return Err(OracleError::AlreadyResolved),
-        MarketStatus::Voided => return Err(OracleError::InvalidState),
-        _ => {}
+    if matches!(current_status, MarketStatus::Resolved { .. }) {
+        return Err(OracleError::AlreadyResolved);
     }
 
-    let record = ResolutionRecord {
-        market_id: att.market_id,
+    Ok(ResolutionRecord {
         payout_nanos: att.payout_nanos,
         resolved_by: OracleSource::DataFeed(feed.id),
         resolved_at_ms: timestamp_ms,
-        proposal: None,
-        challenge: None,
-    };
-
-    Ok(PolicyOutcome::Settle { record })
+    })
 }
 
-/// Convenience wrapper used by the admin facade: reuses the `Immediate` logic
-/// but records the resolution as `OracleSource::Admin` so legacy tests keep
-/// asserting the same enum variant.
-pub(crate) fn evaluate_admin_immediate(
-    market_id: MarketId,
+/// Apply the trusted-admin immediate policy.
+pub fn evaluate_admin_immediate(
     payout_nanos: Nanos,
     current_status: &MarketStatus,
     timestamp_ms: u64,
-) -> Result<PolicyOutcome, OracleError> {
+) -> Result<ResolutionRecord, OracleError> {
     if payout_nanos.0 > NANOS_PER_DOLLAR {
         return Err(OracleError::InvalidPayout(payout_nanos.0));
     }
-    match current_status {
-        MarketStatus::Resolved { .. } => return Err(OracleError::AlreadyResolved),
-        MarketStatus::Voided => return Err(OracleError::InvalidState),
-        _ => {}
+    if matches!(current_status, MarketStatus::Resolved { .. }) {
+        return Err(OracleError::AlreadyResolved);
     }
-    Ok(PolicyOutcome::Settle {
-        record: ResolutionRecord {
-            market_id,
-            payout_nanos,
-            resolved_by: OracleSource::Admin,
-            resolved_at_ms: timestamp_ms,
-            proposal: None,
-            challenge: None,
-        },
+    Ok(ResolutionRecord {
+        payout_nanos,
+        resolved_by: OracleSource::Admin,
+        resolved_at_ms: timestamp_ms,
     })
 }
 
@@ -155,15 +129,9 @@ mod tests {
             1_000,
         )
         .unwrap();
-        match outcome {
-            PolicyOutcome::Settle { record } => {
-                assert_eq!(record.market_id, MarketId::new(5));
-                assert_eq!(record.payout_nanos, Nanos(NANOS_PER_DOLLAR));
-                assert_eq!(record.resolved_at_ms, 1_000);
-                assert!(matches!(record.resolved_by, OracleSource::DataFeed(_)));
-            }
-            _ => panic!("expected Settle"),
-        }
+        assert_eq!(outcome.payout_nanos, Nanos(NANOS_PER_DOLLAR));
+        assert_eq!(outcome.resolved_at_ms, 1_000);
+        assert!(matches!(outcome.resolved_by, OracleSource::DataFeed(_)));
     }
 
     #[test]
@@ -222,12 +190,9 @@ mod tests {
         let feed = sample_feed(7);
         let signed = sample_signed(MarketId::new(5), Nanos(0));
         let record = crate::ResolutionRecord {
-            market_id: MarketId::new(5),
             payout_nanos: Nanos(NANOS_PER_DOLLAR),
             resolved_by: OracleSource::Admin,
             resolved_at_ms: 100,
-            proposal: None,
-            challenge: None,
         };
         let err = evaluate_immediate(
             FeedId(7),

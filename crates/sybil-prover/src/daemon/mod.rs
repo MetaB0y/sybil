@@ -610,7 +610,6 @@ mod tests {
     use matching_engine::MarketSet;
     use matching_sequencer::store::Store;
     use matching_sequencer::{AccountStore, BlockSequencer, SequencerConfig};
-    use sybil_oracle::AdminOracle;
     use sybil_proof_protocol::{ProofEnvelopeError, ProofKind, StateTransitionProofJob};
     use tempfile::TempDir;
     use uuid::Uuid;
@@ -629,7 +628,6 @@ mod tests {
             AccountStore::new(),
             MarketSet::new(),
             vec![],
-            Arc::new(AdminOracle::new()),
             SequencerConfig::default(),
         );
         for index in 0..count {

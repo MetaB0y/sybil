@@ -4,11 +4,11 @@
   "status": "pending_redeploy",
   "desired": {
     "state_transition": {
-      "app_exe_commit": "0x0029c549755b05fc91ce327c57b0eb995933271d8477348cba35724cb2a6b305",
+      "app_exe_commit": "0x007ed68957b0503461be92e3e35ca029819054b2742f815bce641f9664c5fd86",
       "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
     },
     "escape_claim": {
-      "app_exe_commit": "0x0050a798448ab3a198a2a04515a01a37a726f160d4add775bd6a87297afc6b97",
+      "app_exe_commit": "0x008c8f972e57f4b15163aa7bb8d5ca89c5532212c091bb85c1c19a1428a53ffd",
       "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
     }
   },

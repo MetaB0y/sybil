@@ -26,7 +26,6 @@ pub(super) struct SequencerSupervisor;
 pub(super) struct SequencerSupervisorArgs {
     pub(super) config: SequencerConfig,
     pub(super) store: Option<Arc<crate::store::Store>>,
-    pub(super) oracle: Arc<dyn Oracle>,
     pub(super) handle: SequencerHandleInner,
 }
 
@@ -34,7 +33,6 @@ pub(super) struct SequencerSupervisorState {
     current_actor: Option<ActorRef<SequencerMsg>>,
     config: SequencerConfig,
     store: Option<Arc<crate::store::Store>>,
-    oracle: Arc<dyn Oracle>,
     handle: SequencerHandleInner,
 }
 
@@ -100,17 +98,16 @@ impl SequencerSupervisorState {
             return;
         }
 
-        let sequencer =
-            match BlockSequencer::try_restore(state, self.oracle.clone(), self.config.clone()) {
-                Ok(sequencer) => sequencer,
-                Err(error) => {
-                    tracing::error!(
-                        error = %error,
-                        "acknowledged-write replay failed; sequencer restart remains halted"
-                    );
-                    return;
-                }
-            };
+        let sequencer = match BlockSequencer::try_restore(state, self.config.clone()) {
+            Ok(sequencer) => sequencer,
+            Err(error) => {
+                tracing::error!(
+                    error = %error,
+                    "acknowledged-write replay failed; sequencer restart remains halted"
+                );
+                return;
+            }
+        };
 
         match self.spawn_child(myself, sequencer).await {
             Ok(()) => tracing::warn!("sequencer actor restarted from persistent snapshot"),
@@ -136,7 +133,6 @@ impl Actor for SequencerSupervisor {
             current_actor: None,
             config: args.config,
             store: args.store,
-            oracle: args.oracle,
             handle: args.handle,
         })
     }
