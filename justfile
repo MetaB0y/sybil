@@ -677,6 +677,12 @@ deploy-sync:
     scp scripts/ops-smoke.sh scripts/store-backup.sh scripts/store-restore-drill.sh scripts/store-manifest.py scripts/synthetic-probe.sh {{SERVER}}:/opt/sybil/scripts/
     scp scripts/lib/smoke-common.sh {{SERVER}}:/opt/sybil/scripts/lib/
 
+# Converge the checked-in scheduled probe with the running systemd state.
+# Both operations are idempotent, so monitoring/all-stack deploys cannot leave
+# an older unit active after scripts or proof-lag policy change.
+deploy-install-synthetic-probe: deploy-sync
+    ssh {{SERVER}} 'install -m 0644 /opt/sybil/deploy/systemd/sybil-synthetic-probe.service /etc/systemd/system/sybil-synthetic-probe.service && install -m 0644 /opt/sybil/deploy/systemd/sybil-synthetic-probe.timer /etc/systemd/system/sybil-synthetic-probe.timer && systemctl daemon-reload && systemctl enable --now sybil-synthetic-probe.timer'
+
 deploy-prod-env-check:
     ssh {{SERVER}} 'cd /opt/sybil && test -f .env && grep -q "^GF_SECURITY_ADMIN_PASSWORD=." .env && grep -q "^CADDY_OPS_AUTH_USER=." .env && grep -q "^CADDY_OPS_AUTH_HASH=." .env && grep -q "^SYBIL_SERVICE_TOKEN=." .env && grep -q "^SYBIL_HISTORY_TOKEN=." .env && grep -q "^SYBIL_ARENA_READ_TOKEN=." .env && grep -q "^SYBIL_WEBAUTHN_RP_ID=." .env && grep -q "^SYBIL_WEBAUTHN_ORIGIN=." .env'
 
@@ -716,7 +722,7 @@ deploy-arena: deploy-sync deploy-prod-env-check deploy-openrouter-env-check && d
 # Recreate the processes even when Compose wiring is unchanged: VictoriaMetrics
 # scrape config and vmalert local rule files are read into process memory and a
 # bind-mount update alone does not reliably activate them.
-deploy-monitoring: deploy-sync deploy-prod-env-check
+deploy-monitoring: deploy-install-synthetic-probe deploy-prod-env-check
     ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --force-recreate --remove-orphans node-exporter victoriametrics vmalert grafana telegram-alerts; else {{COMPOSE_PROD}} up -d --force-recreate --remove-orphans node-exporter victoriametrics vmalert grafana; fi'
 
 # Enable Telegram delivery for vmalert alerts. Requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in /opt/sybil/.env on the server.
@@ -739,7 +745,7 @@ deploy-caddy: deploy-sync deploy-prod-env-check
     ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d caddy'
 
 # Deploy everything
-deploy-all: deploy-sync deploy-prod-env-check deploy-openrouter-env-check && deploy-verify
+deploy-all: deploy-install-synthetic-probe deploy-prod-env-check deploy-openrouter-env-check && deploy-verify
     DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} --profile integrations --profile ops build
     docker save sybil-api:latest sybil-arena:latest sybil-web:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --remove-orphans; else {{COMPOSE_PROD}} up -d --remove-orphans; fi'
