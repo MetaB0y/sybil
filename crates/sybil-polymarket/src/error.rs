@@ -23,9 +23,6 @@ pub enum Error {
     #[error("Attestation verification error: {0}")]
     Attestation(String),
 
-    #[error("Native market catalog error: {0}")]
-    NativeCatalog(String),
-
     #[error("IO error: {0}")]
     Io(#[from] io::Error),
 

@@ -36,7 +36,7 @@ Compose service profiles are deliberately separate from the process posture
 above. The unprofiled default is the core: `sybil-api`, `sybil-history`, and
 `sybil-web` (plus Caddy in the production overlay). Optional subsystems are:
 
-- `integrations` — Polymarket mirror plus Arena runner/dashboard;
+- `integrations` — native catalog/admin/MM, Polymarket mirror, and Arena runner/dashboard;
 - `validity` — the durable prover daemon;
 - `ops` — VictoriaMetrics, vmalert, Grafana, and node-exporter;
 - `l1-indexer` — the separately credentialed L1 lifecycle sidecar.
@@ -293,6 +293,17 @@ queries over it. It serves a small bearer-authenticated read API on private port
 proxying typed JSON; it does not mount `arena-data`, link SQLite, or understand
 Python tables. If the optional `integrations` profile is absent, bot analytics
 degrade to an explicit unavailable document while trading remains healthy.
+
+## Native market provisioning ownership
+
+Native markets are no longer a side effect of the Polymarket sync loop.
+`sybil-native-admin` is an idempotent one-shot Compose service: after the API is
+healthy it validates the checked-in catalog, converges markets and groups, and
+writes `/native-data/deployment.json` bound to the current genesis. Only after
+that command exits successfully does `sybil-native-mm` start its independent
+static-anchor flash-liquidity actor. Polymarket owns neither the native catalog,
+the deployment manifest, nor the native MM account. A fresh-genesis reset
+therefore clears `native-data` alongside sequencer and integration state.
 
 The initial history redb retains raw batches, fills, events, equity, prices,
 and candles without the former 30/31-day and global-row ceilings. This removes

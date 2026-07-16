@@ -6868,6 +6868,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "sybil-market-maker"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "reqwest 0.13.4",
+ "serde_json",
+ "sybil-api-types",
+ "sybil-client",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "sybil-native"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "reqwest 0.13.4",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sybil-api-types",
+ "sybil-client",
+ "sybil-market-maker",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber 0.3.23",
+ "url",
+]
+
+[[package]]
 name = "sybil-oracle"
 version = "0.1.0"
 dependencies = [
@@ -6892,6 +6926,7 @@ dependencies = [
  "serde_json",
  "sybil-api-types",
  "sybil-client",
+ "sybil-market-maker",
  "sybil-signing",
  "thiserror 2.0.18",
  "tokio",

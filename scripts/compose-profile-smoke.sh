@@ -77,6 +77,8 @@ expected_profile_contract=$(printf '%s\n' \
     'sybil-arena-dashboard=integrations' \
     'sybil-history=core' \
     'sybil-l1-indexer=l1-indexer' \
+    'sybil-native-admin=integrations' \
+    'sybil-native-mm=integrations' \
     'sybil-polymarket=integrations' \
     'sybil-prover=validity' \
     'sybil-web=core' \
@@ -395,7 +397,7 @@ reset_recipe=$(
         in_recipe { print }
     ' justfile
 )
-for volume in sybil-data history-data polymarket-data arena-data prover-data \
+for volume in sybil-data history-data polymarket-data native-data arena-data prover-data \
     prover-artifacts l1-indexer-data vmdata; do
     grep -Fq "$volume" <<<"$reset_recipe" \
         || fail "fresh-genesis reset does not clear $volume"
@@ -404,9 +406,8 @@ grep -Fq -- '--profile l1-indexer down' <<<"$reset_recipe" \
     || fail "fresh-genesis reset does not stop the optional L1 sidecar"
 pass "fresh-genesis reset clears every durable application subsystem"
 
-# The Polymarket mirror bind-mounts its checked-in catalogs from the source
-# tree on the host. Keep deploy-sync responsible for creating that remote path
-# and copying both files so a fresh box cannot start with stale/missing inputs.
+# Polymarket curation and native provisioning have separate owners and remote
+# paths. Keep deploy-sync responsible for both checked-in inputs.
 deploy_sync_recipe=$(
     awk '
         /^deploy-sync:/ { in_recipe = 1; next }
@@ -416,11 +417,13 @@ deploy_sync_recipe=$(
 )
 grep -Fq '/opt/sybil/crates/sybil-polymarket' <<<"$deploy_sync_recipe" \
     || fail "deploy-sync does not create the remote Polymarket catalog directory"
-for catalog in curated_markets.json native_markets.json; do
-    grep -Fq "crates/sybil-polymarket/$catalog" <<<"$deploy_sync_recipe" \
-        || fail "deploy-sync does not transfer $catalog"
-done
-pass "deploy-sync transfers both bind-mounted Polymarket catalogs"
+grep -Fq 'crates/sybil-polymarket/curated_markets.json' <<<"$deploy_sync_recipe" \
+    || fail "deploy-sync does not transfer Polymarket curation"
+grep -Fq '/opt/sybil/crates/sybil-native' <<<"$deploy_sync_recipe" \
+    || fail "deploy-sync does not create the remote native catalog directory"
+grep -Fq 'crates/sybil-native/native_markets.json' <<<"$deploy_sync_recipe" \
+    || fail "deploy-sync does not transfer native provisioning input"
+pass "deploy-sync preserves separate Polymarket and native catalog ownership"
 
 deploy_verify_recipe=$(
     awk '

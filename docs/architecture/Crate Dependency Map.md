@@ -32,7 +32,7 @@ owns guest-safe Form-L account/reservation verification and public inputs;
 `sybil-zk`, HTTP/RPC access, OpenVM proving, and vault calldata. It is a
 user-side client and never mutates sequencer state directly.
 
-The client tier sits below the DTO crate. `sybil-api-types` is the shared source of truth for request/response shapes; `sybil-client` is THE Rust HTTP client for `sybil-api` (SYB-171), typed against those DTOs. In-tree Rust consumers use it: `sybil-polymarket` (the mirror + market maker), the `sybil-admin` CLI (a binary inside `sybil-api`), and the dev L1 bridge indexer. It replaced two hand-written clients that had drifted independently — there is now exactly one, so no third should be added. It owns base-url + optional service-token (`SYBIL_SERVICE_TOKEN`) auth, response decoding, bridge service-route helpers, and resumable WebSocket block-stream consumption; each consumer keeps its own concerns (the mirror's reconnect loop and poisoned-market parsing, the indexer's L1 JSON-RPC polling, the admin's audit log) around it. `sybil-signing` is separate from the commitment schemas: it owns stable Borsh signable payload bytes for client signatures (orders, cancels, attestations, bridge withdrawals), and is used by the sequencer's signed-write verification and by signing clients.
+The client tier sits below the DTO crate. `sybil-api-types` is the shared source of truth for request/response shapes; `sybil-client` is THE Rust HTTP client for `sybil-api` (SYB-171), typed against those DTOs. In-tree Rust consumers use it: `sybil-polymarket`, `sybil-native`, the provider-neutral `sybil-market-maker`, the `sybil-admin` CLI (a binary inside `sybil-api`), and the dev L1 bridge indexer. It replaced hand-written clients that had drifted independently — there is now exactly one, so no duplicate should be added. It owns base-url + optional service-token (`SYBIL_SERVICE_TOKEN`) auth, response decoding, bridge service-route helpers, and resumable WebSocket block-stream consumption; each consumer keeps its provider or operator concerns around it. `sybil-signing` is separate from the commitment schemas: it owns stable Borsh signable payload bytes for client signatures (orders, cancels, attestations, bridge withdrawals), and is used by the sequencer's signed-write verification and by signing clients.
 
 Historical serving has a dependency-light private contract.
 `sybil-history-types` owns the versioned committed-fact batch, projector status,
@@ -95,7 +95,11 @@ graph TB
     SIGNING["sybil-signing<br/>client signable bytes"] --> SEQ
     SIGNING --> POLY
     TYPES["sybil-api-types<br/>shared request/response DTOs"] --> CLIENT["sybil-client<br/>THE Rust API client · SYB-171"]
-    CLIENT --> POLY["sybil-polymarket<br/>mirror + market maker"]
+    CLIENT --> MM["sybil-market-maker<br/>flash-liquidity actor"]
+    CLIENT --> POLY["sybil-polymarket<br/>external mirror"]
+    CLIENT --> NATIVE["sybil-native<br/>catalog + native MM"]
+    POLY --> MM
+    NATIVE --> MM
     CLIENT --> API
     POLY -.->|"HTTP"| API
     L1PROTO["sybil-l1-protocol<br/>guest-safe bridge hash domains"] --> L1INDEXER["sybil-l1-indexer<br/>L1 lifecycle sidecar"]
@@ -130,7 +134,7 @@ graph TB
 - Default `sybil-prover` builds are the proof-job CLI/service boundary and settlement calldata encoder; they do not depend on the sequencer
 - Sequencer owns block production and transactional proof-job capture, not epoch assembly or proving
 - `sybil-signing` is client-signature serialization, not validity-commitment serialization
-- `sybil-client` is THE Rust HTTP client (SYB-171): `sybil-polymarket` and the `sybil-admin` CLI both depend on it; no hand-written duplicate should be reintroduced
+- `sybil-client` is THE Rust HTTP client (SYB-171): integration, native, MM, admin, and indexer consumers depend on it; no hand-written duplicate should be reintroduced
 - `sybil-l1-protocol` stays guest-safe and dependency-light; `sybil-l1-abi` gives host clients one unconditional set of generated Alloy bindings
 - `sybil-l1-indexer` uses Alloy plus `sybil-client` to feed the existing bridge WAL entrypoints
 - `sybil-escape-claim` is the guest-safe emergency statement;

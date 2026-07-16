@@ -13,6 +13,7 @@ path = "src/main.rs"
 sybil-api-types = { path = "../sybil-api-types" }
 sybil-signing = { path = "../sybil-signing" }
 sybil-client = { path = "../sybil-client" }
+sybil-market-maker = { path = "../sybil-market-maker" }
 p256 = { workspace = true, features = ["ecdsa"] }
 hex = { workspace = true }
 getrandom = { workspace = true }

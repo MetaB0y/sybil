@@ -342,6 +342,14 @@ impl SybilClient {
         self.decode(resp).await
     }
 
+    pub async fn list_markets(&self) -> Result<Vec<MarketResponse>, Error> {
+        let resp = self
+            .with_service_auth(self.http.get(self.url("/v1/markets")))
+            .send()
+            .await?;
+        self.decode(resp).await
+    }
+
     pub async fn list_market_summaries(&self) -> Result<Vec<MarketSummaryResponse>, Error> {
         let resp = self
             .with_service_auth(self.http.get(self.url("/v1/markets/summary")))

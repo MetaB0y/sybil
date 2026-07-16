@@ -217,7 +217,7 @@ history has fallen below the retained replay floor.
 
 `sybil-oracle` implements immediate signed-feed resolution. It verifies feed identity, market binding, signature, payout range, and irreversible lifecycle state. Truthfulness of the feed remains a trust assumption; richer quorum/bond/challenge policy is not part of the core implementation.
 
-`sybil-polymarket` is an untrusted client integration: it mirrors curated events/groups, follows CLOB reference prices, submits one-shot MM liquidity, and signs clean closed-market resolutions. It imports no exchange state. The API timestamps reference updates per market, publishes the exact expiry, and omits values older than its configured TTL, so a dead or partially updating publisher cannot leave a stale reference available to web/Arena consumers; this cache is volatile and empty after restart until republish. Arena consumes that one API-owned view, enforces the expiry between refreshes, and clears on refresh failure rather than maintaining a second CLOB/mapping cache.
+`sybil-polymarket` is an untrusted client integration: it mirrors curated events/groups, follows CLOB reference prices, submits one-shot MM liquidity, and signs clean closed-market resolutions. It imports no exchange state. Native product markets are separate: `sybil-native-admin` applies the checked-in catalog idempotently and writes a genesis-bound deployment manifest; `sybil-native-mm` provides static-anchor flash liquidity from that manifest. Both MM processes reuse the provider-neutral `sybil-market-maker` actor. The API timestamps external reference updates per market, publishes the exact expiry, and omits values older than its configured TTL, so a dead or partially updating publisher cannot leave a stale reference available to web/Arena consumers; this cache is volatile and empty after restart until republish. Arena consumes that one API-owned view, enforces the expiry between refreshes, and clears on refresh failure rather than maintaining a second CLOB/mapping cache.
 
 The Python arena and web frontend use the same public interfaces. The Rust client is shared by first-party Rust consumers; OpenAPI generates frontend types.
 
@@ -276,6 +276,8 @@ owns the detailed evidence, and
 | User custody, reconstruction, escape proving | `crates/sybil-custody`, `crates/sybil-escape-claim` |
 | L1 protocol/indexing and contracts | `crates/sybil-l1-*`, `contracts/` |
 | External mirror | `crates/sybil-polymarket` |
+| Native market catalog/runtime | `crates/sybil-native` |
+| Shared flash-liquidity actor | `crates/sybil-market-maker` |
 | Agents and clients | `arena/`, `frontend/web/`, `crates/sybil-client` |
 
 For why these boundaries exist, follow the ADRs and focused notes from [Sybil Architecture](architecture/Sybil%20Architecture.md).

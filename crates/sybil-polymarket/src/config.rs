@@ -1,4 +1,5 @@
 use clap::Parser;
+use sybil_market_maker::MmConfig;
 
 #[derive(Parser, Debug, Clone)]
 #[command(
@@ -131,12 +132,6 @@ pub struct Config {
     #[arg(long, default_value = "", env = "CURATED_MARKETS_PATH")]
     pub curated_markets_path: String,
 
-    /// Path to a native Sybil market template catalog (SYB-151). When set, the
-    /// sync actor ensures enabled native templates exist on Sybil before
-    /// mirroring Polymarket events. Empty = no native catalog.
-    #[arg(long, default_value = "", env = "NATIVE_MARKETS_PATH")]
-    pub native_markets_path: String,
-
     /// Path to the P256 signing key used to attest to resolutions. Empty
     /// disables the ResolutionActor (mirrored markets won't auto-resolve).
     /// The key's compressed SEC1 pubkey must be registered on sybil-api as
@@ -147,46 +142,22 @@ pub struct Config {
     /// Resolution poll interval in seconds.
     #[arg(long, default_value = "120", env = "RESOLUTION_POLL_INTERVAL_SECS")]
     pub resolution_poll_interval_secs: u64,
+}
 
-    // --- SYB-48: LLM auto-resolution (native `api_poll` markets) ---
-    /// Enable the LLM auto-resolution actor. DEFAULT OFF: must be explicitly
-    /// turned on in deployment. Also requires `SIGNER_KEY_PATH` (for signing)
-    /// and `OPENROUTER_API_KEY` (for the model); if either is missing the actor
-    /// stays disabled.
-    #[arg(long, default_value = "false", env = "AUTORESOLVE_ENABLED")]
-    pub autoresolve_enabled: bool,
-
-    /// Auto-resolution poll interval in seconds.
-    #[arg(long, default_value = "300", env = "AUTORESOLVE_POLL_INTERVAL_SECS")]
-    pub autoresolve_poll_interval_secs: u64,
-
-    /// Confidence at/above which a signed proposal enters the challenge window.
-    #[arg(long, default_value = "0.9", env = "AUTORESOLVE_CONFIDENCE_PROPOSE")]
-    pub autoresolve_confidence_propose: f64,
-
-    /// Confidence at/above which a market is queued for human review (but below
-    /// the propose threshold).
-    #[arg(long, default_value = "0.7", env = "AUTORESOLVE_CONFIDENCE_REVIEW")]
-    pub autoresolve_confidence_review: f64,
-
-    /// Challenge window (hours) a proposed resolution is held before it
-    /// auto-finalizes, unless an operator rejects it first.
-    #[arg(long, default_value = "24", env = "AUTORESOLVE_CHALLENGE_WINDOW_HOURS")]
-    pub autoresolve_challenge_window_hours: u64,
-
-    /// Minimum seconds between fetches of the same resolution endpoint.
-    #[arg(
-        long,
-        default_value = "300",
-        env = "AUTORESOLVE_SOURCE_MIN_INTERVAL_SECS"
-    )]
-    pub autoresolve_source_min_interval_secs: u64,
-
-    /// OpenRouter model id used to evaluate resolutions.
-    #[arg(
-        long,
-        default_value = "deepseek/deepseek-v4-flash",
-        env = "AUTORESOLVE_MODEL"
-    )]
-    pub autoresolve_model: String,
+impl Config {
+    pub fn market_maker_config(&self) -> MmConfig {
+        MmConfig {
+            mm_half_spread: self.mm_half_spread,
+            mm_budget_dollars: self.mm_budget_dollars,
+            mm_quote_size_dollars: self.mm_quote_size_dollars,
+            mm_gamma: self.mm_gamma,
+            mm_max_position: self.mm_max_position,
+            mm_max_orders_per_block: self.mm_max_orders_per_block,
+            mm_max_exposure_dollars: self.mm_max_exposure_dollars,
+            mm_vol_window: self.mm_vol_window,
+            mm_min_spread: self.mm_min_spread,
+            mm_sync_interval_blocks: self.mm_sync_interval_blocks,
+            mm_staleness_ms: self.mm_staleness_ms,
+        }
+    }
 }

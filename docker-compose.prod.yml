@@ -102,8 +102,15 @@ services:
       - "--mapping-store-path=/data/polymarket_mapping.json"
       - "--sync-interval-secs=120"
       - "--curated-markets-path=/etc/sybil/curated_markets.json"
-      - "--native-markets-path=/etc/sybil/native_markets.json"
 
+    logging: *default-logging
+  sybil-native-admin:
+    environment:
+      SYBIL_SERVICE_TOKEN: "${SYBIL_SERVICE_TOKEN:?Set SYBIL_SERVICE_TOKEN in /opt/sybil/.env}"
+    logging: *default-logging
+  sybil-native-mm:
+    environment:
+      SYBIL_SERVICE_TOKEN: "${SYBIL_SERVICE_TOKEN:?Set SYBIL_SERVICE_TOKEN in /opt/sybil/.env}"
     logging: *default-logging
   sybil-arena:
     env_file:
