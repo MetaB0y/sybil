@@ -9,7 +9,6 @@ import {
   marketIndex,
   pendingByAccount,
   pendingIndex,
-  positionRefValue,
   topPendingMarkets,
 } from "@/lib/dev/derive";
 import {
@@ -18,13 +17,7 @@ import {
   useDevMarkets,
   useDevPendingOrders,
 } from "@/lib/dev/fetchers";
-import {
-  dollars,
-  dollarsFloat,
-  fmtInt,
-  fmtPrice,
-  moneySigned,
-} from "@/lib/dev/format";
+import { dollars, fmtInt, fmtPrice, moneySigned } from "@/lib/dev/format";
 import { Stat, StatGrid } from "@/components/dev/primitives/stat";
 
 const mutedSpan: CSSProperties = { color: "var(--fg-3)", fontSize: 12 };
@@ -76,7 +69,7 @@ export function AccountsView() {
   const pendIdx = pendingIndex(pendingOrders);
   const pendByAcct = pendingByAccount(pendingOrders);
 
-  const agg = accountAggregates(accounts, mIdx, selectedAccountId, pendByAcct);
+  const agg = accountAggregates(accounts, selectedAccountId, pendByAcct);
 
   const fills =
     useDevAccountFills(agg.activeTradingAccounts.map((a) => a.account_id))
@@ -104,7 +97,7 @@ export function AccountsView() {
             title="Active Trading Accounts"
             actions={
               <span style={mutedSpan}>
-                Aggregated positions, pending orders, and reference marks
+                Canonical Sybil portfolios for discovered trading accounts
               </span>
             }
           />
@@ -187,37 +180,18 @@ export function AccountsView() {
                 sub={agg.mmPositionCount + " positions"}
               />
               <Stat
-                label="Ref Portfolio"
-                value={"$" + dollarsFloat(agg.mmReferenceTotal)}
+                label="Portfolio"
+                value={"$" + dollars(agg.mmPortfolioValueNanos)}
                 tone="cyan"
-                sub="cash plus reference marks"
+                sub="canonical Sybil mark"
               />
               <Stat
-                label="Ref PnL"
-                value={moneySigned(agg.mmReferencePnl)}
-                tone={agg.mmReferencePnl >= 0 ? "yes" : "no"}
-                sub={"Sybil mark $" + dollars(agg.mmSybilValueNanos)}
+                label="PnL"
+                value={moneySigned(agg.mmPnlNanos / 1e9)}
+                tone={agg.mmPnlNanos >= 0 ? "yes" : "no"}
+                sub="canonical deposits basis"
               />
             </StatGrid>
-
-            {agg.accountZeroIsInactive ? (
-              <div
-                style={{
-                  marginTop: 12,
-                  padding: "10px 11px",
-                  border: "1px solid var(--border-2)",
-                  borderRadius: 8,
-                  background: "var(--surface-2)",
-                }}
-              >
-                <strong>Account #0 is not the market maker</strong>
-                <div style={{ marginTop: 4, ...mutedSpan }}>
-                  Account #0 currently has no positions or pending orders. This
-                  panel now follows accounts with actual activity instead of
-                  pinning the MM view to #0.
-                </div>
-              </div>
-            ) : null}
 
             <h3
               style={{
@@ -239,14 +213,11 @@ export function AccountsView() {
                   <Th>Outcome</Th>
                   <Th align="right">Qty</Th>
                   <Th align="right">Sybil Value</Th>
-                  <Th align="right">Ref Mark</Th>
                 </tr>
               </thead>
               <tbody>
                 {agg.topMmPositions.map((p) => (
-                  <tr
-                    key={p.account_id + "-" + p.market_id + "-" + p.outcome}
-                  >
+                  <tr key={p.account_id + "-" + p.market_id + "-" + p.outcome}>
                     <Td mono tone="accent">
                       {"#" + p.account_id}
                     </Td>
@@ -262,14 +233,11 @@ export function AccountsView() {
                     <Td mono align="right">
                       {"$" + dollars(p.value_nanos)}
                     </Td>
-                    <Td mono tone="accent" align="right">
-                      {"$" + dollarsFloat(positionRefValue(p, mIdx))}
-                    </Td>
                   </tr>
                 ))}
                 {agg.topMmPositions.length === 0 ? (
                   <tr>
-                    <td colSpan={6} style={emptyMsg}>
+                    <td colSpan={5} style={emptyMsg}>
                       No positions for the selected scope.
                     </td>
                   </tr>
@@ -361,7 +329,9 @@ export function AccountsView() {
                   <tr key={row.market_id}>
                     <td
                       style={truncCell}
-                      title={"#" + row.market_id + " " + marketName(row.market_id)}
+                      title={
+                        "#" + row.market_id + " " + marketName(row.market_id)
+                      }
                     >
                       {"#" + row.market_id + " " + marketName(row.market_id)}
                     </td>

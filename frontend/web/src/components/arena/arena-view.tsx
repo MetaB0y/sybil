@@ -36,7 +36,10 @@ import {
   type ArenaTokenUsage,
 } from "@/lib/arena/use-arena-feed";
 import { useActivityOverview } from "@/lib/activity/use-activity-overview";
-import { formatCompactDollars, formatCompactDollarsCents } from "@/lib/format/nanos";
+import {
+  formatCompactDollars,
+  formatCompactDollarsCents,
+} from "@/lib/format/nanos";
 import { useDevRecentBlocks } from "@/lib/dev/use-recent-blocks";
 
 const truncCell: CSSProperties = {
@@ -195,7 +198,10 @@ export function combineArenaPanelDataStates(
 ): ArenaPanelDataState {
   return (
     states.find((state) => !state.showData) ??
-    states.find((state) => state.kind !== "ready") ?? { kind: "ready", showData: true }
+    states.find((state) => state.kind !== "ready") ?? {
+      kind: "ready",
+      showData: true,
+    }
   );
 }
 
@@ -251,13 +257,7 @@ function Panel({
   );
 }
 
-function PanelHead({
-  title,
-  actions,
-}: {
-  title: string;
-  actions?: ReactNode;
-}) {
+function PanelHead({ title, actions }: { title: string; actions?: ReactNode }) {
   return (
     <div
       style={{
@@ -404,13 +404,7 @@ export function ArenaPanelDataNotice({
   );
 }
 
-function Pill({
-  children,
-  tone,
-}: {
-  children?: ReactNode;
-  tone?: Tone;
-}) {
+function Pill({ children, tone }: { children?: ReactNode; tone?: Tone }) {
   const color = tone ? toneColor(tone) : "var(--fg-3)";
   const bg = tone
     ? `color-mix(in srgb, ${color} 14%, transparent)`
@@ -617,7 +611,10 @@ export function ArenaView() {
     limit: 500,
   });
   const marketOptions = useMemo(
-    () => marketOptionsFromDecisions(traderHistory.data?.decisions ?? EMPTY_DECISIONS),
+    () =>
+      marketOptionsFromDecisions(
+        traderHistory.data?.decisions ?? EMPTY_DECISIONS,
+      ),
     [traderHistory.data?.decisions],
   );
   const selectedMarketStillVisible = marketOptions.some(
@@ -659,10 +656,7 @@ export function ArenaView() {
         label: "Fair-value history",
       })
     : ({ kind: "ready", showData: true } satisfies ArenaPanelDataState);
-  const fvState = combineArenaPanelDataStates(
-    traderHistoryState,
-    driftState,
-  );
+  const fvState = combineArenaPanelDataStates(traderHistoryState, driftState);
   const totals = useMemo(() => summarizeBots(summaries), [summaries]);
   const strategies = useMemo(() => strategyRows(summaries), [summaries]);
   const tokenCost = estimateTokenCost(tokenUsage);
@@ -694,11 +688,7 @@ export function ArenaView() {
   }
 
   return (
-    <main
-      className="arena-main"
-      style={{
-      }}
-    >
+    <main className="arena-main" style={{}}>
       {feedHeader}
       {feedNotice}
 
@@ -714,12 +704,12 @@ export function ArenaView() {
           sub={"latest " + latestDecision}
         />
         <Stat
-          label="Bots"
-          value={fmtInt(stats?.traders)}
+          label="Scored Traders"
+          value={fmtInt(strategies.reduce((sum, row) => sum + row.traders, 0))}
           sub={fmtInt(stats?.snapshots) + " portfolio snapshots"}
         />
         <Stat
-          label="Arena PnL"
+          label="Scored Arena PnL"
           value={money(totals.pnl, true)}
           tone={totals.pnl >= 0 ? "yes" : "no"}
           sub={"portfolio " + money(totals.portfolioValue)}
@@ -742,20 +732,12 @@ export function ArenaView() {
         />
       </StatGrid>
 
-      <div
-        className="arena-panel-grid"
-        style={{
-        }}
-      >
+      <div className="arena-panel-grid" style={{}}>
         <StrategyPanel rows={strategies} />
         <LlmUsagePanel rows={tokenUsage} />
       </div>
 
-      <div
-        className="arena-panel-grid"
-        style={{
-        }}
-      >
+      <div className="arena-panel-grid" style={{}}>
         <EquityCurvePanel
           trader={activeTrader}
           points={equity.data?.points ?? []}
@@ -837,11 +819,7 @@ function StrategyPanel({ rows }: { rows: ReturnType<typeof strategyRows> }) {
                 <Td mono align="right">
                   {fmtInt(row.traders)}
                 </Td>
-                <Td
-                  mono
-                  align="right"
-                  tone={row.totalPnl >= 0 ? "yes" : "no"}
-                >
+                <Td mono align="right" tone={row.totalPnl >= 0 ? "yes" : "no"}>
                   {money(row.totalPnl, true)}
                 </Td>
                 <Td mono align="right" tone={row.avgPnl >= 0 ? "yes" : "no"}>
@@ -1042,7 +1020,10 @@ function FvDriftPanel({
   retrying: boolean;
   onRetry: () => void;
 }) {
-  const points = useMemo(() => driftPointsFromDecisions(decisions), [decisions]);
+  const points = useMemo(
+    () => driftPointsFromDecisions(decisions),
+    [decisions],
+  );
   const latest = points[points.length - 1];
   const selectedMarket = marketOptions.find(
     (option) => String(option.marketId) === selectedMarketId,
@@ -1200,18 +1181,30 @@ function BotRosterPanel({
                     gap: 8,
                   }}
                 >
-                  <MiniStat label="Portfolio" value={money(bot.portfolio_value)} />
+                  <MiniStat
+                    label="Portfolio"
+                    value={money(bot.portfolio_value)}
+                  />
                   <MiniStat
                     label="PnL"
                     value={money(bot.pnl, true)}
                     tone={(bot.pnl ?? 0) >= 0 ? "yes" : "no"}
                   />
-                  <MiniStat label="Decisions" value={fmtInt(bot.decision_count)} />
+                  <MiniStat
+                    label="Decisions"
+                    value={fmtInt(bot.decision_count)}
+                  />
                   <MiniStat
                     label="Orders / Fills"
-                    value={fmtInt(bot.total_orders) + " / " + fmtInt(bot.total_fills)}
+                    value={
+                      fmtInt(bot.total_orders) + " / " + fmtInt(bot.total_fills)
+                    }
                   />
-                  <MiniStat label="FV" value={pct(bot.latest_fair_value)} tone="yes" />
+                  <MiniStat
+                    label="FV"
+                    value={pct(bot.latest_fair_value)}
+                    tone="yes"
+                  />
                   <MiniStat
                     label="Edge"
                     value={pct(bot.latest_edge)}
@@ -1232,7 +1225,9 @@ function BotRosterPanel({
 
 function EquitySnapshot({ bot }: { bot: ArenaBotSummary }) {
   if (bot.portfolio_value == null || bot.pnl == null) {
-    return <span style={{ color: "var(--fg-4)", fontSize: 12 }}>no snapshot</span>;
+    return (
+      <span style={{ color: "var(--fg-4)", fontSize: 12 }}>no snapshot</span>
+    );
   }
   const current = bot.portfolio_value;
   const baseline = current - bot.pnl;
@@ -1312,7 +1307,11 @@ function ActivityPanel({
           }}
         >
           <MiniStat label="All-time Volume" value={allTimeVolume} />
-          <MiniStat label="All-time Welfare" value={allTimeWelfare} tone="yes" />
+          <MiniStat
+            label="All-time Welfare"
+            value={allTimeWelfare}
+            tone="yes"
+          />
           <MiniStat label="24h Volume" value={last24hVolume} />
           <MiniStat label="24h Welfare" value={last24hWelfare} tone="yes" />
         </div>
@@ -1475,7 +1474,12 @@ function EquityLineChart({
 
   return (
     <ChartBox>
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="100%" preserveAspectRatio="none">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        width="100%"
+        height="100%"
+        preserveAspectRatio="none"
+      >
         {ticks.map((tick) => {
           const y = yFor(tick);
           return (
@@ -1511,8 +1515,17 @@ function EquityLineChart({
           strokeLinecap="round"
           vectorEffect="non-scaling-stroke"
         />
-        <circle cx={xFor(end.t)} cy={yFor(end.value)} r={3.5} fill="var(--accent)" />
-        <AxisText x={pad.l} y={H - 9} text={shortDate(start.timestamp ?? start.t)} />
+        <circle
+          cx={xFor(end.t)}
+          cy={yFor(end.value)}
+          r={3.5}
+          fill="var(--accent)"
+        />
+        <AxisText
+          x={pad.l}
+          y={H - 9}
+          text={shortDate(start.timestamp ?? start.t)}
+        />
         <AxisText
           x={W - pad.r}
           y={H - 9}
@@ -1563,7 +1576,12 @@ function DriftLineChart({
 
   return (
     <ChartBox>
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="100%" preserveAspectRatio="none">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        width="100%"
+        height="100%"
+        preserveAspectRatio="none"
+      >
         {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
           const y = yFor(tick);
           return (
@@ -1607,9 +1625,23 @@ function DriftLineChart({
           strokeLinecap="round"
           vectorEffect="non-scaling-stroke"
         />
-        <circle cx={xFor(end.t)} cy={yFor(end.marketPrice)} r={3.2} fill="var(--accent)" />
-        <circle cx={xFor(end.t)} cy={yFor(end.fairValue)} r={3.2} fill="var(--yes)" />
-        <AxisText x={pad.l} y={H - 9} text={shortDate(start.timestamp ?? start.t)} />
+        <circle
+          cx={xFor(end.t)}
+          cy={yFor(end.marketPrice)}
+          r={3.2}
+          fill="var(--accent)"
+        />
+        <circle
+          cx={xFor(end.t)}
+          cy={yFor(end.fairValue)}
+          r={3.2}
+          fill="var(--yes)"
+        />
+        <AxisText
+          x={pad.l}
+          y={H - 9}
+          text={shortDate(start.timestamp ?? start.t)}
+        />
         <AxisText
           x={W - pad.r}
           y={H - 9}
@@ -1717,7 +1749,9 @@ function equityChartPoints(points: ArenaEquityPoint[]): EquityChartPoint[] {
   return points
     .map((point) => {
       const value = Number(point.portfolio_value);
-      const parsedTime = point.timestamp ? new Date(point.timestamp).getTime() : NaN;
+      const parsedTime = point.timestamp
+        ? new Date(point.timestamp).getTime()
+        : NaN;
       const t = Number.isFinite(parsedTime) ? parsedTime : Number(point.id);
       if (!Number.isFinite(value) || !Number.isFinite(t)) return null;
       return { t, value, timestamp: point.timestamp ?? null };
@@ -1760,11 +1794,7 @@ function DecisionsPanel({
         }
       />
       <PanelBody>
-        <div
-          className="arena-decision-grid"
-          style={{
-          }}
-        >
+        <div className="arena-decision-grid" style={{}}>
           {decisions.map((decision) => (
             <DecisionCard key={decision.id} decision={decision} />
           ))}
@@ -1828,7 +1858,10 @@ function DecisionCard({ decision }: { decision: ArenaDecision }) {
         <Pill tone="accent">{"market " + pct(decision.market_price)}</Pill>
         <Pill>{"cash " + money(decision.balance)}</Pill>
         <Pill>
-          {fmtInt(decision.yes_pos) + " YES / " + fmtInt(decision.no_pos) + " NO"}
+          {fmtInt(decision.yes_pos) +
+            " YES / " +
+            fmtInt(decision.no_pos) +
+            " NO"}
         </Pill>
         <Pill>
           {decision.llm_duration_s == null
@@ -1992,7 +2025,9 @@ function TonePill({
   return tone ? <Pill tone={tone}>{children}</Pill> : <Pill>{children}</Pill>;
 }
 
-function strategyTone(strategy: ReturnType<typeof extractStrategy>): Tone | undefined {
+function strategyTone(
+  strategy: ReturnType<typeof extractStrategy>,
+): Tone | undefined {
   if (strategy === "Kelly") return "warn";
   if (strategy === "Flat") return "accent";
   if (strategy === "Noise") return "dim";

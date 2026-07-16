@@ -88,6 +88,15 @@ class Market:
         return self.volume_nanos / NANOS_PER_DOLLAR
 
 
+@dataclass(frozen=True)
+class MarketGroup:
+    """Core mutually-exclusive market group."""
+
+    id: int
+    name: str
+    market_ids: tuple[int, ...]
+
+
 @dataclass
 class Fill:
     """A fill from the matching engine."""

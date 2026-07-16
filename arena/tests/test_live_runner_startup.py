@@ -9,6 +9,15 @@ import pytest
 import live.runner as runner
 
 
+def test_synthetic_capital_is_fixed_across_actor_counts():
+    one = runner._synthetic_account_balance_nanos(300_000.0, 1)
+    twenty = runner._synthetic_account_balance_nanos(300_000.0, 20)
+
+    assert one == 300_000 * 1_000_000_000
+    assert twenty == 15_000 * 1_000_000_000
+    assert twenty * 20 == one
+
+
 def _trader(name: str, account_id: int, *, pnl: float = 0.0):
     trader = MagicMock()
     trader.name = name
@@ -42,6 +51,7 @@ async def test_one_shot_snapshot_records_every_account_baseline():
         "Control (Flat)",
         "Stage1 (Flat)",
     ]
+    assert [call.kwargs["account_id"] for call in db.log_snapshot.call_args_list] == [11, 12]
     assert all(call.kwargs["positions"] == {"7": {"YES": 3}} for call in db.log_snapshot.call_args_list)
     assert all(call.kwargs["total_fills"] == 1 for call in db.log_snapshot.call_args_list)
     assert all(call.kwargs["total_orders"] == 2 for call in db.log_snapshot.call_args_list)

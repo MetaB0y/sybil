@@ -13,6 +13,7 @@ import math
 import random
 import time
 from dataclasses import dataclass, replace
+from hashlib import sha256
 from typing import Literal
 
 from bots.base import BaseAgent
@@ -336,9 +337,18 @@ class CrossingNoiseStrategy:
     prices just through the previous mark can also trade with MM quotes.
     """
 
-    def __init__(self, config: SyntheticStrategyConfig):
+    def __init__(
+        self,
+        config: SyntheticStrategyConfig,
+        group_members_by_market: dict[int, frozenset[int]] | None = None,
+    ):
         self.config = config
-        self.rng = random.Random(config.random_seed)
+        self.group_members_by_market = group_members_by_market or {}
+
+    def _rng_for_block(self, block_height: int) -> random.Random:
+        material = f"crossing-noise:{self.config.random_seed}:{block_height}".encode()
+        seed = int.from_bytes(sha256(material).digest()[:8], "big")
+        return random.Random(seed)
 
     def _eligible_markets(self, markets: dict[int, Market]) -> list[Market]:
         return sorted(
@@ -357,15 +367,16 @@ class CrossingNoiseStrategy:
         if not candidates:
             return []
 
+        rng = self._rng_for_block(block.height)
         per_block = self.config.crossing_markets_per_block
         if per_block and per_block < len(candidates):
-            chosen = self.rng.sample(candidates, per_block)
+            chosen = rng.sample(candidates, per_block)
         else:
             chosen = candidates
 
         edge = self.config.crossing_edge
         remaining_cash = cash
-        used_buy_yes = False
+        buy_yes_by_group: dict[frozenset[int], int] = {}
         orders: list[OrderSpec] = []
         for market in chosen:
             # Anchor on the previous Sybil price; fresh markets default to 0.5.
@@ -373,13 +384,15 @@ class CrossingNoiseStrategy:
             if mid is None:
                 mid = 0.5
             # Small jitter so prices differ across accounts and over time.
-            jitter = self.rng.uniform(
+            jitter = rng.uniform(
                 -self.config.bounded_randomization_range,
                 self.config.bounded_randomization_range,
             )
             mid = _clamp_price(mid + jitter)
 
             yes_pos, no_pos = _positions(positions, market.id)
+            group = self.group_members_by_market.get(market.id)
+            allow_buy_yes = group is None or buy_yes_by_group.get(group, 0) < len(group) - 1
             order = self._one_order(
                 market.id,
                 mid,
@@ -387,12 +400,14 @@ class CrossingNoiseStrategy:
                 no_pos,
                 remaining_cash,
                 edge,
-                allow_buy_yes=not used_buy_yes,
+                allow_buy_yes=allow_buy_yes,
+                rng=rng,
             )
             if order is None:
                 continue
             orders.append(order)
-            used_buy_yes |= isinstance(order, BuyYes)
+            if isinstance(order, BuyYes) and group is not None:
+                buy_yes_by_group[group] = buy_yes_by_group.get(group, 0) + 1
             if isinstance(order, (BuyYes, BuyNo)):
                 remaining_cash -= order.quantity * (order.limit_price_nanos / NANOS_PER_DOLLAR)
 
@@ -408,11 +423,12 @@ class CrossingNoiseStrategy:
         edge: float,
         *,
         allow_buy_yes: bool,
+        rng: random.Random,
     ) -> OrderSpec | None:
         budget = self.config.notional_budget
         actions: list[tuple[str, float]] = []
-        # At most one YES buy per actor submission also prevents a sparse actor
-        # from accidentally completing every outcome in a small MarketGroup.
+        # The caller suppresses the final YES buy that would complete a whole
+        # mutually-exclusive group in one account submission.
         if allow_buy_yes and yes_pos < self.config.max_inventory and cash > 0:
             actions.append(("buy_yes", self.config.max_inventory - yes_pos))
         if no_pos < self.config.max_inventory and cash > 0:
@@ -424,7 +440,7 @@ class CrossingNoiseStrategy:
         if not actions:
             return None
 
-        action, room = self.rng.choice(actions)
+        action, room = rng.choice(actions)
         if action == "buy_yes":
             price = _clamp_price(mid + edge)
             quantity = _buy_qty(budget, price, room, cash)
@@ -455,10 +471,14 @@ class CrossingNoiseTrader(BaseAgent):
         config: SyntheticStrategyConfig | None = None,
         name: str | None = None,
         market_ids: list[int] | None = None,
+        group_members_by_market: dict[int, frozenset[int]] | None = None,
     ):
         super().__init__(client, account_id, name or "CrossingNoiseTrader", market_ids)
         self.markets_info = markets_info
-        self.strategy = CrossingNoiseStrategy(config or SyntheticStrategyConfig())
+        self.strategy = CrossingNoiseStrategy(
+            config or SyntheticStrategyConfig(),
+            group_members_by_market=group_members_by_market,
+        )
 
     async def on_block(self, block: Block) -> list[OrderSpec]:
         markets = self.markets_info

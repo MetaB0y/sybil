@@ -106,8 +106,8 @@ enum PriceSource {
     },
     Native {
         quote_range: QuoteRange,
-        /// Latest valid Sybil YES clearing price, seeded from the catalog.
-        current_mid: f64,
+        /// Catalog seed retained until a provenance-aware native price source exists.
+        anchor_mid: f64,
     },
 }
 
@@ -147,7 +147,7 @@ impl MarketState {
             sybil_market_id,
             price_source: PriceSource::Native {
                 quote_range,
-                current_mid: quote_range.initial,
+                anchor_mid: quote_range.initial,
             },
             group_key,
             group_size,
@@ -198,7 +198,7 @@ impl MarketState {
             PriceSource::Mirror { yes_token_id } => {
                 snapshot.midpoints.get(yes_token_id).copied().unwrap_or(0.5)
             }
-            PriceSource::Native { current_mid, .. } => *current_mid,
+            PriceSource::Native { anchor_mid, .. } => *anchor_mid,
         }
     }
 }
@@ -514,28 +514,6 @@ impl MmActor {
     /// remain in `on_block` and therefore run only for live blocks.
     fn observe_block(&mut self, block: &PublicBlockResponse) {
         self.untrack_resolved(block);
-        self.update_native_midpoints(block);
-    }
-
-    /// Let native markets discover prices on Sybil after their catalog seed.
-    /// A clearing vector is `[YES, NO]`; invalid or terminal values are ignored.
-    fn update_native_midpoints(&mut self, block: &PublicBlockResponse) {
-        for market in self.state.markets.values_mut() {
-            let PriceSource::Native { current_mid, .. } = &mut market.price_source else {
-                continue;
-            };
-            let Some(yes_nanos) = block
-                .clearing_prices_nanos
-                .get(&market.sybil_market_id.to_string())
-                .and_then(|prices| prices.first())
-            else {
-                continue;
-            };
-            let mid = *yes_nanos as f64 / NANOS_PER_DOLLAR as f64;
-            if mid > 0.0 && mid < 1.0 {
-                *current_mid = mid;
-            }
-        }
     }
 
     // ----- Per-block quote generation ------------------------------------- //
@@ -544,9 +522,8 @@ impl MmActor {
         let snapshot = self.price_rx.borrow().clone();
         let now = now_ms();
 
-        // 0. Observe lifecycle and native clearing prices. The same state-only
-        //    observation also runs during replay, while the quote side effects
-        //    below are live-only.
+        // 0. Observe lifecycle. The same state-only observation also runs
+        //    during replay, while the quote side effects below are live-only.
         self.observe_block(block);
 
         // 1. Periodic position sync
@@ -600,8 +577,8 @@ impl MmActor {
                 }
                 PriceSource::Native {
                     quote_range,
-                    current_mid,
-                } => (*current_mid, Some(*quote_range)),
+                    anchor_mid,
+                } => (*anchor_mid, Some(*quote_range)),
             };
 
             ms.push_price(mid);
@@ -862,7 +839,7 @@ mod tests {
     }
 
     #[test]
-    fn native_midpoint_follows_latest_valid_clearing_price() {
+    fn native_midpoint_does_not_learn_from_internal_clearing_price() {
         let (live_tx, _live_rx) = watch::channel(0usize);
         let (mut actor, _price_tx) = test_actor(live_tx);
         track_native(&mut actor, 7, 0.4);
@@ -871,22 +848,6 @@ mod tests {
         block
             .clearing_prices_nanos
             .insert("7".to_string(), vec![700_000_000, 300_000_000]);
-        actor.observe_block(&block);
-
-        let market = actor.state.markets.get(&7).expect("tracked native market");
-        assert_eq!(market.budget_mid(&PriceSnapshot::default()), 0.7);
-    }
-
-    #[test]
-    fn native_midpoint_ignores_terminal_clearing_price() {
-        let (live_tx, _live_rx) = watch::channel(0usize);
-        let (mut actor, _price_tx) = test_actor(live_tx);
-        track_native(&mut actor, 7, 0.4);
-
-        let mut block = block_resolving(&[]);
-        block
-            .clearing_prices_nanos
-            .insert("7".to_string(), vec![NANOS_PER_DOLLAR, 0]);
         actor.observe_block(&block);
 
         let market = actor.state.markets.get(&7).expect("tracked native market");

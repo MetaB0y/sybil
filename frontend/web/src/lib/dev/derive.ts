@@ -8,8 +8,6 @@
  * math. Fields that may arrive as strings on the wire are coerced via `n()`.
  */
 
-const SHARE_SCALE = 1_000;
-
 import type {
   DevMarket,
   DevMarketGroup,
@@ -20,7 +18,7 @@ import type {
   DevBlockMarketStats,
   DevOverviewBucket,
 } from "./types";
-import { fmtInt, dollars, dollarsFloat, moneySigned, fmtProb } from "./format";
+import { fmtInt, dollars, moneySigned, fmtProb } from "./format";
 
 // ── coercion helpers ──────────────────────────────────────────────────
 
@@ -62,7 +60,8 @@ export function priceStateClass(m: DevMarket): "yes" | "accent" | "no" {
 }
 
 export function priceGap(m: DevMarket): number {
-  if (!present(m.yes_price_nanos) || !present(m.reference_price_nanos)) return 0;
+  if (!present(m.yes_price_nanos) || !present(m.reference_price_nanos))
+    return 0;
   return Math.abs(n(m.yes_price_nanos) - n(m.reference_price_nanos)) / 1e9;
 }
 
@@ -84,11 +83,23 @@ export function pendingIndex(orders: DevPendingOrder[]): PendingIndex {
   for (const o of orders) {
     const id = Number(o.market_id);
     if (!map.has(id)) {
-      map.set(id, { market_id: id, count: 0, BuyYes: 0, BuyNo: 0, SellYes: 0, SellNo: 0 });
+      map.set(id, {
+        market_id: id,
+        count: 0,
+        BuyYes: 0,
+        BuyNo: 0,
+        SellYes: 0,
+        SellNo: 0,
+      });
     }
     const row = map.get(id)!;
     row.count++;
-    if (o.side === "BuyYes" || o.side === "BuyNo" || o.side === "SellYes" || o.side === "SellNo") {
+    if (
+      o.side === "BuyYes" ||
+      o.side === "BuyNo" ||
+      o.side === "SellYes" ||
+      o.side === "SellNo"
+    ) {
       row[o.side] += 1;
     }
   }
@@ -107,7 +118,9 @@ export function topPendingMarkets(idx: PendingIndex): PendingRow[] {
 }
 
 /** Pending-order count keyed by account id (index.html:1170-1178, 1500-1502). */
-export function pendingByAccount(orders: DevPendingOrder[]): Map<number, number> {
+export function pendingByAccount(
+  orders: DevPendingOrder[],
+): Map<number, number> {
   const map = new Map<number, number>();
   for (const o of orders) {
     const id = Number(o.account_id);
@@ -117,7 +130,10 @@ export function pendingByAccount(orders: DevPendingOrder[]): Map<number, number>
   return map;
 }
 
-function accountPendingCount(byAccount: Map<number, number>, id: number): number {
+function accountPendingCount(
+  byAccount: Map<number, number>,
+  id: number,
+): number {
   return byAccount.get(Number(id)) || 0;
 }
 
@@ -146,16 +162,21 @@ export function filterMarkets(
 
   if (q) {
     list = list.filter(
-      (m) => String(m.market_id).includes(q) || m.name.toLowerCase().includes(q),
+      (m) =>
+        String(m.market_id).includes(q) || m.name.toLowerCase().includes(q),
     );
   }
 
   if (opts.state === "cleared") {
     list = list.filter((m) => present(m.yes_price_nanos));
   } else if (opts.state === "ref") {
-    list = list.filter((m) => !present(m.yes_price_nanos) && present(m.reference_price_nanos));
+    list = list.filter(
+      (m) => !present(m.yes_price_nanos) && present(m.reference_price_nanos),
+    );
   } else if (opts.state === "none") {
-    list = list.filter((m) => !present(m.yes_price_nanos) && !present(m.reference_price_nanos));
+    list = list.filter(
+      (m) => !present(m.yes_price_nanos) && !present(m.reference_price_nanos),
+    );
   } else if (opts.state === "pending") {
     list = list.filter((m) => pendingCount(pendingIdx, m.market_id) > 0);
   } else if (opts.state === "mismatch") {
@@ -237,40 +258,32 @@ export function fmtLiquidity(m: DevMarket): string {
 }
 
 export function fmtYesDelta24h(m: DevMarket): string {
-  if (!present(m.yes_price_24h_ago_nanos) || !present(m.yes_price_nanos)) return "—";
+  if (!present(m.yes_price_24h_ago_nanos) || !present(m.yes_price_nanos))
+    return "—";
   const delta = (n(m.yes_price_nanos) - n(m.yes_price_24h_ago_nanos)) / 1e9;
   const sign = delta >= 0 ? "+" : "";
   return sign + (delta * 100).toFixed(1) + "¢";
 }
 
 export function yesDelta24hClass(m: DevMarket): "yes" | "no" | "dim" {
-  if (!present(m.yes_price_24h_ago_nanos) || !present(m.yes_price_nanos)) return "dim";
+  if (!present(m.yes_price_24h_ago_nanos) || !present(m.yes_price_nanos))
+    return "dim";
   return n(m.yes_price_nanos) >= n(m.yes_price_24h_ago_nanos) ? "yes" : "no";
 }
 
-export function orderStatsSub(bucket: DevOverviewBucket | null | undefined): string {
+export function orderStatsSub(
+  bucket: DevOverviewBucket | null | undefined,
+): string {
   if (!bucket || !bucket.orders) return "placed 0 · unmatched 0";
   return (
-    "placed " + fmtInt(bucket.orders.placed) + " · unmatched " + fmtInt(bucket.orders.unmatched)
+    "placed " +
+    fmtInt(bucket.orders.placed) +
+    " · unmatched " +
+    fmtInt(bucket.orders.unmatched)
   );
 }
 
 // ── positions / orders / articles (index.html:1520-1548) ──────────────
-
-export function positionRefValue(
-  p: DevPosition,
-  marketIdx: Map<number, DevMarket>,
-): number {
-  const m = marketIdx.get(Number(p.market_id));
-  const yes =
-    m && present(m.reference_price_nanos)
-      ? n(m.reference_price_nanos) / 1e9
-      : present(p.current_price_nanos)
-        ? n(p.current_price_nanos) / 1e9
-        : 0.5;
-  const price = p.outcome === "YES" ? yes : 1 - yes;
-  return (n(p.quantity) / SHARE_SCALE) * price;
-}
 
 interface OrderLike {
   side?: unknown;
@@ -325,7 +338,9 @@ export function articleUrl(a: string | ArticleLike | null | undefined): string {
   return typeof a === "string" ? a : (a && a.url) || "#";
 }
 
-export function articleLabel(a: string | ArticleLike | null | undefined): string {
+export function articleLabel(
+  a: string | ArticleLike | null | undefined,
+): string {
   if (typeof a === "string") return a;
   if (!a) return "article";
   return [a.source, a.title || a.url].filter(Boolean).join(": ");
@@ -351,7 +366,10 @@ export function buildInsights(ctx: InsightsContext): Insight[] {
   const latest = blocks.length ? blocks[blocks.length - 1] : null;
   if (latest) {
     items.push({
-      title: (latest.fill_count || 0) > 0 ? "Blocks are clearing trades" : "Blocks are alive but not clearing",
+      title:
+        (latest.fill_count || 0) > 0
+          ? "Blocks are clearing trades"
+          : "Blocks are alive but not clearing",
       body:
         "Latest block #" +
         latest.height +
@@ -392,7 +410,8 @@ export function buildInsights(ctx: InsightsContext): Insight[] {
   if (pendingOrders.length) {
     const idx = pendingIndex(pendingOrders);
     const top = topPendingMarkets(idx)[0];
-    const marketsWithPending = new Set(pendingOrders.map((o) => o.market_id)).size;
+    const marketsWithPending = new Set(pendingOrders.map((o) => o.market_id))
+      .size;
     items.push({
       title: "Pending liquidity is concentrated",
       body: top
@@ -412,7 +431,10 @@ export function buildInsights(ctx: InsightsContext): Insight[] {
       blocks.map((b) => b.state_root).filter(Boolean),
     ).size;
     items.push({
-      title: uniqueStateRoots <= 1 ? "State root is not moving" : "State root is moving",
+      title:
+        uniqueStateRoots <= 1
+          ? "State root is not moving"
+          : "State root is moving",
       body:
         uniqueStateRoots +
         " unique state roots across " +
@@ -489,10 +511,20 @@ export function buildQuickAnswer(
 
   if (kind === "liquidity") {
     const idx = pendingIndex(pendingOrders);
-    const marketsWithPending = new Set(pendingOrders.map((o) => o.market_id)).size;
+    const marketsWithPending = new Set(pendingOrders.map((o) => o.market_id))
+      .size;
     const rows = topPendingMarkets(idx)
       .slice(0, 8)
-      .map((r) => "#" + r.market_id + " " + marketName(mIdx, r.market_id) + ": " + r.count + " pending")
+      .map(
+        (r) =>
+          "#" +
+          r.market_id +
+          " " +
+          marketName(mIdx, r.market_id) +
+          ": " +
+          r.count +
+          " pending",
+      )
       .join("\n");
     return (
       pendingOrders.length +
@@ -508,20 +540,14 @@ export function buildQuickAnswer(
     "Active trading accounts: " +
     aggregates.activeTradingAccounts.map((a) => "#" + a.account_id).join(", ") +
     "\n" +
-    "Account #0 activity: " +
-    (aggregates.accountZeroIsInactive ? "none visible" : "has activity") +
-    "\n" +
     "Pending orders: " +
     aggregates.mmPendingOrders +
     "\n" +
-    "Sybil-mark portfolio: $" +
-    dollars(aggregates.mmSybilValueNanos) +
+    "Canonical portfolio: $" +
+    dollars(aggregates.mmPortfolioValueNanos) +
     "\n" +
-    "Reference-mark portfolio: $" +
-    dollarsFloat(aggregates.mmReferenceTotal) +
-    "\n" +
-    "Reference PnL: " +
-    moneySigned(aggregates.mmReferencePnl) +
+    "Canonical PnL: " +
+    moneySigned(aggregates.mmPnlNanos / 1e9) +
     "\n" +
     "Positions: " +
     aggregates.mmPositionCount
@@ -536,19 +562,15 @@ export interface AccountAggregates {
   activeTradingAccounts: DevAccountPortfolio[];
   selectedTradingAccounts: DevAccountPortfolio[];
   mmCashNanos: number;
-  mmSybilValueNanos: number;
+  mmPortfolioValueNanos: number;
+  mmPnlNanos: number;
   mmPositionCount: number;
   mmPendingOrders: number;
-  mmReferencePositionValue: number;
-  mmReferenceTotal: number;
-  mmReferencePnl: number;
   topMmPositions: PositionWithAccount[];
-  accountZeroIsInactive: boolean;
 }
 
 export function accountAggregates(
   accounts: DevAccountPortfolio[],
-  marketIdx: Map<number, DevMarket>,
   selectedAccountId: number | null,
   pendingByAccountIdx?: Map<number, number>,
 ): AccountAggregates {
@@ -558,12 +580,12 @@ export function accountAggregates(
   const pendCount = (id: number): number => accountPendingCount(byAccount, id);
 
   const activeTradingAccounts = accounts
-    .filter((a) => a.account_id !== 0)
     .filter(
       (a) =>
         (a.positions || []).length > 0 ||
         pendCount(a.account_id) > 0 ||
-        Math.abs(n(a.pnl_nanos) || 0) > 0,
+        Math.abs(n(a.pnl_nanos) || 0) > 0 ||
+        (n(a.total_deposited_nanos) || 0) > 0,
     )
     .sort(
       (a, b) =>
@@ -577,16 +599,16 @@ export function accountAggregates(
       ? activeTradingAccounts
       : accounts.filter((a) => a.account_id === selectedAccountId);
 
-  const zero = accounts.find((row) => row.account_id === 0);
-  const accountZeroIsInactive =
-    !!zero && (zero.positions || []).length === 0 && pendCount(0) === 0;
-
   const mmCashNanos = selectedTradingAccounts.reduce(
     (sum, a) => sum + (n(a.balance_nanos) || 0),
     0,
   );
-  const mmSybilValueNanos = selectedTradingAccounts.reduce(
+  const mmPortfolioValueNanos = selectedTradingAccounts.reduce(
     (sum, a) => sum + (n(a.portfolio_value_nanos) || 0),
+    0,
+  );
+  const mmPnlNanos = selectedTradingAccounts.reduce(
+    (sum, a) => sum + (n(a.pnl_nanos) || 0),
     0,
   );
   const mmPositionCount = selectedTradingAccounts.reduce(
@@ -597,40 +619,24 @@ export function accountAggregates(
     (sum, a) => sum + pendCount(a.account_id),
     0,
   );
-  const mmReferencePositionValue = selectedTradingAccounts.reduce(
-    (sum, a) =>
-      sum +
-      (a.positions || []).reduce(
-        (posSum, p) => posSum + positionRefValue(p, marketIdx),
-        0,
-      ),
-    0,
-  );
-  const mmReferenceTotal = mmCashNanos / 1e9 + mmReferencePositionValue;
-  const deposited = selectedTradingAccounts.reduce(
-    (sum, a) => sum + (n(a.total_deposited_nanos) || 0) / 1e9,
-    0,
-  );
-  const mmReferencePnl = mmReferenceTotal - deposited;
-
   const topMmPositions = selectedTradingAccounts
     .flatMap((a) =>
       (a.positions || []).map((p) => ({ ...p, account_id: a.account_id })),
     )
-    .sort((a, b) => Math.abs(n(b.value_nanos) || 0) - Math.abs(n(a.value_nanos) || 0))
+    .sort(
+      (a, b) =>
+        Math.abs(n(b.value_nanos) || 0) - Math.abs(n(a.value_nanos) || 0),
+    )
     .slice(0, 25);
 
   return {
     activeTradingAccounts,
     selectedTradingAccounts,
     mmCashNanos,
-    mmSybilValueNanos,
+    mmPortfolioValueNanos,
+    mmPnlNanos,
     mmPositionCount,
     mmPendingOrders,
-    mmReferencePositionValue,
-    mmReferenceTotal,
-    mmReferencePnl,
     topMmPositions,
-    accountZeroIsInactive,
   };
 }

@@ -82,7 +82,9 @@ class LiveConfig:
     llm_budget_usd: float | None = 5.0
     fast_count: int = 5
     noise_count: int = 15
-    noise_balance: float = 50.0
+    # Fixed across the whole synthetic cohort so increasing actor count does
+    # not silently mint more load capital.
+    synthetic_total_capital: float = 300_000.0
     # Sparse aggressive flow uses IOC so unmatched noise does not accumulate or
     # prevent an actor from participating in later blocks.
     noise_time_in_force: TimeInForce = "IOC"
@@ -419,6 +421,7 @@ async def snapshot_portfolios_once(
                     positions.setdefault(str(mid), {})[outcome] = qty
             db.log_snapshot(
                 trader_name=trader.name,
+                account_id=trader.account_id,
                 balance=portfolio.balance_dollars,
                 portfolio_value=portfolio.portfolio_value_dollars,
                 pnl=portfolio.pnl_dollars,
@@ -915,6 +918,17 @@ async def _discover_markets_until_ready(
         await asyncio.sleep(MARKET_DISCOVERY_RETRY_SECONDS)
 
 
+def _synthetic_account_balance_nanos(total_capital: float, actor_count: int) -> int:
+    """Split a fixed synthetic bankroll without scaling it with actor count."""
+    if total_capital < 0:
+        raise ValueError("synthetic_total_capital must be non-negative")
+    if actor_count < 0:
+        raise ValueError("synthetic actor count must be non-negative")
+    if actor_count == 0:
+        return 0
+    return int(total_capital / actor_count * NANOS_PER_DOLLAR)
+
+
 async def run_live(config: LiveConfig):
     """Main entry point for live trading."""
     experiment_id = _validate_stage1_ab_config(config)
@@ -966,6 +980,18 @@ async def run_live(config: LiveConfig):
         synthetic_markets = list(active)
         synthetic_markets_info = markets_info
         synthetic_market_ids = [m.id for m in synthetic_markets]
+        selected_synthetic_ids = set(synthetic_market_ids)
+        group_members_by_market: dict[int, frozenset[int]] = {}
+        for group in await client.list_market_groups():
+            members = frozenset(group.market_ids)
+            for market_id in members & selected_synthetic_ids:
+                group_members_by_market[market_id] = members
+
+        synthetic_actor_count = config.fast_count + config.noise_count
+        synthetic_balance_nanos = _synthetic_account_balance_nanos(
+            config.synthetic_total_capital,
+            synthetic_actor_count,
+        )
 
         # 2. Create analyst/sizer accounts. The experiment is a fully opt-in
         # alternate topology; without an id, preserve the ordinary live graph
@@ -1043,11 +1069,19 @@ async def run_live(config: LiveConfig):
         # seed offsets for deterministic but non-identical streams.
         fast_traders = []
         for i in range(config.fast_count):
-            account = await client.create_account(int(config.noise_balance * NANOS_PER_DOLLAR))
+            name = f"Fast-{i}"
+            account_id = await _resolve_bot_account(
+                client,
+                db,
+                name,
+                "fast-reference",
+                synthetic_balance_nanos,
+                name,
+            )
             fast = FastReferenceTrader(
                 client=client,
-                account_id=account.id,
-                name=f"Fast-{i}",
+                account_id=account_id,
+                name=name,
                 market_ids=synthetic_market_ids,
                 markets_info=synthetic_markets_info,
                 config=config.synthetic_strategy.with_seed(
@@ -1063,25 +1097,35 @@ async def run_live(config: LiveConfig):
         crossing = config.synthetic_strategy.crossing_enabled
         noise_traders = []
         for i in range(config.noise_count):
-            account = await client.create_account(int(config.noise_balance * NANOS_PER_DOLLAR))
+            name = f"Noise-{i}"
+            strategy_label = "noise-crossing" if crossing else "noise-native"
+            account_id = await _resolve_bot_account(
+                client,
+                db,
+                name,
+                strategy_label,
+                synthetic_balance_nanos,
+                name,
+            )
             noise_cfg = config.synthetic_strategy.with_seed(
                 config.synthetic_strategy.random_seed + 10_000 + i
             )
             if crossing:
                 noise = CrossingNoiseTrader(
                     client=client,
-                    account_id=account.id,
-                    name=f"Noise-{i}",
+                    account_id=account_id,
+                    name=name,
                     market_ids=synthetic_market_ids,
                     markets_info=synthetic_markets_info,
                     config=noise_cfg,
+                    group_members_by_market=group_members_by_market,
                 )
                 noise.time_in_force = config.noise_time_in_force
             else:
                 noise = NativeNoiseTrader(
                     client=client,
-                    account_id=account.id,
-                    name=f"Noise-{i}",
+                    account_id=account_id,
+                    name=name,
                     market_ids=synthetic_market_ids,
                     markets_info=synthetic_markets_info,
                     config=noise_cfg,
@@ -1089,12 +1133,14 @@ async def run_live(config: LiveConfig):
                 noise.time_in_force = config.order_time_in_force
             noise_traders.append(noise)
         log.info(
-            "Created %d fast traders and %d %s noise traders (TIF=%s) over %d selected markets",
+            "Attached %d fast traders and %d %s noise traders (TIF=%s) over %d selected markets with $%.0f total synthetic capital ($%.0f/account)",
             len(fast_traders),
             len(noise_traders),
             "crossing" if crossing else "native",
             config.noise_time_in_force if crossing else config.order_time_in_force,
             len(synthetic_markets_info),
+            config.synthetic_total_capital,
+            synthetic_balance_nanos / NANOS_PER_DOLLAR,
         )
 
         # 4. Create the shared news feed and headline relevance gate.
@@ -1442,8 +1488,7 @@ def main():
         noise_count = (
             args.noise_count if args.noise_count is not None else _env_int("ARENA_NOISE_COUNT", 15)
         )
-        # Well-funded by default so noise can keep trading across the catalog.
-        noise_balance = _env_float("ARENA_NOISE_BALANCE", 100_000.0)
+        synthetic_total_capital = _env_float("ARENA_SYNTHETIC_TOTAL_CAPITAL", 300_000.0)
         crossing_enabled = _env_bool("ARENA_NOISE_CROSSING", True)
         crossing_edge = _env_float("ARENA_NOISE_CROSSING_EDGE", 0.03)
         crossing_markets_per_block = _env_int("ARENA_NOISE_MARKETS_PER_BLOCK", 4)
@@ -1512,7 +1557,7 @@ def main():
         order_time_in_force=args.order_time_in_force,
         fast_count=fast_count,
         noise_count=noise_count,
-        noise_balance=noise_balance,
+        synthetic_total_capital=synthetic_total_capital,
         noise_time_in_force=noise_time_in_force,
         synthetic_strategy=SyntheticStrategyConfig(
             max_inventory=synthetic_max_inventory,

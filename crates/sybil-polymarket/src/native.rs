@@ -16,6 +16,8 @@ use url::Url;
 use crate::error::Error;
 use crate::polymarket::types::parse_iso8601_to_ms;
 
+const CATEGORICAL_SUM_TOLERANCE: f64 = 1e-9;
+
 /// Parsed native market catalog.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct NativeMarketCatalog {
@@ -359,6 +361,8 @@ impl NativeMarketTemplate {
                 let mut market_titles = HashSet::new();
                 let mut enabled_count = 0usize;
                 let mut initial_sum = 0.0;
+                let mut minimum_sum = 0.0;
+                let mut maximum_sum = 0.0;
                 for (i, outcome) in outcomes.iter().enumerate() {
                     let outcome_context = format!("{context} outcome #{i} ({:?})", outcome.id);
                     validate_id(&outcome.id, &outcome_context)?;
@@ -390,6 +394,8 @@ impl NativeMarketTemplate {
                     if outcome.enabled {
                         enabled_count += 1;
                         initial_sum += outcome.quote_range.initial;
+                        minimum_sum += outcome.quote_range.min;
+                        maximum_sum += outcome.quote_range.max;
                     }
                 }
                 if self.enabled && enabled_count < 2 {
@@ -397,9 +403,17 @@ impl NativeMarketTemplate {
                         "{context} enabled categorical template needs at least two enabled outcomes"
                     )));
                 }
-                if self.enabled && initial_sum > 1.0 + f64::EPSILON {
+                if self.enabled && (1.0 - initial_sum).abs() > CATEGORICAL_SUM_TOLERANCE {
                     return Err(Error::NativeCatalog(format!(
-                        "{context} enabled categorical initial prices sum to {initial_sum:.4}, above 1.0"
+                        "{context} enabled categorical initial prices must sum to 1.0, got {initial_sum:.4}"
+                    )));
+                }
+                if self.enabled
+                    && (minimum_sum > 1.0 + CATEGORICAL_SUM_TOLERANCE
+                        || maximum_sum < 1.0 - CATEGORICAL_SUM_TOLERANCE)
+                {
+                    return Err(Error::NativeCatalog(format!(
+                        "{context} enabled categorical quote ranges cannot contain a probability vector summing to 1.0 (min sum {minimum_sum:.4}, max sum {maximum_sum:.4})"
                     )));
                 }
             }
@@ -486,7 +500,7 @@ impl NativeMarketTemplate {
                     )));
                 }
                 // Rungs are nested/independent: initial prices are intentionally
-                // NOT summed (unlike categorical outcomes, which must sum <= 1).
+                // NOT summed (unlike categorical outcomes, which must sum to 1).
             }
         }
 
@@ -1029,8 +1043,8 @@ mod tests {
                 "outcome_set": {
                     "type": "categorical",
                     "outcomes": [
-                        { "id": "a", "title": "A", "market_title": "Will A win?", "enabled": true, "quote_range": { "min": 0.20, "max": 0.50, "initial": 0.30 } },
-                        { "id": "b", "title": "B", "market_title": "Will B win?", "enabled": true, "quote_range": { "min": 0.20, "max": 0.50, "initial": 0.30 } }
+                        { "id": "a", "title": "A", "market_title": "Will A win?", "enabled": true, "quote_range": { "min": 0.20, "max": 0.70, "initial": 0.50 } },
+                        { "id": "b", "title": "B", "market_title": "Will B win?", "enabled": true, "quote_range": { "min": 0.20, "max": 0.70, "initial": 0.50 } }
                     ]
                 },
                 "units": "probability",
@@ -1042,6 +1056,14 @@ mod tests {
             }]
         }"#;
         NativeMarketCatalog::parse_json(json).unwrap();
+
+        let under = json.replacen("\"initial\": 0.50", "\"initial\": 0.40", 1);
+        let err = NativeMarketCatalog::parse_json(&under).unwrap_err();
+        assert!(err.to_string().contains("must sum to 1.0"), "{err}");
+
+        let over = json.replacen("\"initial\": 0.50", "\"initial\": 0.60", 1);
+        let err = NativeMarketCatalog::parse_json(&over).unwrap_err();
+        assert!(err.to_string().contains("must sum to 1.0"), "{err}");
 
         let legacy = json.replace("Will A win?", "Which option wins?: A?");
         let err = NativeMarketCatalog::parse_json(&legacy).unwrap_err();
