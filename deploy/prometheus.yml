@@ -10,8 +10,13 @@ scrape_configs:
     scrape_interval: 10s
     scrape_timeout: 3s
     metrics_path: /metrics
-    static_configs:
-      - targets: ["sybil-prover:3002"]
+    # Optional Compose profiles appear in Docker DNS only while enabled. DNS
+    # discovery therefore creates no false down target for the product devnet,
+    # while retaining the same job label and alerts for explicit validity runs.
+    dns_sd_configs:
+      - names: ["sybil-prover"]
+        type: A
+        port: 3002
 
   - job_name: sybil-arena
     scrape_interval: 10s
@@ -34,14 +39,16 @@ scrape_configs:
     static_configs:
       - targets: ["sybil-polymarket:9105"]
 
-  # The service is opt-in under the Compose `l1-indexer` profile. An absent
-  # target is expected until a vault/RPC deployment is explicitly configured.
+  # The service is opt-in under the Compose `l1-indexer` profile. DNS discovery
+  # omits the target until a vault/RPC deployment is explicitly configured.
   - job_name: sybil-l1-indexer
     scrape_interval: 10s
     scrape_timeout: 3s
     metrics_path: /metrics
-    static_configs:
-      - targets: ["sybil-l1-indexer:9102"]
+    dns_sd_configs:
+      - names: ["sybil-l1-indexer"]
+        type: A
+        port: 9102
 
   - job_name: node
     scrape_interval: 15s

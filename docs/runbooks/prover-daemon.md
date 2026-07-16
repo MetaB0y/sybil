@@ -9,8 +9,8 @@ debugging tools; they do not provide the daemon's recovery guarantees.
 ## Modes
 
 - `mock` executes the full native epoch verifier and emits a deterministic,
-  domain-separated `ProofKind::Mock` envelope. Base Compose uses this for cheap
-  end-to-end transport and restart testing.
+  domain-separated `ProofKind::Mock` envelope. The explicit Compose `validity`
+  profile uses this for bounded end-to-end transport and restart testing.
 - `stark` is the real milestone mode. It encodes the streamed epoch input,
   runs `cargo openvm prove app`, locally runs `cargo openvm verify app`, and
   publishes `ProofKind::OpenVmStark` only after both succeed.
@@ -19,9 +19,11 @@ debugging tools; they do not provide the daemon's recovery guarantees.
   L1 calldata path.
 
 The repository default is `stark`; Compose explicitly selects `mock` because
-the small runtime image and current 2 GB devnet host do not contain or have
-capacity for the pinned OpenVM toolchain. Run STARK mode from a repository
-checkout on measured prover hardware.
+the small runtime image does not contain the pinned OpenVM toolchain. The
+current 2 GB product devnet does not enable that profile: the mock daemon's
+retained job stock exhausted its cgroup during a live soak (#137). Run bounded
+mock integration tests locally and STARK mode from a repository checkout on
+measured prover hardware.
 
 ## Start locally
 

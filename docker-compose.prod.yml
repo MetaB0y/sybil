@@ -1,6 +1,7 @@
 # Production overrides: persistence, tuned params, Caddy.
-# Usage (full stack): docker compose -f docker-compose.yml -f docker-compose.prod.yml \
-#   --profile integrations --profile validity --profile ops up -d
+# Usage (product devnet): docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+#   --profile integrations --profile ops up -d
+# Add --profile validity only for an explicit, separately gated prover soak.
 x-default-logging: &default-logging
   driver: "json-file"
   options:

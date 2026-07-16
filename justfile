@@ -653,8 +653,9 @@ polymarket-dev port="3001" max_events="10":
 # docker-compose.override.yml (build contexts) is NOT shipped to the server.
 
 SERVER := "root@172.104.31.54"
-COMPOSE_PROD := "docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile integrations --profile validity --profile ops"
-COMPOSE_TELEGRAM := "docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.telegram.yml --profile integrations --profile validity --profile ops"
+COMPOSE_PROD := "docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile integrations --profile ops"
+COMPOSE_PROD_VALIDITY := "docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile integrations --profile ops --profile validity"
+COMPOSE_TELEGRAM := "docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.telegram.yml --profile integrations --profile ops"
 
 # Post-deploy verification gates (SYB-248) run against the LIVE stack as the
 # final step of application deploy recipes. API/all-stack promotions run the
@@ -682,24 +683,26 @@ deploy-prod-env-check:
 deploy-openrouter-env-check:
     ssh {{SERVER}} 'cd /opt/sybil && test -f arena.env && grep -q "^OPENROUTER_API_KEY=." arena.env'
 
-# Build and deploy sybil-api, polymarket mirror, and the durable prover daemon.
-# Base Compose selects the typed mock backend on the small devnet host.
+# Build and deploy sybil-api plus the native and Polymarket integrations.
+# Validity is a separate deployment boundary: the 2 GB product host does not
+# claim ZK/TEE/L1 validity and cannot safely retain the current mock job stock.
 deploy-api: deploy-sync deploy-prod-env-check && deploy-verify
     DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-api
     docker save sybil-api:latest | ssh {{SERVER}} docker load
-    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-api sybil-native-admin sybil-native-mm sybil-polymarket sybil-prover'
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-api sybil-native-admin sybil-native-mm sybil-polymarket'
 
-# Restart the durable daemon. Real STARK mode is run on measured prover
-# hardware with `just prover-daemon-stark`, not the current 2 GB web host.
-deploy-prover-daemon: deploy-sync deploy-prod-env-check
-    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-prover'
+# Explicit mock-validity integration deployment. This is not part of the
+# product devnet: issue #137 owns bounded prover retention before it can soak
+# indefinitely, and real STARK mode requires measured prover hardware.
+deploy-prover-daemon: deploy-sync deploy-prod-env-check && deploy-verify-validity
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD_VALIDITY}} up -d sybil-prover'
 
 # Destructively reset production app state, then restart services.
 # This removes old markets, projected history, mirror mappings, Arena bot DB,
 # prover/L1 cursors and artifacts, and metric history. Pass CONFIRM explicitly.
 deploy-reset-state confirm: deploy-prod-env-check
     @test "{{confirm}}" = "CONFIRM" || (echo 'Refusing to reset production state. Run: just deploy-reset-state CONFIRM' >&2; exit 2)
-    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} --profile l1-indexer down; else {{COMPOSE_PROD}} --profile l1-indexer down; fi'
+    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} --profile validity --profile l1-indexer down; else {{COMPOSE_PROD}} --profile validity --profile l1-indexer down; fi'
     ssh {{SERVER}} 'docker volume rm sybil-data history-data polymarket-data native-data arena-data prover-data prover-artifacts prover-jobs sybil_prover-jobs sybil_prover-artifacts l1-indexer-data vmdata || true'
     ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --remove-orphans; else {{COMPOSE_PROD}} up -d --remove-orphans; fi'
 
@@ -737,7 +740,7 @@ deploy-caddy: deploy-sync deploy-prod-env-check
 
 # Deploy everything
 deploy-all: deploy-sync deploy-prod-env-check deploy-openrouter-env-check && deploy-verify
-    DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} --profile integrations --profile validity --profile ops build
+    DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} --profile integrations --profile ops build
     docker save sybil-api:latest sybil-arena:latest sybil-web:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --remove-orphans; else {{COMPOSE_PROD}} up -d --remove-orphans; fi'
 
@@ -749,19 +752,24 @@ deploy-all: deploy-sync deploy-prod-env-check deploy-openrouter-env-check && dep
 # automatically as the final step of deploy-api / deploy-all; can also be
 # invoked directly.
 deploy-verify:
-    SYBIL_SMOKE_DOCKER_SSH={{SERVER}} scripts/post-deploy-smoke.sh --require-signer --require-proof-freshness --service-token "$(ssh {{SERVER}} 'grep -oP "^SYBIL_SERVICE_TOKEN=\K.*" /opt/sybil/.env')"
+    SYBIL_SMOKE_DOCKER_SSH={{SERVER}} scripts/post-deploy-smoke.sh --require-signer --service-token "$(ssh {{SERVER}} 'grep -oP "^SYBIL_SERVICE_TOKEN=\K.*" /opt/sybil/.env')"
+
+# Validity-only promotion adds the proof freshness assertion to the complete
+# product gate without creating another durable fill fixture.
+deploy-verify-validity:
+    SYBIL_SMOKE_DOCKER_SSH={{SERVER}} scripts/post-deploy-smoke.sh --require-signer --require-proof-freshness --skip-fill-seed --service-token "$(ssh {{SERVER}} 'grep -oP "^SYBIL_SERVICE_TOKEN=\K.*" /opt/sybil/.env')"
 
 # Scoped verifier for Arena image promotions. The API/matcher did not change,
 # so avoid another durable SYB-247 market while still requiring live external
 # mirror/reference readiness because Arena consumes it.
 deploy-verify-scoped:
-    SYBIL_SMOKE_DOCKER_SSH={{SERVER}} scripts/post-deploy-smoke.sh --require-signer --require-proof-freshness --skip-fill-seed --service-token "$(ssh {{SERVER}} 'grep -oP "^SYBIL_SERVICE_TOKEN=\K.*" /opt/sybil/.env')"
+    SYBIL_SMOKE_DOCKER_SSH={{SERVER}} scripts/post-deploy-smoke.sh --require-signer --skip-fill-seed --service-token "$(ssh {{SERVER}} 'grep -oP "^SYBIL_SERVICE_TOKEN=\K.*" /opt/sybil/.env')"
 
 # Web-only promotion keeps the signed lifecycle/full-stack health assertions,
 # but does not couple an otherwise valid frontend image to a transient external
 # Polymarket outage. It skips no local application readiness check.
 deploy-verify-web:
-    SYBIL_SMOKE_DOCKER_SSH={{SERVER}} scripts/post-deploy-smoke.sh --require-signer --require-proof-freshness --skip-fill-seed --skip-mirror-readiness --service-token "$(ssh {{SERVER}} 'grep -oP "^SYBIL_SERVICE_TOKEN=\K.*" /opt/sybil/.env')"
+    SYBIL_SMOKE_DOCKER_SSH={{SERVER}} scripts/post-deploy-smoke.sh --require-signer --skip-fill-seed --skip-mirror-readiness --service-token "$(ssh {{SERVER}} 'grep -oP "^SYBIL_SERVICE_TOKEN=\K.*" /opt/sybil/.env')"
 
 # Restart-resilience gate (SYB-267): restarts the live sybil-api container and
 # fails on OOM-kill / boot-loop / unhealthy-after-timeout. OPT-IN — ~20s API

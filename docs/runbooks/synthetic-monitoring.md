@@ -28,9 +28,9 @@ without creating accounts, orders, or any other application state.
 - `/v1/markets` is a nonempty JSON array;
 - an `OPTIONS /v1/onboarding/accounts` preflight from the real app origin
   permits that origin and `POST`;
-- the proof-status head (`GET /proofs/latest` on the prover status API) is
-  within `SYBIL_SMOKE_PROOF_LAG_MAX` blocks (default 30) of
-  `/v1/blocks/latest` — see [Proof lag](#proof-lag) below;
+- when validity is enabled, the proof-status head (`GET /proofs/latest` on the
+  prover status API) is within `SYBIL_SMOKE_PROOF_LAG_MAX` blocks (default 30)
+  of `/v1/blocks/latest` — see [Proof lag](#proof-lag) below;
 - every discovered Compose container is running and is either healthy or has
   no healthcheck, using the exact shared helper also used by
   `post-deploy-smoke.sh`.
@@ -158,12 +158,12 @@ How the probe reads the proof-status head, in order:
 
 Modes (`SYBIL_SMOKE_PROOF_LAG` / `--proof-lag`):
 
-- `fail` (default): lag above the threshold, a missing prover container, or an
+- `fail` (script default): lag above the threshold, a missing prover container, or an
   unusable `/proofs/latest` fails the probe and pages via
-  `SyntheticProbeFailed`. This is correct for what the devnet runs today: the
-  compose stack includes the durable `sybil-prover` daemon in typed mock mode.
-  It pulls the transactional proof-job outbox, assembles epochs, and advances
-  the proof-status head after native epoch verification.
+  `SyntheticProbeFailed`. Use this for an explicit validity deployment: the
+  durable `sybil-prover` daemon pulls the transactional proof-job outbox,
+  assembles epochs, and advances the proof-status head after native epoch
+  verification.
 - `warn`: violations print one `WARN:` line and the probe stays green; the
   `sybil_synthetic_proof_lag_blocks` sample is still pushed, so
   `SyntheticProofLagHigh` still pages if the lag persists. Flip to this mode
@@ -172,11 +172,13 @@ Modes (`SYBIL_SMOKE_PROOF_LAG` / `--proof-lag`):
   (`just prover-daemon-stark ...`), whose proving latency profile is not yet
   established; return to `fail` — with `SYBIL_SMOKE_PROOF_LAG_MAX` raised to
   match observed real-prover cadence — once it holds a steady lag.
-- `off`: skip entirely (deployments with no prover at all).
+- `off`: skip entirely (deployments with no prover at all). The checked-in
+  systemd unit selects this for the 2 GB product devnet. Override it to `fail`
+  in a systemd drop-in only when the validity profile is enabled.
 
 The 30-block default threshold is one probe period (5 min) at the 10s block
-cadence: ~30x the mock prover's normal lag, so it never false-alarms today,
-while a wedged pipeline crosses it within a single probe cycle.
+cadence: ~30x the mock prover's normal lag in bounded integration runs, while a
+wedged enabled pipeline crosses it within a single probe cycle.
 
 First response for `SyntheticProofLagHigh` or a proof-lag probe failure:
 

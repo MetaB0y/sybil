@@ -41,9 +41,11 @@ above. The unprofiled default is the core: `sybil-api`, `sybil-history`, and
 - `ops` — VictoriaMetrics, vmalert, Grafana, and node-exporter;
 - `l1-indexer` — the separately credentialed L1 lifecycle sidecar.
 
-`just docker-up-all` selects the first three on a workstation. Production
-deploy recipes also select those three explicitly; `l1-indexer` remains an
-independent opt-in until its vault and provider identities are configured.
+`just docker-up-all` selects the first three on a workstation. The 2 GB product
+devnet deploy recipes select `integrations` and `ops`; both `validity` and
+`l1-indexer` remain independent opt-ins. Validity stays off because the release
+does not claim ZK/TEE/L1 security and the current mock daemon's retained job
+stock is not bounded on that host ([#137](https://github.com/MetaB0y/sybil/issues/137)).
 
 ## Profile matrix
 
@@ -129,14 +131,17 @@ remaining public capacity.
 
 ### Prover
 
-The `validity` Compose profile runs one restart-safe `sybil-prover daemon`, with
-separate redb and artifact volumes and authenticated pull/ack against the API
-outbox. Base configuration explicitly selects its typed mock backend for cheap
-integration; the repository daemon default is STARK. The current 2 GB host/runtime image is not
-a STARK prover, so production-capable STARK mode runs from a pinned repository
-checkout on measured prover hardware. Mock and STARK envelopes are both
-ineligible for L1 submission; EVM/Halo2 remains disabled under GitHub #13. See
-the [prover runbook](../../runbooks/prover-daemon.md).
+The explicit `validity` Compose profile runs one restart-safe `sybil-prover
+daemon`, with separate redb and artifact volumes and authenticated pull/ack
+against the API outbox. Its Compose configuration selects the typed mock
+backend for bounded integration tests; the repository daemon default is STARK.
+It is not part of the 2 GB product devnet. A live soak reached 303 MiB anonymous
+RSS and its 384 MiB cgroup ceiling after only 140 retained jobs, so the profile
+uses bounded restart attempts and remains opt-in while #137 defines and
+implements retention. Production-capable STARK mode runs from a pinned
+repository checkout on measured prover hardware. Mock and STARK envelopes are
+both ineligible for L1 submission; EVM/Halo2 remains disabled under GitHub #13.
+See the [prover runbook](../../runbooks/prover-daemon.md).
 
 ## Startup preflight guardrail (SYB-133)
 

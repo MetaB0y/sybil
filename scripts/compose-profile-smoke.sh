@@ -109,12 +109,20 @@ pass "integration, validity, and ops profiles are isolated and compose cleanly"
 
 for variable in COMPOSE_PROD COMPOSE_TELEGRAM; do
     definition=$(grep -E "^${variable} :=" justfile)
-    for profile in integrations validity ops; do
+    for profile in integrations ops; do
         grep -Fq -- "--profile $profile" <<<"$definition" \
             || fail "$variable does not explicitly select the $profile profile"
     done
+    if grep -Fq -- '--profile validity' <<<"$definition"; then
+        fail "$variable silently enables validity on the product devnet"
+    fi
 done
-pass "production Compose commands explicitly select the full ordinary stack"
+validity_definition=$(grep -E '^COMPOSE_PROD_VALIDITY :=' justfile)
+for profile in integrations ops validity; do
+    grep -Fq -- "--profile $profile" <<<"$validity_definition" \
+        || fail "COMPOSE_PROD_VALIDITY does not explicitly select the $profile profile"
+done
+pass "product and explicit-validity production topologies are separate"
 
 compose --profile l1-indexer config --quiet \
     || fail "l1-indexer profile does not compose cleanly"
@@ -138,11 +146,15 @@ grep -Fq 'SYBIL_PROVER_SOURCE_URL' <<<"$prover_service_block" \
     || fail "sybil-prover is not wired to the authenticated source outbox"
 grep -Fq 'SYBIL_PROVER_PROOF_KIND' <<<"$prover_service_block" \
     || fail "sybil-prover has no explicit typed backend"
+grep -Fq 'names: ["sybil-prover"]' deploy/prometheus.yml \
+    || fail "VictoriaMetrics does not discover the optional prover"
 grep -Fq 'mem_limit: "384m"' <<<"$prover_service_block" \
-    || fail "sybil-prover memory limit regressed below its measured live RSS"
+    || fail "sybil-prover lost its integration safety ceiling"
 grep -Fq 'memswap_limit: "512m"' <<<"$prover_service_block" \
     || fail "sybil-prover has no bounded transient-memory cushion"
-pass "durable prover daemon, source, backend, volumes, and memory budget are explicit"
+grep -Fq 'restart: "on-failure:3"' <<<"$prover_service_block" \
+    || fail "sybil-prover can enter an unbounded OOM restart loop"
+pass "explicit prover integration has durable state and bounded failure behavior"
 
 # The restore drill must be usable without the base file. Merging Compose
 # volume lists would append the globally named sybil-data mount and make
@@ -188,9 +200,9 @@ for expected in \
 done
 grep -Fq '/app/bin/sybil-l1-indexer' Dockerfile \
     || fail "server image does not package sybil-l1-indexer"
-grep -Fq 'targets: ["sybil-l1-indexer:9102"]' deploy/prometheus.yml \
-    || fail "VictoriaMetrics does not scrape the L1 indexer metrics listener"
-pass "L1 indexer binary, durable cursor, healthcheck, and scrape target are wired"
+grep -Fq 'names: ["sybil-l1-indexer"]' deploy/prometheus.yml \
+    || fail "VictoriaMetrics does not discover the optional L1 indexer"
+pass "L1 indexer binary, durable cursor, healthcheck, and optional discovery are wired"
 
 polymarket_service_block=$(
     awk '
@@ -496,14 +508,29 @@ deploy_verify_recipe=$(
 )
 grep -Fq 'post-deploy-smoke.sh --require-signer' <<<"$deploy_verify_recipe" \
     || fail "deploy-verify does not require the signed order/cancel smoke helper"
-grep -Fq -- '--require-proof-freshness' <<<"$deploy_verify_recipe" \
-    || fail "deploy-verify does not require proof-pipeline freshness"
+if grep -Fq -- '--require-proof-freshness' <<<"$deploy_verify_recipe"; then
+    fail "product deploy verification silently requires the absent validity profile"
+fi
 if grep -Fq -- '--skip-fill-seed' <<<"$deploy_verify_recipe"; then
     fail "deploy-verify must retain the full deterministic fill seed"
 fi
 grep -Fq -- '--service-token' <<<"$deploy_verify_recipe" \
     || fail "deploy-verify lost the valid service-token gating checks"
 pass "deploy-verify fails closed when signed order/cancel smoke cannot run"
+
+deploy_verify_validity_recipe=$(
+    awk '
+        /^deploy-verify-validity:/ { in_recipe = 1; next }
+        in_recipe && /^[[:alnum:]_-]+[^:]*:/ { exit }
+        in_recipe { print }
+    ' justfile
+)
+grep -Fq 'post-deploy-smoke.sh --require-signer --require-proof-freshness --skip-fill-seed' \
+    <<<"$deploy_verify_validity_recipe" \
+    || fail "explicit validity promotion lost proof freshness or its scoped fill skip"
+grep -Fq 'Environment=SYBIL_SMOKE_PROOF_LAG=off' deploy/systemd/sybil-synthetic-probe.service \
+    || fail "product synthetic timer does not explicitly disable absent validity"
+pass "proof freshness is required only by the explicit validity topology"
 
 grep -Fq 'check_public_block_stream' scripts/post-deploy-smoke.sh \
     || fail "post-deploy smoke no longer runs the public block-stream check"
@@ -522,9 +549,12 @@ deploy_verify_scoped_recipe=$(
         in_recipe { print }
     ' justfile
 )
-grep -Fq 'post-deploy-smoke.sh --require-signer --require-proof-freshness --skip-fill-seed' \
+grep -Fq 'post-deploy-smoke.sh --require-signer --skip-fill-seed' \
     <<<"$deploy_verify_scoped_recipe" \
-    || fail "deploy-verify-scoped lost proof freshness or its scoped fill skip"
+    || fail "deploy-verify-scoped lost its scoped fill skip"
+if grep -Fq -- '--require-proof-freshness' <<<"$deploy_verify_scoped_recipe"; then
+    fail "Arena deploy verification silently requires the absent validity profile"
+fi
 if grep -Fq -- '--skip-mirror-readiness' <<<"$deploy_verify_scoped_recipe"; then
     fail "Arena deploy verification must require external mirror readiness"
 fi
@@ -538,9 +568,12 @@ deploy_verify_web_recipe=$(
         in_recipe { print }
     ' justfile
 )
-grep -Fq 'post-deploy-smoke.sh --require-signer --require-proof-freshness --skip-fill-seed --skip-mirror-readiness' \
+grep -Fq 'post-deploy-smoke.sh --require-signer --skip-fill-seed --skip-mirror-readiness' \
     <<<"$deploy_verify_web_recipe" \
-    || fail "deploy-verify-web lost proof freshness or its two isolated skips"
+    || fail "deploy-verify-web lost its two isolated skips"
+if grep -Fq -- '--require-proof-freshness' <<<"$deploy_verify_web_recipe"; then
+    fail "web deploy verification silently requires the absent validity profile"
+fi
 grep -Fq -- '--service-token' <<<"$deploy_verify_web_recipe" \
     || fail "deploy-verify-web lost the valid service-token gating checks"
 grep -Eq '^deploy-web:.*&& deploy-verify-web$' justfile \
