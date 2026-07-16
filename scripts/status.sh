@@ -24,7 +24,7 @@ for block in json.load(sys.stdin):
     welfare = block["total_welfare_nanos"] / 1_000_000_000
     print(
         f"  Block {block['"'"'height'"'"']}: {block['"'"'order_count'"'"']} orders, "
-        f"{block['"'"'fill_count'"'"']} fills, {len(block['"'"'rejections'"'"'])} rej, "
+        f"{block['"'"'fill_count'"'"']} fills, {block['"'"'rejection_count'"'"']} rej, "
         f"welfare=${welfare:.2f}{marker}"
     )
 ' <<<"$blocks"
