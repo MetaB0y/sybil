@@ -86,10 +86,13 @@ does not duplicate delivery or deduplication logic.
 
 ### L1 indexer alert path
 
-When the opt-in `l1-indexer` Compose profile is enabled, VictoriaMetrics
-scrapes `sybil-l1-indexer:9102` independently of ingestion. A fatal integrity
-error leaves that listener alive, returns 503 from `/healthz`, and pages through
-`L1IndexerFatalFailure` on the first nonzero sample. `L1IndexerNotReady`,
+The product VictoriaMetrics config deliberately omits the absent `l1-indexer`
+and `validity` targets: static targets create false `up=0` state, while DNS
+discovery logs an error for every absent name. GitHub #146 owns an explicit
+profile-selected target file/config without Docker-socket access. When the
+opt-in `l1-indexer` profile is enabled together with that scrape target, a fatal
+integrity error leaves its listener alive, returns 503 from `/healthz`, and
+pages through `L1IndexerFatalFailure` on the first nonzero sample. `L1IndexerNotReady`,
 `L1IndexerRpcFailureBurst`, and `L1IndexerConfirmedLagHigh` cover sustained
 unready state, whole-quorum RPC failures, and authenticated-prefix checkpoint
 lag. Provider disagreement, invalid hash binding, and finality regression are
@@ -97,7 +100,7 @@ stable fatal kinds; the active trust mode and provider count are exported as
 metrics. Their firing and
 recovery fixtures live in
 `deploy/vmalert/tests/l1-indexer-health_test.yml`; the Compose smoke gate checks
-the packaged binary, durable cursor mount, healthcheck, and scrape target.
+the packaged binary, durable cursor mount, and healthcheck.
 
 The profile is absent in deployments without an L1 vault, so the shared rule
 set deliberately does not alert on an absent target. Once the profile is

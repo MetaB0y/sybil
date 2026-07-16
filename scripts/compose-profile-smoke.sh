@@ -146,8 +146,6 @@ grep -Fq 'SYBIL_PROVER_SOURCE_URL' <<<"$prover_service_block" \
     || fail "sybil-prover is not wired to the authenticated source outbox"
 grep -Fq 'SYBIL_PROVER_PROOF_KIND' <<<"$prover_service_block" \
     || fail "sybil-prover has no explicit typed backend"
-grep -Fq 'names: ["sybil-prover"]' deploy/prometheus.yml \
-    || fail "VictoriaMetrics does not discover the optional prover"
 grep -Fq 'mem_limit: "384m"' <<<"$prover_service_block" \
     || fail "sybil-prover lost its integration safety ceiling"
 grep -Fq 'memswap_limit: "512m"' <<<"$prover_service_block" \
@@ -200,9 +198,10 @@ for expected in \
 done
 grep -Fq '/app/bin/sybil-l1-indexer' Dockerfile \
     || fail "server image does not package sybil-l1-indexer"
-grep -Fq 'names: ["sybil-l1-indexer"]' deploy/prometheus.yml \
-    || fail "VictoriaMetrics does not discover the optional L1 indexer"
-pass "L1 indexer binary, durable cursor, healthcheck, and optional discovery are wired"
+if grep -Eq 'job_name: sybil-(prover|l1-indexer)' deploy/prometheus.yml; then
+    fail "product monitoring statically couples to an absent optional profile"
+fi
+pass "L1 indexer binary and durable health boundary are wired without fake product targets"
 
 polymarket_service_block=$(
     awk '
