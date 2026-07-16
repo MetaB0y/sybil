@@ -169,10 +169,6 @@ fn exact_public_routes() -> &'static [RouteMount] {
         },
         RouteMount {
             method: "GET",
-            path: "/v1/blocks/stream",
-        },
-        RouteMount {
-            method: "GET",
             path: "/v2/blocks/ws",
         },
         RouteMount {

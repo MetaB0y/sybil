@@ -43,7 +43,7 @@ sybil/
 │   ├── sybil-history/             # Private durable history projector and query service
 │   ├── sybil-history-types/       # Neutral sequencer-to-history facts and query DTOs
 │   ├── sybil-loadtest/            # Goose HTTP load and architectural-isolation checks
-│   ├── sybil-client/              # Shared Rust HTTP/SSE client
+│   ├── sybil-client/              # Shared Rust HTTP/WebSocket client
 │   ├── sybil-signing/             # Canonical client-action signing bytes
 │   ├── sybil-oracle/              # Oracle/resolution service
 │   ├── sybil-verifier/            # Native canonical witness/state verification
@@ -179,7 +179,7 @@ An Obsidian vault at `docs/architecture/` is the canonical architectural spec. I
 | Core model | Payoff Vectors, Binary Markets and Market Groups, Nanos and Integer Arithmetic, Order Types |
 | Solvers | Solver Landscape, Retained Cash Solver, LP Solver, Conic Solver, MILP Solver, Decomposed Solver, The LP Core |
 | Sequencer | Block Lifecycle, Order Admission, Settlement, Pending Orders and TTL |
-| API | REST API, SSE Block Stream, P256 Authentication |
+| API | REST API, WebSocket Block Stream, P256 Authentication |
 | Oracle | Market Resolution |
 | Verification | Four-Layer Verification, Block Witness, ZK Integration Path |
 | Economics | Welfare Maximization, Welfare vs Volume, MM Budget Constraint, LP Duality and Clearing Prices, Minting |

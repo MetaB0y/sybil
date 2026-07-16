@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
+from websockets.asyncio.client import connect
 
 from ._generated.models import (
     AccountFillResponse,
@@ -61,6 +62,10 @@ class SybilClientError(Exception):
         self.status_code = status_code
         self.message = message
         super().__init__(f"HTTP {status_code}: {message}")
+
+
+class BlockStreamGapError(SybilClientError):
+    """The requested block-stream history is no longer retained."""
 
 
 class SybilClient:
@@ -505,25 +510,70 @@ class SybilClient:
         data = await self._request("GET", f"/v1/blocks/{height}")
         return self._parse_block(data)
 
-    async def stream_blocks(self) -> AsyncIterator[Block]:
-        """Stream new blocks via SSE, reconnecting with backoff on drops.
+    async def stream_blocks(self, from_block: int | None = None) -> AsyncIterator[Block]:
+        """Stream committed blocks over the resumable public WebSocket.
 
-        AR-3: a transient SSE disconnect (or a clean server-side close) used to
-        end the iterator, which tore down the consuming bot. Instead we
-        transparently reconnect with exponential backoff so callers see one
-        uninterrupted block stream; the backoff resets after any block is
-        delivered. ``CancelledError`` (shutdown) still propagates immediately.
+        After delivering a block, reconnects request the next height so a
+        transient disconnect cannot silently skip blocks. A retention gap is
+        terminal because the caller must perform a cold resync before it can
+        safely continue.
         """
         backoff = self._stream_reconnect_base_s
+        last_seen_height = from_block - 1 if from_block is not None else None
+        ws_base_url = self.base_url.replace("https://", "wss://", 1).replace(
+            "http://", "ws://", 1
+        )
         while True:
+            next_height = last_seen_height + 1 if last_seen_height is not None else None
+            url = f"{ws_base_url}/v2/blocks/ws"
+            if next_height is not None:
+                url = f"{url}?from_block={next_height}"
             try:
-                async with self.client.stream("GET", "/v1/blocks/stream") as response:
-                    async for line in response.aiter_lines():
-                        if line.startswith("data:"):
-                            data = json.loads(line[5:].strip())
-                            yield self._parse_block(data)
+                async with connect(
+                    url,
+                    ping_interval=20,
+                    ping_timeout=20,
+                    close_timeout=5,
+                ) as websocket:
+                    async for raw_message in websocket:
+                        if isinstance(raw_message, bytes):
+                            raw_message = raw_message.decode("utf-8")
+                        message = json.loads(raw_message)
+                        if message.get("v") != 2:
+                            log.warning("Ignoring unsupported block stream version: %r", message)
+                            continue
+
+                        message_type = message.get("type")
+                        if message_type == "block":
+                            block = self._parse_block(message["data"])
+                            if last_seen_height is not None and block.height <= last_seen_height:
+                                continue
+                            last_seen_height = block.height
                             backoff = self._stream_reconnect_base_s
+                            yield block
+                        elif message_type == "replay_complete":
+                            continue
+                        elif message_type == "lagged":
+                            server_height = message.get("last_sent_height")
+                            if server_height is not None:
+                                last_seen_height = max(last_seen_height or 0, int(server_height))
+                            log.warning(
+                                "Block stream lagged by %s messages; resuming after height %s",
+                                message.get("skipped"),
+                                last_seen_height,
+                            )
+                            break
+                        elif message_type == "retention_gap":
+                            raise BlockStreamGapError(
+                                410,
+                                "block replay starts before retained history "
+                                f"(requested={message.get('requested_height')}, "
+                                f"retention_min={message.get('retention_min_height')}, "
+                                f"head={message.get('head_height')})",
+                            )
             except asyncio.CancelledError:
+                raise
+            except BlockStreamGapError:
                 raise
             except Exception as e:
                 log.warning("Block stream error (%s); reconnecting in %.1fs", e, backoff)

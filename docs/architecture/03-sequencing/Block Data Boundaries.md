@@ -8,7 +8,7 @@ last_verified: 2026-07-16
 
 Sybil keeps canonical block data separate from derived product data. A
 canonical `Block` is the exchange-facing record that can be replayed, hashed,
-served over [[SSE Block Stream]], and related to a [[Block Witness]]. Derived
+served over the [[WebSocket Block Stream]], and related to a [[Block Witness]]. Derived
 fields that are useful for API/frontend views live in a `BlockAnalytics`
 sidecar and are transported with the block as `SealedBlock`.
 

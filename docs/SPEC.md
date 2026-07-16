@@ -20,7 +20,7 @@ Sybil rests on five commitments:
 
 ```mermaid
 flowchart LR
-    CLIENT["Humans · bots · mirrors"] --> API["Authenticated REST / WS / SSE"]
+    CLIENT["Humans · bots · mirrors"] --> API["Authenticated REST / WebSocket"]
     API --> SEQ["Sequencer actor"]
     SEQ --> SOLVE["Batch solver"]
     SOLVE --> SETTLE["Integer settlement"]
@@ -209,11 +209,11 @@ hostile-operator successor governance remain incomplete.
 `sybil-api` is the transport/operations boundary around the actor and the
 private history service. It owns REST, OpenAPI, rate limits,
 deployment/service auth, account-owner checks, read-scoped bearers,
-P256/WebAuthn ceremonies, metrics, resumable WebSocket, convenience SSE,
+P256/WebAuthn ceremonies, metrics, resumable WebSocket,
 proofs/DA endpoints, and static-free frontend integration. Historical requests
 are owner-authorized here, then proxied with a separate private history token.
-First-party realtime clients use WebSocket height resume; SSE remains a simple
-third-party stream.
+Realtime clients use WebSocket height resume and fail explicitly when requested
+history has fallen below the retained replay floor.
 
 `sybil-oracle` implements immediate signed-feed resolution. It verifies feed identity, market binding, signature, payout range, and irreversible lifecycle state. Truthfulness of the feed remains a trust assumption; richer quorum/bond/challenge policy is not part of the core implementation.
 

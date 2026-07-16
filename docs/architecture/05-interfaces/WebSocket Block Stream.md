@@ -3,25 +3,22 @@ tags: [infrastructure]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-15
+last_verified: 2026-07-16
 ---
 
 The WebSocket block stream is the first-party production transport for the
 public block feed — a persistent, bidirectional channel at
 `GET /v2/blocks/ws` that pushes a privacy-preserving market-tape projection of
-every committed block. It complements the live-only
-[[SSE Block Stream]] (`/v1/blocks/stream`) with stronger guarantees: versioned
-message envelope, explicit lag signalling with close codes, server-initiated
-pings, and gap-free reconnect via `?from_block=N`. These are the properties
-long-lived public clients (frontends and agents) need; SSE stays around
-only as a third-party convenience for scripted tooling and `curl` debugging.
+every committed block. Its versioned message envelope, explicit lag signalling
+with close codes, server-initiated pings, and gap-free reconnect via
+`?from_block=N` make it the sole public realtime block transport.
 
 The canonical v1 `BlockResponse`, including account-attributed rows, remains at
 `GET /v1/blocks/ws` only for service-authenticated infrastructure. It is not a
 public replay protocol. See
 [ADR-0016](../../adr/0016-public-market-tape-and-recovery-da-boundaries.md).
 
-The public WebSocket and SSE endpoints share the
+The public WebSocket endpoint has a
 `SYBIL_HTTP_PUBLIC_STREAM_MAX_CONNECTIONS` hard cap (default 256). A permit is
 held from successful admission until the upgraded connection task exits, and
 capacity exhaustion returns HTTP `429` before upgrading. The service-authenticated
@@ -112,7 +109,6 @@ The server sends a WebSocket Ping frame every 30 seconds. Any message from the c
 > `crates/sybil-loadtest/src/bin/ws_load.rs` — explicit 100+ subscriber capacity/recovery harness
 
 ## See Also
-- [[SSE Block Stream]] — simpler alternative at `/v1/blocks/stream`
 - [[REST API]] — `GET /v1/blocks/{height}` for one-shot block fetches
 - [[Block Lifecycle]] — canonical block production behind the public projection
 - [[Historical Data Serving]] — planned durable replay source

@@ -303,8 +303,8 @@ pub struct AppState {
     /// so retained-history serving cannot monopolize the sequencer/store.
     pub http_da_limiter: Arc<HttpRateLimiter>,
     pub http_da_concurrency: Arc<Semaphore>,
-    /// Hard lifetime cap for anonymous SSE and public WebSocket block streams.
-    /// A permit is held until the response stream/upgrade task is dropped.
+    /// Hard lifetime cap for anonymous public WebSocket block streams. A
+    /// permit is held until the upgrade task is dropped.
     pub http_public_stream_concurrency: Arc<Semaphore>,
     /// WebSocket client-liveness window. Public and service streams share the
     /// protocol behavior, while only public streams consume the anonymous cap.

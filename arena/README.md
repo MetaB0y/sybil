@@ -15,7 +15,7 @@ consumer of the exchange, not part of the matching or validity boundary.
 flowchart LR
     NEWS["News and synthetic feeds"] --> ANALYST["Analysts / strategies"]
     ANALYST --> CLIENT["Python SybilClient"]
-    CLIENT -->|"signed REST + WS/SSE"| API["sybil-api"]
+    CLIENT -->|"signed REST + resumable WS"| API["sybil-api"]
     API --> BLOCKS["Blocks and fills"]
     BLOCKS --> CLIENT
     ANALYST --> DB["Decision SQLite"]

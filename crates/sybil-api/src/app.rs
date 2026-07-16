@@ -660,10 +660,6 @@ pub const PUBLIC_ROUTE_TABLE: &[RouteMount] = &[
     },
     RouteMount {
         method: "GET",
-        path: "/v1/blocks/stream",
-    },
-    RouteMount {
-        method: "GET",
         path: "/v2/blocks/ws",
     },
     RouteMount {
@@ -914,7 +910,6 @@ fn public_routes() -> OpenApiRouter<AppState> {
         .routes(openapi_routes!(routes::orders::cancel_signed_order))
         .routes(openapi_routes!(routes::blocks::get_recent_blocks))
         .routes(openapi_routes!(routes::blocks::get_latest_block))
-        .routes(openapi_routes!(routes::blocks::stream_blocks))
         .routes(openapi_routes!(routes::blocks::ws_blocks))
         .routes(openapi_routes!(routes::blocks::get_block_by_height))
 }

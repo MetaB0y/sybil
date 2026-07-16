@@ -7,7 +7,7 @@ not own exchange mutation or settlement rules.
 
 ## Read first
 
-- [[REST API]], [[WebSocket Block Stream]], and [[SSE Block Stream]]
+- [[REST API]] and [[WebSocket Block Stream]]
 - [[P256 Authentication]]
 - [[Deployment Profiles]]
 
@@ -49,7 +49,7 @@ Do not maintain an endpoint list here:
 | App state/off-block ref data | `state.rs` |
 | REST handlers | `routes/`; account product-history reads in `routes/accounts/history.rs` |
 | WebAuthn | `webauthn.rs`, account routes |
-| Realtime | `ws.rs`, `sse.rs` |
+| Realtime | `ws.rs` |
 | Admin CLI | `bin/sybil_admin.rs` |
 
 When the API surface changes, regenerate/check both frontend and Python clients

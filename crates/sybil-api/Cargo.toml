@@ -44,7 +44,6 @@ p256 = { workspace = true, features = ["ecdsa"] }
 ratelimit = { workspace = true }
 getrandom = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
-tokio-stream = { version = "0.1", features = ["sync"] }
 reqwest = { workspace = true, features = ["json"] }
 rmp-serde = { workspace = true }
 serde_yaml = "0.9"

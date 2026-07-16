@@ -11,9 +11,6 @@ pub enum Error {
     #[error("WebSocket error: {0}")]
     WebSocket(String),
 
-    #[error("SSE stream error: {0}")]
-    Sse(String),
-
     #[error("JSON parse error: {0}")]
     Json(#[from] serde_json::Error),
 

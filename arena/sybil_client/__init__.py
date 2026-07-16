@@ -1,6 +1,6 @@
 """Sybil Python Client Library."""
 
-from .client import SybilClient
+from .client import BlockStreamGapError, SybilClient, SybilClientError
 from .types import (
     Account,
     AccountFill,
@@ -27,6 +27,8 @@ from .types import (
 
 __all__ = [
     "SybilClient",
+    "SybilClientError",
+    "BlockStreamGapError",
     "Account",
     "AccountFill",
     "Block",

@@ -11,8 +11,8 @@
 172-104-31-54.nip.io {
     encode zstd gzip
 
-    # SSE and WebSocket block streams: no timeout, flush immediately
-    @streaming path /v1/blocks/stream
+    # WebSocket block streams: no upstream timeout.
+    @streaming path /v1/blocks/ws /v2/blocks/ws
     reverse_proxy @streaming sybil-api:3000 {
         flush_interval -1
         transport http {

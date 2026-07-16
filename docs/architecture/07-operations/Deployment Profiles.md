@@ -87,8 +87,8 @@ cache. Product-history stock and historical query policy live in
 an age/row cap. The remaining recent-block ring and compact rolling aggregate
 anchors support hot block serving and current-value calculations only.
 
-The 256 anonymous-stream ceiling is a hard admission budget shared by public
-SSE and WebSocket connections, not a capacity claim. Run `just ws-load` with at
+The 256 anonymous-stream ceiling is a hard admission budget for public
+WebSocket connections, not a capacity claim. Run `just ws-load` with at
 least 100 subscribers before changing it or claiming fanout headroom; the
 runbook requires concurrent RSS/high-water, mailbox, solve-p99, health-p95, and
 block-progress evidence plus a separate fast-cadence lag/replay profile.

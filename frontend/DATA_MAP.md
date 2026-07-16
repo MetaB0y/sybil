@@ -24,8 +24,6 @@ flowchart LR
 - REST uses `src/lib/api/client.ts` and generated `schema.d.ts`.
 - Realtime hydration reads `GET /v1/blocks/latest` and
   `GET /v1/markets/prices`, then opens `/v1/blocks/ws` with height resume.
-- `/v1/blocks/stream` remains an SSE convenience for third parties; the web app
-  uses WebSocket.
 - Money is nanodollars (`1_000_000_000 = $1`); quantity is share units
   (`1000 = 1 share`). Application money arithmetic uses `bigint` helpers.
 

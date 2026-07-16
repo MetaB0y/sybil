@@ -2,7 +2,6 @@ use axum::Json;
 use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::{Path, Query, State};
 use axum::response::Response;
-use axum::response::sse::{Event, Sse};
 use tokio::sync::OwnedSemaphorePermit;
 
 use matching_sequencer::MAX_BLOCK_REPLAY_QUERY_BLOCKS;
@@ -129,28 +128,6 @@ pub async fn get_block_by_height(
 ) -> Result<Json<PublicBlockResponse>, AppError> {
     let block = state.sequencer.get_block(height).await?;
     Ok(Json(public_block_to_response(&block)))
-}
-
-/// GET /v1/blocks/stream
-///
-/// Third-party convenience SSE stream. First-party clients should use
-/// `GET /v2/blocks/ws?from_block=N` for versioned replay/resume and explicit
-/// lag/retention-gap signalling.
-#[utoipa::path(
-    tag = "routesblocks",
-    get,
-    path = "/v1/blocks/stream",
-    description = "Third-party convenience SSE stream of public block aggregates. First-party clients should use GET /v2/blocks/ws?from_block=N for replay/resume, versioned envelopes, and lag/retention-gap signalling.",
-    responses(
-        (status = 200, description = "Third-party convenience SSE stream of block events")
-    )
-)]
-pub async fn stream_blocks(
-    State(state): State<AppState>,
-) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>>, AppError>
-{
-    let permit = PublicStreamPermit::try_acquire(&state, "sse")?;
-    crate::sse::block_stream(&state.sequencer, permit).await
 }
 
 /// GET /v2/blocks/ws
