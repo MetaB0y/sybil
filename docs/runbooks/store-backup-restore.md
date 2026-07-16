@@ -115,7 +115,10 @@ scripts/store-backup.sh --target custom \
 
 ## Run the restore drill
 
-Run from a checkout containing the binary version intended for restore:
+Run from a checkout containing the binary version intended for restore. For a
+pre-fresh-genesis rollback backup, this is the preserved old/source binary. For
+a state-preserving migration, it is the new target binary, which must open and
+serve the migrated state exactly before deployment:
 
 ```bash
 TMPDIR=/home/anonymous/.cache/tmp \
