@@ -185,6 +185,19 @@ check_proof_freshness >/dev/null
 [[ "$FAILN" -eq 1 && "$http_calls" -eq 0 ]] \
     || { echo "FAIL: proof timeout budget was reused across network legs" >&2; exit 1; }
 
+# An optional product deployment with no running validity service must skip
+# immediately rather than spend the full prover catch-up timeout.
+reset_gate
+PROOF_TIMEOUT=120
+REQUIRE_PROOF_FRESHNESS=0
+smoke_docker_available() { return 0; }
+smoke_compose_service_rows() { printf '%s\n' 'sybil-api /sybil-api running healthy 0'; }
+prover_calls=0
+smoke_compose_service_curl() { prover_calls=$((prover_calls + 1)); return 1; }
+check_proof_freshness >/dev/null
+[[ "$FAILN" -eq 0 && "$SKIPN" -eq 1 && "$SECONDS" -eq 0 && "$prover_calls" -eq 0 ]] \
+    || { echo "FAIL: absent optional validity did not skip immediately" >&2; exit 1; }
+
 # Docker/prover access is fail-closed only when the deploy recipe requires it;
 # direct diagnostic runs retain an explicit skip.
 reset_gate
