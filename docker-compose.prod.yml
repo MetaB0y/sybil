@@ -109,8 +109,6 @@ services:
 
     logging: *default-logging
   sybil-arena:
-    volumes:
-      - polymarket-data:/polymarket-data:ro
     env_file:
       - ./arena.env
     environment:
@@ -119,7 +117,6 @@ services:
       - "--sybil-url=http://sybil-api:3000"
       - "--model=deepseek/deepseek-v4-flash"
       - "--db-path=/data/decisions.db"
-      - "--mapping-path=/polymarket-data/polymarket_mapping.json"
       - "--metrics-port=9101"
       # Keep the live bot cohort aligned with the deliberately small curated
       # mirror. This also prevents pre-reset legacy mirror rows from silently
