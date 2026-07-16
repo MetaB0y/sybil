@@ -3542,17 +3542,11 @@ mod tests {
 
         let block2 = handle.produce_block().await.unwrap();
         assert_eq!(block2.canonical.header.height, 2);
-        let remaining = tokio::time::timeout(Duration::from_secs(2), async {
-            loop {
-                let jobs = store.proof_job_outbox_page(None, 10).unwrap();
-                if jobs.iter().all(|job| job.height != job1.height) {
-                    break jobs;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("post-commit proof-job pruning should finish");
+        assert!(
+            handle.stop_and_wait(TEST_ACTOR_TIMEOUT).await,
+            "graceful shutdown should drain post-commit maintenance"
+        );
+        let remaining = store.proof_job_outbox_page(None, 10).unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].height, block2.canonical.header.height);
         assert!(!remaining[0].acknowledged);
