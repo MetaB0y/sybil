@@ -36,6 +36,17 @@ came from organic information, the MM itself, or synthetic load. Native markets
 can adopt a dynamic anchor only after that provenance and its update invariant
 are designed explicitly.
 
+Live synthetic flow also stays on the ordinary client boundary. Fast and noise
+actors reuse persisted `(name, strategy)` account mappings across Arena
+restarts. Their total starting bankroll is fixed by
+`ARENA_SYNTHETIC_TOTAL_CAPITAL` (default `$300,000`) and divided across the
+configured actor count, so adding actors changes scheduling granularity rather
+than minting capital. Crossing-noise choices are deterministic from
+`(actor seed, block height)`, which makes a replay or restart reproduce the
+same block decision. Each actor emits at most one order per selected market;
+for core mutually-exclusive MarketGroups it also suppresses the final YES buy
+that would complete every group outcome in one account submission.
+
 ## Key Properties
 - `BaseAgent.on_block(block) -> list[OrderSpec]` — the core interface
 - Event-driven: bots react to blocks, not poll
@@ -44,6 +55,7 @@ are designed explicitly.
 - Competition runner for multi-bot simulations
 - Explicit, heartbeating live cohort separates scored competitors from load/noise
 - Native MM anchors do not learn recursively from provenance-free internal clears
+- Synthetic load uses durable accounts, fixed aggregate capital, and block-keyed decisions
 - Adding a bot: extend BaseAgent, implement on_block, export, configure
 
 ## Where This Lives

@@ -9,6 +9,15 @@ import pytest
 import live.runner as runner
 
 
+def test_synthetic_capital_is_fixed_across_actor_counts():
+    one = runner._synthetic_account_balance_nanos(300_000.0, 1)
+    twenty = runner._synthetic_account_balance_nanos(300_000.0, 20)
+
+    assert one == 300_000 * 1_000_000_000
+    assert twenty == 15_000 * 1_000_000_000
+    assert twenty * 20 == one
+
+
 def _trader(name: str, account_id: int, *, pnl: float = 0.0):
     trader = MagicMock()
     trader.name = name

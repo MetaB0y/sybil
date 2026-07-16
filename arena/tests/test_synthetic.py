@@ -246,10 +246,11 @@ def test_seeded_strategies_are_deterministic():
     assert first == second
 
 
-def test_sparse_crossing_noise_never_builds_a_same_account_complete_set():
-    markets = {market_id: _market(market_id) for market_id in range(1, 207)}
+def test_sparse_crossing_noise_never_builds_a_same_account_complete_group():
+    markets = {market_id: _market(market_id) for market_id in range(1, 5)}
     block = _block(0.50)
     block.clearing_prices.update({market_id: (500_000_000, 500_000_000) for market_id in markets})
+    members = frozenset(markets)
     strategy = CrossingNoiseStrategy(
         SyntheticStrategyConfig(
             max_inventory=100,
@@ -257,7 +258,8 @@ def test_sparse_crossing_noise_never_builds_a_same_account_complete_set():
             random_seed=10_000,
             randomization_range=0.02,
             crossing_markets_per_block=4,
-        )
+        ),
+        group_members_by_market={market_id: members for market_id in members},
     )
 
     orders = strategy.generate_orders(block, markets, {}, cash=100_000.0)
@@ -265,7 +267,24 @@ def test_sparse_crossing_noise_never_builds_a_same_account_complete_set():
     assert len(orders) == 4
     assert len({order.market_id for order in orders}) == 4
     assert all(isinstance(order, (BuyYes, BuyNo)) for order in orders)
-    assert sum(isinstance(order, BuyYes) for order in orders) <= 1
+    assert sum(isinstance(order, BuyYes) for order in orders) < len(members)
+
+
+def test_crossing_noise_randomness_is_keyed_by_block_height():
+    markets = {market_id: _market(market_id) for market_id in range(1, 20)}
+    block = _block(0.50)
+    strategy = CrossingNoiseStrategy(
+        SyntheticStrategyConfig(random_seed=123, crossing_markets_per_block=4)
+    )
+
+    first = strategy.generate_orders(block, markets, {}, cash=100_000.0)
+    replay = strategy.generate_orders(block, markets, {}, cash=100_000.0)
+    next_block = _block(0.50)
+    next_block.height = block.height + 1
+    following = strategy.generate_orders(next_block, markets, {}, cash=100_000.0)
+
+    assert replay == first
+    assert following != first
 
 
 def test_fifteen_sparse_noise_streams_cover_about_quarter_catalog():

@@ -275,3 +275,21 @@ def test_parse_market_preserves_polymarket_condition_id():
 
     assert market.reference_price == 0.61
     assert market.polymarket_condition_id == "0xcondition"
+
+
+async def test_list_market_groups_decodes_core_membership(monkeypatch):
+    from sybil_client import SybilClient
+
+    client = SybilClient("http://example.invalid")
+
+    async def fake_request(method, path, **kwargs):
+        assert method == "GET"
+        assert path == "/v1/markets/groups"
+        return [{"group_id": 7, "name": "Winner", "market_ids": [11, 12, 13]}]
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    groups = await client.list_market_groups()
+
+    assert [(group.id, group.name, group.market_ids) for group in groups] == [
+        (7, "Winner", (11, 12, 13))
+    ]

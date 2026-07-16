@@ -25,6 +25,7 @@ from .types import (
     BuyYes,
     Fill,
     Market,
+    MarketGroup,
     OrderSpec,
     PendingOrder,
     Portfolio,
@@ -241,6 +242,18 @@ class SybilClient:
         """List all markets."""
         data = await self._request("GET", "/v1/markets")
         return [self._parse_market(m) for m in data]
+
+    async def list_market_groups(self) -> list[MarketGroup]:
+        """List core mutually-exclusive market groups."""
+        data = await self._request("GET", "/v1/markets/groups")
+        return [
+            MarketGroup(
+                id=int(group["group_id"]),
+                name=str(group["name"]),
+                market_ids=tuple(int(market_id) for market_id in group["market_ids"]),
+            )
+            for group in data
+        ]
 
     async def get_market(self, market_id: int) -> Market:
         """Get market details."""
