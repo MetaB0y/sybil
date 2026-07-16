@@ -152,6 +152,7 @@ services:
 
     logging: *default-logging
   sybil-polymarket:
+    profiles: ["integrations"]
     image: sybil-api:latest
     mem_limit: "256m"
     memswap_limit: "256m"
@@ -181,6 +182,7 @@ services:
 
     logging: *default-logging
   sybil-prover:
+    profiles: ["validity"]
     image: sybil-api:latest
     mem_limit: "256m"
     memswap_limit: "256m"
@@ -214,6 +216,7 @@ services:
 
     logging: *default-logging
   sybil-arena:
+    profiles: ["integrations"]
     image: sybil-arena:latest
     mem_limit: "512m"
     memswap_limit: "512m"
@@ -239,6 +242,7 @@ services:
 
     logging: *default-logging
   sybil-arena-dashboard:
+    profiles: ["integrations"]
     image: sybil-arena:latest
     mem_limit: "512m"
     memswap_limit: "512m"
@@ -264,6 +268,7 @@ services:
 
     logging: *default-logging
   victoriametrics:
+    profiles: ["ops"]
     image: victoriametrics/victoria-metrics:v1.101.0
     mem_limit: "256m"
     memswap_limit: "256m"
@@ -284,6 +289,7 @@ services:
 
     logging: *default-logging
   vmalert:
+    profiles: ["ops"]
     image: victoriametrics/vmalert:v1.101.0
     mem_limit: "128m"
     memswap_limit: "128m"
@@ -309,6 +315,7 @@ services:
 
     logging: *default-logging
   grafana:
+    profiles: ["ops"]
     image: grafana/grafana:11.0.0
     mem_limit: "256m"
     memswap_limit: "256m"
@@ -331,6 +338,7 @@ services:
 
     logging: *default-logging
   node-exporter:
+    profiles: ["ops"]
     image: prom/node-exporter:v1.8.1
     mem_limit: "128m"
     memswap_limit: "128m"

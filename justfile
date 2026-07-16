@@ -619,9 +619,14 @@ DEPLOY_PLATFORM := "linux/amd64"
 docker-build:
     {{LOCAL_COMPOSE}} build
 
-# Start all services (API + VictoriaMetrics + Grafana)
+# Start the minimal local core (API + history + web).
 docker-up:
     {{LOCAL_COMPOSE}} up -d
+
+# Start core plus every ordinary optional subsystem. L1 remains a separate,
+# credentialed opt-in profile.
+docker-up-all:
+    {{LOCAL_COMPOSE}} --profile integrations --profile validity --profile ops up -d
 
 # Stop all services
 docker-down:
@@ -647,8 +652,8 @@ polymarket-dev port="3001" max_events="10":
 # docker-compose.override.yml (build contexts) is NOT shipped to the server.
 
 SERVER := "root@172.104.31.54"
-COMPOSE_PROD := "docker compose -f docker-compose.yml -f docker-compose.prod.yml"
-COMPOSE_TELEGRAM := "docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.telegram.yml"
+COMPOSE_PROD := "docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile integrations --profile validity --profile ops"
+COMPOSE_TELEGRAM := "docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.telegram.yml --profile integrations --profile validity --profile ops"
 
 # Post-deploy verification gates (SYB-248) run against the LIVE stack as the
 # final step of application deploy recipes. API/all-stack promotions run the
@@ -688,12 +693,12 @@ deploy-prover-daemon: deploy-sync deploy-prod-env-check
     ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-prover'
 
 # Destructively reset production app state, then restart services.
-# This removes old markets, mirror mappings, arena bot DB, prover artifacts,
-# and metric history from previous deploys. Pass CONFIRM explicitly.
+# This removes old markets, projected history, mirror mappings, Arena bot DB,
+# prover/L1 cursors and artifacts, and metric history. Pass CONFIRM explicitly.
 deploy-reset-state confirm: deploy-prod-env-check
     @test "{{confirm}}" = "CONFIRM" || (echo 'Refusing to reset production state. Run: just deploy-reset-state CONFIRM' >&2; exit 2)
-    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} down; else {{COMPOSE_PROD}} down; fi'
-    ssh {{SERVER}} 'docker volume rm sybil-data polymarket-data arena-data prover-data prover-artifacts prover-jobs sybil_prover-jobs sybil_prover-artifacts vmdata || true'
+    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} --profile l1-indexer down; else {{COMPOSE_PROD}} --profile l1-indexer down; fi'
+    ssh {{SERVER}} 'docker volume rm sybil-data history-data polymarket-data arena-data prover-data prover-artifacts prover-jobs sybil_prover-jobs sybil_prover-artifacts l1-indexer-data vmdata || true'
     ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --remove-orphans; else {{COMPOSE_PROD}} up -d --remove-orphans; fi'
 
 # Build and deploy arena bots + dashboard. Requires OPENROUTER_API_KEY in /opt/sybil/arena.env.
@@ -730,7 +735,7 @@ deploy-caddy: deploy-sync deploy-prod-env-check
 
 # Deploy everything
 deploy-all: deploy-sync deploy-prod-env-check deploy-openrouter-env-check && deploy-verify
-    DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build
+    DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} --profile integrations --profile validity --profile ops build
     docker save sybil-api:latest sybil-arena:latest sybil-web:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --remove-orphans; else {{COMPOSE_PROD}} up -d --remove-orphans; fi'
 

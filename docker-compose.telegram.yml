@@ -1,9 +1,11 @@
 # Optional Telegram alerting overlay.
 # Usage:
 #   1. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in /opt/sybil/.env.
-#   2. docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.telegram.yml up -d telegram-alerts vmalert
+#   2. docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+#        -f docker-compose.telegram.yml --profile ops up -d telegram-alerts vmalert
 services:
   telegram-alerts:
+    profiles: ["ops"]
     image: python:3.13-alpine
     mem_limit: "64m"
     memswap_limit: "64m"
