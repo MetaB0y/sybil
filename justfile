@@ -411,7 +411,8 @@ check-consensus: golden-check
 # Backup/restore manifest compatibility and shell-entrypoint syntax.
 store-tools-check:
     python3 scripts/test-store-manifest.py
-    python3 -m py_compile scripts/store-manifest.py scripts/test-store-manifest.py
+    python3 scripts/test-store-backup-image.py
+    python3 -m py_compile scripts/store-manifest.py scripts/test-store-manifest.py scripts/test-store-backup-image.py
     bash scripts/test-store-restore-drill.sh
     bash -n scripts/store-backup.sh scripts/store-restore-drill.sh scripts/test-store-restore-drill.sh
 

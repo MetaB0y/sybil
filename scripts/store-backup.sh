@@ -108,6 +108,14 @@ docker exec "$CONTAINER" test -d "$DATA_DIR/sybil.qmdb" \
     || { echo "error: $DATA_DIR/sybil.qmdb not found in $CONTAINER" >&2; exit 2; }
 
 SOURCE_IMAGE="$(docker inspect --format '{{.Config.Image}}' "$CONTAINER")"
+# `.Config.Image` is a mutable tag such as `sybil-api:latest`; deployment may
+# advance it while this older container remains live. Validate the backup with
+# the immutable image ID actually running in the source container.
+SOURCE_IMAGE_ID="$(docker inspect --format '{{.Image}}' "$CONTAINER")"
+[[ -n "$SOURCE_IMAGE_ID" ]] \
+    || { echo "error: source container has no immutable image ID" >&2; exit 2; }
+docker image inspect "$SOURCE_IMAGE_ID" >/dev/null \
+    || { echo "error: running source image $SOURCE_IMAGE_ID is not available locally" >&2; exit 2; }
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 OUT="$DEST/sybil-store-$STAMP-$$"
 INSPECT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/store-backup-inspect.XXXXXX")"
@@ -161,7 +169,7 @@ docker run -d --name "$INSPECT_CONTAINER" --network none \
     -e SYBIL_ARENA_READ_URL= \
     -e SYBIL_EVENT_SNAPSHOT_DIR= \
     -e SYBIL_MARKET_REF_DATA_PATH= \
-    --entrypoint sybil-api "$SOURCE_IMAGE" >/dev/null
+    --entrypoint sybil-api "$SOURCE_IMAGE_ID" >/dev/null
 
 READY=0
 for _ in $(seq 1 "$TIMEOUT"); do
@@ -213,6 +221,7 @@ python3 "$SCRIPT_DIR/store-manifest.py" build \
     --project "$PROJECT" \
     --container "$CONTAINER" \
     --image "$SOURCE_IMAGE" \
+    --image-id "$SOURCE_IMAGE_ID" \
     --data-dir "$DATA_DIR"
 
 docker rm -f "$INSPECT_CONTAINER" >/dev/null
