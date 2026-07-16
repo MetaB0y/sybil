@@ -125,6 +125,10 @@ export interface DevBotDecision {
 
 export interface DevBotSummary {
   trader_name: string;
+  account_id?: number | null;
+  active?: boolean;
+  role?: string | null;
+  scored?: boolean;
   decision_count?: number;
   avg_edge?: number;
   latest_market_name?: string;
@@ -133,6 +137,10 @@ export interface DevBotSummary {
   pnl?: number;
   total_orders?: number;
   total_fills?: number;
+}
+
+export interface DevLeaderboardResponse {
+  entries?: Array<{ account_id: number | string }>;
 }
 
 export interface DevBotsResponse {

@@ -19,6 +19,7 @@ const MAX_BOT_EQUITY_LIMIT: usize = 1_000;
 
 type SnapshotRow = (
     String,
+    Option<i64>,
     Option<f64>,
     Option<f64>,
     Option<f64>,
@@ -137,6 +138,8 @@ pub struct BotStatsResponse {
 #[derive(Debug, Clone, Default, Serialize, utoipa::ToSchema)]
 pub struct BotSummaryResponse {
     pub trader_name: String,
+    /// Durable sequencer account recorded with the latest Arena snapshot.
+    pub account_id: Option<i64>,
     /// Member of the most recent non-stale Arena runtime cohort.
     pub active: bool,
     /// Runtime role such as competitor, load, or noise.
@@ -642,6 +645,34 @@ fn load_latest_snapshots(
         return;
     }
 
+    let with_account = conn.prepare(
+        "SELECT p.trader_name, p.account_id, p.balance, p.portfolio_value, p.pnl, p.total_fills, p.total_orders, p.timestamp \
+         FROM portfolio_snapshots p \
+         JOIN (SELECT trader_name, MAX(id) AS id FROM portfolio_snapshots \
+               WHERE (?1 IS NULL OR run_id = ?1) GROUP BY trader_name) latest \
+           ON p.trader_name = latest.trader_name AND p.id = latest.id",
+    );
+
+    if let Ok(mut stmt) = with_account
+        && let Ok(rows) = stmt.query_map([run_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<i64>>(1)?,
+                row.get::<_, Option<f64>>(2)?,
+                row.get::<_, Option<f64>>(3)?,
+                row.get::<_, Option<f64>>(4)?,
+                row.get::<_, Option<i64>>(5)?,
+                row.get::<_, Option<i64>>(6)?,
+                row.get::<_, Option<String>>(7)?,
+            ))
+        })
+    {
+        for row in rows.flatten() {
+            apply_snapshot(summaries, row);
+        }
+        return;
+    }
+
     let with_totals = conn.prepare(
         "SELECT p.trader_name, p.balance, p.portfolio_value, p.pnl, p.total_fills, p.total_orders, p.timestamp \
          FROM portfolio_snapshots p \
@@ -654,6 +685,7 @@ fn load_latest_snapshots(
         && let Ok(rows) = stmt.query_map([run_id], |row| {
             Ok((
                 row.get::<_, String>(0)?,
+                None,
                 row.get::<_, Option<f64>>(1)?,
                 row.get::<_, Option<f64>>(2)?,
                 row.get::<_, Option<f64>>(3)?,
@@ -681,6 +713,7 @@ fn load_latest_snapshots(
     let Ok(rows) = stmt.query_map([run_id], |row| {
         Ok((
             row.get::<_, String>(0)?,
+            None,
             row.get::<_, Option<f64>>(1)?,
             row.get::<_, Option<f64>>(2)?,
             row.get::<_, Option<f64>>(3)?,
@@ -697,7 +730,16 @@ fn load_latest_snapshots(
 }
 
 fn apply_snapshot(summaries: &mut HashMap<String, BotSummaryResponse>, row: SnapshotRow) {
-    let (trader_name, balance, portfolio_value, pnl, total_fills, total_orders, timestamp) = row;
+    let (
+        trader_name,
+        account_id,
+        balance,
+        portfolio_value,
+        pnl,
+        total_fills,
+        total_orders,
+        timestamp,
+    ) = row;
     let summary = summaries
         .entry(trader_name.clone())
         .or_insert_with(|| BotSummaryResponse {
@@ -707,6 +749,7 @@ fn apply_snapshot(summaries: &mut HashMap<String, BotSummaryResponse>, row: Snap
     if summary.latest_balance.is_none() {
         summary.latest_balance = balance;
     }
+    summary.account_id = account_id;
     summary.portfolio_value = portfolio_value;
     summary.pnl = pnl;
     summary.total_fills = total_fills;
@@ -981,6 +1024,7 @@ mod tests {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 run_id TEXT,
                 trader_name TEXT,
+                account_id INTEGER,
                 timestamp TEXT,
                 balance REAL,
                 portfolio_value REAL,
@@ -1089,9 +1133,9 @@ mod tests {
         ] {
             conn.execute(
                 "INSERT INTO portfolio_snapshots (
-                    run_id, trader_name, timestamp, balance, portfolio_value, pnl,
+                    run_id, trader_name, account_id, timestamp, balance, portfolio_value, pnl,
                     positions, total_fills, total_orders
-                ) VALUES (?1, ?2, '2026-07-15T00:00:00+00:00', 100.0, ?3, ?4, '{}', 1, 2)",
+                ) VALUES (?1, ?2, 7, '2026-07-15T00:00:00+00:00', 100.0, ?3, ?4, '{}', 1, 2)",
                 rusqlite::params![run_id, trader, portfolio_value, pnl],
             )
             .expect("insert snapshot");
@@ -1126,6 +1170,7 @@ mod tests {
         assert!((alice.avg_edge.unwrap() - 0.1).abs() < 1e-12);
         assert_eq!(alice.portfolio_value, Some(104.0));
         assert_eq!(alice.pnl, Some(4.0));
+        assert_eq!(alice.account_id, Some(7));
         let no_baseline = rows
             .iter()
             .find(|row| row.trader_name == "no-baseline")

@@ -10,6 +10,7 @@ import type {
   DevActivityOverview,
   DevOpenBatch,
   DevBotsResponse,
+  DevLeaderboardResponse,
 } from "./types";
 
 const API_BASE =
@@ -68,7 +69,9 @@ export function useDevGroups() {
   return useQuery({
     queryKey: ["dev", "market-groups"],
     queryFn: async () =>
-      mergeGroupsByName((await rawGet<DevMarketGroup[]>("/v1/markets/groups")) ?? []),
+      mergeGroupsByName(
+        (await rawGet<DevMarketGroup[]>("/v1/markets/groups")) ?? [],
+      ),
     staleTime: 60_000,
   });
 }
@@ -76,21 +79,46 @@ export function useDevGroups() {
 export function useDevPendingOrders() {
   return useQuery({
     queryKey: ["dev", "pending-orders"],
-    queryFn: async () => (await rawGet<DevPendingOrder[]>("/v1/orders/pending")) ?? [],
+    queryFn: async () =>
+      (await rawGet<DevPendingOrder[]>("/v1/orders/pending")) ?? [],
     refetchInterval: 10_000,
   });
 }
 
-/** Account portfolios for ids 0..47 plus any id seen in pending orders. */
+/** Account portfolios discovered from durable Arena identities, orders, and leaderboard state. */
 export function useDevAccounts(extraIds: number[] = []) {
+  const pending = useDevPendingOrders().data ?? [];
+  const bots = useDevBots().data?.summaries ?? [];
+  const observedIds = [
+    ...extraIds,
+    ...pending.map((order) => Number(order.account_id)),
+    ...bots.flatMap((bot) =>
+      bot.account_id == null ? [] : [Number(bot.account_id)],
+    ),
+  ].filter(Number.isSafeInteger);
+
   return useQuery({
-    queryKey: ["dev", "accounts", [...extraIds].sort((a, b) => a - b)],
+    queryKey: [
+      "dev",
+      "accounts",
+      [...new Set(observedIds)].sort((a, b) => a - b),
+    ],
     queryFn: async () => {
+      const leaderboard = await rawGet<DevLeaderboardResponse>(
+        "/v1/leaderboard?window=all&limit=100",
+      );
       const ids = Array.from(
-        new Set([...Array.from({ length: 48 }, (_, i) => i), ...extraIds])
+        new Set([
+          ...observedIds,
+          ...(leaderboard?.entries ?? []).map((entry) =>
+            Number(entry.account_id),
+          ),
+        ]),
       ).sort((a, b) => a - b);
       const rows = await Promise.all(
-        ids.map((id) => rawGet<DevAccountPortfolio>(`/v1/accounts/${id}/portfolio`))
+        ids.map((id) =>
+          rawGet<DevAccountPortfolio>(`/v1/accounts/${id}/portfolio`),
+        ),
       );
       return rows
         .filter((r): r is DevAccountPortfolio => r != null)
@@ -114,7 +142,12 @@ export function useDevBots() {
     queryKey: ["dev", "bots-decisions"],
     queryFn: async () => {
       const data = await rawGet<DevBotsResponse>("/v1/bots/decisions?limit=80");
-      return data ?? { db_available: false, error: "failed to load bot decision feed" };
+      return (
+        data ?? {
+          db_available: false,
+          error: "failed to load bot decision feed",
+        }
+      );
     },
     refetchInterval: 30_000,
   });
@@ -135,7 +168,9 @@ export function useDevPortfolio(accountId: number) {
   return useQuery({
     queryKey: ["dev", "portfolio", accountId],
     queryFn: async () =>
-      (await rawGet<DevAccountPortfolio>(`/v1/accounts/${accountId}/portfolio`)) ?? null,
+      (await rawGet<DevAccountPortfolio>(
+        `/v1/accounts/${accountId}/portfolio`,
+      )) ?? null,
     enabled: accountId > 0,
   });
 }
@@ -152,7 +187,7 @@ export function useDevAccountFills(ids: number[]) {
             `/v1/accounts/${id}/fills?limit=25`,
           );
           return [id, page?.fills ?? []] as const;
-        })
+        }),
       );
       return Object.fromEntries(entries) as Record<number, unknown[]>;
     },

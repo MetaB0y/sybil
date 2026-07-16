@@ -1791,6 +1791,11 @@ export interface components {
       traders: number;
     };
     BotSummaryResponse: {
+      /**
+       * Format: int64
+       * @description Durable sequencer account recorded with the latest Arena snapshot.
+       */
+      account_id?: number | null;
       /** @description Member of the most recent non-stale Arena runtime cohort. */
       active: boolean;
       /** Format: double */

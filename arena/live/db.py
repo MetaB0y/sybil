@@ -28,6 +28,7 @@ class DecisionDB:
                 ("portfolio_snapshots", "total_fills", "INTEGER DEFAULT 0"),
                 ("portfolio_snapshots", "total_orders", "INTEGER DEFAULT 0"),
                 ("portfolio_snapshots", "run_id", "TEXT"),
+                ("portfolio_snapshots", "account_id", "INTEGER"),
                 # SYB-64: per-call USD cost + its source (provider vs price table).
                 ("token_usage", "usd_cost", "REAL DEFAULT 0"),
                 ("token_usage", "cost_source", "TEXT"),
@@ -106,6 +107,7 @@ class DecisionDB:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     run_id TEXT,
                     trader_name TEXT,
+                    account_id INTEGER,
                     timestamp TEXT,
                     balance REAL,
                     portfolio_value REAL,
@@ -428,16 +430,18 @@ class DecisionDB:
         positions: dict,
         total_fills: int = 0,
         total_orders: int = 0,
+        account_id: int | None = None,
     ) -> int:
         with self._lock:
             cur = self.conn.execute(
                 """INSERT INTO portfolio_snapshots
-                   (run_id, trader_name, timestamp, balance, portfolio_value, pnl,
-                    positions, total_fills, total_orders)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (run_id, trader_name, account_id, timestamp, balance,
+                    portfolio_value, pnl, positions, total_fills, total_orders)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     self._active_runtime_id,
                     trader_name,
+                    account_id,
                     datetime.now(timezone.utc).isoformat(),
                     balance,
                     portfolio_value,

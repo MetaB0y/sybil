@@ -419,6 +419,7 @@ async def snapshot_portfolios_once(
                     positions.setdefault(str(mid), {})[outcome] = qty
             db.log_snapshot(
                 trader_name=trader.name,
+                account_id=trader.account_id,
                 balance=portfolio.balance_dollars,
                 portfolio_value=portfolio.portfolio_value_dollars,
                 pnl=portfolio.pnl_dollars,

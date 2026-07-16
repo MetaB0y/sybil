@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from hashlib import sha256
 
 import pandas as pd
-from sybil_client.types import SHARE_SCALE
 
 try:
     from .personas import PERSONAS
@@ -421,9 +420,11 @@ def get_live_experiment_status(conn: sqlite3.Connection) -> list[dict]:
 
 
 def get_mm_mtm(
-    sybil_url: str = SYBIL_URL, account_id: int = 0, initial_balance: float = 1_000_000.0
+    sybil_url: str = SYBIL_URL,
+    account_id: int | None = None,
+    initial_balance: float = 1_000_000.0,
 ) -> dict | None:
-    """Fetch MM account from Sybil API and compute mark-to-market P&L.
+    """Fetch the canonical Sybil portfolio for the configured MM account.
 
     Returns dict with cash, position_value, total, pnl, return_pct, positions count,
     or None if the API is unreachable.
@@ -431,6 +432,14 @@ def get_mm_mtm(
     import urllib.request
 
     token = os.environ.get("SYBIL_SERVICE_TOKEN", "")
+    if account_id is None:
+        configured_id = os.environ.get("SYBIL_MM_ACCOUNT_ID")
+        if configured_id is None:
+            return None
+        try:
+            account_id = int(configured_id)
+        except ValueError:
+            return None
 
     def private_request(path: str):
         headers = {"Authorization": f"Bearer {token}"} if token else {}
@@ -438,38 +447,21 @@ def get_mm_mtm(
         return json.loads(urllib.request.urlopen(request, timeout=5).read())
 
     try:
-        acct = private_request(f"/v1/accounts/{account_id}")
-        mkts = private_request("/v1/markets?limit=2000")
+        portfolio = private_request(f"/v1/accounts/{account_id}/portfolio")
     except Exception:
         return None
 
-    ref_prices = {}
-    for m in mkts:
-        rp = m.get("reference_price_nanos")
-        if rp and rp > 0:
-            ref_prices[m["market_id"]] = rp / 1e9
-
-    cash = acct["balance_nanos"] / 1e9
-    position_value = 0.0
-    n_positions = 0
-    for p in acct.get("positions", []):
-        mid = ref_prices.get(p["market_id"], 0.5)
-        qty = p["quantity"] / SHARE_SCALE
-        if p["outcome"] == "YES":
-            position_value += qty * mid
-        else:
-            position_value += qty * (1.0 - mid)
-        if qty != 0:
-            n_positions += 1
-
-    total = cash + position_value
-    pnl = total - initial_balance
+    cash = portfolio["balance_nanos"] / 1e9
+    position_value = portfolio["total_position_value_nanos"] / 1e9
+    total = portfolio["portfolio_value_nanos"] / 1e9
+    pnl = portfolio["pnl_nanos"] / 1e9
+    deposited = portfolio.get("total_deposited_nanos", int(initial_balance * 1e9)) / 1e9
     return {
         "cash": cash,
         "position_value": position_value,
         "total": total,
         "pnl": pnl,
-        "return_pct": pnl / initial_balance * 100 if initial_balance > 0 else 0,
-        "positions": n_positions,
-        "initial": initial_balance,
+        "return_pct": pnl / deposited * 100 if deposited > 0 else 0,
+        "positions": sum(1 for p in portfolio.get("positions", []) if p.get("quantity", 0) != 0),
+        "initial": deposited,
     }

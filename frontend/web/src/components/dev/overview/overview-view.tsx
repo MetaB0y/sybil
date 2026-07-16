@@ -57,11 +57,14 @@ export function OverviewView() {
   // ── trivial aggregates (computed inline per the console getters) ──────
   const pricedCount = markets.filter((m) => present(m.yes_price_nanos)).length;
   const noClearCount = markets.length - pricedCount;
-  const refCount = markets.filter((m) => present(m.reference_price_nanos)).length;
+  const refCount = markets.filter((m) =>
+    present(m.reference_price_nanos),
+  ).length;
   const refOnlyCount = markets.filter(
     (m) => !present(m.yes_price_nanos) && present(m.reference_price_nanos),
   ).length;
-  const marketsWithPending = new Set(pendingOrders.map((o) => o.market_id)).size;
+  const marketsWithPending = new Set(pendingOrders.map((o) => o.market_id))
+    .size;
 
   const recentVolumeNanos = blocks.reduce(
     (sum, b) => sum + (Number(b.total_volume_nanos) || 0),
@@ -76,7 +79,6 @@ export function OverviewView() {
   const mIdx = marketIndex(markets);
   const aggregates = accountAggregates(
     accounts,
-    mIdx,
     null,
     pendingByAccount(pendingOrders),
   );
@@ -136,9 +138,9 @@ export function OverviewView() {
           sub={`${fmtInt(recentOrders)} orders seen`}
         />
         <Stat
-          label="MM Ref PnL"
-          value={moneySigned(aggregates.mmReferencePnl)}
-          tone={aggregates.mmReferencePnl >= 0 ? "yes" : "no"}
+          label="Account PnL"
+          value={moneySigned(aggregates.mmPnlNanos / 1e9)}
+          tone={aggregates.mmPnlNanos >= 0 ? "yes" : "no"}
           sub={`${aggregates.mmPositionCount} positions, ${aggregates.activeTradingAccounts.length} active accounts`}
         />
       </StatGrid>
@@ -163,7 +165,11 @@ export function OverviewView() {
                     style={metric === m ? activeButtonStyle : buttonStyle}
                     onClick={() => setMetric(m)}
                   >
-                    {m === "volume" ? "Volume" : m === "fills" ? "Fills" : "Orders"}
+                    {m === "volume"
+                      ? "Volume"
+                      : m === "fills"
+                        ? "Fills"
+                        : "Orders"}
                   </button>
                 ))}
               </div>
@@ -181,7 +187,9 @@ export function OverviewView() {
             >
               <Pill>{blockRangeLabel}</Pill>
               <Pill tone="yes">{recentFills + " fills"}</Pill>
-              <Pill tone="accent">{"$" + dollars(recentVolumeNanos) + " volume"}</Pill>
+              <Pill tone="accent">
+                {"$" + dollars(recentVolumeNanos) + " volume"}
+              </Pill>
               <Pill>{uniqueStateRoots + " state roots"}</Pill>
             </div>
           </PanelBody>
@@ -222,9 +230,7 @@ export function OverviewView() {
           <Panel>
             <PanelHead title="Quick Questions" />
             <PanelBody>
-              <div
-                style={{ display: "flex", flexWrap: "wrap", gap: 6 }}
-              >
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                 <button
                   type="button"
                   style={buttonStyle}

@@ -28,6 +28,7 @@ class BotSummaryResponse:
             decision_count (int):
             scored (bool): Eligible for public competition totals within the active runtime.
             trader_name (str):
+            account_id (int | None | Unset): Durable sequencer account recorded with the latest Arena snapshot.
             avg_edge (float | None | Unset):
             latest_balance (float | None | Unset):
             latest_edge (float | None | Unset):
@@ -48,6 +49,7 @@ class BotSummaryResponse:
     decision_count: int
     scored: bool
     trader_name: str
+    account_id: int | None | Unset = UNSET
     avg_edge: float | None | Unset = UNSET
     latest_balance: float | None | Unset = UNSET
     latest_edge: float | None | Unset = UNSET
@@ -76,6 +78,12 @@ class BotSummaryResponse:
         scored = self.scored
 
         trader_name = self.trader_name
+
+        account_id: int | None | Unset
+        if isinstance(self.account_id, Unset):
+            account_id = UNSET
+        else:
+            account_id = self.account_id
 
         avg_edge: float | None | Unset
         if isinstance(self.avg_edge, Unset):
@@ -170,6 +178,8 @@ class BotSummaryResponse:
             "scored": scored,
             "trader_name": trader_name,
         })
+        if account_id is not UNSET:
+            field_dict["account_id"] = account_id
         if avg_edge is not UNSET:
             field_dict["avg_edge"] = avg_edge
         if latest_balance is not UNSET:
@@ -213,6 +223,16 @@ class BotSummaryResponse:
         scored = d.pop("scored")
 
         trader_name = d.pop("trader_name")
+
+        def _parse_account_id(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        account_id = _parse_account_id(d.pop("account_id", UNSET))
+
 
         def _parse_avg_edge(data: object) -> float | None | Unset:
             if data is None:
@@ -359,6 +379,7 @@ class BotSummaryResponse:
             decision_count=decision_count,
             scored=scored,
             trader_name=trader_name,
+            account_id=account_id,
             avg_edge=avg_edge,
             latest_balance=latest_balance,
             latest_edge=latest_edge,

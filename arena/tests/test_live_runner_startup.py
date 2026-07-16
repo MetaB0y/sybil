@@ -42,6 +42,7 @@ async def test_one_shot_snapshot_records_every_account_baseline():
         "Control (Flat)",
         "Stage1 (Flat)",
     ]
+    assert [call.kwargs["account_id"] for call in db.log_snapshot.call_args_list] == [11, 12]
     assert all(call.kwargs["positions"] == {"7": {"YES": 3}} for call in db.log_snapshot.call_args_list)
     assert all(call.kwargs["total_fills"] == 1 for call in db.log_snapshot.call_args_list)
     assert all(call.kwargs["total_orders"] == 2 for call in db.log_snapshot.call_args_list)
