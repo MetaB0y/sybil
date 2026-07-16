@@ -122,11 +122,18 @@ TMPDIR=/home/anonymous/.cache/tmp \
   scripts/store-restore-drill.sh /opt/sybil/backups/sybil-store-<UTC>-<pid>
 ```
 
-The drill validates checksums, creates a unique Compose project from the normal
-base file plus the itest overlay, populates only that project's fresh
-`itest-data` volume, builds/boots `sybil-api`, and tears the project down with
-`down -v` on every exit. `--no-build` reuses an existing `sybil-api:itest`
-image; `--port` and `--timeout` tune local execution.
+The drill validates checksums, creates a unique Compose project from the
+standalone itest service definition without merging the base file, populates
+only that project's fresh `itest-data` volume, builds/boots `sybil-api`, and
+tears the project down with `down -v` on every exit or shell hangup.
+`--no-build` reuses an existing `sybil-api:itest` image; `--port` and
+`--timeout` tune local execution.
+
+The helper refuses to run on a Docker daemon with a live API mounted to
+`sybil-data`. Use a separate machine for production-sized drills. The
+`--allow-live-host` escape hatch is for an operator who has measured adequate
+headroom and deliberately accepts the shared CPU/memory failure domain; it
+does not weaken storage isolation.
 
 “Restored OK” means all of the following are true:
 

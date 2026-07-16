@@ -412,7 +412,8 @@ check-consensus: golden-check
 store-tools-check:
     python3 scripts/test-store-manifest.py
     python3 -m py_compile scripts/store-manifest.py scripts/test-store-manifest.py
-    bash -n scripts/store-backup.sh scripts/store-restore-drill.sh
+    bash scripts/test-store-restore-drill.sh
+    bash -n scripts/store-backup.sh scripts/store-restore-drill.sh scripts/test-store-restore-drill.sh
 
 # Complete local/CI-equivalent gate, including every standalone Rust workspace.
 check-all: check-fast check-features test standalone-check check-consensus docs-check store-tools-check arena-check frontend-check monitoring-check contracts-fmt-check contracts-build contracts-test contracts-coverage

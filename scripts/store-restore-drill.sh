@@ -3,11 +3,11 @@
 #
 # Usage:
 #   scripts/store-restore-drill.sh BACKUP_DIR [--port PORT] [--timeout SECONDS]
-#                                                   [--no-build] [--dry-run]
+#                               [--no-build] [--allow-live-host] [--dry-run]
 #
-# The drill uses docker-compose.yml + docker-compose.itest.yml, a unique project
-# and a unique named volume. Cleanup always runs `down -v`; production volumes
-# are neither named nor mounted by this script.
+# The drill uses standalone docker-compose.itest.yml, a unique project, and a
+# unique named volume. Cleanup always runs `down -v`; production volumes are
+# neither named nor mounted by this script.
 
 set -euo pipefail
 
@@ -18,6 +18,7 @@ PORT="${SYBIL_RESTORE_DRILL_PORT:-3310}"
 TIMEOUT=120
 BUILD=1
 DRY_RUN=0
+ALLOW_LIVE_HOST=0
 
 usage() { grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
@@ -27,6 +28,7 @@ while [[ $# -gt 0 ]]; do
         --port) PORT="${2:?missing port}"; shift 2 ;;
         --timeout) TIMEOUT="${2:?missing timeout}"; shift 2 ;;
         --no-build) BUILD=0; shift ;;
+        --allow-live-host) ALLOW_LIVE_HOST=1; shift ;;
         --dry-run) DRY_RUN=1; shift ;;
         --*) echo "unknown argument: $1" >&2; usage 2 ;;
         *)
@@ -47,7 +49,8 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
     if [[ "$BUILD" -eq 1 ]]; then BUILD_DESCRIPTION="build and start"; else BUILD_DESCRIPTION="start existing image for"; fi
     cat <<EOF
 dry-run: validate $BACKUP_DIR/manifest.json and SHA256SUMS
-dry-run: create unique Compose project with docker-compose.yml + docker-compose.itest.yml
+dry-run: refuse a Docker daemon serving sybil-data unless --allow-live-host was explicit
+dry-run: create a unique project from standalone docker-compose.itest.yml only
 dry-run: populate only that project's fresh itest-data volume from $BACKUP_DIR/store
 dry-run: $BUILD_DESCRIPTION sybil-api with a 24h block interval on 127.0.0.1:$PORT
 dry-run: require health and exact manifest matches for latest height, committed/replayed state roots, and sampled account
@@ -77,6 +80,20 @@ else
     exit 2
 fi
 
+# A second full-state recovery can exhaust the small production host even
+# though its volume is logically isolated. More importantly, restore drills
+# should never share a Docker resource boundary with a live authoritative API
+# accidentally. Operators with measured headroom must opt in explicitly.
+if [[ "$ALLOW_LIVE_HOST" -ne 1 ]]; then
+    mapfile -t LIVE_APIS < <(docker ps -q \
+        --filter 'label=com.docker.compose.service=sybil-api' \
+        --filter 'volume=sybil-data')
+    if [[ "${#LIVE_APIS[@]}" -ne 0 ]]; then
+        echo "error: refusing restore drill on a Docker daemon with a live sybil-data API; use a separate host or pass --allow-live-host deliberately" >&2
+        exit 2
+    fi
+fi
+
 python3 "$SCRIPT_DIR/store-manifest.py" validate "$BACKUP_DIR/manifest.json"
 (
     cd "$BACKUP_DIR/store"
@@ -87,13 +104,16 @@ PROJECT="sybil-restore-drill-$(date +%s)-$$"
 export COMPOSE_PROJECT_NAME="$PROJECT"
 export SYBIL_ITEST_PORT="$PORT"
 export SYBIL_ITEST_BLOCK_INTERVAL_MS=86400000
-COMPOSE=("${COMPOSE_BIN[@]}" -p "$PROJECT" -f "$ROOT/docker-compose.yml" -f "$ROOT/docker-compose.itest.yml")
+# docker-compose.itest.yml is intentionally complete enough for this one
+# service. Merging the base file would append sybil-data:/data and expose the
+# globally named production volume to `down -v` cleanup.
+COMPOSE=("${COMPOSE_BIN[@]}" -p "$PROJECT" -f "$ROOT/docker-compose.itest.yml")
 compose() { "${COMPOSE[@]}" "$@"; }
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/store-restore-drill.XXXXXX")"
 cleanup() {
-    local status=$?
-    trap - EXIT INT TERM
+    local status=${1:-$?}
+    trap - EXIT HUP INT TERM
     if [[ "$status" -ne 0 ]]; then
         compose logs --no-color sybil-api > "$WORK/sybil-api.log" 2>&1 || true
         if [[ -s "$WORK/sybil-api.log" ]]; then
@@ -105,7 +125,10 @@ cleanup() {
     rm -rf "$WORK"
     exit "$status"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'cleanup 129' HUP
+trap 'cleanup 130' INT
+trap 'cleanup 143' TERM
 
 if [[ "$BUILD" -eq 1 ]]; then
     compose build sybil-api
