@@ -99,8 +99,12 @@ pub enum NativeThresholdDirection {
 pub struct NativeOutcome {
     /// Stable outcome id within the parent template.
     pub id: String,
-    /// Display label for this outcome.
+    /// Compact display label for this outcome inside the parent event card.
     pub title: String,
+    /// Natural-language binary question used as the child market's title.
+    /// This deliberately mirrors Polymarket's event-title + market-question
+    /// model instead of synthesizing `"{event}: {outcome}"`.
+    pub market_title: String,
     /// Per-outcome enablement.
     pub enabled: bool,
     /// YES-price quote range used to seed the MM for this child market.
@@ -117,8 +121,10 @@ pub struct NativeOutcome {
 pub struct NativeThresholdRung {
     /// Stable rung id within the parent template.
     pub id: String,
-    /// Display label, e.g. "≥ 8 hours" or "≤ $5 / MTok".
+    /// Compact display label, e.g. "≥ 8 hours" or "≤ $5 / MTok".
     pub title: String,
+    /// Natural-language binary question used as the child market's title.
+    pub market_title: String,
     /// Per-rung enablement.
     pub enabled: bool,
     /// Numeric rung threshold, expressed in the ladder's `unit`.
@@ -241,6 +247,7 @@ impl NativeMarketCatalog {
 
     fn validate(&self) -> Result<(), Error> {
         let mut ids = HashSet::new();
+        let mut event_titles = HashSet::new();
         for (i, template) in self.markets.iter().enumerate() {
             let context = format!("native market #{i} ({:?})", template.id);
             validate_id(&template.id, &context)?;
@@ -251,6 +258,26 @@ impl NativeMarketCatalog {
                 )));
             }
             template.validate(&context)?;
+            if template.enabled && !event_titles.insert(template.title.trim().to_ascii_lowercase())
+            {
+                return Err(Error::NativeCatalog(format!(
+                    "{context} duplicates enabled event title {:?}",
+                    template.title
+                )));
+            }
+        }
+
+        // Market questions are public discovery keys as well as display copy.
+        // Reject case-insensitive duplicates across templates so two native
+        // contracts cannot become visually indistinguishable.
+        let mut market_titles = HashSet::new();
+        for spec in self.enabled_market_specs() {
+            if !market_titles.insert(spec.name.trim().to_lowercase()) {
+                return Err(Error::NativeCatalog(format!(
+                    "enabled native market title {:?} is duplicated",
+                    spec.name
+                )));
+            }
         }
         Ok(())
     }
@@ -259,15 +286,18 @@ impl NativeMarketCatalog {
 impl NativeMarketTemplate {
     fn validate(&self, context: &str) -> Result<(), Error> {
         validate_nonempty("title", &self.title, context)?;
+        if self.enabled {
+            validate_question_title("title", &self.title, context)?;
+        }
         validate_nonempty("units", &self.units, context)?;
         validate_nonempty("resolution_criteria", &self.resolution_criteria, context)?;
         validate_nonempty("category", &self.category, context)?;
         validate_url("source_url", &self.source_url, context)?;
         if let Some(u) = &self.event_image_url {
-            validate_url("event_image_url", u, context)?;
+            validate_image_url("event_image_url", u, context)?;
         }
         if let Some(u) = &self.event_icon_url {
-            validate_url("event_icon_url", u, context)?;
+            validate_image_url("event_icon_url", u, context)?;
         }
         let end_time_ms = parse_iso8601_to_ms(&self.end_time)
             .and_then(|ms| u64::try_from(ms).ok())
@@ -326,6 +356,7 @@ impl NativeMarketTemplate {
                     )));
                 }
                 let mut outcome_ids = HashSet::new();
+                let mut market_titles = HashSet::new();
                 let mut enabled_count = 0usize;
                 let mut initial_sum = 0.0;
                 for (i, outcome) in outcomes.iter().enumerate() {
@@ -338,11 +369,23 @@ impl NativeMarketTemplate {
                         )));
                     }
                     validate_nonempty("title", &outcome.title, &outcome_context)?;
+                    validate_child_market_title(
+                        &outcome.market_title,
+                        &self.title,
+                        &outcome.title,
+                        &outcome_context,
+                    )?;
+                    if !market_titles.insert(outcome.market_title.trim().to_lowercase()) {
+                        return Err(Error::NativeCatalog(format!(
+                            "{outcome_context} duplicates child market_title {:?}",
+                            outcome.market_title
+                        )));
+                    }
                     outcome
                         .quote_range
                         .validate(&format!("{outcome_context} quote_range"))?;
                     if let Some(u) = &outcome.image_url {
-                        validate_url("image_url", u, &outcome_context)?;
+                        validate_image_url("image_url", u, &outcome_context)?;
                     }
                     if outcome.enabled {
                         enabled_count += 1;
@@ -377,6 +420,7 @@ impl NativeMarketTemplate {
                     )));
                 }
                 let mut rung_ids = HashSet::new();
+                let mut market_titles = HashSet::new();
                 let mut enabled_count = 0usize;
                 let mut previous: Option<&NativeThresholdRung> = None;
                 for (i, rung) in outcomes.iter().enumerate() {
@@ -389,6 +433,18 @@ impl NativeMarketTemplate {
                         )));
                     }
                     validate_nonempty("title", &rung.title, &rung_context)?;
+                    validate_child_market_title(
+                        &rung.market_title,
+                        &self.title,
+                        &rung.title,
+                        &rung_context,
+                    )?;
+                    if !market_titles.insert(rung.market_title.trim().to_lowercase()) {
+                        return Err(Error::NativeCatalog(format!(
+                            "{rung_context} duplicates child market_title {:?}",
+                            rung.market_title
+                        )));
+                    }
                     if !rung.threshold.is_finite() {
                         return Err(Error::NativeCatalog(format!(
                             "{rung_context} threshold must be finite"
@@ -397,7 +453,7 @@ impl NativeMarketTemplate {
                     rung.quote_range
                         .validate(&format!("{rung_context} quote_range"))?;
                     if let Some(u) = &rung.image_url {
-                        validate_url("image_url", u, &rung_context)?;
+                        validate_image_url("image_url", u, &rung_context)?;
                     }
                     if rung.enabled {
                         enabled_count += 1;
@@ -476,7 +532,7 @@ impl NativeMarketTemplate {
                     .map(|outcome| NativeMarketSpec {
                         template_id: self.id.clone(),
                         market_key: outcome_market_key(&self.id, &outcome.id),
-                        name: format!("{}: {}", self.title, outcome.title),
+                        name: outcome.market_title.clone(),
                         outcome_title: Some(outcome.title.clone()),
                         quote_range: outcome.quote_range,
                         group_key: group_key.clone(),
@@ -509,7 +565,7 @@ impl NativeMarketTemplate {
                     .map(|rung| NativeMarketSpec {
                         template_id: self.id.clone(),
                         market_key: outcome_market_key(&self.id, &rung.id),
-                        name: format!("{}: {}", self.title, rung.title),
+                        name: rung.market_title.clone(),
                         outcome_title: Some(rung.title.clone()),
                         quote_range: rung.quote_range,
                         group_key: None,
@@ -686,6 +742,55 @@ fn validate_url(field: &str, value: &str, context: &str) -> Result<(), Error> {
     }
 }
 
+fn validate_image_url(field: &str, value: &str, context: &str) -> Result<(), Error> {
+    let value = value.trim();
+    if let Some(path) = value.strip_prefix('/') {
+        let safe = !path.is_empty()
+            && !path.starts_with('/')
+            && !path.contains('\\')
+            && !path.contains('?')
+            && !path.contains('#')
+            && path
+                .split('/')
+                .all(|segment| !segment.is_empty() && segment != "." && segment != "..");
+        if safe {
+            return Ok(());
+        }
+        return Err(Error::NativeCatalog(format!(
+            "{context} has unsafe same-origin {field} {:?}",
+            value
+        )));
+    }
+    validate_url(field, value, context)
+}
+
+fn validate_question_title(field: &str, value: &str, context: &str) -> Result<(), Error> {
+    validate_nonempty(field, value, context)?;
+    if value.trim() != value || !value.ends_with('?') {
+        return Err(Error::NativeCatalog(format!(
+            "{context} {field} must be a trimmed question ending in '?'"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_child_market_title(
+    market_title: &str,
+    event_title: &str,
+    outcome_title: &str,
+    context: &str,
+) -> Result<(), Error> {
+    validate_question_title("market_title", market_title, context)?;
+    let legacy_title = format!("{}: {}", event_title.trim(), outcome_title.trim());
+    if market_title == legacy_title || market_title.starts_with(&format!("{}:", event_title.trim()))
+    {
+        return Err(Error::NativeCatalog(format!(
+            "{context} market_title must be a standalone question, not an event-title/outcome concatenation"
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -694,7 +799,7 @@ mod tests {
     fn checked_in_catalog_is_research_backed() {
         let data = include_str!("../native_markets.json");
         let catalog = NativeMarketCatalog::parse_json(data).unwrap();
-        assert_eq!(catalog.len(), 25);
+        assert_eq!(catalog.len(), 26);
 
         // Every shipped template is enabled.
         let disabled: Vec<&str> = catalog
@@ -708,12 +813,17 @@ mod tests {
             "unexpected disabled templates: {disabled:?}"
         );
 
-        // Enabled specs: 17 categorical groups + 8 threshold ladders expand to
-        // 127 child markets.
+        // Enabled specs: 18 categorical groups + 8 threshold ladders expand to
+        // 134 child markets.
         let specs = catalog.enabled_market_specs();
-        assert_eq!(specs.len(), 127);
+        assert_eq!(specs.len(), 134);
         assert!(specs.iter().all(|s| s.end_time_ms > 0));
         for spec in &specs {
+            assert!(
+                spec.name.ends_with('?'),
+                "native market title is not a question: {:?}",
+                spec.name
+            );
             // Native provenance: a native child market never carries a
             // Polymarket condition id (the mirror/native discriminator).
             assert_eq!(spec.metadata_request().polymarket_condition_id, None);
@@ -731,13 +841,97 @@ mod tests {
             }
         }
 
-        // These ids were already deployed with different categorical children.
-        // Reusing them would append the replacement children to the persisted
-        // old MarketGroup instead of creating a clean catalog generation.
-        assert!(catalog.markets.iter().all(|template| {
-            template.id != "openrouter_top_model_dec_2026"
-                && template.id != "openrouter_top_app_dec_2026"
-        }));
+        // The retired app id had a different categorical membership. Reusing
+        // it would append children to an old persisted MarketGroup. The final-
+        // week model event is intentionally restored with its original exact
+        // membership and stable id.
+        assert!(
+            catalog
+                .markets
+                .iter()
+                .all(|template| template.id != "openrouter_top_app_dec_2026")
+        );
+
+        let title_for = |market_key: &str| {
+            specs
+                .iter()
+                .find(|spec| spec.market_key == market_key)
+                .map(|spec| spec.name.as_str())
+        };
+        assert_eq!(
+            catalog
+                .markets
+                .iter()
+                .find(|template| template.id == "aa_intelligence_leader_eoy2026")
+                .map(|template| template.title.as_str()),
+            Some(
+                "Which company will lead the Artificial Analysis Intelligence Index at end of 2026?"
+            )
+        );
+        assert_eq!(
+            title_for("openrouter_top_image_company_dec_2026:or_img_bytedance"),
+            Some("Will ByteDance lead OpenRouter image-model usage in December 2026?")
+        );
+        assert_eq!(
+            title_for("anthropic_flagship_input_price_below_eoy2026:anthropic_input_le_5"),
+            Some(
+                "Will Anthropic's flagship Opus base input API price be at or below $5/MTok at end of 2026?"
+            )
+        );
+        assert_eq!(
+            title_for("openai_flagship_input_price_below_eoy2026:openai_input_le_5"),
+            Some(
+                "Will OpenAI's flagship model standard input API price be at or below $5/MTok at end of 2026?"
+            )
+        );
+        assert!(
+            specs.iter().all(|spec| spec.market_key
+                != "context_window_max_advertised_eoy2026:context_window_above_10m_eoy2026"),
+            "the retired 10M context-window market must not return"
+        );
+
+        for market in &catalog.markets {
+            let expected_logo = if market.id == "aa_intelligence_leader_eoy2026" {
+                Some("/native-market-logos/artificial-analysis.svg")
+            } else if market.id.starts_with("openrouter_") {
+                Some("/native-market-logos/openrouter.svg")
+            } else if market.id.starts_with("metr_") {
+                Some("/native-market-logos/metr.svg")
+            } else if market.id == "anthropic_flagship_input_price_below_eoy2026" {
+                Some("/native-market-logos/anthropic.svg")
+            } else if market.id == "openai_flagship_input_price_below_eoy2026" {
+                Some("/native-market-logos/openai.svg")
+            } else {
+                None
+            };
+            if let Some(expected_logo) = expected_logo {
+                assert_eq!(
+                    market.event_image_url.as_deref(),
+                    Some(expected_logo),
+                    "unexpected event logo for {}",
+                    market.id
+                );
+            }
+        }
+
+        // Same-origin logo paths are deployment artifacts, so fail the catalog
+        // test if a referenced public asset is renamed or omitted.
+        let public_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../frontend/web/public");
+        for market in &catalog.markets {
+            for image_url in [&market.event_image_url, &market.event_icon_url]
+                .into_iter()
+                .flatten()
+                .filter(|url| url.starts_with('/'))
+            {
+                let path = public_dir.join(image_url.trim_start_matches('/'));
+                assert!(
+                    path.is_file(),
+                    "{} references missing same-origin image {}",
+                    market.id,
+                    path.display()
+                );
+            }
+        }
 
         // No placeholder text may survive in shipped entries.
         for market in &catalog.markets {
@@ -794,9 +988,9 @@ mod tests {
                 "outcome_set": {
                     "type": "categorical",
                     "outcomes": [
-                        { "id": "a", "title": "A", "enabled": true, "quote_range": { "min": 0.20, "max": 0.50, "initial": 0.30 } },
-                        { "id": "b", "title": "B", "enabled": true, "quote_range": { "min": 0.20, "max": 0.50, "initial": 0.30 } },
-                        { "id": "c", "title": "C", "enabled": true, "quote_range": { "min": 0.10, "max": 0.50, "initial": 0.40 } }
+                        { "id": "a", "title": "A", "market_title": "Will A win?", "enabled": true, "quote_range": { "min": 0.20, "max": 0.50, "initial": 0.30 } },
+                        { "id": "b", "title": "B", "market_title": "Will B win?", "enabled": true, "quote_range": { "min": 0.20, "max": 0.50, "initial": 0.30 } },
+                        { "id": "c", "title": "C", "market_title": "Will C win?", "enabled": true, "quote_range": { "min": 0.10, "max": 0.50, "initial": 0.40 } }
                     ]
                 },
                 "units": "probability",
@@ -818,10 +1012,80 @@ mod tests {
         );
         assert!(specs.iter().all(|spec| spec.group_size == 3));
         assert_eq!(specs[0].market_key, "native_multi:a");
+        assert_eq!(specs[0].name, "Will A win?");
         assert_eq!(
             specs[0].metadata_request().group_item_title.as_deref(),
             Some("A")
         );
+    }
+
+    #[test]
+    fn categorical_market_titles_are_standalone_unique_questions() {
+        let json = r#"{
+            "markets": [{
+                "id": "native_multi",
+                "enabled": true,
+                "title": "Which option wins?",
+                "outcome_set": {
+                    "type": "categorical",
+                    "outcomes": [
+                        { "id": "a", "title": "A", "market_title": "Will A win?", "enabled": true, "quote_range": { "min": 0.20, "max": 0.50, "initial": 0.30 } },
+                        { "id": "b", "title": "B", "market_title": "Will B win?", "enabled": true, "quote_range": { "min": 0.20, "max": 0.50, "initial": 0.30 } }
+                    ]
+                },
+                "units": "probability",
+                "end_time": "2026-12-31T23:59:00Z",
+                "resolution_criteria": "Resolve to the winning option.",
+                "source_url": "https://example.com/test",
+                "category": "Testing",
+                "resolution_source": { "type": "manual", "instructions": "Read the result." }
+            }]
+        }"#;
+        NativeMarketCatalog::parse_json(json).unwrap();
+
+        let legacy = json.replace("Will A win?", "Which option wins?: A?");
+        let err = NativeMarketCatalog::parse_json(&legacy).unwrap_err();
+        assert!(err.to_string().contains("standalone question"), "{err}");
+
+        let duplicate = json.replace("Will B win?", "WILL A WIN?");
+        let err = NativeMarketCatalog::parse_json(&duplicate).unwrap_err();
+        assert!(
+            err.to_string().contains("duplicates child market_title"),
+            "{err}"
+        );
+
+        let not_a_question = json.replace("Will A win?", "A wins");
+        let err = NativeMarketCatalog::parse_json(&not_a_question).unwrap_err();
+        assert!(err.to_string().contains("ending in '?'"), "{err}");
+
+        let missing = json.replace("\"market_title\": \"Will A win?\", ", "");
+        let err = NativeMarketCatalog::parse_json(&missing).unwrap_err();
+        assert!(
+            err.to_string().contains("missing field `market_title`"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn same_origin_images_must_use_safe_public_paths() {
+        assert!(
+            validate_image_url(
+                "event_image_url",
+                "/native-market-logos/openrouter.svg",
+                "test"
+            )
+            .is_ok()
+        );
+        for bad in [
+            "//cdn.example/logo.svg",
+            "/../logo.svg",
+            "/logos//logo.svg",
+            "/logo.svg?version=1",
+            "/logo.svg#mark",
+        ] {
+            let err = validate_image_url("event_image_url", bad, "test").unwrap_err();
+            assert!(err.to_string().contains("unsafe same-origin"), "{err}");
+        }
     }
 
     #[test]
@@ -836,9 +1100,9 @@ mod tests {
                     "direction": "above",
                     "unit": "tokens",
                     "outcomes": [
-                        { "id": "ge_2m", "title": "≥ 2M", "enabled": true, "threshold": 2000000, "quote_range": { "min": 0.30, "max": 0.70, "initial": 0.50 } },
-                        { "id": "ge_5m", "title": "≥ 5M", "enabled": true, "threshold": 5000000, "quote_range": { "min": 0.06, "max": 0.30, "initial": 0.15 } },
-                        { "id": "ge_10m", "title": "≥ 10M", "enabled": false, "threshold": 10000000, "quote_range": { "min": 0.02, "max": 0.16, "initial": 0.06 } }
+                        { "id": "ge_2m", "title": "≥ 2M", "market_title": "Will X be at least 2M tokens?", "enabled": true, "threshold": 2000000, "quote_range": { "min": 0.30, "max": 0.70, "initial": 0.50 } },
+                        { "id": "ge_5m", "title": "≥ 5M", "market_title": "Will X be at least 5M tokens?", "enabled": true, "threshold": 5000000, "quote_range": { "min": 0.06, "max": 0.30, "initial": 0.15 } },
+                        { "id": "ge_10m", "title": "≥ 10M", "market_title": "Will X be at least 10M tokens?", "enabled": false, "threshold": 10000000, "quote_range": { "min": 0.02, "max": 0.16, "initial": 0.06 } }
                     ]
                 },
                 "units": "tokens",
@@ -857,6 +1121,7 @@ mod tests {
         assert!(specs.iter().all(|spec| spec.group_key.is_none()));
         assert!(specs.iter().all(|spec| spec.group_size == 0));
         assert_eq!(specs[0].market_key, "native_ladder:ge_2m");
+        assert_eq!(specs[0].name, "Will X be at least 2M tokens?");
         assert_eq!(
             specs[0].resolution_question(),
             "For the event \"How large will X be?\": resolve YES if and only if the observed value is greater than or equal to 2000000 tokens, otherwise NO."
@@ -878,8 +1143,8 @@ mod tests {
                 "id": "price_ladder", "enabled": true, "title": "How low?",
                 "outcome_set": { "type": "threshold", "direction": "below", "unit": "USD/MTok",
                     "outcomes": [
-                        { "id": "le_10", "title": "≤ $10", "enabled": true, "threshold": 10, "quote_range": { "min": 0.5, "max": 0.9, "initial": 0.7 } },
-                        { "id": "le_5", "title": "≤ $5", "enabled": true, "threshold": 5, "quote_range": { "min": 0.06, "max": 0.34, "initial": 0.16 } }
+                        { "id": "le_10", "title": "≤ $10", "market_title": "Will the price be at most $10?", "enabled": true, "threshold": 10, "quote_range": { "min": 0.5, "max": 0.9, "initial": 0.7 } },
+                        { "id": "le_5", "title": "≤ $5", "market_title": "Will the price be at most $5?", "enabled": true, "threshold": 5, "quote_range": { "min": 0.06, "max": 0.34, "initial": 0.16 } }
                     ] },
                 "units": "USD/MTok", "end_time": "2026-12-31T23:59:00Z",
                 "resolution_criteria": "Rungs on price.", "source_url": "https://example.com/p",
@@ -905,8 +1170,8 @@ mod tests {
                 "id": "native_ladder", "enabled": true, "title": "How large?",
                 "outcome_set": { "type": "threshold", "direction": "above", "unit": "x",
                     "outcomes": [
-                        { "id": "ge_2", "title": "≥ 2", "enabled": true, "threshold": 2, "quote_range": { "min": 0.4, "max": 0.8, "initial": 0.6 } },
-                        { "id": "ge_5", "title": "≥ 5", "enabled": true, "threshold": 5, "quote_range": { "min": 0.2, "max": 0.6, "initial": 0.3 } }
+                        { "id": "ge_2", "title": "≥ 2", "market_title": "Will X be at least 2?", "enabled": true, "threshold": 2, "quote_range": { "min": 0.4, "max": 0.8, "initial": 0.6 } },
+                        { "id": "ge_5", "title": "≥ 5", "market_title": "Will X be at least 5?", "enabled": true, "threshold": 5, "quote_range": { "min": 0.2, "max": 0.6, "initial": 0.3 } }
                     ] },
                 "units": "x", "end_time": "2026-12-31T23:59:00Z",
                 "resolution_criteria": "Compare the observed value.",

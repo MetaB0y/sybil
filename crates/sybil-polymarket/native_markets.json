@@ -1,16 +1,17 @@
 {
-  "description": "CANDIDATE native Sybil market catalog (rev 3, 2026-07-11). EXTENDED schema (threshold ladders + images; see SCHEMA-PATCH.md). Trimmed from 33->25 templates; subscription-price markets dropped (API-cost theme); Anthropic flagship = Fable 5; company markets capped to top-4 + Other; images via Google favicon service.",
+  "description": "Native Sybil AI market catalog (rev 4, 2026-07-15). Grouped children carry explicit natural-language market titles in addition to their parent event titles. Duplicate legacy contracts are consolidated; the distinct final-week OpenRouter event is retained; source-event artwork is self-hosted from reviewed brand assets.",
   "markets": [
     {
       "id": "aa_intelligence_leader_eoy2026",
       "enabled": true,
-      "title": "Which company has the top model on the Artificial Analysis Intelligence Index at end of 2026?",
+      "title": "Which company will lead the Artificial Analysis Intelligence Index at end of 2026?",
       "outcome_set": {
         "type": "categorical",
         "outcomes": [
           {
             "id": "aa_intelligence_leader_eoy2026_anthropic",
             "title": "Anthropic",
+            "market_title": "Will Anthropic lead the Artificial Analysis Intelligence Index at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.25,
@@ -22,6 +23,7 @@
           {
             "id": "aa_intelligence_leader_eoy2026_openai",
             "title": "OpenAI",
+            "market_title": "Will OpenAI lead the Artificial Analysis Intelligence Index at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.22,
@@ -33,6 +35,7 @@
           {
             "id": "aa_intelligence_leader_eoy2026_google",
             "title": "Google",
+            "market_title": "Will Google lead the Artificial Analysis Intelligence Index at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.03,
@@ -44,6 +47,7 @@
           {
             "id": "aa_intelligence_leader_eoy2026_xai",
             "title": "xAI",
+            "market_title": "Will xAI lead the Artificial Analysis Intelligence Index at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.02,
@@ -55,6 +59,7 @@
           {
             "id": "aa_intelligence_leader_eoy2026_other",
             "title": "Other",
+            "market_title": "Will a company other than Anthropic, OpenAI, Google, or xAI lead the Artificial Analysis Intelligence Index at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.02,
@@ -75,7 +80,117 @@
         "method": "GET",
         "notes": "Endpoint is machine-readable JSON but requires a free API key (unauthenticated WebFetch returned HTTP 401). Field is the model's headline Artificial Analysis Intelligence Index value; creator/provider field identifies the company. Fallback: If the API is unavailable or the key cannot be obtained, read the #1 model and its provider directly off the public leaderboard page https://artificialanalysis.ai/leaderboards/models (Artificial Analysis Intelligence Index column, sorted descending) at the read time."
       },
-      "event_image_url": "https://www.google.com/s2/favicons?domain=artificialanalysis.ai&sz=128"
+      "event_image_url": "/native-market-logos/artificial-analysis.svg"
+    },
+    {
+      "id": "openrouter_top_model_dec_2026",
+      "enabled": true,
+      "title": "Which model will rank #1 by token usage on OpenRouter for the final week of 2026?",
+      "outcome_set": {
+        "type": "categorical",
+        "outcomes": [
+          {
+            "id": "deepseek",
+            "title": "A DeepSeek model",
+            "market_title": "Will a DeepSeek model rank #1 by token usage on OpenRouter for the final week of 2026?",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.1,
+              "max": 0.45,
+              "initial": 0.25
+            }
+          },
+          {
+            "id": "xiaomi",
+            "title": "A Xiaomi model",
+            "market_title": "Will a Xiaomi model rank #1 by token usage on OpenRouter for the final week of 2026?",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.08,
+              "max": 0.4,
+              "initial": 0.2
+            }
+          },
+          {
+            "id": "minimax",
+            "title": "A MiniMax model",
+            "market_title": "Will a MiniMax model rank #1 by token usage on OpenRouter for the final week of 2026?",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.05,
+              "max": 0.35,
+              "initial": 0.15
+            }
+          },
+          {
+            "id": "z_ai_glm",
+            "title": "A Z AI (GLM) model",
+            "market_title": "Will a Z AI (GLM) model rank #1 by token usage on OpenRouter for the final week of 2026?",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.03,
+              "max": 0.25,
+              "initial": 0.1
+            }
+          },
+          {
+            "id": "anthropic",
+            "title": "An Anthropic model",
+            "market_title": "Will an Anthropic model rank #1 by token usage on OpenRouter for the final week of 2026?",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.2,
+              "initial": 0.08
+            }
+          },
+          {
+            "id": "google",
+            "title": "A Google model",
+            "market_title": "Will a Google model rank #1 by token usage on OpenRouter for the final week of 2026?",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.15,
+              "initial": 0.05
+            }
+          },
+          {
+            "id": "openai",
+            "title": "An OpenAI model",
+            "market_title": "Will an OpenAI model rank #1 by token usage on OpenRouter for the final week of 2026?",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.15,
+              "initial": 0.05
+            }
+          },
+          {
+            "id": "other",
+            "title": "Other",
+            "market_title": "Will a model from an organization other than DeepSeek, Xiaomi, MiniMax, Z AI, Anthropic, Google, or OpenAI rank #1 by token usage on OpenRouter for the final week of 2026?",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.05,
+              "max": 0.3,
+              "initial": 0.12
+            }
+          }
+        ]
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Resolves to the authoring organization of the model with the highest total token usage on OpenRouter aggregated over the 7 UTC days 2026-12-25 through 2026-12-31 inclusive, per OpenRouter's daily rankings dataset (summed across those days), with the public weekly rankings page https://openrouter.ai/rankings as the human-readable backstop. If the top vendor is not a listed outcome, resolves Other. Tie-break: higher single-day peak inside the window. If OpenRouter stops publishing the rankings dataset before the read date, resolution uses the last complete published week of 2026; if no 2026 data is retrievable, the market voids.",
+      "source_url": "https://openrouter.ai/rankings",
+      "category": "AI",
+      "resolution_source": {
+        "type": "api_poll",
+        "endpoint": "https://openrouter.ai/docs/api/api-reference/datasets/get-rankings-daily",
+        "method": "GET",
+        "notes": "The dataset endpoint requires the OpenRouter API key already held for arena bots. Sum model token usage over 2026-12-25 through 2026-12-31 UTC and map the winning model to its authoring organization; the public weekly rankings page is the human-readable backstop."
+      },
+      "event_image_url": "/native-market-logos/openrouter.svg"
     },
     {
       "id": "openrouter_top_model_dec_2026_v2",
@@ -87,6 +202,7 @@
           {
             "id": "or_txtllm_google",
             "title": "Google",
+            "market_title": "Will Google lead OpenRouter text-LLM token usage in December 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.12,
@@ -98,6 +214,7 @@
           {
             "id": "or_txtllm_deepseek",
             "title": "DeepSeek",
+            "market_title": "Will DeepSeek lead OpenRouter text-LLM token usage in December 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.1,
@@ -109,6 +226,7 @@
           {
             "id": "or_txtllm_anthropic",
             "title": "Anthropic",
+            "market_title": "Will Anthropic lead OpenRouter text-LLM token usage in December 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.07,
@@ -120,6 +238,7 @@
           {
             "id": "or_txtllm_openai",
             "title": "OpenAI",
+            "market_title": "Will OpenAI lead OpenRouter text-LLM token usage in December 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.06,
@@ -131,6 +250,7 @@
           {
             "id": "or_txtllm_other",
             "title": "Other",
+            "market_title": "Will a company other than Google, DeepSeek, Anthropic, or OpenAI lead OpenRouter text-LLM token usage in December 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.05,
@@ -149,7 +269,7 @@
         "type": "manual",
         "instructions": "Open OpenRouter LLM Rankings, select the 'Market Share' tab (share by model author), set the range to December 2026, and record the model author with the highest token share.\n\nFallback: If the page is unreachable, use the OpenRouter datasets rankings API aggregated by model author (requires an OpenRouter API key), or the Web Archive snapshot of https://openrouter.ai/rankings nearest 2026-12-31 23:59 UTC."
       },
-      "event_image_url": "https://www.google.com/s2/favicons?domain=openrouter.ai&sz=128"
+      "event_image_url": "/native-market-logos/openrouter.svg"
     },
     {
       "id": "openrouter_top_app_dec_2026_v2",
@@ -161,6 +281,7 @@
           {
             "id": "or_apps_kilocode",
             "title": "Kilo Code",
+            "market_title": "Will Kilo Code lead OpenRouter app token usage in December 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.14,
@@ -172,6 +293,7 @@
           {
             "id": "or_apps_cline",
             "title": "Cline",
+            "market_title": "Will Cline lead OpenRouter app token usage in December 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.06,
@@ -183,6 +305,7 @@
           {
             "id": "or_apps_hermes",
             "title": "Hermes",
+            "market_title": "Will Hermes lead OpenRouter app token usage in December 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.05,
@@ -194,6 +317,7 @@
           {
             "id": "or_apps_roocode",
             "title": "Roo Code",
+            "market_title": "Will Roo Code lead OpenRouter app token usage in December 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.04,
@@ -205,6 +329,7 @@
           {
             "id": "or_apps_other",
             "title": "Other",
+            "market_title": "Will an app other than Kilo Code, Cline, Hermes, or Roo Code lead OpenRouter app token usage in December 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.05,
@@ -223,7 +348,7 @@
         "type": "manual",
         "instructions": "Open OpenRouter App & Agent Rankings sorted by 'popular' (total token volume), set the range to December 2026, and record the top-ranked app.\n\nFallback: If unreachable, use the OpenRouter app-rankings dataset endpoint (requires an API key) for the December 2026 window, or the Web Archive snapshot of https://openrouter.ai/apps nearest 2026-12-31 23:59 UTC."
       },
-      "event_image_url": "https://www.google.com/s2/favicons?domain=openrouter.ai&sz=128"
+      "event_image_url": "/native-market-logos/openrouter.svg"
     },
     {
       "id": "openrouter_top_image_company_dec_2026",
@@ -235,6 +360,7 @@
           {
             "id": "or_img_google",
             "title": "Google",
+            "market_title": "Will Google lead OpenRouter image-model usage in December 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.2,
@@ -246,6 +372,7 @@
           {
             "id": "or_img_openai",
             "title": "OpenAI",
+            "market_title": "Will OpenAI lead OpenRouter image-model usage in December 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.08,
@@ -257,6 +384,7 @@
           {
             "id": "or_img_bfl",
             "title": "Black Forest Labs",
+            "market_title": "Will Black Forest Labs lead OpenRouter image-model usage in December 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.05,
@@ -268,6 +396,7 @@
           {
             "id": "or_img_bytedance",
             "title": "ByteDance",
+            "market_title": "Will ByteDance lead OpenRouter image-model usage in December 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.04,
@@ -279,6 +408,7 @@
           {
             "id": "or_img_other",
             "title": "Other",
+            "market_title": "Will a company other than Google, OpenAI, Black Forest Labs, or ByteDance lead OpenRouter image-model usage in December 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.03,
@@ -297,7 +427,7 @@
         "type": "manual",
         "instructions": "Open OpenRouter Image Model Rankings, select the 'Market Share' tab (share by model author), set the range to December 2026, and record the author with the highest request share.\n\nFallback: If unreachable, use the OpenRouter datasets image-rankings aggregated by author (requires an API key), or the Web Archive snapshot of https://openrouter.ai/rankings/image nearest 2026-12-31 23:59 UTC."
       },
-      "event_image_url": "https://www.google.com/s2/favicons?domain=openrouter.ai&sz=128"
+      "event_image_url": "/native-market-logos/openrouter.svg"
     },
     {
       "id": "openrouter_top_embeddings_company_dec_2026",
@@ -309,6 +439,7 @@
           {
             "id": "or_emb_openai",
             "title": "OpenAI",
+            "market_title": "Will OpenAI lead OpenRouter embedding-model usage in December 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.16,
@@ -320,6 +451,7 @@
           {
             "id": "or_emb_google",
             "title": "Google",
+            "market_title": "Will Google lead OpenRouter embedding-model usage in December 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.09,
@@ -331,6 +463,7 @@
           {
             "id": "or_emb_alibaba",
             "title": "Alibaba (Qwen)",
+            "market_title": "Will Alibaba (Qwen) lead OpenRouter embedding-model usage in December 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.05,
@@ -342,6 +475,7 @@
           {
             "id": "or_emb_cohere",
             "title": "Cohere",
+            "market_title": "Will Cohere lead OpenRouter embedding-model usage in December 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.04,
@@ -353,6 +487,7 @@
           {
             "id": "or_emb_other",
             "title": "Other",
+            "market_title": "Will a company other than OpenAI, Google, Alibaba, or Cohere lead OpenRouter embedding-model usage in December 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.03,
@@ -371,18 +506,19 @@
         "type": "manual",
         "instructions": "Open OpenRouter Embedding Model Rankings, select the 'Market Share' tab (share by model author), set the range to December 2026, and record the author with the highest request share.\n\nFallback: If unreachable, use the OpenRouter datasets embeddings rankings aggregated by author (requires an API key), or the Web Archive snapshot of https://openrouter.ai/rankings/embeddings nearest 2026-12-31 23:59 UTC."
       },
-      "event_image_url": "https://www.google.com/s2/favicons?domain=openrouter.ai&sz=128"
+      "event_image_url": "/native-market-logos/openrouter.svg"
     },
     {
       "id": "gpqa_diamond_leader_company_eoy2026",
       "enabled": true,
-      "title": "Which company has the top GPQA Diamond score at end of 2026?",
+      "title": "Which company will have the top GPQA Diamond score at end of 2026?",
       "outcome_set": {
         "type": "categorical",
         "outcomes": [
           {
             "id": "gpqa_leader_anthropic",
             "title": "Anthropic",
+            "market_title": "Will Anthropic have the top GPQA Diamond score at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.15,
@@ -394,6 +530,7 @@
           {
             "id": "gpqa_leader_google",
             "title": "Google",
+            "market_title": "Will Google have the top GPQA Diamond score at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.14,
@@ -405,6 +542,7 @@
           {
             "id": "gpqa_leader_openai",
             "title": "OpenAI",
+            "market_title": "Will OpenAI have the top GPQA Diamond score at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.1,
@@ -416,6 +554,7 @@
           {
             "id": "gpqa_leader_xai",
             "title": "xAI",
+            "market_title": "Will xAI have the top GPQA Diamond score at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.02,
@@ -427,6 +566,7 @@
           {
             "id": "gpqa_leader_other",
             "title": "Other",
+            "market_title": "Will a company other than Anthropic, Google, OpenAI, or xAI have the top GPQA Diamond score at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.02,
@@ -450,13 +590,14 @@
     {
       "id": "swebench_verified_leader_company_eoy2026",
       "enabled": true,
-      "title": "Which company has the top SWE-bench Verified score at end of 2026?",
+      "title": "Which company will have the top SWE-bench Verified score at end of 2026?",
       "outcome_set": {
         "type": "categorical",
         "outcomes": [
           {
             "id": "swe_leader_anthropic",
             "title": "Anthropic",
+            "market_title": "Will Anthropic have the top SWE-bench Verified score at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.32,
@@ -468,6 +609,7 @@
           {
             "id": "swe_leader_openai",
             "title": "OpenAI",
+            "market_title": "Will OpenAI have the top SWE-bench Verified score at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.08,
@@ -479,6 +621,7 @@
           {
             "id": "swe_leader_google",
             "title": "Google",
+            "market_title": "Will Google have the top SWE-bench Verified score at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.05,
@@ -490,6 +633,7 @@
           {
             "id": "swe_leader_deepseek",
             "title": "DeepSeek",
+            "market_title": "Will DeepSeek have the top SWE-bench Verified score at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.02,
@@ -501,6 +645,7 @@
           {
             "id": "swe_leader_other",
             "title": "Other",
+            "market_title": "Will a company other than Anthropic, OpenAI, Google, or DeepSeek have the top SWE-bench Verified score at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.02,
@@ -531,6 +676,7 @@
           {
             "id": "swe_max_below93",
             "title": "Below 93%",
+            "market_title": "Will the top SWE-bench Verified score be below 93% at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.02,
@@ -541,6 +687,7 @@
           {
             "id": "swe_max_93_95",
             "title": "93-95%",
+            "market_title": "Will the top SWE-bench Verified score be at least 93% but below 95% at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.03,
@@ -551,6 +698,7 @@
           {
             "id": "swe_max_95_97",
             "title": "95-97%",
+            "market_title": "Will the top SWE-bench Verified score be at least 95% but below 97% at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.16,
@@ -561,6 +709,7 @@
           {
             "id": "swe_max_97_99",
             "title": "97-99%",
+            "market_title": "Will the top SWE-bench Verified score be at least 97% but below 99% at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.26,
@@ -570,7 +719,8 @@
           },
           {
             "id": "swe_max_above99",
-            "title": "Above 99%",
+            "title": "99% or above",
+            "market_title": "Will the top SWE-bench Verified score be at least 99% at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.05,
@@ -594,13 +744,14 @@
     {
       "id": "hle_leader_company_eoy2026",
       "enabled": true,
-      "title": "Which company has the top Humanity's Last Exam score at end of 2026?",
+      "title": "Which company will have the top Humanity's Last Exam score at end of 2026?",
       "outcome_set": {
         "type": "categorical",
         "outcomes": [
           {
             "id": "hle_leader_anthropic",
             "title": "Anthropic",
+            "market_title": "Will Anthropic have the top Humanity's Last Exam score at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.15,
@@ -612,6 +763,7 @@
           {
             "id": "hle_leader_google",
             "title": "Google",
+            "market_title": "Will Google have the top Humanity's Last Exam score at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.14,
@@ -623,6 +775,7 @@
           {
             "id": "hle_leader_openai",
             "title": "OpenAI",
+            "market_title": "Will OpenAI have the top Humanity's Last Exam score at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.1,
@@ -634,6 +787,7 @@
           {
             "id": "hle_leader_xai",
             "title": "xAI",
+            "market_title": "Will xAI have the top Humanity's Last Exam score at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.02,
@@ -645,6 +799,7 @@
           {
             "id": "hle_leader_other",
             "title": "Other",
+            "market_title": "Will a company other than Anthropic, Google, OpenAI, or xAI have the top Humanity's Last Exam score at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.02,
@@ -675,6 +830,7 @@
           {
             "id": "hle_max_below55",
             "title": "Below 55%",
+            "market_title": "Will the top Humanity's Last Exam score be below 55% at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.02,
@@ -685,6 +841,7 @@
           {
             "id": "hle_max_55_65",
             "title": "55-65%",
+            "market_title": "Will the top Humanity's Last Exam score be at least 55% but below 65% at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.1,
@@ -695,6 +852,7 @@
           {
             "id": "hle_max_65_75",
             "title": "65-75%",
+            "market_title": "Will the top Humanity's Last Exam score be at least 65% but below 75% at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.2,
@@ -705,6 +863,7 @@
           {
             "id": "hle_max_75_85",
             "title": "75-85%",
+            "market_title": "Will the top Humanity's Last Exam score be at least 75% but below 85% at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.12,
@@ -714,7 +873,8 @@
           },
           {
             "id": "hle_max_above85",
-            "title": "Above 85%",
+            "title": "85% or above",
+            "market_title": "Will the top Humanity's Last Exam score be at least 85% at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.03,
@@ -738,13 +898,14 @@
     {
       "id": "mmlu_pro_leader_company_eoy2026",
       "enabled": true,
-      "title": "Which company has the top MMLU-Pro score at end of 2026?",
+      "title": "Which company will have the top MMLU-Pro score at end of 2026?",
       "outcome_set": {
         "type": "categorical",
         "outcomes": [
           {
             "id": "mmlu_leader_google",
             "title": "Google",
+            "market_title": "Will Google have the top MMLU-Pro score at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.12,
@@ -756,6 +917,7 @@
           {
             "id": "mmlu_leader_alibaba",
             "title": "Alibaba",
+            "market_title": "Will Alibaba have the top MMLU-Pro score at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.1,
@@ -767,6 +929,7 @@
           {
             "id": "mmlu_leader_anthropic",
             "title": "Anthropic",
+            "market_title": "Will Anthropic have the top MMLU-Pro score at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.09,
@@ -778,6 +941,7 @@
           {
             "id": "mmlu_leader_openai",
             "title": "OpenAI",
+            "market_title": "Will OpenAI have the top MMLU-Pro score at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.07,
@@ -789,6 +953,7 @@
           {
             "id": "mmlu_leader_other",
             "title": "Other",
+            "market_title": "Will a company other than Google, Alibaba, Anthropic, or OpenAI have the top MMLU-Pro score at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.02,
@@ -812,13 +977,14 @@
     {
       "id": "livecodebench_leader_company_eoy2026",
       "enabled": true,
-      "title": "Which company has the top LiveCodeBench score at end of 2026?",
+      "title": "Which company will have the top LiveCodeBench score at end of 2026?",
       "outcome_set": {
         "type": "categorical",
         "outcomes": [
           {
             "id": "lcb_leader_deepseek",
             "title": "DeepSeek",
+            "market_title": "Will DeepSeek have the top LiveCodeBench score at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.15,
@@ -830,6 +996,7 @@
           {
             "id": "lcb_leader_alibaba",
             "title": "Alibaba",
+            "market_title": "Will Alibaba have the top LiveCodeBench score at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.09,
@@ -841,6 +1008,7 @@
           {
             "id": "lcb_leader_anthropic",
             "title": "Anthropic",
+            "market_title": "Will Anthropic have the top LiveCodeBench score at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.07,
@@ -852,6 +1020,7 @@
           {
             "id": "lcb_leader_openai",
             "title": "OpenAI",
+            "market_title": "Will OpenAI have the top LiveCodeBench score at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.06,
@@ -863,6 +1032,7 @@
           {
             "id": "lcb_leader_other",
             "title": "Other",
+            "market_title": "Will a company other than DeepSeek, Alibaba, Anthropic, or OpenAI have the top LiveCodeBench score at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.02,
@@ -893,6 +1063,7 @@
           {
             "id": "lcb_max_below90",
             "title": "Below 90%",
+            "market_title": "Will the top LiveCodeBench score be below 90% at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.02,
@@ -903,6 +1074,7 @@
           {
             "id": "lcb_max_90_93",
             "title": "90-93%",
+            "market_title": "Will the top LiveCodeBench score be at least 90% but below 93% at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.03,
@@ -913,6 +1085,7 @@
           {
             "id": "lcb_max_93_96",
             "title": "93-96%",
+            "market_title": "Will the top LiveCodeBench score be at least 93% but below 96% at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.18,
@@ -923,6 +1096,7 @@
           {
             "id": "lcb_max_96_99",
             "title": "96-99%",
+            "market_title": "Will the top LiveCodeBench score be at least 96% but below 99% at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.24,
@@ -932,7 +1106,8 @@
           },
           {
             "id": "lcb_max_above99",
-            "title": "Above 99%",
+            "title": "99% or above",
+            "market_title": "Will the top LiveCodeBench score be at least 99% at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.04,
@@ -956,13 +1131,14 @@
     {
       "id": "metr_time_horizon_50pct_leader_eoy2026",
       "enabled": true,
-      "title": "Which company has the longest METR 50% time horizon at end of 2026?",
+      "title": "Which company's model will have the longest METR 50% time horizon at end of 2026?",
       "outcome_set": {
         "type": "categorical",
         "outcomes": [
           {
             "id": "metr_th50_leader_anthropic",
             "title": "Anthropic",
+            "market_title": "Will an Anthropic model have the longest METR 50% time horizon at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.32,
@@ -974,6 +1150,7 @@
           {
             "id": "metr_th50_leader_openai",
             "title": "OpenAI",
+            "market_title": "Will an OpenAI model have the longest METR 50% time horizon at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.1,
@@ -985,6 +1162,7 @@
           {
             "id": "metr_th50_leader_google",
             "title": "Google",
+            "market_title": "Will a Google model have the longest METR 50% time horizon at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.1,
@@ -996,6 +1174,7 @@
           {
             "id": "metr_th50_leader_xai",
             "title": "xAI",
+            "market_title": "Will an xAI model have the longest METR 50% time horizon at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.02,
@@ -1007,6 +1186,7 @@
           {
             "id": "metr_th50_leader_other",
             "title": "Other",
+            "market_title": "Will a model from a company other than Anthropic, OpenAI, Google, or xAI have the longest METR 50% time horizon at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.02,
@@ -1025,7 +1205,7 @@
         "type": "manual",
         "instructions": "Open https://metr.org/time-horizons/, select the 50% time-horizon view, and identify the single model with the highest 50%-task-completion time horizon among all models listed at the read time. Map that model to its provider using the mapping in the resolution criteria and resolve to that company (or Other).\n\nFallback: If the interactive chart fails to load, use Epoch AI's mirror at https://epoch.ai/benchmarks/metr-time-horizons, or the most recent METR blog post reporting the same 50%-horizon figure."
       },
-      "event_image_url": "https://www.google.com/s2/favicons?domain=metr.org&sz=128"
+      "event_image_url": "/native-market-logos/metr.svg"
     },
     {
       "id": "metr_time_horizon_50pct_ladder_eoy2026",
@@ -1039,6 +1219,7 @@
           {
             "id": "metr_th50_8h_eoy2026",
             "title": "≥ 8 hours",
+            "market_title": "Will the longest METR 50% time horizon be at least 8 hours at end of 2026?",
             "enabled": true,
             "threshold": 8,
             "quote_range": {
@@ -1050,6 +1231,7 @@
           {
             "id": "metr_th50_12h_eoy2026",
             "title": "≥ 12 hours",
+            "market_title": "Will the longest METR 50% time horizon be at least 12 hours at end of 2026?",
             "enabled": true,
             "threshold": 12,
             "quote_range": {
@@ -1061,6 +1243,7 @@
           {
             "id": "metr_th50_16h_eoy2026",
             "title": "≥ 16 hours",
+            "market_title": "Will the longest METR 50% time horizon be at least 16 hours at end of 2026?",
             "enabled": true,
             "threshold": 16,
             "quote_range": {
@@ -1072,6 +1255,7 @@
           {
             "id": "metr_th50_24h_eoy2026",
             "title": "≥ 24 hours",
+            "market_title": "Will the longest METR 50% time horizon be at least 24 hours at end of 2026?",
             "enabled": true,
             "threshold": 24,
             "quote_range": {
@@ -1083,6 +1267,7 @@
           {
             "id": "metr_th50_40h_eoy2026",
             "title": "≥ 40 hours",
+            "market_title": "Will the longest METR 50% time horizon be at least 40 hours at end of 2026?",
             "enabled": true,
             "threshold": 40,
             "quote_range": {
@@ -1102,7 +1287,7 @@
         "type": "manual",
         "instructions": "Open https://metr.org/time-horizons/, select the 50% time-horizon view, and read the maximum 50%-horizon point estimate across all models plotted at the read time. Convert to hours and mark each rung YES whose threshold is <= that value.\n\nFallback: If the interactive chart fails to load, use Epoch AI's mirror at https://epoch.ai/benchmarks/metr-time-horizons, or the most recent METR blog post reporting the leading 50%-horizon figure."
       },
-      "event_image_url": "https://www.google.com/s2/favicons?domain=metr.org&sz=128"
+      "event_image_url": "/native-market-logos/metr.svg"
     },
     {
       "id": "metr_time_horizon_80pct_ladder_eoy2026",
@@ -1116,6 +1301,7 @@
           {
             "id": "metr_th80_2h_eoy2026",
             "title": "≥ 2 hours",
+            "market_title": "Will the longest METR 80% time horizon be at least 2 hours at end of 2026?",
             "enabled": true,
             "threshold": 2,
             "quote_range": {
@@ -1127,6 +1313,7 @@
           {
             "id": "metr_th80_4h_eoy2026",
             "title": "≥ 4 hours",
+            "market_title": "Will the longest METR 80% time horizon be at least 4 hours at end of 2026?",
             "enabled": true,
             "threshold": 4,
             "quote_range": {
@@ -1138,6 +1325,7 @@
           {
             "id": "metr_th80_8h_eoy2026",
             "title": "≥ 8 hours",
+            "market_title": "Will the longest METR 80% time horizon be at least 8 hours at end of 2026?",
             "enabled": true,
             "threshold": 8,
             "quote_range": {
@@ -1149,6 +1337,7 @@
           {
             "id": "metr_th80_12h_eoy2026",
             "title": "≥ 12 hours",
+            "market_title": "Will the longest METR 80% time horizon be at least 12 hours at end of 2026?",
             "enabled": true,
             "threshold": 12,
             "quote_range": {
@@ -1160,6 +1349,7 @@
           {
             "id": "metr_th80_16h_eoy2026",
             "title": "≥ 16 hours",
+            "market_title": "Will the longest METR 80% time horizon be at least 16 hours at end of 2026?",
             "enabled": true,
             "threshold": 16,
             "quote_range": {
@@ -1179,7 +1369,7 @@
         "type": "manual",
         "instructions": "Open https://metr.org/time-horizons/, select the 80% time-horizon view, and read the maximum 80%-horizon point estimate across all models plotted at the read time. Convert to hours and mark each rung YES whose threshold is <= that value.\n\nFallback: If the interactive chart fails to load, use Epoch AI's mirror at https://epoch.ai/benchmarks/metr-time-horizons, or the most recent METR blog post reporting the leading 80%-horizon figure."
       },
-      "event_image_url": "https://www.google.com/s2/favicons?domain=metr.org&sz=128"
+      "event_image_url": "/native-market-logos/metr.svg"
     },
     {
       "id": "context_window_max_advertised_eoy2026",
@@ -1193,6 +1383,7 @@
           {
             "id": "context_window_above_2m_eoy2026",
             "title": "≥ 2M tokens",
+            "market_title": "Will a generally available model on a standard public API advertise a context window of at least 2,000,000 tokens by end of 2026?",
             "enabled": true,
             "threshold": 2000000,
             "quote_range": {
@@ -1204,6 +1395,7 @@
           {
             "id": "context_window_above_3m_eoy2026",
             "title": "≥ 3M tokens",
+            "market_title": "Will a generally available model on a standard public API advertise a context window of at least 3,000,000 tokens by end of 2026?",
             "enabled": true,
             "threshold": 3000000,
             "quote_range": {
@@ -1215,23 +1407,13 @@
           {
             "id": "context_window_above_5m_eoy2026",
             "title": "≥ 5M tokens",
+            "market_title": "Will a generally available model on a standard public API advertise a context window of at least 5,000,000 tokens by end of 2026?",
             "enabled": true,
             "threshold": 5000000,
             "quote_range": {
               "min": 0.06,
               "max": 0.3,
               "initial": 0.15
-            }
-          },
-          {
-            "id": "context_window_above_10m_eoy2026",
-            "title": "≥ 10M tokens",
-            "enabled": true,
-            "threshold": 10000000,
-            "quote_range": {
-              "min": 0.02,
-              "max": 0.16,
-              "initial": 0.06
             }
           }
         ]
@@ -1243,14 +1425,14 @@
       "category": "AI",
       "resolution_source": {
         "type": "manual",
-        "instructions": "At read time, determine the single largest advertised maximum context window (in tokens) across all generally-available LLMs. Check the docs/model cards of the current context leaders — Meta Llama (https://ai.meta.com/blog/llama-4-multimodal-intelligence/ ; Llama 4 Scout = 10M today), Google Gemini (https://ai.google.dev/gemini-api/docs/models), Anthropic, OpenAI, plus any newer entrant — and take the maximum headline figure from a GA model (public API or open weights; exclude research-preview, waitlist, and enterprise-gated-only tiers). Cross-check against the whatllm.org tracker. Resolve each rung YES iff that maximum >= the rung's threshold.\n\nFallback: If a provider page is unreachable, use the WhatLLM.org largest-context tracker (https://whatllm.org/largest-context-window-llm) or the OpenRouter model list (https://openrouter.ai/models, sorted by context length) for the leading open-weights/API figure."
+        "instructions": "At read time, determine the largest context window officially advertised for a generally available model on a standard public API. Check the official API documentation for Google Gemini, Anthropic, OpenAI, xAI, DeepSeek, and any newer entrant; exclude open-weights/self-hosted-only models, research previews, waitlists, private betas, and enterprise-gated-only tiers. Cross-check against the WhatLLM tracker and resolve each rung YES iff the largest eligible figure is at least that rung's threshold.\n\nFallback: If a provider page is unreachable, use the WhatLLM largest-context tracker (https://whatllm.org/largest-context-window-llm) or the OpenRouter model list, while preserving the standard-public-API eligibility rule."
       },
       "event_image_url": "https://www.google.com/s2/favicons?domain=whatllm.org&sz=128"
     },
     {
       "id": "anthropic_flagship_input_price_below_eoy2026",
       "enabled": true,
-      "title": "How low will Anthropic's flagship Claude API input price be at end of 2026?",
+      "title": "How low will Anthropic's flagship Opus base API input price be at end of 2026?",
       "outcome_set": {
         "type": "threshold",
         "direction": "below",
@@ -1259,6 +1441,7 @@
           {
             "id": "anthropic_input_le_15",
             "title": "≤ $15 / MTok",
+            "market_title": "Will Anthropic's flagship Opus base input API price be at or below $15/MTok at end of 2026?",
             "enabled": true,
             "threshold": 15,
             "quote_range": {
@@ -1270,6 +1453,7 @@
           {
             "id": "anthropic_input_le_10",
             "title": "≤ $10 / MTok",
+            "market_title": "Will Anthropic's flagship Opus base input API price be at or below $10/MTok at end of 2026?",
             "enabled": true,
             "threshold": 10,
             "quote_range": {
@@ -1281,6 +1465,7 @@
           {
             "id": "anthropic_input_le_8",
             "title": "≤ $8 / MTok",
+            "market_title": "Will Anthropic's flagship Opus base input API price be at or below $8/MTok at end of 2026?",
             "enabled": true,
             "threshold": 8,
             "quote_range": {
@@ -1292,6 +1477,7 @@
           {
             "id": "anthropic_input_le_5",
             "title": "≤ $5 / MTok",
+            "market_title": "Will Anthropic's flagship Opus base input API price be at or below $5/MTok at end of 2026?",
             "enabled": true,
             "threshold": 5,
             "quote_range": {
@@ -1303,6 +1489,7 @@
           {
             "id": "anthropic_input_le_3",
             "title": "≤ $3 / MTok",
+            "market_title": "Will Anthropic's flagship Opus base input API price be at or below $3/MTok at end of 2026?",
             "enabled": true,
             "threshold": 3,
             "quote_range": {
@@ -1315,19 +1502,19 @@
       },
       "units": "probability",
       "end_time": "2027-01-01T00:00:00Z",
-      "resolution_criteria": "Resolves each rung YES if Anthropic's flagship (most-capable) Claude model — currently the Fable line (Fable 5) — has a standard base API input price at or below the rung's dollar threshold per million input tokens, as read on Anthropic's official pricing page (https://platform.claude.com/docs/en/about-claude/pricing) at 2026-12-31 23:59 UTC. Use the standard global, non-cached, non-batch input price of that model. If Anthropic renames or replaces the flagship line, use the then-current most-capable Claude model's standard input price. Tie-break: a price exactly equal to a threshold counts as at-or-below. If the pricing page is unreachable, use the OpenRouter/aggregator listing for the same model as backstop; void only if no price is published.",
+      "resolution_criteria": "Resolves each rung YES if Anthropic's flagship Opus model — the highest-numbered non-deprecated Opus model — has a standard base API input price at or below the rung's dollar threshold per million input tokens, as read on Anthropic's official pricing page (https://platform.claude.com/docs/en/about-claude/pricing) at 2026-12-31 23:59 UTC. Use the standard global, non-cached, non-batch input price. A price exactly equal to a threshold counts as at-or-below. If Anthropic renames Opus while retaining an explicitly designated successor flagship line, use that direct successor; if it retires Opus without a priced successor, every rung resolves NO. If the pricing page is unreachable, use Anthropic's official model page or the OpenRouter listing for the same model as backstop.",
       "source_url": "https://platform.claude.com/docs/en/about-claude/pricing",
       "category": "AI",
       "resolution_source": {
         "type": "manual",
         "instructions": "Fetch the pricing page and read the standard input $/MTok for the highest-numbered non-deprecated Opus model. Compare against each rung threshold.\n\nFallback: If the docs page is unreachable, read the Opus input price from https://www.anthropic.com/pricing or the Opus model card at https://www.anthropic.com/claude/opus."
       },
-      "event_image_url": "https://www.google.com/s2/favicons?domain=anthropic.com&sz=128"
+      "event_image_url": "/native-market-logos/anthropic.svg"
     },
     {
       "id": "openai_flagship_input_price_below_eoy2026",
       "enabled": true,
-      "title": "How low will OpenAI's flagship GPT API input price be at end of 2026?",
+      "title": "How low will OpenAI's flagship model standard input API price be at end of 2026?",
       "outcome_set": {
         "type": "threshold",
         "direction": "below",
@@ -1336,6 +1523,7 @@
           {
             "id": "openai_input_le_15",
             "title": "≤ $15/MTok",
+            "market_title": "Will OpenAI's flagship model standard input API price be at or below $15/MTok at end of 2026?",
             "enabled": true,
             "threshold": 15,
             "quote_range": {
@@ -1347,6 +1535,7 @@
           {
             "id": "openai_input_le_8",
             "title": "≤ $8/MTok",
+            "market_title": "Will OpenAI's flagship model standard input API price be at or below $8/MTok at end of 2026?",
             "enabled": true,
             "threshold": 8,
             "quote_range": {
@@ -1358,6 +1547,7 @@
           {
             "id": "openai_input_le_5",
             "title": "≤ $5/MTok",
+            "market_title": "Will OpenAI's flagship model standard input API price be at or below $5/MTok at end of 2026?",
             "enabled": true,
             "threshold": 5,
             "quote_range": {
@@ -1369,6 +1559,7 @@
           {
             "id": "openai_input_le_3",
             "title": "≤ $3/MTok",
+            "market_title": "Will OpenAI's flagship model standard input API price be at or below $3/MTok at end of 2026?",
             "enabled": true,
             "threshold": 3,
             "quote_range": {
@@ -1380,6 +1571,7 @@
           {
             "id": "openai_input_le_2",
             "title": "≤ $2/MTok",
+            "market_title": "Will OpenAI's flagship model standard input API price be at or below $2/MTok at end of 2026?",
             "enabled": true,
             "threshold": 2,
             "quote_range": {
@@ -1399,7 +1591,7 @@
         "type": "manual",
         "instructions": "Read the standard short-context input $/MTok for the highest-numbered non-deprecated GPT flagship (the base model, not the Pro variant, not batch/priority/flex). Compare against each rung threshold.\n\nFallback: If the OpenAI pricing page is JS-blocked or unreachable, read the flagship's input price from https://openrouter.ai/openai or https://pricepertoken.com (OpenAI section), preferring the figure that matches OpenAI's own standard list price."
       },
-      "event_image_url": "https://www.google.com/s2/favicons?domain=openai.com&sz=128"
+      "event_image_url": "/native-market-logos/openai.svg"
     },
     {
       "id": "google_flagship_input_price_below_eoy2026",
@@ -1413,6 +1605,7 @@
           {
             "id": "google_input_le_8",
             "title": "≤ $8/MTok",
+            "market_title": "Will Google's flagship Gemini API input price be at or below $8/MTok at end of 2026?",
             "enabled": true,
             "threshold": 8,
             "quote_range": {
@@ -1424,6 +1617,7 @@
           {
             "id": "google_input_le_4",
             "title": "≤ $4/MTok",
+            "market_title": "Will Google's flagship Gemini API input price be at or below $4/MTok at end of 2026?",
             "enabled": true,
             "threshold": 4,
             "quote_range": {
@@ -1435,6 +1629,7 @@
           {
             "id": "google_input_le_2",
             "title": "≤ $2/MTok",
+            "market_title": "Will Google's flagship Gemini API input price be at or below $2/MTok at end of 2026?",
             "enabled": true,
             "threshold": 2,
             "quote_range": {
@@ -1446,6 +1641,7 @@
           {
             "id": "google_input_le_1_5",
             "title": "≤ $1.50/MTok",
+            "market_title": "Will Google's flagship Gemini API input price be at or below $1.50/MTok at end of 2026?",
             "enabled": true,
             "threshold": 1.5,
             "quote_range": {
@@ -1457,6 +1653,7 @@
           {
             "id": "google_input_le_1",
             "title": "≤ $1/MTok",
+            "market_title": "Will Google's flagship Gemini API input price be at or below $1/MTok at end of 2026?",
             "enabled": true,
             "threshold": 1,
             "quote_range": {
@@ -1490,6 +1687,7 @@
           {
             "id": "rli_top_ge_15pct_eoy2026",
             "title": "≥ 15%",
+            "market_title": "Will the top Remote Labor Index automation rate be at least 15% at end of 2026?",
             "enabled": true,
             "threshold": 15,
             "quote_range": {
@@ -1501,6 +1699,7 @@
           {
             "id": "rli_top_ge_20pct_eoy2026",
             "title": "≥ 20%",
+            "market_title": "Will the top Remote Labor Index automation rate be at least 20% at end of 2026?",
             "enabled": true,
             "threshold": 20,
             "quote_range": {
@@ -1512,6 +1711,7 @@
           {
             "id": "rli_top_ge_25pct_eoy2026",
             "title": "≥ 25%",
+            "market_title": "Will the top Remote Labor Index automation rate be at least 25% at end of 2026?",
             "enabled": true,
             "threshold": 25,
             "quote_range": {
@@ -1523,6 +1723,7 @@
           {
             "id": "rli_top_ge_30pct_eoy2026",
             "title": "≥ 30%",
+            "market_title": "Will the top Remote Labor Index automation rate be at least 30% at end of 2026?",
             "enabled": true,
             "threshold": 30,
             "quote_range": {
@@ -1534,6 +1735,7 @@
           {
             "id": "rli_top_ge_40pct_eoy2026",
             "title": "≥ 40%",
+            "market_title": "Will the top Remote Labor Index automation rate be at least 40% at end of 2026?",
             "enabled": true,
             "threshold": 40,
             "quote_range": {
@@ -1545,6 +1747,7 @@
           {
             "id": "rli_top_ge_50pct_eoy2026",
             "title": "≥ 50%",
+            "market_title": "Will the top Remote Labor Index automation rate be at least 50% at end of 2026?",
             "enabled": true,
             "threshold": 50,
             "quote_range": {
@@ -1569,13 +1772,14 @@
     {
       "id": "kernelbench_mega_top_company_eoy2026",
       "enabled": true,
-      "title": "Which company tops KernelBench-Mega at end of 2026?",
+      "title": "Which company will top KernelBench-Mega at end of 2026?",
       "outcome_set": {
         "type": "categorical",
         "outcomes": [
           {
             "id": "kbmega_company_anthropic",
             "title": "Anthropic",
+            "market_title": "Will Anthropic top KernelBench-Mega at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.4,
@@ -1587,6 +1791,7 @@
           {
             "id": "kbmega_company_openai",
             "title": "OpenAI",
+            "market_title": "Will OpenAI top KernelBench-Mega at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.05,
@@ -1598,6 +1803,7 @@
           {
             "id": "kbmega_company_google",
             "title": "Google",
+            "market_title": "Will Google top KernelBench-Mega at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.02,
@@ -1609,6 +1815,7 @@
           {
             "id": "kbmega_company_xai",
             "title": "xAI",
+            "market_title": "Will xAI top KernelBench-Mega at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.02,
@@ -1620,6 +1827,7 @@
           {
             "id": "kbmega_company_other",
             "title": "Other",
+            "market_title": "Will a company other than Anthropic, OpenAI, Google, or xAI top KernelBench-Mega at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.02,
@@ -1654,6 +1862,7 @@
           {
             "id": "kbmega_speedup_ge15x",
             "title": "≥ 15x",
+            "market_title": "Will the top KernelBench-Mega decode speedup be at least 15x at end of 2026?",
             "enabled": true,
             "threshold": 15,
             "quote_range": {
@@ -1665,6 +1874,7 @@
           {
             "id": "kbmega_speedup_ge20x",
             "title": "≥ 20x",
+            "market_title": "Will the top KernelBench-Mega decode speedup be at least 20x at end of 2026?",
             "enabled": true,
             "threshold": 20,
             "quote_range": {
@@ -1676,6 +1886,7 @@
           {
             "id": "kbmega_speedup_ge25x",
             "title": "≥ 25x",
+            "market_title": "Will the top KernelBench-Mega decode speedup be at least 25x at end of 2026?",
             "enabled": true,
             "threshold": 25,
             "quote_range": {
@@ -1687,6 +1898,7 @@
           {
             "id": "kbmega_speedup_ge30x",
             "title": "≥ 30x",
+            "market_title": "Will the top KernelBench-Mega decode speedup be at least 30x at end of 2026?",
             "enabled": true,
             "threshold": 30,
             "quote_range": {
@@ -1698,6 +1910,7 @@
           {
             "id": "kbmega_speedup_ge40x",
             "title": "≥ 40x",
+            "market_title": "Will the top KernelBench-Mega decode speedup be at least 40x at end of 2026?",
             "enabled": true,
             "threshold": 40,
             "quote_range": {
@@ -1709,6 +1922,7 @@
           {
             "id": "kbmega_speedup_ge50x",
             "title": "≥ 50x",
+            "market_title": "Will the top KernelBench-Mega decode speedup be at least 50x at end of 2026?",
             "enabled": true,
             "threshold": 50,
             "quote_range": {
@@ -1735,13 +1949,14 @@
     {
       "id": "osworld2_leader_company_eoy2026",
       "enabled": true,
-      "title": "Which company tops OSWorld 2.0 at end of 2026?",
+      "title": "Which company will top OSWorld 2.0 at end of 2026?",
       "outcome_set": {
         "type": "categorical",
         "outcomes": [
           {
             "id": "osworld2_leader_anthropic",
             "title": "Anthropic",
+            "market_title": "Will Anthropic top OSWorld 2.0 at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.45,
@@ -1753,6 +1968,7 @@
           {
             "id": "osworld2_leader_openai",
             "title": "OpenAI",
+            "market_title": "Will OpenAI top OSWorld 2.0 at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.04,
@@ -1764,6 +1980,7 @@
           {
             "id": "osworld2_leader_google",
             "title": "Google",
+            "market_title": "Will Google top OSWorld 2.0 at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.02,
@@ -1775,6 +1992,7 @@
           {
             "id": "osworld2_leader_alibaba",
             "title": "Alibaba",
+            "market_title": "Will Alibaba top OSWorld 2.0 at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.02,
@@ -1786,6 +2004,7 @@
           {
             "id": "osworld2_leader_other",
             "title": "Other",
+            "market_title": "Will a company other than Anthropic, OpenAI, Google, or Alibaba top OSWorld 2.0 at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.02,
@@ -1816,6 +2035,7 @@
           {
             "id": "osworld2_max_below20",
             "title": "Below 20%",
+            "market_title": "Will the top binary success rate on the Snorkel OSWorld 2.0 leaderboard be below 20% at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.02,
@@ -1826,6 +2046,7 @@
           {
             "id": "osworld2_max_20_25",
             "title": "20-25%",
+            "market_title": "Will the top binary success rate on the Snorkel OSWorld 2.0 leaderboard be at least 20% but below 25% at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.05,
@@ -1836,6 +2057,7 @@
           {
             "id": "osworld2_max_25_30",
             "title": "25-30%",
+            "market_title": "Will the top binary success rate on the Snorkel OSWorld 2.0 leaderboard be at least 25% but below 30% at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.06,
@@ -1846,6 +2068,7 @@
           {
             "id": "osworld2_max_30_40",
             "title": "30-40%",
+            "market_title": "Will the top binary success rate on the Snorkel OSWorld 2.0 leaderboard be at least 30% but below 40% at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.06,
@@ -1856,6 +2079,7 @@
           {
             "id": "osworld2_max_40_50",
             "title": "40-50%",
+            "market_title": "Will the top binary success rate on the Snorkel OSWorld 2.0 leaderboard be at least 40% but below 50% at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.02,
@@ -1865,7 +2089,8 @@
           },
           {
             "id": "osworld2_max_above50",
-            "title": "Above 50%",
+            "title": "50% or above",
+            "market_title": "Will the top binary success rate on the Snorkel OSWorld 2.0 leaderboard be at least 50% at end of 2026?",
             "enabled": true,
             "quote_range": {
               "min": 0.02,

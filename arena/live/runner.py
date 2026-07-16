@@ -80,12 +80,11 @@ class LiveConfig:
     # <=0 on the CLI) disables the threshold (unlimited).
     llm_budget_usd: float | None = 5.0
     fast_count: int = 5
-    noise_count: int = 5
+    noise_count: int = 15
     noise_balance: float = 50.0
-    # Zero-fills fix: aggressive two-sided crossing noise on a durable (GTC) book.
-    # noise_time_in_force overrides order_time_in_force for the crossing noise
-    # traders so a resting book accumulates even while LLM/fast flow stays IOC.
-    noise_time_in_force: TimeInForce = "GTC"
+    # Sparse aggressive flow uses IOC so unmatched noise does not accumulate or
+    # prevent an actor from participating in later blocks.
+    noise_time_in_force: TimeInForce = "IOC"
     synthetic_strategy: SyntheticStrategyConfig = field(default_factory=SyntheticStrategyConfig)
     db_path: str = ""
     metrics_host: str = "0.0.0.0"
@@ -1011,11 +1010,9 @@ async def run_live(config: LiveConfig):
             fast.time_in_force = config.order_time_in_force
             fast_traders.append(fast)
 
-        # Noise traders. When crossing is enabled (default), they cover the
-        # same selected markets the LLM bots trade and post aggressive
-        # two-sided crossing orders on a durable
-        # (GTC) book, which is the reliable path to fills. When disabled they
-        # fall back to the legacy inventory-aware native-only noise flow.
+        # Noise traders. When aggressive flow is enabled (default), independent
+        # accounts sample a sparse subset and post one order per selected
+        # market. When disabled they fall back to native-only noise flow.
         crossing = config.synthetic_strategy.crossing_enabled
         noise_traders = []
         for i in range(config.noise_count):
@@ -1395,17 +1392,17 @@ def main():
             if args.synthetic_randomization_range is not None
             else _env_float("ARENA_SYNTHETIC_RANDOMIZATION_RANGE", 0.02)
         )
-        # Zero-fills fix: well-funded, aggressive two-sided crossing noise.
+        # Sparse independent noise: 15 actors × 4 draws covers roughly 25% of
+        # a 206-market catalog per block without a privileged control plane.
         noise_count = (
-            args.noise_count if args.noise_count is not None else _env_int("ARENA_NOISE_COUNT", 5)
+            args.noise_count if args.noise_count is not None else _env_int("ARENA_NOISE_COUNT", 15)
         )
-        # Well-funded by default so crossing noise sustains a steady fill stream;
-        # each crossing pair pays a small (~2*crossing_edge) mint premium.
+        # Well-funded by default so noise can keep trading across the catalog.
         noise_balance = _env_float("ARENA_NOISE_BALANCE", 100_000.0)
         crossing_enabled = _env_bool("ARENA_NOISE_CROSSING", True)
         crossing_edge = _env_float("ARENA_NOISE_CROSSING_EDGE", 0.03)
-        crossing_markets_per_block = _env_int("ARENA_NOISE_MARKETS_PER_BLOCK", 6)
-        noise_tif_raw = os.environ.get("ARENA_NOISE_TIF", "GTC").strip().upper()
+        crossing_markets_per_block = _env_int("ARENA_NOISE_MARKETS_PER_BLOCK", 4)
+        noise_tif_raw = os.environ.get("ARENA_NOISE_TIF", "IOC").strip().upper()
         if noise_tif_raw not in ("GTC", "IOC", "GTD"):
             raise ValueError("ARENA_NOISE_TIF must be one of: GTC, IOC, GTD")
         noise_time_in_force: TimeInForce = noise_tif_raw  # type: ignore[assignment]

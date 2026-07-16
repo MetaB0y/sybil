@@ -21,6 +21,14 @@ preserves flash-liquidity, atomicity, group self-trade-prevention semantics, and
 exact ordering against nonce/key/bridge actions. Multi-market/custom payoff
 execution is rejected at API, admission, solver, and verifier boundaries.
 
+Complete-set self-trade prevention within protocol `MarketGroup`s is
+price-aware. Complementary YES/NO bids on one grouped market are rejected only
+when their limits sum to at least $1. Merely bidding across every grouped
+outcome is also valid: a full group of YES bids is rejected only when its
+limits can fund the $1 group mint. Non-crossing market-maker quotes remain
+eligible under one shared flash-liquidity budget. Independent binary markets
+remain outside this group-specific wash-trade guard.
+
 Admission has lightweight backpressure before either path mutates state:
 
 - HTTP order-write endpoints have a global and per-client token bucket before JSON parsing and P256 signature work.

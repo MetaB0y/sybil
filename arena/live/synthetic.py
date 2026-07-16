@@ -35,13 +35,12 @@ class SyntheticStrategyConfig:
     random_seed: int = 42
     randomization_range: float = MAX_RANDOMIZATION_RANGE
     enabled_market_ids: frozenset[int] | None = None
-    # SYB "zero-fills" fix: aggressive two-sided crossing noise. When enabled,
-    # noise traders post BOTH a BuyYes and a BuyNo per market at prices whose
-    # sum exceeds $1, so they cross via complete-set minting (p+q>=1) against
-    # the resting book, against other noise accounts, or (with GTC) over time.
+    # Aggressive sparse noise. Each account submits at most one inventory-aware
+    # order per selected market; distinct accounts can cross one another or the
+    # MM without manufacturing a same-account complete set.
     crossing_enabled: bool = True
-    crossing_edge: float = 0.03  # how far past mid each side crosses; sum = 1 + 2*edge
-    crossing_markets_per_block: int = 6  # 0 = every eligible market each block
+    crossing_edge: float = 0.03
+    crossing_markets_per_block: int = 4  # 15 actors × 4 draws ≈ 25% of 206 markets
 
     def __post_init__(self) -> None:
         if self.max_inventory < 0:
@@ -320,23 +319,15 @@ class FastReferenceTrader(BaseAgent):
                 for market_id, market in markets.items()
                 if market_id in self.market_ids
             }
-        return self.strategy.generate_orders(
-            block, markets, self.positions, self.current_balance
-        )
+        return self.strategy.generate_orders(block, markets, self.positions, self.current_balance)
 
 
 class CrossingNoiseStrategy:
-    """Aggressive two-sided taker that reliably produces complete-set matches.
+    """Aggressive sparse flow that never crosses an account with itself.
 
-    The zero-fills problem is order-flow density: LLM bots + MM post one-sided,
-    non-crossing IOC quotes, so nothing crosses in-batch and no durable book
-    forms. This strategy fixes that directly. Each block it picks up to
-    ``crossing_markets_per_block`` markets from the runner's selected cohort
-    and, on each, submits BOTH a BuyYes and a BuyNo at prices whose
-    sum exceeds $1. Because BuyYes@p + BuyNo@q with p+q>=1 mints a complete set,
-    these orders cross — against the resting book, against the opposite side of
-    other well-funded noise accounts, or (under GTC) accumulated over time.
-    Well-funded accounts absorb the small (~2*edge) per-set mint premium.
+    Each actor samples a small market subset and emits at most one order per
+    market. Independent seeds create opposing flow across accounts, while
+    prices just through the previous mark can also trade with MM quotes.
     """
 
     def __init__(self, config: SyntheticStrategyConfig):
@@ -367,12 +358,10 @@ class CrossingNoiseStrategy:
             chosen = candidates
 
         edge = self.config.crossing_edge
-        budget = self.config.notional_budget
         remaining_cash = cash
+        used_buy_yes = False
         orders: list[OrderSpec] = []
         for market in chosen:
-            if remaining_cash <= 0:
-                break
             # Anchor on the previous Sybil price; fresh markets default to 0.5.
             mid = _previous_sybil_price(block, market)
             if mid is None:
@@ -385,24 +374,67 @@ class CrossingNoiseStrategy:
             mid = _clamp_price(mid + jitter)
 
             yes_pos, no_pos = _positions(positions, market.id)
-            yes_price = _clamp_price(mid + edge)
-            no_price = _clamp_price((1.0 - mid) + edge)
-
-            yes_qty = _buy_qty(
-                budget, yes_price, self.config.max_inventory - yes_pos, remaining_cash
+            order = self._one_order(
+                market.id,
+                mid,
+                yes_pos,
+                no_pos,
+                remaining_cash,
+                edge,
+                allow_buy_yes=not used_buy_yes,
             )
-            if yes_qty > 0:
-                orders.append(BuyYes.at_price(market.id, yes_price, yes_qty))
-                remaining_cash -= yes_qty * yes_price
-
-            no_qty = _buy_qty(
-                budget, no_price, self.config.max_inventory - no_pos, remaining_cash
-            )
-            if no_qty > 0:
-                orders.append(BuyNo.at_price(market.id, no_price, no_qty))
-                remaining_cash -= no_qty * no_price
+            if order is None:
+                continue
+            orders.append(order)
+            used_buy_yes |= isinstance(order, BuyYes)
+            if isinstance(order, (BuyYes, BuyNo)):
+                remaining_cash -= order.quantity * (order.limit_price_nanos / NANOS_PER_DOLLAR)
 
         return orders
+
+    def _one_order(
+        self,
+        market_id: int,
+        mid: float,
+        yes_pos: float,
+        no_pos: float,
+        cash: float,
+        edge: float,
+        *,
+        allow_buy_yes: bool,
+    ) -> OrderSpec | None:
+        budget = self.config.notional_budget
+        actions: list[tuple[str, float]] = []
+        # At most one YES buy per actor submission also prevents a sparse actor
+        # from accidentally completing every outcome in a small MarketGroup.
+        if allow_buy_yes and yes_pos < self.config.max_inventory and cash > 0:
+            actions.append(("buy_yes", self.config.max_inventory - yes_pos))
+        if no_pos < self.config.max_inventory and cash > 0:
+            actions.append(("buy_no", self.config.max_inventory - no_pos))
+        if yes_pos > 0:
+            actions.append(("sell_yes", yes_pos))
+        if no_pos > 0:
+            actions.append(("sell_no", no_pos))
+        if not actions:
+            return None
+
+        action, room = self.rng.choice(actions)
+        if action == "buy_yes":
+            price = _clamp_price(mid + edge)
+            quantity = _buy_qty(budget, price, room, cash)
+            return BuyYes.at_price(market_id, price, quantity) if quantity > 0 else None
+        if action == "buy_no":
+            price = _clamp_price((1.0 - mid) + edge)
+            quantity = _buy_qty(budget, price, room, cash)
+            return BuyNo.at_price(market_id, price, quantity) if quantity > 0 else None
+        if action == "sell_yes":
+            price = _clamp_price(mid - edge)
+            quantity = _sell_qty(budget, price, room)
+            return SellYes.at_price(market_id, price, quantity) if quantity > 0 else None
+
+        price = _clamp_price((1.0 - mid) - edge)
+        quantity = _sell_qty(budget, price, room)
+        return SellNo.at_price(market_id, price, quantity) if quantity > 0 else None
 
 
 class CrossingNoiseTrader(BaseAgent):
@@ -430,9 +462,7 @@ class CrossingNoiseTrader(BaseAgent):
                 for market_id, market in markets.items()
                 if market_id in self.market_ids
             }
-        return self.strategy.generate_orders(
-            block, markets, self.positions, self.current_balance
-        )
+        return self.strategy.generate_orders(block, markets, self.positions, self.current_balance)
 
 
 class NativeNoiseTrader(BaseAgent):
@@ -460,6 +490,4 @@ class NativeNoiseTrader(BaseAgent):
                 for market_id, market in markets.items()
                 if market_id in self.market_ids
             }
-        return self.strategy.generate_orders(
-            block, markets, self.positions, self.current_balance
-        )
+        return self.strategy.generate_orders(block, markets, self.positions, self.current_balance)

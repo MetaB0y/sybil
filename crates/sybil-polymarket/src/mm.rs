@@ -1153,6 +1153,31 @@ mod tests {
     }
 
     #[test]
+    fn default_submission_limit_covers_two_sided_206_market_epoch() {
+        let runtime_config = Config::parse_from(["sybil-polymarket"]);
+        assert_eq!(runtime_config.mm_max_orders_per_block, 512);
+
+        let quote_config = default_config();
+        let inputs: Vec<_> = (1..=206)
+            .map(|market_id| {
+                let mut input = default_input(0.5);
+                input.market_id = market_id;
+                input
+            })
+            .collect();
+
+        let (orders, next_index) = select_rotating_quotes(
+            &inputs,
+            &quote_config,
+            0,
+            runtime_config.mm_max_orders_per_block,
+        );
+
+        assert_eq!(orders.len(), 412);
+        assert_eq!(next_index, 0);
+    }
+
+    #[test]
     fn rotating_selection_resumes_from_cursor() {
         let config = default_config();
         let inputs: Vec<_> = (1..=10)
@@ -1178,7 +1203,7 @@ mod tests {
     }
 
     #[test]
-    fn grouped_selection_filters_self_completing_quotes() {
+    fn grouped_selection_filters_only_price_crossing_complete_set() {
         let config = default_config();
         let inputs: Vec<_> = (1..=3)
             .map(|market_id| {
@@ -1196,17 +1221,43 @@ mod tests {
                 .iter()
                 .filter(|order| matches!(order, OrderSpec::BuyNo { .. }))
                 .count(),
-            1
+            3
         );
-        let buy_no_market = orders.iter().find_map(|order| match order {
-            OrderSpec::BuyNo { market_id, .. } => Some(*market_id),
-            _ => None,
-        });
-        assert!(buy_no_market.is_some());
-        assert!(!orders.iter().any(|order| match order {
-            OrderSpec::BuyYes { market_id, .. } => Some(*market_id) == buy_no_market,
-            _ => false,
-        }));
+        assert_eq!(
+            orders
+                .iter()
+                .filter(|order| matches!(order, OrderSpec::BuyYes { .. }))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn grouped_selection_keeps_coherent_two_sided_quotes() {
+        let config = default_config();
+        let inputs: Vec<_> = [(1, 0.2), (2, 0.3), (3, 0.5)]
+            .into_iter()
+            .map(|(market_id, mid)| {
+                let mut input = grouped_input(mid);
+                input.market_id = market_id;
+                input
+            })
+            .collect();
+
+        let (orders, next_index) = select_rotating_quotes(&inputs, &config, 0, 12);
+
+        assert_eq!(next_index, 0);
+        assert_eq!(orders.len(), 6);
+        for market_id in 1..=3 {
+            assert!(orders.iter().any(|order| matches!(
+                order,
+                OrderSpec::BuyYes { market_id: id, .. } if *id == market_id
+            )));
+            assert!(orders.iter().any(|order| matches!(
+                order,
+                OrderSpec::BuyNo { market_id: id, .. } if *id == market_id
+            )));
+        }
     }
 
     #[test]

@@ -16,7 +16,7 @@ pub enum RejectionReason {
         available: i64,
     },
     AccountNotFound,
-    /// MM orders form a complete set within a market group (self-trade via minting).
+    /// Buy limits fund a complete set within a market group (self-trade via minting).
     CompleteSetFormation,
     /// Order shape or quantity is not supported by production admission.
     InvalidOrder(String),

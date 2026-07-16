@@ -83,9 +83,9 @@ pub struct Config {
     #[arg(long, default_value = "200", env = "MM_MAX_MARKETS")]
     pub mm_max_markets: usize,
 
-    /// Maximum MM orders to submit per block. Keeps live quoting inside the
-    /// sybil-api per-submission DOS guard while rotating across tracked markets.
-    #[arg(long, default_value = "64", env = "MM_MAX_ORDERS_PER_BLOCK")]
+    /// Maximum MM orders to submit per block. The default covers two orders
+    /// for each market in the current catalog with room for growth.
+    #[arg(long, default_value = "512", env = "MM_MAX_ORDERS_PER_BLOCK")]
     pub mm_max_orders_per_block: usize,
 
     /// Max total dollar exposure across all markets. Budget → 0 as exposure approaches this.

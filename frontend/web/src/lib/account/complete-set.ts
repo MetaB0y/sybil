@@ -11,16 +11,13 @@ export type CoverageOrder = {
   order_id: number;
   market_id: number;
   side: string;
+  limit_price_nanos: string | number | bigint;
 };
 
-function contribution(
-  side: string,
-  marketId: number,
-  groupMarkets: readonly number[],
-): number[] {
-  if (side === "BuyYes") return [marketId];
-  if (side === "BuyNo") return groupMarkets.filter((id) => id !== marketId);
-  return [];
+const ONE_DOLLAR_NANOS = 1_000_000_000n;
+
+function asNanos(value: string | number | bigint): bigint {
+  return typeof value === "bigint" ? value : BigInt(value);
 }
 
 export function findCompleteSetBlockers({
@@ -28,39 +25,53 @@ export function findCompleteSetBlockers({
   restingOrders,
   marketId,
   side,
+  limitPriceNanos,
 }: {
   groupMarkets: readonly number[];
   restingOrders: readonly CoverageOrder[];
   marketId: number;
   side: OrderSideName;
+  limitPriceNanos: string | number | bigint;
 }): CoverageOrder[] | null {
-  if (groupMarkets.length === 0 || !groupMarkets.includes(marketId)) return null;
+  if (side !== "BuyYes" && side !== "BuyNo") return null;
 
-  const candidate = new Set(contribution(side, marketId, groupMarkets));
-  if (candidate.size === 0) return null;
-
-  const inGroup = restingOrders.filter((order) =>
+  const hasProtocolGroup = groupMarkets.includes(marketId);
+  if (!hasProtocolGroup) return null;
+  const relevantOrders = restingOrders.filter((order) =>
     groupMarkets.includes(order.market_id),
   );
-  const covered = new Set(candidate);
-  for (const order of inGroup) {
-    for (const id of contribution(order.side, order.market_id, groupMarkets)) {
-      covered.add(id);
+  const opposite = side === "BuyYes" ? "BuyNo" : "BuyYes";
+  const crossingSameMarket = relevantOrders.filter(
+    (order) =>
+      order.market_id === marketId &&
+      order.side === opposite &&
+      asNanos(order.limit_price_nanos) + asNanos(limitPriceNanos) >=
+        ONE_DOLLAR_NANOS,
+  );
+  if (crossingSameMarket.length > 0) return crossingSameMarket;
+
+  if (side !== "BuyYes") return null;
+
+  const highestYesByMarket = new Map<number, CoverageOrder>();
+  for (const order of relevantOrders) {
+    if (order.side !== "BuyYes") continue;
+    const current = highestYesByMarket.get(order.market_id);
+    if (
+      current == null ||
+      asNanos(order.limit_price_nanos) > asNanos(current.limit_price_nanos)
+    ) {
+      highestYesByMarket.set(order.market_id, order);
     }
   }
-  if (covered.size < groupMarkets.length) return null;
+  highestYesByMarket.delete(marketId);
+  if (highestYesByMarket.size !== groupMarkets.length - 1) return null;
 
-  const blockers = inGroup.filter((order) =>
-    contribution(order.side, order.market_id, groupMarkets).some(
-      (id) => !candidate.has(id),
-    ),
+  const blockers = [...highestYesByMarket.values()];
+  const totalLimit = blockers.reduce(
+    (sum, order) => sum + asNanos(order.limit_price_nanos),
+    asNanos(limitPriceNanos),
   );
-  return blockers.length > 0
-    ? blockers
-    : inGroup.filter(
-        (order) =>
-          contribution(order.side, order.market_id, groupMarkets).length > 0,
-      );
+  return totalLimit >= ONE_DOLLAR_NANOS ? blockers : null;
 }
 
 export function completeSetReason(

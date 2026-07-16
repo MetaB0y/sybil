@@ -3272,6 +3272,38 @@ fn test_mm_complete_set_buyyes_rejected() {
 }
 
 #[test]
+fn test_mm_non_crossing_complete_group_is_accepted_without_fills() {
+    let (markets, m0, m1, m2, group) = setup_group();
+    let mut accounts = AccountStore::new();
+    let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+    let mut seq = BlockSequencer::with_default_solver(
+        accounts,
+        markets.clone(),
+        vec![group],
+        Arc::new(AdminOracle::new()),
+        SequencerConfig::default(),
+    );
+
+    let mut constraint = MmConstraint::new(MmId::new(1), Nanos(50 * NANOS_PER_DOLLAR));
+    for order_id in 0..3 {
+        constraint.add_order(order_id, matching_engine::MmSide::BuyYes);
+    }
+    let sub = OrderSubmission {
+        account_id: aid,
+        orders: vec![
+            outcome_buy(&markets, 0, m0, 0, 300_000_000, 10),
+            outcome_buy(&markets, 0, m1, 0, 300_000_000, 10),
+            outcome_buy(&markets, 0, m2, 0, 300_000_000, 10),
+        ],
+        mm_constraint: Some(constraint),
+    };
+
+    let production = seq.produce_block(vec![sub], 1_000);
+    assert!(production.block.rejections.is_empty());
+    assert!(production.block.fills.is_empty());
+}
+
+#[test]
 fn test_mm_partial_group_accepted() {
     let (markets, m0, m1, _m2, group) = setup_group();
     let mut accounts = AccountStore::new();
@@ -3309,8 +3341,8 @@ fn test_mm_partial_group_accepted() {
 
 #[test]
 fn test_mm_same_market_both_sides_accepted() {
-    // BuyYes + BuyNo on same market (not in a group) — legitimate MM behavior
-    let (markets, m0) = setup();
+    // A non-crossing BuyYes + BuyNo pair is legitimate MM behavior.
+    let (markets, m0, _m1, _m2, group) = setup_group();
     let (mut seq, aid) = make_sequencer(100 * NANOS_PER_DOLLAR as i64);
 
     let mut constraint = MmConstraint::new(MmId::new(1), Nanos(50 * NANOS_PER_DOLLAR));
@@ -3326,7 +3358,7 @@ fn test_mm_same_market_both_sides_accepted() {
         mm_constraint: Some(constraint),
     };
 
-    let result = run_batch(&mut seq, vec![sub], &markets, &[]);
+    let result = run_batch(&mut seq, vec![sub], &markets, &[group]);
     assert_eq!(
         result.rejections.len(),
         0,
@@ -3335,9 +3367,63 @@ fn test_mm_same_market_both_sides_accepted() {
 }
 
 #[test]
-fn test_mm_buyno_complete_set_rejected() {
+fn test_mm_same_market_crossing_bids_are_rejected() {
+    let (markets, m0, _m1, _m2, group) = setup_group();
+    let (mut seq, aid) = make_sequencer(100 * NANOS_PER_DOLLAR as i64);
+
+    let mut constraint = MmConstraint::new(MmId::new(1), Nanos(50 * NANOS_PER_DOLLAR));
+    constraint.add_order(0, matching_engine::MmSide::BuyYes);
+    constraint.add_order(1, matching_engine::MmSide::BuyNo);
+    let sub = OrderSubmission {
+        account_id: aid,
+        orders: vec![
+            outcome_buy(&markets, 0, m0, 0, 600_000_000, 10),
+            outcome_buy(&markets, 0, m0, 1, 600_000_000, 10),
+        ],
+        mm_constraint: Some(constraint),
+    };
+
+    let result = run_batch(&mut seq, vec![sub], &markets, &[group]);
+    assert_eq!(result.rejections.len(), 1);
+    assert!(result.fills.is_empty());
+}
+
+#[test]
+fn test_grouped_mm_complementary_bids_require_a_price_cross() {
+    for (limit, expected_rejections) in [(400_000_000, 0), (600_000_000, 1)] {
+        let (markets, m0, _m1, _m2, group) = setup_group();
+        let mut accounts = AccountStore::new();
+        let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![group],
+            Arc::new(AdminOracle::new()),
+            SequencerConfig::default(),
+        );
+
+        let mut constraint = MmConstraint::new(MmId::new(1), Nanos(50 * NANOS_PER_DOLLAR));
+        constraint.add_order(0, matching_engine::MmSide::BuyYes);
+        constraint.add_order(1, matching_engine::MmSide::BuyNo);
+        let submission = OrderSubmission {
+            account_id: aid,
+            orders: vec![
+                outcome_buy(&markets, 0, m0, 0, limit, 10),
+                outcome_buy(&markets, 0, m0, 1, limit, 10),
+            ],
+            mm_constraint: Some(constraint),
+        };
+
+        let production = seq.produce_block(vec![submission], 1_000);
+        assert_eq!(production.block.rejections.len(), expected_rejections);
+        assert!(production.block.fills.is_empty());
+    }
+}
+
+#[test]
+fn test_mm_buyno_coverage_without_a_cross_is_accepted() {
     // 3-market group: BuyNo on M0 covers {M1,M2}, BuyNo on M1 covers {M0,M2}
-    // Union = {M0,M1,M2} = complete set — 2nd order completes it
+    // Union = {M0,M1,M2}, but each NO claim still costs its own binary mint.
     let (markets, m0, m1, _m2, group) = setup_group();
     let mut accounts = AccountStore::new();
     let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
@@ -3358,17 +3444,14 @@ fn test_mm_buyno_complete_set_rejected() {
         account_id: aid,
         orders: vec![
             outcome_buy(&markets, 0, m0, 1, 800_000_000, 10), // BuyNo M0 → covers {M1,M2}
-            outcome_buy(&markets, 0, m1, 1, 800_000_000, 10), // BuyNo M1 → would cover {M0,M2}, completing set
+            outcome_buy(&markets, 0, m1, 1, 800_000_000, 10), // BuyNo M1 → covers {M0,M2}
         ],
         mm_constraint: Some(constraint),
     };
 
     let bp = seq.produce_block(vec![sub], 1000);
-    assert_eq!(
-        bp.block.rejections.len(),
-        1,
-        "Per-order STP: only the completing BuyNo rejected"
-    );
+    assert!(bp.block.rejections.is_empty());
+    assert!(bp.block.fills.is_empty());
 }
 
 // --- MM budget capping ---
@@ -3719,14 +3802,14 @@ fn direct_write_path_rejects_zero_and_subminimum_resting_orders() {
 fn cross_block_stp_rejects_set_formation_across_blocks() {
     let (mut seq, aid, markets, m0, m1) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
 
-    let first = single_order_sub(aid, outcome_buy(&markets, 0, m0, 0, 400_000_000, 10));
+    let first = single_order_sub(aid, outcome_buy(&markets, 0, m0, 0, 600_000_000, 10));
     let outcome = seq.try_admit_direct(first, 0);
     assert!(matches!(outcome, AdmitOutcome::Admitted { .. }));
 
     seq.produce_block(vec![], 1000);
     assert_eq!(seq.height, 1);
 
-    let second = single_order_sub(aid, outcome_buy(&markets, 0, m1, 0, 400_000_000, 10));
+    let second = single_order_sub(aid, outcome_buy(&markets, 0, m1, 0, 600_000_000, 10));
     let outcome = seq.try_admit_direct(second, 0);
     match outcome {
         AdmitOutcome::Rejected(SequencerError::Rejected(r)) => {
@@ -3734,6 +3817,24 @@ fn cross_block_stp_rejects_set_formation_across_blocks() {
         }
         other => panic!("expected CompleteSetFormation rejection, got {:?}", other),
     }
+}
+
+#[test]
+fn cross_block_stp_accepts_non_crossing_complete_coverage() {
+    let (mut seq, aid, markets, m0, m1) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
+
+    let first = single_order_sub(aid, outcome_buy(&markets, 0, m0, 0, 400_000_000, 10));
+    assert!(matches!(
+        seq.try_admit_direct(first, 0),
+        AdmitOutcome::Admitted { .. }
+    ));
+    seq.produce_block(vec![], 1_000);
+
+    let second = single_order_sub(aid, outcome_buy(&markets, 0, m1, 0, 400_000_000, 10));
+    assert!(matches!(
+        seq.try_admit_direct(second, 0),
+        AdmitOutcome::Admitted { .. }
+    ));
 }
 
 #[test]
@@ -3754,7 +3855,7 @@ fn stp_undo_preserves_other_accounts_same_block_expired_history_and_state_root()
         },
     );
 
-    let stp_resting = outcome_buy(&markets, 0, m0, 0, 400_000_000, q(1));
+    let stp_resting = outcome_buy(&markets, 0, m0, 0, 600_000_000, q(1));
     assert!(matches!(
         seq.try_admit_direct(single_order_sub(stp_account, stp_resting), 100),
         AdmitOutcome::Admitted { .. }
@@ -3772,7 +3873,7 @@ fn stp_undo_preserves_other_accounts_same_block_expired_history_and_state_root()
     let reservation_before = seq.order_book.reserved_balance(stp_account);
     let completing = single_order_sub(
         stp_account,
-        outcome_buy(&markets, 0, m1, 0, 400_000_000, q(1)),
+        outcome_buy(&markets, 0, m1, 0, 600_000_000, q(1)),
     );
 
     let production = seq.produce_block(vec![completing], 1_000);
@@ -3915,7 +4016,7 @@ fn direct_gtd_order_rejects_when_it_cannot_reach_next_batch() {
 }
 
 #[test]
-fn cross_block_stp_rejects_buyno_combination_across_blocks() {
+fn cross_block_stp_accepts_non_crossing_buyno_coverage() {
     let (markets, m0, m1, _m2, group) = setup_group();
     let mut accounts = AccountStore::new();
     let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
@@ -3937,12 +4038,10 @@ fn cross_block_stp_rejects_buyno_combination_across_blocks() {
     seq.produce_block(vec![], 1000);
 
     let second = single_order_sub(aid, outcome_buy(&markets, 0, m1, 1, 800_000_000, 10));
-    match seq.try_admit_direct(second, 0) {
-        AdmitOutcome::Rejected(SequencerError::Rejected(r)) => {
-            assert!(matches!(r.reason, RejectionReason::CompleteSetFormation));
-        }
-        other => panic!("expected CompleteSetFormation rejection, got {:?}", other),
-    }
+    assert!(matches!(
+        seq.try_admit_direct(second, 0),
+        AdmitOutcome::Admitted { .. }
+    ));
 }
 
 #[test]
@@ -3986,7 +4085,7 @@ fn cross_block_stp_mm_path_sees_prior_resting() {
     // resting order and reject the completing leg.
     let (mut seq, aid, markets, m0, m1) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
 
-    let first = single_order_sub(aid, outcome_buy(&markets, 0, m0, 0, 400_000_000, 10));
+    let first = single_order_sub(aid, outcome_buy(&markets, 0, m0, 0, 600_000_000, 10));
     assert!(matches!(
         seq.try_admit_direct(first, 0),
         AdmitOutcome::Admitted { .. }
@@ -3997,7 +4096,7 @@ fn cross_block_stp_mm_path_sees_prior_resting() {
     constraint.add_order(0, matching_engine::MmSide::BuyYes);
     let mm_sub = OrderSubmission {
         account_id: aid,
-        orders: vec![outcome_buy(&markets, 0, m1, 0, 400_000_000, 10)],
+        orders: vec![outcome_buy(&markets, 0, m1, 0, 600_000_000, 10)],
         mm_constraint: Some(constraint),
     };
 

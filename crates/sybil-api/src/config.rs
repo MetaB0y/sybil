@@ -78,8 +78,8 @@ pub struct ApiConfig {
     #[arg(long, default_value = "10000", env = "SYBIL_MAX_PENDING_BUNDLES")]
     pub max_pending_bundles: usize,
 
-    /// Maximum number of orders accepted in one submission.
-    #[arg(long, default_value = "64", env = "SYBIL_MAX_ORDERS_PER_SUBMISSION")]
+    /// Maximum number of orders accepted through the service-only bulk route.
+    #[arg(long, default_value = "512", env = "SYBIL_MAX_ORDERS_PER_SUBMISSION")]
     pub max_orders_per_submission: usize,
 
     /// Per-account sustained order/cancel submission rate.
@@ -356,7 +356,7 @@ impl Default for ApiConfig {
             seed_markets: Vec::new(),
             order_ttl_blocks: 63_072_000,
             max_pending_bundles: 10_000,
-            max_orders_per_submission: 64,
+            max_orders_per_submission: 512,
             max_submissions_per_account_per_second: 50,
             submission_burst_per_account: 200,
             max_global_submissions_per_second: 1_000,
