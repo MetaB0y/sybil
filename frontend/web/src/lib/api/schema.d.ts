@@ -367,67 +367,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/v1/admin/auto-resolutions": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** GET /v1/admin/auto-resolutions — list every recorded proposal. */
-    get: operations["list_auto_resolutions"];
-    put?: never;
-    /**
-     * POST /v1/admin/auto-resolutions — record (or refresh) an auto-resolution
-     *     proposal. Never settles a market.
-     */
-    post: operations["submit_auto_resolution"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/v1/admin/auto-resolutions/{id}/approve": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * POST /v1/admin/auto-resolutions/{id}/approve — approve a proposal so the
-     *     resolver finalizes it on its next poll (does not settle here).
-     */
-    post: operations["approve_auto_resolution"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/v1/admin/auto-resolutions/{id}/reject": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * POST /v1/admin/auto-resolutions/{id}/reject — veto a proposal. Terminal: the
-     *     resolver will never finalize it.
-     */
-    post: operations["reject_auto_resolution"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/v1/attestation": {
     parameters: {
       query?: never;
@@ -529,7 +468,9 @@ export interface paths {
     };
     /**
      * GET /v1/bots/decisions
-     * @description Native arena / bot analytics feed. Public (unauthenticated) read route.
+     * @description Public bot analytics backed by Arena's private typed read service. The Rust
+     *     API owns the public route and contract, while Python owns its storage and
+     *     query semantics.
      */
     get: operations["get_bot_decisions"];
     put?: never;
@@ -549,9 +490,8 @@ export interface paths {
     };
     /**
      * GET /v1/bots/equity-series
-     * @description Native arena per-bot portfolio-value time series from `portfolio_snapshots`.
-     *     Public (unauthenticated) read route. Dense result sets are downsampled with a
-     *     naive stride after a bounded count query; the latest point is retained.
+     * @description Public per-bot portfolio-value series proxied from Arena's private typed
+     *     read service. Dense results are bounded and downsampled by Arena.
      */
     get: operations["get_bot_equity_series"];
     put?: never;
@@ -1525,63 +1465,6 @@ export interface components {
     };
     /** @enum {string} */
     AuthScheme: "raw_p256" | "webauthn";
-    /**
-     * @description Which confidence tier a proposed automated resolution (SYB-48) landed in.
-     *     Mirrors the resolver-side confidence policy so the review board can render
-     *     and gate each entry consistently.
-     * @enum {string}
-     */
-    AutoResolutionActionDto: "propose" | "review" | "escalate";
-    /** @description One entry on the automated-resolution review board (SYB-48). */
-    AutoResolutionEntryResponse: {
-      /**
-       * @description Confidence tier the resolver assigned (`propose` | `review` |
-       *     `escalate`).
-       */
-      action: components["schemas"]["AutoResolutionActionDto"];
-      /**
-       * Format: double
-       * @description Model confidence in [0, 1].
-       */
-      confidence: number;
-      /**
-       * Format: int64
-       * @description When an operator approved/rejected, if they did. Unix milliseconds.
-       */
-      decided_at_ms?: number | null;
-      /**
-       * Format: int64
-       * @description Auto-finalize deadline for `propose` entries. Unix milliseconds.
-       */
-      eta_ms?: number | null;
-      /** @description Short verbatim excerpts from the fetched source. */
-      evidence_excerpts?: string[];
-      /** Format: int32 */
-      market_id: number;
-      /**
-       * Format: int64
-       * @description Proposed YES payout per share. Integer nanodollars; 1_000_000_000 = $1.
-       *     Payouts are per-share probabilities in [0, 1e9].
-       */
-      payout_nanos: string;
-      /**
-       * Format: int64
-       * @description When the proposal was first recorded. Unix milliseconds.
-       */
-      proposed_at_ms: number;
-      /** @description Model's free-text justification. */
-      reasoning: string;
-      /**
-       * @description Display status derived at read time from the operator decision AND the
-       *     market's live on-chain state: one of `pending`, `needs_review`,
-       *     `escalated`, `approved`, `rejected`, `resolved`.
-       */
-      status: string;
-    };
-    /** @description Response body of `GET /v1/admin/auto-resolutions` (SYB-48). */
-    AutoResolutionListResponse: {
-      entries: components["schemas"]["AutoResolutionEntryResponse"][];
-    };
     /**
      * @description Nested per-market sidecar on `BlockResponse.by_market`. Grows append-only
      *     across steps (each new field carries `#[serde(default)]` so partial
@@ -3668,44 +3551,6 @@ export interface components {
       /** @description Current state root. Hex-encoded 32-byte qMDB root. */
       state_root: string;
     };
-    /**
-     * @description Body of `POST /v1/admin/auto-resolutions` (SYB-48). The auto-resolution
-     *     resolver (sybil-polymarket) submits one of these per market it has
-     *     evaluated with an LLM. This route NEVER settles a market: it only records a
-     *     reviewable proposal. Finalization always flows back through the existing
-     *     signed `POST /v1/markets/{id}/resolve` money path.
-     */
-    SubmitAutoResolutionRequest: {
-      /** @description Confidence tier the resolver's policy assigned. */
-      action: components["schemas"]["AutoResolutionActionDto"];
-      /**
-       * Format: double
-       * @description Model confidence in [0, 1].
-       */
-      confidence: number;
-      /**
-       * Format: int64
-       * @description Wall-clock deadline after which a `propose` entry may auto-finalize.
-       *     Unix milliseconds. Required for `propose`; ignored otherwise.
-       */
-      eta_ms?: number | null;
-      /** @description Short verbatim excerpts from the fetched source the model relied on. */
-      evidence_excerpts?: string[];
-      /**
-       * Format: int32
-       * @description Market the proposal is for.
-       */
-      market_id: number;
-      /**
-       * Format: int64
-       * @description Proposed YES payout per share. Integer nanodollars; 1_000_000_000 = $1.
-       *     Payouts are per-share probabilities in [0, 1e9].
-       * @example 1000000000
-       */
-      payout_nanos: string;
-      /** @description Model's free-text justification. Stored verbatim for review. */
-      reasoning: string;
-    };
     SubmitL1DepositRequest: {
       /**
        * Format: int64
@@ -4978,145 +4823,6 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["ActivityOverviewResponse"];
         };
-      };
-    };
-  };
-  list_auto_resolutions: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Pending auto-resolutions */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AutoResolutionListResponse"];
-        };
-      };
-      /** @description Service token required */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  submit_auto_resolution: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["SubmitAutoResolutionRequest"];
-      };
-    };
-    responses: {
-      /** @description Proposal recorded */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AutoResolutionEntryResponse"];
-        };
-      };
-      /** @description Invalid proposal */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Service token required */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  approve_auto_resolution: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Market ID */
-        id: number;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Proposal approved */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AutoResolutionEntryResponse"];
-        };
-      };
-      /** @description Service token required */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description No proposal for this market */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  reject_auto_resolution: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Market ID */
-        id: number;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Proposal rejected */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AutoResolutionEntryResponse"];
-        };
-      };
-      /** @description Service token required */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description No proposal for this market */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
       };
     };
   };

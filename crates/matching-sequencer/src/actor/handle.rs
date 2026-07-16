@@ -735,20 +735,6 @@ impl SequencerHandle {
             .await
     }
 
-    pub async fn list_auto_resolution_records(
-        &self,
-    ) -> Result<Vec<AutoResolutionRecord>, SequencerError> {
-        self.rpc(SequencerMsg::ListAutoResolutionRecords).await?
-    }
-
-    pub async fn put_auto_resolution_record(
-        &self,
-        record: AutoResolutionRecord,
-    ) -> Result<(), SequencerError> {
-        self.rpc(|reply| SequencerMsg::PutAutoResolutionRecord(record, reply))
-            .await?
-    }
-
     pub async fn get_pending_orders(
         &self,
         account_id: Option<AccountId>,

@@ -316,9 +316,6 @@ pub struct AppState {
     /// The public atomic create path holds this guard until its initial key is
     /// registered, closing the cross-request first-key race at the API edge.
     pub account_bootstrap_lock: Arc<AsyncMutex<()>>,
-    /// Review board for automated LLM resolutions (SYB-48). Metadata only — it
-    /// records proposals and operator decisions but never settles a market.
-    pub auto_resolutions: crate::auto_resolution::AutoResolutionStore,
 }
 
 impl AppState {
@@ -425,16 +422,7 @@ impl AppState {
             ws_client_idle_timeout: Duration::from_millis(config.ws_client_idle_timeout_ms),
             webauthn: WebAuthnVerifierConfig::from_api_config(config),
             account_bootstrap_lock: Arc::new(AsyncMutex::new(())),
-            auto_resolutions: crate::auto_resolution::AutoResolutionStore::new(),
         }
-    }
-
-    pub async fn rehydrate_auto_resolutions(
-        &self,
-    ) -> Result<(), matching_sequencer::SequencerError> {
-        let records = self.sequencer.list_auto_resolution_records().await?;
-        self.auto_resolutions.rehydrate(records);
-        Ok(())
     }
 
     pub(crate) async fn update_reference_prices(&self, updates: HashMap<u32, u64>) {

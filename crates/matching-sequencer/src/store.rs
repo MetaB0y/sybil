@@ -99,7 +99,6 @@ pub struct ProofJobOutboxEntry {
     pub acknowledged: bool,
 }
 
-mod auto_resolution;
 mod codec;
 mod commit;
 mod da;
@@ -126,7 +125,6 @@ use self::restore::{
 use self::retention::prune_historical_block_rows;
 use self::tables::*;
 
-pub use self::auto_resolution::{AutoResolutionAction, AutoResolutionRecord};
 pub use self::commit::{AnalyticsSnapshot, SequencerSnapshot, Store, StoreError};
 pub use self::da::{
     DA_FILE_PROVIDER_REF_ENCODING, DA_FILE_PROVIDER_REF_KIND, DA_PAYLOAD_ENCODING, DA_PAYLOAD_KIND,

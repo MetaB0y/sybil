@@ -24,7 +24,7 @@ const OPENAPI_EXEMPT_PATHS: &[&str] = &[
     "/metrics",
 ];
 
-const EXPECTED_UNIT_FIELD_DESCRIPTIONS: usize = 138;
+const EXPECTED_UNIT_FIELD_DESCRIPTIONS: usize = 136;
 
 /// Registered method/path pairs, minus the non-API exemptions.
 fn documented_route_mounts() -> BTreeSet<(String, String)> {

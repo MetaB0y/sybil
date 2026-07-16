@@ -11,9 +11,6 @@ from .api_key_response import ApiKeyResponse
 from .attestation_response import AttestationResponse
 from .attestation_response_pcr_values import AttestationResponsePcrValues
 from .auth_scheme import AuthScheme
-from .auto_resolution_action_dto import AutoResolutionActionDto
-from .auto_resolution_entry_response import AutoResolutionEntryResponse
-from .auto_resolution_list_response import AutoResolutionListResponse
 from .block_market_stats import BlockMarketStats
 from .block_response import BlockResponse
 from .block_response_by_market import BlockResponseByMarket
@@ -122,7 +119,6 @@ from .signed_order_data import SignedOrderData
 from .signed_register_key_request import SignedRegisterKeyRequest
 from .state_proof_response import StateProofResponse
 from .state_root_response import StateRootResponse
-from .submit_auto_resolution_request import SubmitAutoResolutionRequest
 from .submit_l1_deposit_request import SubmitL1DepositRequest
 from .submit_l1_withdrawal_event_request import SubmitL1WithdrawalEventRequest
 from .submit_order_request import SubmitOrderRequest
@@ -174,9 +170,6 @@ __all__ = (
     "AttestationResponse",
     "AttestationResponsePcrValues",
     "AuthScheme",
-    "AutoResolutionActionDto",
-    "AutoResolutionEntryResponse",
-    "AutoResolutionListResponse",
     "BlockMarketStats",
     "BlockResponse",
     "BlockResponseByMarket",
@@ -285,7 +278,6 @@ __all__ = (
     "SignedRegisterKeyRequest",
     "StateProofResponse",
     "StateRootResponse",
-    "SubmitAutoResolutionRequest",
     "SubmitL1DepositRequest",
     "SubmitL1WithdrawalEventRequest",
     "SubmitOrderRequest",

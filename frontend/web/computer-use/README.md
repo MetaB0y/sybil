@@ -103,9 +103,7 @@ Prefer one coherent user goal over a tour of unrelated screens. Reuse a named
 fixture capability only when its semantics really match. Keep protocol/API
 details in architecture docs and deterministic tests; keep visible truth and
 decision clarity here. If a required screen does not exist, open or reference a
-product issue instead of writing an allegedly executable scenario. The current
-operator auto-resolution gap is tracked by
-[GitHub #70](https://github.com/MetaB0y/sybil/issues/70).
+product issue instead of writing an allegedly executable scenario.
 
 After adding or changing a scenario, run `pnpm scenarios:check`, the focused
 validator tests, and the ordinary frontend gate.

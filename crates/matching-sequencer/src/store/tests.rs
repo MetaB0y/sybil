@@ -20,33 +20,6 @@ fn store_test_sequencer_config() -> crate::SequencerConfig {
 }
 
 #[tokio::test]
-async fn auto_resolution_records_round_trip() {
-    let path = temp_db_path("auto-resolution-records");
-    let store = Store::open(&path).unwrap();
-    let record = AutoResolutionRecord {
-        market_id: 7,
-        action: AutoResolutionAction::Propose,
-        payout_nanos: 1_000_000_000,
-        confidence_ppm: 950_000,
-        reasoning: "clear yes".to_string(),
-        evidence_excerpts: vec!["evidence".to_string()],
-        proposed_at_ms: 1_000,
-        eta_ms: Some(90_000),
-        approved_at_ms: None,
-        rejected_at_ms: Some(2_000),
-        rejected_payout_nanos: Some(1_000_000_000),
-        rejected_reasoning_hash: Some([9; 32]),
-        operator_note: Some("bad source".to_string()),
-    };
-
-    store
-        .put_auto_resolution_record(record.clone())
-        .await
-        .unwrap();
-    assert_eq!(store.auto_resolution_records().unwrap(), vec![record]);
-}
-
-#[tokio::test]
 async fn witnessed_qmdb_state_root_matches_header_after_slot_reuse() {
     let path = temp_db_path("store-qmdb-root-reuse");
     let store = Store::open(&path).unwrap();

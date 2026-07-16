@@ -81,9 +81,8 @@ def sync_detailed(
 ) -> Response[BotEquitySeriesResponse]:
     """ GET /v1/bots/equity-series
 
-     Native arena per-bot portfolio-value time series from `portfolio_snapshots`.
-    Public (unauthenticated) read route. Dense result sets are downsampled with a
-    naive stride after a bounded count query; the latest point is retained.
+     Public per-bot portfolio-value series proxied from Arena's private typed
+    read service. Dense results are bounded and downsampled by Arena.
 
     Args:
         trader (str | Unset):
@@ -122,9 +121,8 @@ def sync(
 ) -> BotEquitySeriesResponse | None:
     """ GET /v1/bots/equity-series
 
-     Native arena per-bot portfolio-value time series from `portfolio_snapshots`.
-    Public (unauthenticated) read route. Dense result sets are downsampled with a
-    naive stride after a bounded count query; the latest point is retained.
+     Public per-bot portfolio-value series proxied from Arena's private typed
+    read service. Dense results are bounded and downsampled by Arena.
 
     Args:
         trader (str | Unset):
@@ -158,9 +156,8 @@ async def asyncio_detailed(
 ) -> Response[BotEquitySeriesResponse]:
     """ GET /v1/bots/equity-series
 
-     Native arena per-bot portfolio-value time series from `portfolio_snapshots`.
-    Public (unauthenticated) read route. Dense result sets are downsampled with a
-    naive stride after a bounded count query; the latest point is retained.
+     Public per-bot portfolio-value series proxied from Arena's private typed
+    read service. Dense results are bounded and downsampled by Arena.
 
     Args:
         trader (str | Unset):
@@ -199,9 +196,8 @@ async def asyncio(
 ) -> BotEquitySeriesResponse | None:
     """ GET /v1/bots/equity-series
 
-     Native arena per-bot portfolio-value time series from `portfolio_snapshots`.
-    Public (unauthenticated) read route. Dense result sets are downsampled with a
-    naive stride after a bounded count query; the latest point is retained.
+     Public per-bot portfolio-value series proxied from Arena's private typed
+    read service. Dense results are bounded and downsampled by Arena.
 
     Args:
         trader (str | Unset):

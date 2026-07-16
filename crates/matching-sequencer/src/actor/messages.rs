@@ -190,11 +190,6 @@ pub enum SequencerMsg {
         MarketMetadata,
         RpcReplyPort<Result<MarketId, SequencerError>>,
     ),
-    ListAutoResolutionRecords(RpcReplyPort<Result<Vec<AutoResolutionRecord>, SequencerError>>),
-    PutAutoResolutionRecord(
-        AutoResolutionRecord,
-        RpcReplyPort<Result<(), SequencerError>>,
-    ),
     PauseBlockProduction(RpcReplyPort<Result<(), SequencerError>>),
     ResumeBlockProduction(RpcReplyPort<Result<(), SequencerError>>),
     Query(SequencerReadQuery),

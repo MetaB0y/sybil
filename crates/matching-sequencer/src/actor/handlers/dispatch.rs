@@ -396,25 +396,6 @@ impl Actor for SequencerActor {
                         .await,
                 );
             }
-            SequencerMsg::ListAutoResolutionRecords(reply) => {
-                let result = match &state.store {
-                    Some(store) => store
-                        .auto_resolution_records()
-                        .map_err(|error| SequencerError::Persistence(error.to_string())),
-                    None => Ok(Vec::new()),
-                };
-                let _ = reply.send(result);
-            }
-            SequencerMsg::PutAutoResolutionRecord(record, reply) => {
-                let result = match &state.store {
-                    Some(store) => store
-                        .put_auto_resolution_record(record)
-                        .await
-                        .map_err(|error| SequencerError::Persistence(error.to_string())),
-                    None => Ok(()),
-                };
-                let _ = reply.send(result);
-            }
             SequencerMsg::PauseBlockProduction(reply) => {
                 state.pause_count = state.pause_count.saturating_add(1);
                 let _ = reply.send(Ok(()));
