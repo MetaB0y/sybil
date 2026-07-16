@@ -21,14 +21,29 @@ is wired in. See [[REST API]] for the endpoints these knobs feed and
 `SYBIL_DEPLOYMENT_PROFILE` (`local` | `devnet` | `prod`, process default
 `local`) names the intended posture and drives the preflight guardrail.
 
-- **local** — developer laptop / CI. `docker compose up` (base + override) or
-  `cargo run`. Dev conveniences on, no durability expected.
-- **devnet** — the current shared public box (base `docker-compose.yml` alone).
-  Dev-tuned but multi-user; no production guarantees. Base Compose explicitly
-  selects `devnet`, so its startup log cannot silently self-label as local.
+- **local** — developer laptop / CI. `docker compose up` (base + override)
+  starts the minimal API/history/web core, or use `cargo run`. Dev conveniences
+  on, no durability expected.
+- **devnet** — the current shared public box (base `docker-compose.yml` plus
+  explicitly selected service profiles). Dev-tuned but multi-user; no
+  production guarantees. Base Compose explicitly selects `devnet`, so its
+  startup log cannot silently self-label as local.
 - **prod** — production / devnet-v2 (base + `docker-compose.prod.yml`). Durable,
   locked down, fail-closed. `docker-compose.prod.yml` sets
   `SYBIL_DEPLOYMENT_PROFILE=prod`.
+
+Compose service profiles are deliberately separate from the process posture
+above. The unprofiled default is the core: `sybil-api`, `sybil-history`, and
+`sybil-web` (plus Caddy in the production overlay). Optional subsystems are:
+
+- `integrations` — Polymarket mirror plus Arena runner/dashboard;
+- `validity` — the durable prover daemon;
+- `ops` — VictoriaMetrics, vmalert, Grafana, and node-exporter;
+- `l1-indexer` — the separately credentialed L1 lifecycle sidecar.
+
+`just docker-up-all` selects the first three on a workstation. Production
+deploy recipes also select those three explicitly; `l1-indexer` remains an
+independent opt-in until its vault and provider identities are configured.
 
 ## Profile matrix
 
@@ -113,10 +128,10 @@ remaining public capacity.
 
 ### Prover
 
-Compose now runs one restart-safe `sybil-prover daemon`, with separate redb and
-artifact volumes and authenticated pull/ack against the API outbox. Base
-Compose explicitly selects its typed mock backend for cheap integration; the
-repository daemon default is STARK. The current 2 GB host/runtime image is not
+The `validity` Compose profile runs one restart-safe `sybil-prover daemon`, with
+separate redb and artifact volumes and authenticated pull/ack against the API
+outbox. Base configuration explicitly selects its typed mock backend for cheap
+integration; the repository daemon default is STARK. The current 2 GB host/runtime image is not
 a STARK prover, so production-capable STARK mode runs from a pinned repository
 checkout on measured prover hardware. Mock and STARK envelopes are both
 ineligible for L1 submission; EVM/Halo2 remains disabled under GitHub #13. See

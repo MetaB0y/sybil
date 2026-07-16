@@ -55,13 +55,35 @@ contains_service() {
     grep -Fxq "$service" <<<"$services"
 }
 
-default_services=$(compose config --services)
+profile_contract=$(
+    compose config | python3 -c '
+import sys
+import yaml
 
-for service in sybil-api sybil-polymarket sybil-prover; do
-    contains_service "$default_services" "$service" \
-        || fail "default compose config is missing $service"
-done
-pass "default compose config includes core devnet services"
+config = yaml.safe_load(sys.stdin)
+for service, body in sorted(config["services"].items()):
+    profiles = body.get("profiles", [])
+    profile = ",".join(profiles) if profiles else "core"
+    print(f"{service}={profile}")
+'
+)
+expected_profile_contract=$(printf '%s\n' \
+    'caddy=core' \
+    'grafana=ops' \
+    'node-exporter=ops' \
+    'sybil-api=core' \
+    'sybil-arena=integrations' \
+    'sybil-arena-dashboard=integrations' \
+    'sybil-history=core' \
+    'sybil-l1-indexer=l1-indexer' \
+    'sybil-polymarket=integrations' \
+    'sybil-prover=validity' \
+    'sybil-web=core' \
+    'victoriametrics=ops' \
+    'vmalert=ops')
+[[ "$profile_contract" == "$expected_profile_contract" ]] \
+    || fail "Compose services drifted across core/integration/validity/ops boundaries"
+pass "default core and optional subsystem memberships are explicit"
 
 if ! SYBIL_L1_RPC_URLS= SYBIL_L1_RPC_IDS= compose config --services >/dev/null; then
     fail "inactive L1 indexer credentials block the default private-devnet stack"
@@ -69,11 +91,30 @@ fi
 pass "inactive L1 credentials do not block private-devnet deploys"
 
 available_profiles=$(compose config --profiles)
-contains_service "$available_profiles" "l1-indexer" \
-    || fail "L1 indexer is not isolated behind its explicit Compose profile"
-l1_services=$(compose --profile l1-indexer config --services)
-contains_service "$l1_services" "sybil-l1-indexer" \
-    || fail "l1-indexer profile does not enable sybil-l1-indexer"
+for profile in integrations validity ops l1-indexer; do
+    contains_service "$available_profiles" "$profile" \
+        || fail "Compose profile $profile is not declared"
+done
+
+for profile in integrations validity ops; do
+    compose --profile "$profile" config --quiet \
+        || fail "$profile profile does not compose cleanly"
+done
+compose --profile integrations --profile validity --profile ops config --quiet \
+    || fail "full ordinary profile set does not compose cleanly"
+pass "integration, validity, and ops profiles are isolated and compose cleanly"
+
+for variable in COMPOSE_PROD COMPOSE_TELEGRAM; do
+    definition=$(grep -E "^${variable} :=" justfile)
+    for profile in integrations validity ops; do
+        grep -Fq -- "--profile $profile" <<<"$definition" \
+            || fail "$variable does not explicitly select the $profile profile"
+    done
+done
+pass "production Compose commands explicitly select the full ordinary stack"
+
+compose --profile l1-indexer config --quiet \
+    || fail "l1-indexer profile does not compose cleanly"
 pass "L1 indexer is explicit opt-in deployment state"
 
 compose config --quiet
@@ -331,6 +372,22 @@ done
 grep -Fq '| ssh {{SERVER}} docker load' <<<"$deploy_all_save" \
     || fail "deploy-all does not stream its images to the remote Docker daemon"
 pass "deploy-all transfers every locally built application image"
+
+reset_recipe=$(
+    awk '
+        /^deploy-reset-state / { in_recipe = 1; next }
+        in_recipe && /^[[:alnum:]_-]+[^:]*:/ { exit }
+        in_recipe { print }
+    ' justfile
+)
+for volume in sybil-data history-data polymarket-data arena-data prover-data \
+    prover-artifacts l1-indexer-data vmdata; do
+    grep -Fq "$volume" <<<"$reset_recipe" \
+        || fail "fresh-genesis reset does not clear $volume"
+done
+grep -Fq -- '--profile l1-indexer down' <<<"$reset_recipe" \
+    || fail "fresh-genesis reset does not stop the optional L1 sidecar"
+pass "fresh-genesis reset clears every durable application subsystem"
 
 # The Polymarket mirror bind-mounts its checked-in catalogs from the source
 # tree on the host. Keep deploy-sync responsible for creating that remote path

@@ -1,5 +1,6 @@
 # Production overrides: persistence, tuned params, Caddy.
-# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# Usage (full stack): docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+#   --profile integrations --profile validity --profile ops up -d
 x-default-logging: &default-logging
   driver: "json-file"
   options:

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 S=${SYBIL_STATUS_SSH:-root@172.104.31.54}
-COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile integrations --profile validity --profile ops"
 
 remote_api_get() {
     local path=$1
