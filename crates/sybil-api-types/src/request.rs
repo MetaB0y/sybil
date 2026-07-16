@@ -377,6 +377,10 @@ pub struct CreateMarketRequest {
     /// Name of the binary market.
     #[cfg_attr(feature = "openapi", schema(example = "Will it rain tomorrow?"))]
     pub name: String,
+    /// Optional operator idempotency key. Repeating the same key and creation
+    /// fields returns the original market; conflicting reuse is rejected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creation_key: Option<String>,
     /// Optional description of the market.
     #[serde(default)]
     pub description: Option<String>,

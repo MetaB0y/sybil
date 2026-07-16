@@ -25,6 +25,10 @@ pub struct MarketMetadata {
     /// migration.
     #[serde(default)]
     pub resolution_config: Option<ResolutionConfig>,
+    /// Stable operator-supplied identity for idempotent market creation.
+    /// `None` preserves the ordinary allocate-on-every-call behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creation_key: Option<String>,
     /// Recovery-only override for DA-imported markets where the witness proves
     /// the metadata digest but does not carry the raw metadata fields.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -39,6 +43,20 @@ impl MarketMetadata {
             .as_ref()
             .map(|c| c.template.as_str())
             .unwrap_or("admin_immediate")
+    }
+
+    pub(crate) fn same_creation_fields(&self, other: &Self) -> bool {
+        let mut self_tags = self.tags.clone();
+        let mut other_tags = other.tags.clone();
+        self_tags.sort();
+        other_tags.sort();
+        self.description == other.description
+            && self.category == other.category
+            && self_tags == other_tags
+            && self.resolution_criteria == other.resolution_criteria
+            && self.expiry_timestamp_ms == other.expiry_timestamp_ms
+            && self.resolution_config == other.resolution_config
+            && self.creation_key == other.creation_key
     }
 }
 

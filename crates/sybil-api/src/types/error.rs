@@ -253,6 +253,16 @@ impl From<matching_sequencer::SequencerError> for AppError {
             matching_sequencer::SequencerError::MarketNotFound { market_id } => {
                 AppError::market_not_found(market_id.0)
             }
+            matching_sequencer::SequencerError::InvalidMarketCreationKey(message) => {
+                AppError::bad_request(format!("Invalid market creation key: {message}"))
+            }
+            matching_sequencer::SequencerError::MarketCreationKeyConflict {
+                key,
+                existing_market_id,
+            } => AppError::conflict(format!(
+                "Market creation key {key:?} already identifies market {} with different creation fields",
+                existing_market_id.0
+            )),
             matching_sequencer::SequencerError::MarketGroupNotFound => {
                 AppError::not_found("Market group not found")
             }

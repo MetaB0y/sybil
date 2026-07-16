@@ -379,6 +379,13 @@ fn market_metadata_digest(metadata: Option<&MarketMetadata>) -> [u8; 32] {
             payload.extend_from_slice(&metadata.expiry_timestamp_ms.to_le_bytes());
             payload.extend_from_slice(&metadata.created_at_ms.to_le_bytes());
             append_string(&mut payload, metadata.effective_template());
+            match metadata.creation_key.as_deref() {
+                None => payload.push(0),
+                Some(key) => {
+                    payload.push(1);
+                    append_string(&mut payload, key);
+                }
+            }
         }
     }
     sybil_verifier::block::market_metadata_digest(&payload)
@@ -644,6 +651,25 @@ mod tests {
             &prices,
         );
         assert_ne!(active_root, metadata_root);
+
+        lifecycle.set_market_metadata(
+            market_id,
+            MarketMetadata {
+                description: "Rain in London by noon".to_string(),
+                creation_key: Some("native:rain".to_string()),
+                ..MarketMetadata::default()
+            },
+        );
+        let keyed_metadata_root = compute_complete_state_root(
+            &accounts,
+            &bridge,
+            &order_book,
+            &markets,
+            &groups,
+            &lifecycle,
+            &prices,
+        );
+        assert_ne!(metadata_root, keyed_metadata_root);
 
         lifecycle.set_market_status(
             market_id,

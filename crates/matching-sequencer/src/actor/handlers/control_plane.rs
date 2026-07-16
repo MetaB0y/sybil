@@ -153,12 +153,18 @@ impl SequencerActorState {
         name: String,
         metadata: MarketMetadata,
     ) -> Result<MarketId, SequencerError> {
+        if let Some(market_id) = self
+            .sequencer
+            .existing_market_for_creation(&name, &metadata)?
+        {
+            return Ok(market_id);
+        }
         self.persist_control_plane(&ControlPlaneCommand::CreateMarketWithMetadata {
             name: name.clone(),
             metadata: metadata.clone(),
         })
         .await?;
-        Ok(self.sequencer.create_market_with_metadata(name, metadata))
+        self.sequencer.create_market_with_metadata(name, metadata)
     }
 
     pub(super) async fn handle_create_market_group(

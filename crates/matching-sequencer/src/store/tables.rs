@@ -199,7 +199,7 @@ pub(super) const KEY_LAST_CANONICAL_ARCHIVE_MAINTENANCE_HEIGHT: &str = "last_his
 pub(super) const KEY_ACKNOWLEDGED_WRITE_FLOOR: &str = "acknowledged_write_floor";
 pub(super) const KEY_NEXT_ACKNOWLEDGED_WRITE_SEQ: &str = "next_acknowledged_write_seq";
 
-pub(super) const STORE_LAYOUT_VERSION: u64 = 2;
+pub(super) const STORE_LAYOUT_VERSION: u64 = 3;
 
 // TODO: Tier 2 tables (remaining)
 // const MM_STATE: TableDefinition<u32, &[u8]> = TableDefinition::new("mm_state");

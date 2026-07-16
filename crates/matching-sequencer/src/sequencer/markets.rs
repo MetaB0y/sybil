@@ -1,6 +1,8 @@
 use super::*;
 
 impl BlockSequencer {
+    pub const MAX_MARKET_CREATION_KEY_BYTES: usize = 128;
+
     pub fn create_market(&mut self, name: String) -> MarketId {
         self.markets.add_binary(name)
     }
@@ -9,10 +11,46 @@ impl BlockSequencer {
         &mut self,
         name: String,
         metadata: MarketMetadata,
-    ) -> MarketId {
+    ) -> Result<MarketId, SequencerError> {
+        if let Some(market_id) = self.existing_market_for_creation(&name, &metadata)? {
+            return Ok(market_id);
+        }
         let market_id = self.create_market(name);
         self.set_market_metadata(market_id, metadata);
-        market_id
+        Ok(market_id)
+    }
+
+    pub(crate) fn existing_market_for_creation(
+        &self,
+        name: &str,
+        metadata: &MarketMetadata,
+    ) -> Result<Option<MarketId>, SequencerError> {
+        let Some(key) = metadata.creation_key.as_deref() else {
+            return Ok(None);
+        };
+        validate_market_creation_key(key)?;
+
+        let Some((&market_id, existing_metadata)) = self
+            .lifecycle
+            .market_metadata_all()
+            .iter()
+            .find(|(_, existing)| existing.creation_key.as_deref() == Some(key))
+        else {
+            return Ok(None);
+        };
+        let existing_market = self.markets.get(market_id).ok_or_else(|| {
+            SequencerError::Persistence(format!(
+                "market creation key {key:?} references missing market {}",
+                market_id.0
+            ))
+        })?;
+        if existing_market.name == name && existing_metadata.same_creation_fields(metadata) {
+            return Ok(Some(market_id));
+        }
+        Err(SequencerError::MarketCreationKeyConflict {
+            key: key.to_string(),
+            existing_market_id: market_id,
+        })
     }
 
     pub fn create_market_group(
@@ -227,4 +265,27 @@ impl BlockSequencer {
         }
         self.market_groups = groups;
     }
+}
+
+fn validate_market_creation_key(key: &str) -> Result<(), SequencerError> {
+    if key.is_empty() {
+        return Err(SequencerError::InvalidMarketCreationKey(
+            "key must not be empty".to_string(),
+        ));
+    }
+    if key.len() > BlockSequencer::MAX_MARKET_CREATION_KEY_BYTES {
+        return Err(SequencerError::InvalidMarketCreationKey(format!(
+            "key is {} bytes; maximum is {}",
+            key.len(),
+            BlockSequencer::MAX_MARKET_CREATION_KEY_BYTES
+        )));
+    }
+    if !key.bytes().all(|byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b':' | b'.' | b'/')
+    }) {
+        return Err(SequencerError::InvalidMarketCreationKey(
+            "key must use ASCII letters, digits, '-', '_', ':', '.', or '/'".to_string(),
+        ));
+    }
+    Ok(())
 }

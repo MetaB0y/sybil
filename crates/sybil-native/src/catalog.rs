@@ -556,6 +556,7 @@ impl NativeMarketSpec {
     pub fn create_request(&self) -> CreateMarketRequest {
         CreateMarketRequest {
             name: self.name.clone(),
+            creation_key: Some(native_market_creation_key(&self.market_key)),
             description: self.description.clone(),
             category: Some(self.category.clone()),
             tags: Some(vec!["native".to_string(), self.category.clone()]),
@@ -597,6 +598,10 @@ pub fn outcome_market_key(template_id: &str, outcome_id: &str) -> String {
 
 pub fn native_group_key(template_id: &str) -> String {
     format!("native:{template_id}")
+}
+
+pub fn native_market_creation_key(market_key: &str) -> String {
+    format!("native:{market_key}")
 }
 
 fn validate_id(id: &str, context: &str) -> Result<(), Error> {
@@ -860,6 +865,7 @@ mod tests {
         assert_eq!(specs[0].quote_range.initial, 0.50);
         let req = specs[0].create_request();
         assert_eq!(req.name, "Will the test pass?");
+        assert_eq!(req.creation_key.as_deref(), Some("native:native_binary"));
         assert_eq!(req.resolution_template, None);
         let metadata = specs[0].metadata_request();
         assert_eq!(
@@ -903,6 +909,10 @@ mod tests {
         assert!(specs.iter().all(|spec| spec.group_size == 3));
         assert_eq!(specs[0].market_key, "native_multi:a");
         assert_eq!(specs[0].name, "Will A win?");
+        assert_eq!(
+            specs[0].create_request().creation_key.as_deref(),
+            Some("native:native_multi:a")
+        );
         assert_eq!(
             specs[0].metadata_request().group_item_title.as_deref(),
             Some("A")

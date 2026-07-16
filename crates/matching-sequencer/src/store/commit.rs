@@ -229,7 +229,7 @@ fn build_redb_block_commit(
     let mut market_meta_rows = Vec::new();
     for (id, _) in snapshot.markets.iter_with_ids() {
         if let Some(meta) = snapshot.lifecycle.market_metadata(*id) {
-            market_meta_rows.push((id.0, rmp_serde::to_vec(meta)?));
+            market_meta_rows.push((id.0, rmp_serde::to_vec_named(meta)?));
         }
     }
 

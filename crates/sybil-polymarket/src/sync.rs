@@ -307,6 +307,7 @@ impl SyncActor {
                 // Create market on Sybil
                 let req = CreateMarketRequest {
                     name: name.clone(),
+                    creation_key: None,
                     description: poly_market.description.clone(),
                     category: event.primary_category(),
                     tags: Some({

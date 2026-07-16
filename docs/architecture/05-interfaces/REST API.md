@@ -142,6 +142,14 @@ and `details.market_status`. Bots and SDKs use those stable fields to remove
 only the rejected market from a batch. The human-readable `error` remains a
 diagnostic and is not a machine interface.
 
+Trusted `POST /v1/markets` callers may supply `creation_key` as a stable
+operator identity (at most 128 ASCII letters, digits, or `-_:./`). The first
+call durably creates the market and commits the key through its metadata
+digest. A retry with the same name and creation fields returns the original id
+without appending another acknowledged write; the server-generated creation
+timestamp is deliberately not a caller field. Reusing the key for a different
+contract returns 409. Omitting the key retains allocate-on-every-call behavior.
+
 Market raw price history is served through
 `GET /v1/markets/{id}/prices/history`, backed by the private history projector.
 The endpoint is bounded by `limit` and pages older committed points with

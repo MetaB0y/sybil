@@ -304,6 +304,11 @@ that command exits successfully does `sybil-native-mm` start its independent
 static-anchor flash-liquidity actor. Polymarket owns neither the native catalog,
 the deployment manifest, nor the native MM account. A fresh-genesis reset
 therefore clears `native-data` alongside sequencer and integration state.
+Each catalog child submits the canonical creation key `native:<market-key>`.
+The sequencer returns the original market id for an exact retry, including a
+retry after acknowledged-write recovery, and rejects conflicting reuse. The
+admin therefore never discovers identity from titles, tags, or the off-block
+reference metadata written after creation.
 
 The initial history redb retains raw batches, fills, events, equity, prices,
 and candles without the former 30/31-day and global-row ceilings. This removes

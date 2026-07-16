@@ -40,6 +40,7 @@ async fn witnessed_qmdb_state_root_matches_header_after_slot_reuse() {
                     resolution_config: Some(crate::market_info::ResolutionConfig {
                         template: "admin_immediate".to_string(),
                     }),
+                    creation_key: None,
                     committed_metadata_digest: None,
                 },
             );
@@ -2276,6 +2277,29 @@ fn test_open_rejects_legacy_store_layout() {
 
     match Store::open(&path) {
         Ok(_) => panic!("expected legacy store layout to be rejected"),
+        Err(StoreError::UnsupportedLayout(_)) => {}
+        Err(error) => panic!("expected unsupported layout error, got {error:?}"),
+    }
+}
+
+#[test]
+fn test_open_rejects_unkeyed_v2_store_layout() {
+    const TEST_COUNTERS: TableDefinition<&str, u64> = TableDefinition::new("counters");
+    const PRE_CREATION_KEY_LAYOUT: u64 = 2;
+
+    let path = temp_db_path("unkeyed-v2-layout");
+    let db = Database::create(&path).unwrap();
+    let txn = db.begin_write().unwrap();
+    let mut counters = txn.open_table(TEST_COUNTERS).unwrap();
+    counters
+        .insert(KEY_STORE_LAYOUT_VERSION, PRE_CREATION_KEY_LAYOUT)
+        .unwrap();
+    drop(counters);
+    txn.commit().unwrap();
+    drop(db);
+
+    match Store::open(&path) {
+        Ok(_) => panic!("expected the unkeyed v2 store layout to be rejected"),
         Err(StoreError::UnsupportedLayout(_)) => {}
         Err(error) => panic!("expected unsupported layout error, got {error:?}"),
     }

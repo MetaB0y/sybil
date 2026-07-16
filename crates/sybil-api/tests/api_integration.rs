@@ -905,6 +905,55 @@ async fn create_market_with_metadata() {
 }
 
 #[tokio::test]
+async fn keyed_market_creation_converges_and_rejects_conflicts() {
+    let (app, handle) = test_app(true).await;
+    let request = json!({
+        "name": "Canonical native market?",
+        "creation_key": "native:catalog:market",
+        "description": "One immutable creation spec",
+        "category": "native",
+        "tags": ["native", "catalog"]
+    });
+
+    let (status, body) = post_json(app.clone(), "/v1/markets", request.clone()).await;
+    assert_eq!(status, StatusCode::OK);
+    let first_market_id = parse_json(&body)["market_id"].as_u64().unwrap();
+
+    let (status, body) = post_json(app.clone(), "/v1/markets", request).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        parse_json(&body)["market_id"].as_u64(),
+        Some(first_market_id)
+    );
+    assert_eq!(handle.list_markets().await.unwrap().len(), 1);
+
+    let (status, _) = post_json(
+        app.clone(),
+        "/v1/markets",
+        json!({
+            "name": "Conflicting market?",
+            "creation_key": "native:catalog:market",
+            "category": "native"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(handle.list_markets().await.unwrap().len(), 1);
+
+    let (status, _) = post_json(
+        app,
+        "/v1/markets",
+        json!({
+            "name": "Invalid key?",
+            "creation_key": "native key with spaces"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(handle.list_markets().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn resolved_market_rejects_new_orders() {
     let (app, _) = test_app(true).await;
 

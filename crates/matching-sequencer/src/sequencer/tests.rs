@@ -3,7 +3,7 @@ use super::*;
 use crate::account::AccountStore;
 use crate::crypto::sign_attestation;
 use crate::error::RejectionReason;
-use crate::market_info::ResolutionConfig;
+use crate::market_info::{MarketMetadata, ResolutionConfig};
 use crate::order_book::RestingOrder;
 use crate::store::{AcknowledgedWrite, SequencedAcknowledgedWrite};
 use crate::validation::{validate_order, validate_order_with_reservation};
@@ -3000,6 +3000,48 @@ fn attested_resolution_dissolves_two_market_group() {
         "violations: {:?}",
         verification.violations
     );
+}
+
+#[test]
+fn market_creation_key_is_idempotent_and_conflict_safe() {
+    let mut seq = BlockSequencer::with_default_solver(
+        AccountStore::new(),
+        MarketSet::new(),
+        vec![],
+        SequencerConfig::default(),
+    );
+    let metadata = MarketMetadata {
+        description: "Canonical native contract".to_string(),
+        category: "native".to_string(),
+        tags: vec!["native".to_string(), "test".to_string()],
+        creation_key: Some("native:catalog:outcome".to_string()),
+        created_at_ms: 10,
+        ..MarketMetadata::default()
+    };
+
+    let first = seq
+        .create_market_with_metadata("Will it happen?".to_string(), metadata.clone())
+        .unwrap();
+    let mut retry = metadata.clone();
+    retry.created_at_ms = 99;
+    retry.tags.reverse();
+    let second = seq
+        .create_market_with_metadata("Will it happen?".to_string(), retry)
+        .unwrap();
+    assert_eq!(second, first);
+    assert_eq!(seq.markets().len(), 1);
+
+    let conflict = seq
+        .create_market_with_metadata("A different contract?".to_string(), metadata)
+        .unwrap_err();
+    assert!(matches!(
+        conflict,
+        SequencerError::MarketCreationKeyConflict {
+            existing_market_id,
+            ..
+        } if existing_market_id == first
+    ));
+    assert_eq!(seq.markets().len(), 1);
 }
 
 #[test]

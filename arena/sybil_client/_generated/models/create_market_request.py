@@ -26,6 +26,8 @@ class CreateMarketRequest:
         Attributes:
             name (str): Name of the binary market. Example: Will it rain tomorrow?.
             category (None | str | Unset): Optional category (e.g., "sports", "politics", "crypto").
+            creation_key (None | str | Unset): Optional operator idempotency key. Repeating the same key and creation
+                fields returns the original market; conflicting reuse is rejected.
             description (None | str | Unset): Optional description of the market.
             expiry_timestamp_ms (int | None | Unset): Optional expiry timestamp in ms (0 = no expiry).
             resolution_criteria (None | str | Unset): Optional resolution criteria.
@@ -36,6 +38,7 @@ class CreateMarketRequest:
 
     name: str
     category: None | str | Unset = UNSET
+    creation_key: None | str | Unset = UNSET
     description: None | str | Unset = UNSET
     expiry_timestamp_ms: int | None | Unset = UNSET
     resolution_criteria: None | str | Unset = UNSET
@@ -55,6 +58,12 @@ class CreateMarketRequest:
             category = UNSET
         else:
             category = self.category
+
+        creation_key: None | str | Unset
+        if isinstance(self.creation_key, Unset):
+            creation_key = UNSET
+        else:
+            creation_key = self.creation_key
 
         description: None | str | Unset
         if isinstance(self.description, Unset):
@@ -98,6 +107,8 @@ class CreateMarketRequest:
         })
         if category is not UNSET:
             field_dict["category"] = category
+        if creation_key is not UNSET:
+            field_dict["creation_key"] = creation_key
         if description is not UNSET:
             field_dict["description"] = description
         if expiry_timestamp_ms is not UNSET:
@@ -126,6 +137,16 @@ class CreateMarketRequest:
             return cast(None | str | Unset, data)
 
         category = _parse_category(d.pop("category", UNSET))
+
+
+        def _parse_creation_key(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        creation_key = _parse_creation_key(d.pop("creation_key", UNSET))
 
 
         def _parse_description(data: object) -> None | str | Unset:
@@ -189,6 +210,7 @@ class CreateMarketRequest:
         create_market_request = cls(
             name=name,
             category=category,
+            creation_key=creation_key,
             description=description,
             expiry_timestamp_ms=expiry_timestamp_ms,
             resolution_criteria=resolution_criteria,
