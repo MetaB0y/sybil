@@ -1745,8 +1745,16 @@ mod tests {
         baseline
             .register_pubkey(aid, PublicKey(*cancel_signing_key.verifying_key()))
             .unwrap();
-        baseline.produce_block(Vec::new(), 1);
-        store.save_block(baseline.snapshot()).await.unwrap();
+        let genesis = baseline.produce_block(Vec::new(), 1);
+        store
+            .save_block_with_witness_and_replay_block(
+                baseline.snapshot(),
+                &genesis.witness,
+                &genesis.sealed_block(),
+                true,
+            )
+            .await
+            .unwrap();
 
         let restored = store.load_state().await.unwrap().unwrap();
         let seq = BlockSequencer::restore(restored, config.clone());
@@ -2097,8 +2105,16 @@ mod tests {
             );
         let pubkey = PublicKey(*signing_key.verifying_key());
         baseline.register_pubkey(aid, pubkey).unwrap();
-        baseline.produce_block(Vec::new(), 1);
-        store.save_block(baseline.snapshot()).await.unwrap();
+        let genesis = baseline.produce_block(Vec::new(), 1);
+        store
+            .save_block_with_witness_and_replay_block(
+                baseline.snapshot(),
+                &genesis.witness,
+                &genesis.sealed_block(),
+                true,
+            )
+            .await
+            .unwrap();
 
         let restored = store.load_state().await.unwrap().unwrap();
         let seq = BlockSequencer::restore(restored, config.clone());
@@ -2241,8 +2257,16 @@ mod tests {
             ..SequencerConfig::default()
         };
         let (mut baseline, aid) = make_test_sequencer_with_config(config.clone());
-        baseline.produce_block(Vec::new(), 1);
-        store.save_block(baseline.snapshot()).await.unwrap();
+        let genesis = baseline.produce_block(Vec::new(), 1);
+        store
+            .save_block_with_witness_and_replay_block(
+                baseline.snapshot(),
+                &genesis.witness,
+                &genesis.sealed_block(),
+                true,
+            )
+            .await
+            .unwrap();
 
         let restored = store.load_state().await.unwrap().unwrap();
         let seq = BlockSequencer::restore(restored, config);
@@ -2836,8 +2860,16 @@ mod tests {
             ..SequencerConfig::default()
         };
         let (mut sequencer, _) = make_test_sequencer_with_config(config.clone());
-        sequencer.produce_block(Vec::new(), 1);
-        store.save_block(sequencer.snapshot()).await.unwrap();
+        let genesis = sequencer.produce_block(Vec::new(), 1);
+        store
+            .save_block_with_witness_and_replay_block(
+                sequencer.snapshot(),
+                &genesis.witness,
+                &genesis.sealed_block(),
+                true,
+            )
+            .await
+            .unwrap();
 
         let restored = store.load_state().await.unwrap().unwrap();
         let sequencer = BlockSequencer::restore(restored, config.clone());
@@ -2923,8 +2955,16 @@ mod tests {
             ..SequencerConfig::default()
         };
         let (mut sequencer, _) = make_test_sequencer_with_config(config.clone());
-        sequencer.produce_block(Vec::new(), 1);
-        store.save_block(sequencer.snapshot()).await.unwrap();
+        let genesis = sequencer.produce_block(Vec::new(), 1);
+        store
+            .save_block_with_witness_and_replay_block(
+                sequencer.snapshot(),
+                &genesis.witness,
+                &genesis.sealed_block(),
+                true,
+            )
+            .await
+            .unwrap();
 
         let restored = store.load_state().await.unwrap().unwrap();
         let sequencer = BlockSequencer::restore(restored, config.clone());
@@ -2978,8 +3018,16 @@ mod tests {
             ..SequencerConfig::default()
         };
         let (mut sequencer, _) = make_test_sequencer_with_config(config.clone());
-        sequencer.produce_block(Vec::new(), 1);
-        store.save_block(sequencer.snapshot()).await.unwrap();
+        let genesis = sequencer.produce_block(Vec::new(), 1);
+        store
+            .save_block_with_witness_and_replay_block(
+                sequencer.snapshot(),
+                &genesis.witness,
+                &genesis.sealed_block(),
+                true,
+            )
+            .await
+            .unwrap();
         let restored = store.load_state().await.unwrap().unwrap();
         let sequencer = BlockSequencer::restore(restored, config);
         let handle = SequencerHandle::spawn_with_store_arc(sequencer, Some(store.clone()));
@@ -3567,6 +3615,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn product_only_chain_keeps_recovery_and_replay_without_validity_artifacts() {
+        let path = temp_store_path("product-only-artifacts");
+        let store = Arc::new(crate::store::Store::open(&path).unwrap());
+        store.bind_validity_artifact_retention(false).unwrap();
+        let config = SequencerConfig {
+            retain_validity_artifacts: false,
+            block_interval: Duration::from_secs(60 * 60),
+            ..SequencerConfig::default()
+        };
+        let (seq, _) = make_test_sequencer_with_config(config);
+        let handle = SequencerHandle::spawn_with_store_arc(seq, Some(store.clone()));
+
+        let block = handle.produce_block().await.unwrap();
+        let height = block.canonical.header.height;
+        assert!(
+            handle.stop_and_wait(TEST_ACTOR_TIMEOUT).await,
+            "graceful shutdown should drain post-commit work"
+        );
+
+        assert!(store.proof_job_outbox_page(None, 10).unwrap().is_empty());
+        assert!(store.load_da_artifact(height).await.unwrap().is_none());
+        assert_eq!(
+            store
+                .latest_block_witness()
+                .unwrap()
+                .expect("latest recovery witness remains available")
+                .header
+                .height,
+            height
+        );
+        assert_eq!(
+            store
+                .load_block(height)
+                .await
+                .unwrap()
+                .expect("canonical replay block remains available")
+                .canonical
+                .header
+                .height,
+            height
+        );
+        assert_eq!(store.load_state().await.unwrap().unwrap().height, height);
+    }
+
+    #[tokio::test]
     async fn committed_price_facts_are_written_to_the_durable_history_outbox() {
         let path = temp_store_path("price-history");
         let store = Arc::new(crate::store::Store::open(&path).unwrap());
@@ -3719,8 +3812,16 @@ mod tests {
         };
 
         let (mut baseline, aid) = make_test_sequencer_with_config(config.clone());
-        baseline.produce_block(Vec::new(), 1_000);
-        store.save_block(baseline.snapshot()).await.unwrap();
+        let genesis = baseline.produce_block(Vec::new(), 1_000);
+        store
+            .save_block_with_witness_and_replay_block(
+                baseline.snapshot(),
+                &genesis.witness,
+                &genesis.sealed_block(),
+                true,
+            )
+            .await
+            .unwrap();
 
         let restored = store.load_state().await.unwrap().unwrap();
         let seq = BlockSequencer::restore(restored, config.clone());

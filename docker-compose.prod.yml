@@ -63,6 +63,10 @@ services:
       # Run canonical block/DA maintenance every ten minutes (60 blocks).
       SYBIL_CANONICAL_ARCHIVE_MAINTENANCE_INTERVAL_BLOCKS: "60"
       SYBIL_CANONICAL_ARCHIVE_MAX_ROWS_PER_PASS: "10000"
+      # Product devnet makes no proof/DA validity claim. Keep native
+      # verification, replay/history, and the latest recovery witness without
+      # accumulating portable proof jobs or DA serving payloads.
+      SYBIL_RETAIN_VALIDITY_ARTIFACTS: "false"
 
     logging: *default-logging
   sybil-history:

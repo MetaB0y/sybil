@@ -33,6 +33,7 @@ impl Store {
         genesis_hash: Option<[u8; 32]>,
         config: SequencerConfig,
     ) -> Result<WitnessImportSummary, StoreError> {
+        self.bind_validity_artifact_retention(config.retain_validity_artifacts)?;
         self.ensure_import_target_empty()?;
         validate_import_witness_root(&witness, expect_state_root)?;
         let genesis_hash = import_genesis_hash(&witness, genesis_hash)?;

@@ -52,6 +52,10 @@ services:
       SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS: "${SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS:-8640}"
       SYBIL_ACKNOWLEDGED_PROOF_JOB_MAINTENANCE_INTERVAL_BLOCKS: "60"
       SYBIL_ACKNOWLEDGED_PROOF_JOB_MAX_ROWS_PER_PASS: "1000"
+      # Local validity integration is enabled by default. The production
+      # product overlay disables artifact retention, while the explicit
+      # validity overlay re-enables it from fresh genesis.
+      SYBIL_RETAIN_VALIDITY_ARTIFACTS: "true"
       SYBIL_EVENT_SNAPSHOT_DIR: "/data/event_snapshots"
       RUST_LOG: "warn,sybil_api=info,matching_sequencer=info,sybil_prover=info,commonware_storage=error,tower_http=warn"
     volumes:
@@ -340,6 +344,11 @@ services:
     volumes:
       - vmdata:/storage
       - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # Empty file-SD inputs keep absent optional profiles completely absent
+      # from the target set without DNS errors. Profile overlays replace these
+      # mounts with the corresponding enabled target file.
+      - ./deploy/prometheus-targets/disabled.json:/etc/prometheus/targets/sybil-prover.json:ro
+      - ./deploy/prometheus-targets/disabled.json:/etc/prometheus/targets/sybil-l1-indexer.json:ro
     command:
       - "-storageDataPath=/storage"
       - "-promscrape.config=/etc/prometheus/prometheus.yml"

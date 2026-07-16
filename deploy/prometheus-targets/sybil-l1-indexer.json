@@ -1,0 +1,5 @@
+[
+  {
+    "targets": ["sybil-l1-indexer:9102"]
+  }
+]

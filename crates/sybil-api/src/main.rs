@@ -129,6 +129,7 @@ fn sequencer_config_from_api(config: &ApiConfig) -> SequencerConfig {
         acknowledged_proof_job_maintenance_interval_blocks: config
             .acknowledged_proof_job_maintenance_interval_blocks,
         acknowledged_proof_job_max_rows_per_pass: config.acknowledged_proof_job_max_rows_per_pass,
+        retain_validity_artifacts: config.retain_validity_artifacts,
         actor_queue_warn_depth: config.actor_queue_warn_depth,
         actor_queue_error_depth: config.actor_queue_error_depth,
         liquidity_band_nanos: config.liquidity_band_nanos,
@@ -212,6 +213,9 @@ async fn run_witness_import(config: &ApiConfig) -> Result<(), Box<dyn std::error
     let db_path = data_dir.join("sybil.redb");
     let store = matching_sequencer::store::Store::open(&db_path)
         .map_err(|e| Error::other(format!("open persistent store {}: {e}", db_path.display())))?;
+    store
+        .bind_validity_artifact_retention(config.retain_validity_artifacts)
+        .map_err(|e| Error::other(format!("bind validity artifact retention: {e}")))?;
     let summary = store
         .import_witness_genesis(
             witness,
@@ -300,7 +304,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!(
         port = config.port,
         dev_mode = config.dev_mode,
+        retain_validity_artifacts = config.retain_validity_artifacts,
         "Starting Sybil API server"
+    );
+    metrics::gauge!("sybil_validity_artifact_retention_enabled").set(
+        if config.retain_validity_artifacts {
+            1.0
+        } else {
+            0.0
+        },
     );
 
     let store = if !config.data_dir.is_empty() {
@@ -308,7 +320,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::fs::create_dir_all(data_dir).expect("failed to create data dir");
         let db_path = data_dir.join("sybil.redb");
         match matching_sequencer::store::Store::open(&db_path) {
-            Ok(s) => Some(Arc::new(s)),
+            Ok(s) => match s.bind_validity_artifact_retention(config.retain_validity_artifacts) {
+                Ok(()) => Some(Arc::new(s)),
+                Err(e) => {
+                    tracing::error!(error = %e, "persistent store validity mode mismatch");
+                    return Err(std::io::Error::other(format!(
+                        "failed to bind persistent store validity mode: {e}"
+                    ))
+                    .into());
+                }
+            },
             Err(e) => {
                 tracing::error!(error = %e, "failed to open persistent store");
                 return Err(

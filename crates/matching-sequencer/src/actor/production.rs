@@ -298,41 +298,44 @@ impl SequencerActorState {
                     prepared.next_sequencer().snapshot(),
                     &prepared.production().witness,
                     &sealed,
+                    self.sequencer.config.retain_validity_artifacts,
                 )
                 .await
                 .map_err(|error| SequencerError::Persistence(error.to_string()))?;
 
-            let da_store = Arc::clone(store);
-            let da_witness = prepared.production().witness.clone();
-            let da_writes_in_flight = metrics::gauge!("sybil_da_artifact_writes_in_flight");
-            da_writes_in_flight.increment(1.0);
-            self.background_tasks.spawn(async move {
-                let started = Instant::now();
-                let artifact = DaArtifact::from_witness(&da_witness);
-                let height = artifact.manifest.height;
-                metrics::histogram!("sybil_witness_payload_bytes")
-                    .record(artifact.manifest.payload_len as f64);
-                match da_store.save_da_artifact(artifact).await {
-                    Ok(true) => {
-                        metrics::counter!("sybil_da_artifacts_persisted_total").increment(1);
+            if self.sequencer.config.retain_validity_artifacts {
+                let da_store = Arc::clone(store);
+                let da_witness = prepared.production().witness.clone();
+                let da_writes_in_flight = metrics::gauge!("sybil_da_artifact_writes_in_flight");
+                da_writes_in_flight.increment(1.0);
+                self.background_tasks.spawn(async move {
+                    let started = Instant::now();
+                    let artifact = DaArtifact::from_witness(&da_witness);
+                    let height = artifact.manifest.height;
+                    metrics::histogram!("sybil_witness_payload_bytes")
+                        .record(artifact.manifest.payload_len as f64);
+                    match da_store.save_da_artifact(artifact).await {
+                        Ok(true) => {
+                            metrics::counter!("sybil_da_artifacts_persisted_total").increment(1);
+                        }
+                        Ok(false) => {
+                            metrics::counter!("sybil_da_artifacts_skipped_total", "reason" => "below_retention_floor")
+                                .increment(1);
+                            tracing::warn!(
+                                height,
+                                "skipped DA artifact write below retained block-history floor"
+                            );
+                        }
+                        Err(error) => {
+                            metrics::counter!("sybil_da_artifact_persist_failures_total").increment(1);
+                            tracing::warn!(height, %error, "DA artifact persistence failed after block commit");
+                        }
                     }
-                    Ok(false) => {
-                        metrics::counter!("sybil_da_artifacts_skipped_total", "reason" => "below_retention_floor")
-                            .increment(1);
-                        tracing::warn!(
-                            height,
-                            "skipped DA artifact write below retained block-history floor"
-                        );
-                    }
-                    Err(error) => {
-                        metrics::counter!("sybil_da_artifact_persist_failures_total").increment(1);
-                        tracing::warn!(height, %error, "DA artifact persistence failed after block commit");
-                    }
-                }
-                metrics::histogram!("sybil_da_artifact_persist_duration_seconds")
-                    .record(started.elapsed().as_secs_f64());
-                da_writes_in_flight.decrement(1.0);
-            });
+                    metrics::histogram!("sybil_da_artifact_persist_duration_seconds")
+                        .record(started.elapsed().as_secs_f64());
+                    da_writes_in_flight.decrement(1.0);
+                });
+            }
 
             let canonical_policy = CanonicalArchiveRetentionPolicy {
                 retention_blocks: self.sequencer.config.canonical_archive_retention_blocks,
@@ -356,8 +359,9 @@ impl SequencerActorState {
                     .config
                     .acknowledged_proof_job_max_rows_per_pass,
             };
+            let retain_validity_artifacts = self.sequencer.config.retain_validity_artifacts;
             if canonical_policy.should_maintain_at(height)
-                || proof_job_policy.should_maintain_at(height)
+                || (retain_validity_artifacts && proof_job_policy.should_maintain_at(height))
             {
                 // Persistent artifact retention is maintenance, not part of
                 // the commit fence. Never hold the single-writer actor while
@@ -398,7 +402,7 @@ impl SequencerActorState {
                             }
                         }
                     }
-                    if proof_job_policy.should_maintain_at(height) {
+                    if retain_validity_artifacts && proof_job_policy.should_maintain_at(height) {
                         match retention_store
                             .prune_acknowledged_proof_jobs(height, proof_job_policy)
                             .await

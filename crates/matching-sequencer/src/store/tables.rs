@@ -100,6 +100,7 @@ pub(super) const CANONICAL_ARCHIVE_META: TableDefinition<&str, u64> =
 /// header and scopes order/cancel signatures across fresh-genesis redeploys.
 pub(super) const CHAIN_META: TableDefinition<&str, &[u8]> = TableDefinition::new("chain_meta");
 pub(super) const KEY_GENESIS_HASH: &str = "genesis_hash";
+pub(super) const KEY_VALIDITY_ARTIFACT_RETENTION: &str = "validity_artifact_retention";
 
 /// Resting order book snapshot: single row keyed "snapshot" → msgpack(Vec<RestingOrder>).
 /// Rewritten atomically each block.
