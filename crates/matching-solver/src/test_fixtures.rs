@@ -7,13 +7,14 @@
 //! unique scenarios (Conic Fisher mode and retained-cash budget sweeps) stay
 //! next to the solver they characterize.
 //!
-//! Gated on `feature = "lp"` because every LP-family solver requires it.
+//! Gated on `feature = "retained-cash"` because that is the smallest feature
+//! carrying the shared HiGHS machinery.
 
-use matching_engine::{
-    MarketGroup, MmConstraint, MmId, MmSide, NANOS_PER_DOLLAR, Nanos, Problem, Qty, outcome_sell,
-    simple_no_buy, simple_yes_buy,
-};
+use matching_engine::{MarketGroup, Problem, outcome_sell, simple_no_buy, simple_yes_buy};
+#[cfg(feature = "conic")]
+use matching_engine::{MmConstraint, MmId, MmSide, NANOS_PER_DOLLAR, Nanos, Qty};
 
+#[cfg(feature = "conic")]
 use crate::PipelineResult;
 
 /// One binary market: symmetric YES/NO sellers at 50c plus a YES buyer at 60c.
@@ -115,6 +116,7 @@ pub(crate) fn no_profitable_trades_problem() -> Problem {
 
 /// YES buyer at 60c (500) paired via minting with an MM buying NO at 50c
 /// (1000) under a $50 budget. Order id `200` is the MM (`BuyNo`).
+#[cfg(feature = "conic")]
 pub(crate) fn mm_budget_problem() -> Problem {
     let mut problem = Problem::new("mm_budget");
     let market = problem.markets.add_binary("market");
@@ -138,6 +140,7 @@ pub(crate) fn mm_budget_problem() -> Problem {
 
 /// A retail YES/NO minting pair plus a zero-budget MM (order id `200`,
 /// `BuyNo`) that must not be filled.
+#[cfg(feature = "conic")]
 pub(crate) fn zero_budget_mm_problem() -> Problem {
     let mut problem = Problem::new("zero_budget");
     let market = problem.markets.add_binary("market");
@@ -168,6 +171,7 @@ pub(crate) fn zero_budget_mm_problem() -> Problem {
 
 /// Two YES buyers (60c/55c) and two competing MMs buying NO — MM `200`
 /// at 45c budget $100, MM `300` at 50c budget $50.
+#[cfg(feature = "conic")]
 pub(crate) fn multiple_mms_problem() -> Problem {
     let mut problem = Problem::new("multi_mm");
     let market = problem.markets.add_binary("market");
@@ -204,6 +208,7 @@ pub(crate) fn multiple_mms_problem() -> Problem {
 /// Assert a `BuyNo` MM's capital usage stays within `budget_dollars` (with the
 /// 1% rounding tolerance every solver's MM-budget test uses). A missing fill
 /// (MM not filled at all) trivially satisfies the budget.
+#[cfg(feature = "conic")]
 pub(crate) fn assert_buy_no_within_budget(
     result: &PipelineResult,
     order_id: u64,
@@ -222,6 +227,7 @@ pub(crate) fn assert_buy_no_within_budget(
 }
 
 /// Assert a zero-budget MM order got no fill (absent or zero quantity).
+#[cfg(feature = "conic")]
 pub(crate) fn assert_mm_not_filled(result: &PipelineResult, order_id: u64) {
     let mm_fill = result.result.fills.iter().find(|f| f.order_id == order_id);
     assert!(

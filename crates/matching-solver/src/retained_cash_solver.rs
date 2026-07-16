@@ -85,7 +85,7 @@ impl RetainedCashSolver {
         let model = ObjectiveModel::new(problem, &ctx);
 
         if !model.has_reduced_form_orders() {
-            let mut result = crate::LpSolver::new().solve(problem);
+            let mut result = crate::lp_solver::LpSolver::new().solve(problem);
             result.diagnostics.algorithm = "retained-cash-fw".to_string();
             result.diagnostics.status = TerminationStatus::Delegated;
             result.diagnostics.message =
@@ -593,6 +593,7 @@ impl<'a> ObjectiveModel<'a> {
                 .sum::<f64>()
     }
 
+    #[cfg(feature = "lp")]
     pub(crate) fn segment_argmax(
         &self,
         utilities: &[f64],
@@ -693,9 +694,9 @@ mod tests {
         MmConstraint, MmId, MmSide, Nanos, Qty, notional_nanos, outcome_buy, outcome_sell,
         shares_to_qty, simple_no_buy, simple_yes_buy,
     };
-    use matching_scenarios::{
-        FlashLiquidityConfig, ScenarioConfig, generate_flash_liquidity_scenario, generate_scenario,
-    };
+    use matching_scenarios::{FlashLiquidityConfig, generate_flash_liquidity_scenario};
+    #[cfg(feature = "lp")]
+    use matching_scenarios::{ScenarioConfig, generate_scenario};
 
     fn tight_budget_problem(budget_dollars: u64) -> Problem {
         let mut problem = Problem::new("retained_cash_tight");
@@ -748,7 +749,7 @@ mod tests {
     fn calibrate_budgets_from_unconstrained_lp(problem: &mut Problem, fraction: f64) {
         let mut unconstrained = problem.clone();
         unconstrained.mm_constraints.clear();
-        let unconstrained = crate::LpSolver::new().solve(&unconstrained);
+        let unconstrained = crate::lp_solver::LpSolver::new().solve(&unconstrained);
         let unconstrained_q: HashMap<_, _> = unconstrained
             .result
             .fills
@@ -782,6 +783,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "lp")]
     fn wide_range_problem(seed: u64) -> Problem {
         let mut problem = generate_scenario(ScenarioConfig {
             seed,
@@ -843,7 +845,7 @@ mod tests {
     fn slack_budget_recovers_the_lp_welfare() {
         let problem = tight_budget_problem(1_000);
         let retained = RetainedCashSolver::new().solve(&problem);
-        let lp = crate::LpSolver::new().solve(&problem);
+        let lp = crate::lp_solver::LpSolver::new().solve(&problem);
 
         assert_eq!(retained.diagnostics.status, TerminationStatus::Converged);
         assert_eq!(retained.result.total_welfare(), lp.result.total_welfare());
@@ -908,6 +910,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "lp")]
     fn supported_wide_range_landings_preserve_minting_duality() {
         for seed in [16_200, 16_201, 16_202, 16_204] {
             let problem = wide_range_problem(seed);
@@ -942,6 +945,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "lp")]
     fn unsupported_wide_range_integer_face_fails_explicitly() {
         let problem = wide_range_problem(16_203);
         let result = crate::PacingBundleSolver::with_config(crate::PacingBundleConfig {
@@ -969,6 +973,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "lp")]
     fn nearest_face_landing_is_available_on_multi_mm_flash_book() {
         let mut problem = generate_flash_liquidity_scenario(FlashLiquidityConfig {
             seed: 18_303,
@@ -1007,10 +1012,15 @@ mod tests {
         mm.add_order(5, MmSide::BuyNo);
         problem.mm_constraints.push(mm);
 
-        for result in [
+        #[cfg(not(feature = "lp"))]
+        let results = vec![RetainedCashSolver::new().solve(&problem)];
+        #[cfg(feature = "lp")]
+        let results = vec![
             RetainedCashSolver::new().solve(&problem),
             crate::PacingBundleSolver::new().solve(&problem),
-        ] {
+        ];
+
+        for result in results {
             assert_ne!(
                 result.diagnostics.status,
                 TerminationStatus::PostProcessingFailure,

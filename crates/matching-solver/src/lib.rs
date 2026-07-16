@@ -15,13 +15,13 @@ pub mod viz;
 #[cfg(feature = "milp")]
 pub mod milp;
 
-#[cfg(feature = "lp")]
-pub mod lp_solver;
+#[cfg(feature = "retained-cash")]
+mod lp_solver;
 
 #[cfg(feature = "conic")]
 pub mod conic_solver;
 
-#[cfg(feature = "lp")]
+#[cfg(feature = "retained-cash")]
 pub mod retained_cash_solver;
 
 #[cfg(feature = "lp")]
@@ -30,7 +30,7 @@ pub mod pacing_bundle_solver;
 #[cfg(feature = "lp")]
 pub mod decomposed;
 
-#[cfg(all(test, feature = "lp"))]
+#[cfg(all(test, feature = "retained-cash"))]
 pub(crate) mod test_fixtures;
 
 // === Public API ===
@@ -52,7 +52,7 @@ pub use milp::{MilpConfig, MilpResult, MilpSolver, MmBudgetMode, SolveStatus};
 #[cfg(feature = "lp")]
 pub use lp_solver::{LpConfig, LpSolver};
 
-#[cfg(feature = "lp")]
+#[cfg(feature = "retained-cash")]
 pub use retained_cash_solver::{
     RetainedCashConfig, RetainedCashSolver, retained_cash_objective_for_fills,
     retained_cash_welfare_gap_bound_for_fills, zero_temperature_minting_cost_for_fills,
