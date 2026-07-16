@@ -27,7 +27,6 @@ serde_json = { workspace = true }
 
 [features]
 default = ["lp", "conic"]
-viz = ["matching-solver/viz"]
 lp = ["matching-solver/lp"]
 conic = ["matching-solver/conic"]
 milp = ["matching-solver/milp"]

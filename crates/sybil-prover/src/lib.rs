@@ -1,8 +1,8 @@
 //! Host-side Sybil prover tooling.
 //!
 //! The default build stays sequencer-free. Store-backed proof-job export lives
-//! behind the `sequencer-store` feature, and the dev mock artifact producer
-//! lives behind the `mock-live` feature.
+//! behind the `sequencer-store` feature. The prover daemon owns both the typed
+//! mock backend used by development and the STARK backend used for real proofs.
 
 pub mod abi;
 pub mod artifacts;
@@ -12,8 +12,6 @@ pub mod error;
 pub mod mock_backend;
 pub mod serve;
 
-#[cfg(feature = "mock-live")]
-pub mod mock_live;
 #[cfg(feature = "sequencer-store")]
 pub mod sequencer_store;
 #[cfg(feature = "sequencer-store")]

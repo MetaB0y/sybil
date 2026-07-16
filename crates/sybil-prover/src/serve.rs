@@ -500,7 +500,7 @@ mod tests {
         let new_status_path = new_artifact_dir.join("status.json");
         let old_status = WorkerStatusJson {
             version: 1,
-            producer: "mock-live".to_string(),
+            producer: "test-fixture".to_string(),
             status: "prepared".to_string(),
             job_path: "mock://sybil/blocks/7".to_string(),
             artifact_dir: old_artifact_dir.display().to_string(),

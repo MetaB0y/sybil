@@ -36,9 +36,7 @@ RUN --mount=type=cache,id=sybil-cargo-registry,target=/usr/local/cargo/registry,
     --mount=type=cache,id=sybil-cargo-git,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=sybil-target-${TARGETARCH},target=/app/target,sharing=locked \
     cargo chef cook --release --recipe-path recipe.json \
-        -p sybil-api -p sybil-history -p sybil-l1-indexer -p sybil-polymarket -p sybil-prover && \
-    cargo chef cook --release --recipe-path recipe.json \
-        -p sybil-prover --features mock-live --bin sybil-prover-mock
+        -p sybil-api -p sybil-history -p sybil-l1-indexer -p sybil-polymarket -p sybil-prover
 
 # Copy the real workspace only after dependencies have been cooked.
 COPY . .
@@ -49,7 +47,6 @@ RUN --mount=type=cache,id=sybil-cargo-registry,target=/usr/local/cargo/registry,
     --mount=type=cache,id=sybil-cargo-git,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=sybil-target-${TARGETARCH},target=/app/target,sharing=locked \
     cargo build --release -p sybil-api -p sybil-history -p sybil-l1-indexer -p sybil-polymarket -p sybil-prover && \
-    cargo build --release -p sybil-prover --features mock-live --bin sybil-prover-mock && \
     install -d /app/bin && \
     install -m 0755 \
         /app/target/release/sybil-api \
@@ -57,7 +54,6 @@ RUN --mount=type=cache,id=sybil-cargo-registry,target=/usr/local/cargo/registry,
         /app/target/release/sybil-l1-indexer \
         /app/target/release/sybil-polymarket \
         /app/target/release/sybil-prover \
-        /app/target/release/sybil-prover-mock \
         /app/bin/
 
 
@@ -71,7 +67,6 @@ COPY --from=builder /app/bin/sybil-history /usr/local/bin/sybil-history
 COPY --from=builder /app/bin/sybil-l1-indexer /usr/local/bin/sybil-l1-indexer
 COPY --from=builder /app/bin/sybil-polymarket /usr/local/bin/sybil-polymarket
 COPY --from=builder /app/bin/sybil-prover /usr/local/bin/sybil-prover
-COPY --from=builder /app/bin/sybil-prover-mock /usr/local/bin/sybil-prover-mock
 COPY --from=builder /app/zk/openvm-guest/openvm/release/sybil-openvm-guest.commit.json /etc/sybil/sybil-openvm-guest.commit.json
 
 EXPOSE 3000 3002 3003 9102

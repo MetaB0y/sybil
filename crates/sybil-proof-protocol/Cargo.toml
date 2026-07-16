@@ -8,7 +8,6 @@ description = "Portable Sybil proof jobs, epoch identifiers, and proof envelopes
 [dependencies]
 blake3 = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-sha3 = { workspace = true }
 sybil-verifier = { path = "../sybil-verifier", default-features = false }
 sybil-zk = { path = "../sybil-zk" }
 thiserror = { workspace = true }

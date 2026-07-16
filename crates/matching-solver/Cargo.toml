@@ -7,8 +7,6 @@ description = "Solvers for the prediction market matching problem"
 
 [dependencies]
 matching-engine = { path = "../matching-engine" }
-rand = { workspace = true }
-rand_chacha = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tracing = { workspace = true }
@@ -35,6 +33,8 @@ blake3 = { workspace = true }
 proptest = { workspace = true }
 divan = "0.1"
 matching-scenarios = { path = "../matching-scenarios" }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
 sybil-verifier = { path = "../sybil-verifier", default-features = false }
 
 [[bench]]
@@ -51,7 +51,6 @@ milp = ["dep:russcip"]  # MIQCQP solver via SCIP
 lp = ["dep:highs"]      # LP solver via HiGHS
 conic = ["dep:clarabel", "lp"] # Conic EG solver via Clarabel (reuses LP utilities)
 parallel = ["dep:rayon"] # Parallel decomposed solves
-viz = []   # Enable detailed phase snapshots and orderbook data
 
 [lints.clippy]
 # f64 ban is scoped to the consensus crates (matching-engine, matching-sequencer);
