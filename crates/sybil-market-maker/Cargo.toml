@@ -13,6 +13,7 @@ tokio-util = { workspace = true }
 futures-util = "0.3"
 serde_json = { workspace = true }
 tracing = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 reqwest = { workspace = true }

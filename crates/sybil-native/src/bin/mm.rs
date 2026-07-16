@@ -2,9 +2,10 @@ use std::path::{Path, PathBuf};
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use sybil_api_types::NANOS_PER_DOLLAR;
 use sybil_client::SybilClient;
-use sybil_market_maker::{MmActor, MmConfig, MmMessage, PriceSnapshot, QuoteRange};
+use sybil_market_maker::{
+    MmActor, MmConfig, MmMessage, PriceSnapshot, QuoteRange, dollars_to_nanos,
+};
 use sybil_native::{Error, NativeDeployment};
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
@@ -76,6 +77,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
     let config = Config::parse();
+    let mm_config = config.mm_config().validate()?;
+    let initial_balance_nanos = dollars_to_nanos(
+        "native_mm_initial_balance_dollars",
+        config.initial_balance_dollars,
+    )?;
     let deployment = NativeDeployment::load(&config.deployment_path)?;
     let token = std::env::var("SYBIL_SERVICE_TOKEN")
         .ok()
@@ -98,7 +104,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .into());
     }
 
-    let account_id = resolve_account(&client, &config, &deployment).await?;
+    let account_id = resolve_account(
+        &client,
+        &config.state_path,
+        &deployment,
+        initial_balance_nanos,
+    )
+    .await?;
     let channel_size = deployment.markets.len().max(1);
     let (mm_tx, mm_rx) = mpsc::channel(channel_size);
     for market in &deployment.markets {
@@ -119,14 +131,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let (_price_tx, price_rx) = watch::channel(PriceSnapshot::default());
     let (live_tx, _live_rx) = watch::channel(0usize);
-    let actor = MmActor::new(
-        config.mm_config(),
-        client,
-        account_id,
-        price_rx,
-        mm_rx,
-        live_tx,
-    );
+    let actor = MmActor::new(mm_config, client, account_id, price_rx, mm_rx, live_tx);
     let cancel = CancellationToken::new();
     let actor_cancel = cancel.clone();
     let mut actor_handle = tokio::spawn(async move { actor.run(actor_cancel).await });
@@ -144,10 +149,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn resolve_account(
     client: &SybilClient,
-    config: &Config,
+    state_path: &Path,
     deployment: &NativeDeployment,
+    initial_balance_nanos: u64,
 ) -> Result<u64, Error> {
-    if let Ok(state) = load_state(&config.state_path)
+    if let Ok(state) = load_state(state_path)
         && state.genesis_hash == deployment.genesis_hash
         && client.get_account(state.account_id).await.is_ok()
     {
@@ -157,10 +163,9 @@ async fn resolve_account(
         );
         return Ok(state.account_id);
     }
-    let balance_nanos = (config.initial_balance_dollars * NANOS_PER_DOLLAR as f64) as u64;
-    let account = client.create_bare_account(balance_nanos).await?;
+    let account = client.create_bare_account(initial_balance_nanos).await?;
     save_state(
-        &config.state_path,
+        state_path,
         &MmState {
             genesis_hash: deployment.genesis_hash.clone(),
             account_id: account.account_id,

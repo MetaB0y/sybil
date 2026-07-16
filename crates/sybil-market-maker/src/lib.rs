@@ -77,6 +77,103 @@ impl Default for MmConfig {
     }
 }
 
+/// A market-maker policy whose numeric invariants were checked at startup.
+/// Runtime code accepts this wrapper so invalid environment values cannot
+/// reach quote generation or float-to-integer protocol conversions.
+#[derive(Debug, Clone)]
+pub struct ValidatedMmConfig(MmConfig);
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[error("invalid market-maker configuration {field}: {requirement}")]
+pub struct MmConfigError {
+    field: &'static str,
+    requirement: &'static str,
+}
+
+impl MmConfig {
+    pub fn validate(self) -> Result<ValidatedMmConfig, MmConfigError> {
+        finite_range("mm_half_spread", self.mm_half_spread, 0.0, 0.5)?;
+        dollars_to_nanos("mm_budget_dollars", self.mm_budget_dollars)?;
+        dollars_to_nanos("mm_quote_size_dollars", self.mm_quote_size_dollars)?;
+        finite_nonnegative("mm_gamma", self.mm_gamma)?;
+        nonzero("mm_max_position", self.mm_max_position)?;
+        nonzero("mm_max_orders_per_block", self.mm_max_orders_per_block)?;
+        finite_positive("mm_max_exposure_dollars", self.mm_max_exposure_dollars)?;
+        if self.mm_vol_window < 3 {
+            return Err(invalid(
+                "mm_vol_window",
+                "must contain at least three observations",
+            ));
+        }
+        finite_range("mm_min_spread", self.mm_min_spread, 0.0, 0.5)?;
+        nonzero("mm_sync_interval_blocks", self.mm_sync_interval_blocks)?;
+        nonzero("mm_staleness_ms", self.mm_staleness_ms)?;
+        Ok(ValidatedMmConfig(self))
+    }
+}
+
+/// Convert an operator-configured dollar amount into integer nanodollars only
+/// after proving that it is finite, positive, and representable.
+pub fn dollars_to_nanos(field: &'static str, dollars: f64) -> Result<u64, MmConfigError> {
+    finite_positive(field, dollars)?;
+    let nanos = dollars * NANOS_PER_DOLLAR as f64;
+    if nanos >= u64::MAX as f64 {
+        return Err(invalid(field, "must fit in integer nanodollars"));
+    }
+    let nanos = nanos.floor() as u64;
+    if nanos == 0 {
+        return Err(invalid(field, "must be at least one nanodollar"));
+    }
+    Ok(nanos)
+}
+
+fn invalid(field: &'static str, requirement: &'static str) -> MmConfigError {
+    MmConfigError { field, requirement }
+}
+
+fn finite_positive(field: &'static str, value: f64) -> Result<(), MmConfigError> {
+    if value.is_finite() && value > 0.0 {
+        Ok(())
+    } else {
+        Err(invalid(field, "must be finite and positive"))
+    }
+}
+
+fn finite_nonnegative(field: &'static str, value: f64) -> Result<(), MmConfigError> {
+    if value.is_finite() && value >= 0.0 {
+        Ok(())
+    } else {
+        Err(invalid(field, "must be finite and non-negative"))
+    }
+}
+
+fn finite_range(
+    field: &'static str,
+    value: f64,
+    lower_exclusive: f64,
+    upper_exclusive: f64,
+) -> Result<(), MmConfigError> {
+    if value.is_finite() && value > lower_exclusive && value < upper_exclusive {
+        Ok(())
+    } else {
+        Err(invalid(
+            field,
+            "must be finite and strictly between 0 and 0.5",
+        ))
+    }
+}
+
+fn nonzero<T>(field: &'static str, value: T) -> Result<(), MmConfigError>
+where
+    T: Default + PartialEq,
+{
+    if value == T::default() {
+        Err(invalid(field, "must be nonzero"))
+    } else {
+        Ok(())
+    }
+}
+
 /// Default variance prior for markets with insufficient price history.
 const DEFAULT_VARIANCE: f64 = 0.0005;
 const SHARE_SCALE: f64 = 1_000.0;
@@ -309,7 +406,7 @@ pub struct MmActor {
 
 impl MmActor {
     pub fn new(
-        config: MmConfig,
+        config: ValidatedMmConfig,
         sybil_client: SybilClient,
         account_id: u64,
         price_rx: watch::Receiver<PriceSnapshot>,
@@ -317,7 +414,7 @@ impl MmActor {
         live_tx: watch::Sender<usize>,
     ) -> Self {
         Self {
-            config,
+            config: config.0,
             sybil_client,
             account_id,
             price_rx,
@@ -783,6 +880,95 @@ fn now_ms() -> u64 {
 mod tests {
     use super::*;
 
+    #[test]
+    fn valid_default_policy_and_dollar_conversion() {
+        MmConfig::default().validate().unwrap();
+        assert_eq!(dollars_to_nanos("balance", 1.25).unwrap(), 1_250_000_000);
+    }
+
+    #[test]
+    fn invalid_numeric_policy_fails_at_validation_boundary() {
+        let mut cases = Vec::new();
+
+        let config = MmConfig {
+            mm_half_spread: f64::NAN,
+            ..MmConfig::default()
+        };
+        cases.push(("mm_half_spread", config));
+
+        let config = MmConfig {
+            mm_budget_dollars: -1.0,
+            ..MmConfig::default()
+        };
+        cases.push(("mm_budget_dollars", config));
+
+        let config = MmConfig {
+            mm_quote_size_dollars: f64::INFINITY,
+            ..MmConfig::default()
+        };
+        cases.push(("mm_quote_size_dollars", config));
+
+        let config = MmConfig {
+            mm_gamma: -0.1,
+            ..MmConfig::default()
+        };
+        cases.push(("mm_gamma", config));
+
+        let config = MmConfig {
+            mm_max_position: 0,
+            ..MmConfig::default()
+        };
+        cases.push(("mm_max_position", config));
+
+        let config = MmConfig {
+            mm_max_orders_per_block: 0,
+            ..MmConfig::default()
+        };
+        cases.push(("mm_max_orders_per_block", config));
+
+        let config = MmConfig {
+            mm_max_exposure_dollars: 0.0,
+            ..MmConfig::default()
+        };
+        cases.push(("mm_max_exposure_dollars", config));
+
+        let config = MmConfig {
+            mm_vol_window: 2,
+            ..MmConfig::default()
+        };
+        cases.push(("mm_vol_window", config));
+
+        let config = MmConfig {
+            mm_min_spread: 0.5,
+            ..MmConfig::default()
+        };
+        cases.push(("mm_min_spread", config));
+
+        let config = MmConfig {
+            mm_sync_interval_blocks: 0,
+            ..MmConfig::default()
+        };
+        cases.push(("mm_sync_interval_blocks", config));
+
+        let config = MmConfig {
+            mm_staleness_ms: 0,
+            ..MmConfig::default()
+        };
+        cases.push(("mm_staleness_ms", config));
+
+        for (field, config) in cases {
+            let error = config.validate().unwrap_err();
+            assert_eq!(error.field, field);
+        }
+    }
+
+    #[test]
+    fn invalid_dollar_amount_never_reaches_integer_cast() {
+        for value in [f64::NAN, f64::INFINITY, -1.0, 0.0, u64::MAX as f64] {
+            assert!(dollars_to_nanos("balance", value).is_err(), "{value}");
+        }
+    }
+
     fn sybil_api_error(body: &str) -> sybil_client::Error {
         sybil_client::Error::Api {
             status: 400,
@@ -825,7 +1011,14 @@ mod tests {
         let (price_tx, price_rx) = watch::channel(PriceSnapshot::default());
         let (_mm_tx, mm_rx) = mpsc::channel(16);
         let client = SybilClient::new(reqwest::Client::new(), "http://localhost".into(), None);
-        let actor = MmActor::new(MmConfig::default(), client, 1, price_rx, mm_rx, live_tx);
+        let actor = MmActor::new(
+            MmConfig::default().validate().unwrap(),
+            client,
+            1,
+            price_rx,
+            mm_rx,
+            live_tx,
+        );
         (actor, price_tx)
     }
 

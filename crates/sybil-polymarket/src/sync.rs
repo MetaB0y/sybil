@@ -718,7 +718,7 @@ mod tests {
             market("cond-2", "yes-2", "no-2", "B"),
             market("cond-3", "yes-3", "no-3", "C"),
         ]);
-        let mut mapping = MappingStore::new(None);
+        let mut mapping = MappingStore::new(None, "test-genesis");
         mapping.register_market("cond-1".to_string(), vec!["yes-1".into(), "no-1".into()], 0);
         mapping.register_market("cond-2".to_string(), vec!["yes-2".into(), "no-2".into()], 1);
         mapping.register_event(

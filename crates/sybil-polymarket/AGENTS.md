@@ -33,6 +33,9 @@ ResolutionActor ── signed resolved-source outcome ──► sybil-api
   active/closed state, and JSON-within-JSON fields.
 - Mapping and display/reference metadata are off-block. They must not become
   validity inputs accidentally.
+- The mapping file is atomically replaced, schema-versioned, and bound to one
+  Sybil genesis. A mismatch fails startup and requires clearing integration
+  state; market-presence probes are not a chain-identity protocol.
 - Preserve source provenance (`condition_id`, event id/title, external URL) on
   mirrored markets.
 - MM submissions are flash/IOC-style liquidity and must not become a second
