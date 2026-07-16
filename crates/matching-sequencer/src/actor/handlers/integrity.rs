@@ -143,12 +143,6 @@ impl SequencerActorState {
             SequencerMsg::GetDaManifest(height, reply) => {
                 Some(SequencerMsg::GetDaManifest(height, reply))
             }
-            SequencerMsg::ListAutoResolutionRecords(reply) => {
-                Some(SequencerMsg::ListAutoResolutionRecords(reply))
-            }
-            SequencerMsg::PutAutoResolutionRecord(record, reply) => {
-                Some(SequencerMsg::PutAutoResolutionRecord(record, reply))
-            }
             SequencerMsg::PauseBlockProduction(reply) => {
                 Some(SequencerMsg::PauseBlockProduction(reply))
             }

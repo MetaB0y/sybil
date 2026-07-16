@@ -133,10 +133,6 @@ use crate::util::now_ms;
         routes::bots::TokenUsageResponse,
         routes::bots::BotEquitySeriesResponse,
         routes::bots::BotEquityPointResponse,
-        SubmitAutoResolutionRequest,
-        AutoResolutionActionDto,
-        AutoResolutionEntryResponse,
-        AutoResolutionListResponse,
     )),
     modifiers(&BearerReadAddon),
     info(
@@ -613,10 +609,6 @@ declare_route_registry! {
         "POST" "/v1/feeds" => routes::feeds::register_feed;
         "POST" "/v1/markets/prices/reference" => routes::markets::set_reference_prices;
         "POST" "/v1/markets/{id}/metadata" => routes::markets::set_market_metadata;
-        "POST" "/v1/admin/auto-resolutions" => routes::auto_resolution::submit_auto_resolution;
-        "GET" "/v1/admin/auto-resolutions" => routes::auto_resolution::list_auto_resolutions;
-        "POST" "/v1/admin/auto-resolutions/{id}/approve" => routes::auto_resolution::approve_auto_resolution;
-        "POST" "/v1/admin/auto-resolutions/{id}/reject" => routes::auto_resolution::reject_auto_resolution;
     }
 }
 

@@ -85,7 +85,9 @@ def sync_detailed(
 ) -> Response[BotDecisionFeedResponse]:
     """ GET /v1/bots/decisions
 
-     Native arena / bot analytics feed. Public (unauthenticated) read route.
+     Public bot analytics backed by Arena's private typed read service. The Rust
+    API owns the public route and contract, while Python owns its storage and
+    query semantics.
 
     Args:
         limit (int | Unset):
@@ -127,7 +129,9 @@ def sync(
 ) -> BotDecisionFeedResponse | None:
     """ GET /v1/bots/decisions
 
-     Native arena / bot analytics feed. Public (unauthenticated) read route.
+     Public bot analytics backed by Arena's private typed read service. The Rust
+    API owns the public route and contract, while Python owns its storage and
+    query semantics.
 
     Args:
         limit (int | Unset):
@@ -164,7 +168,9 @@ async def asyncio_detailed(
 ) -> Response[BotDecisionFeedResponse]:
     """ GET /v1/bots/decisions
 
-     Native arena / bot analytics feed. Public (unauthenticated) read route.
+     Public bot analytics backed by Arena's private typed read service. The Rust
+    API owns the public route and contract, while Python owns its storage and
+    query semantics.
 
     Args:
         limit (int | Unset):
@@ -206,7 +212,9 @@ async def asyncio(
 ) -> BotDecisionFeedResponse | None:
     """ GET /v1/bots/decisions
 
-     Native arena / bot analytics feed. Public (unauthenticated) read route.
+     Public bot analytics backed by Arena's private typed read service. The Rust
+    API owns the public route and contract, while Python owns its storage and
+    query semantics.
 
     Args:
         limit (int | Unset):

@@ -70,10 +70,6 @@ SERVICE PUT /v1/events/{event_id}/raw
 SERVICE POST /v1/feeds
 SERVICE POST /v1/markets/prices/reference
 SERVICE POST /v1/markets/{id}/metadata
-SERVICE POST /v1/admin/auto-resolutions
-SERVICE GET /v1/admin/auto-resolutions
-SERVICE POST /v1/admin/auto-resolutions/{id}/approve
-SERVICE POST /v1/admin/auto-resolutions/{id}/reject
 DEV GET /v1/attestation
 DEV POST /v1/simulation/pause
 DEV POST /v1/simulation/resume

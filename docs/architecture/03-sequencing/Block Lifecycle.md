@@ -58,11 +58,9 @@ Read queries remain available for incident diagnosis. `GET /v1/health` returns
 `503` with `status = "integrity_halted"` while retaining the last committed
 height and genesis hash, and mutation endpoints return the stable
 `SEQUENCER_INTEGRITY_HALTED` code. Pausing remains available as an incident
-control; resume cannot override the stronger halt. Immediately durable,
-noncanonical auto-resolution review records remain separate from this boundary
-because they neither mutate exchange state nor grow the acknowledged-write
-suffix. Recovery is an operator restart from the last committed fence after the
-underlying solver/state fault is understood.
+control; resume cannot override the stronger halt. Recovery is an operator
+restart from the last committed fence after the underlying solver/state fault
+is understood.
 
 ## Where this lives
 

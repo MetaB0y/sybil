@@ -184,11 +184,6 @@ pub(super) const COST_BASIS_TRACKER: TableDefinition<&str, &[u8]> =
     TableDefinition::new("cost_basis_tracker");
 pub(super) const KEY_COST_BASIS_TRACKER_SNAPSHOT: &str = "snapshot";
 
-/// Durable auto-resolution review-board decisions. Keyed by market_id and
-/// off-block: these rows gate resolver automation, not settlement verification.
-pub(super) const AUTO_RESOLUTION_RECORDS: TableDefinition<u32, &[u8]> =
-    TableDefinition::new("auto_resolution_records");
-
 // Counter keys
 pub(super) const KEY_STORE_LAYOUT_VERSION: &str = "store_layout_version";
 pub(super) const KEY_HEIGHT: &str = "height";

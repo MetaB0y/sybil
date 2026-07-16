@@ -693,7 +693,6 @@ impl Store {
         txn.open_table(FIRST_DEPOSIT_MS)?;
         txn.open_table(FILL_TOTAL_COUNTS)?;
         txn.open_table(COST_BASIS_TRACKER)?;
-        txn.open_table(AUTO_RESOLUTION_RECORDS)?;
         txn.commit()?;
 
         initialize_or_validate_layout(&db)?;
