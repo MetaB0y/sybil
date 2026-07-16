@@ -1,7 +1,7 @@
 ---
 tags: [runbook, observability, resources, data-availability]
 status: current
-last_verified: 2026-07-15
+last_verified: 2026-07-16
 ---
 
 # Resource and DA liveness alerts
@@ -24,7 +24,7 @@ last_verified: 2026-07-15
 
 | Alert | Threshold | Why it is conservative |
 | --- | --- | --- |
-| `SybilApiMemoryGrowingFast` | RSS slope above 32 MiB/hour for 30 minutes | Catches sustained retention well before the 650/800 MiB absolute alerts while ignoring short startup peaks. |
+| `SybilApiMemoryGrowingFast` | After the recent-block cache has been size-stable for 5 minutes, RSS slope above 32 MiB/hour for 30 minutes | Catches sustained post-warm-up retention well before the 650/800 MiB absolute alerts. The absolute alerts remain active during startup. |
 | `HostMemoryPressureStalled` | Full Linux PSI memory stalls above 5% for 5 minutes | By this point scrapes, DNS, and actor scheduling can already lag, so later queue values may be consequences rather than causes. |
 | `HostOomKill` | Any kernel OOM kill in 10 minutes | Container state can remain stale when the host OOM killer terminates the payload process directly. |
 | `HostDiskSpaceLow` | Root filesystem below 15% available for 10 minutes | Both named sequencer/history Docker volumes currently allocate from this filesystem, so the warning precedes correlated redb failures. |
@@ -87,6 +87,10 @@ failure and inspect logs before restarting.
    queue with growing durable state or outbox stock suggests retained data; a
    growing queue with flat state suggests backpressure. Once PSI is high, treat
    queue growth as possibly downstream of host starvation.
+   The derivative alert waits until the recent-block cache length has been
+   stable for five minutes, so its 30-minute persistence window measures
+   post-warm-up growth rather than intentional cache population. Absolute RSS
+   alerts remain active throughout startup.
 4. For account growth, compare `sybil_state_accounts_total` with
    `sybil_public_account_stock`, `sybil_public_account_remaining`, and
    `sybil_public_account_creation_total{result=...}`. Anonymous creation uses

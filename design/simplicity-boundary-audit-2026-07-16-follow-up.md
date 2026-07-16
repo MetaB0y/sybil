@@ -55,6 +55,20 @@ coupled state, selects the validity chain/monitoring overlays, and starts from
 fresh genesis. The store-level binding independently fails closed if an
 operator bypasses the recipe.
 
+### 4. The RSS-growth alert treated bounded cache warm-up as a leak
+
+**Finding:** During the fresh product soak, the intentional recent-block cache
+grew to its 100-block production cap while the API remained otherwise healthy.
+The 30-minute RSS-derivative rule started its persistence timer immediately, so
+normal bounded warm-up could become an operations warning.
+
+**Decision:** Keep the absolute RSS alerts active from startup, but start the
+sustained derivative alert only after the recent-block cache length has been
+stable for five minutes. This uses the cache's own behavior rather than copying
+its configurable capacity into monitoring.
+
+**Issue:** #158.
+
 ## Findings retained as separate work
 
 - **Prover retained-memory ownership (#137):** product isolation removes the

@@ -11,6 +11,8 @@ tests:
     input_series:
       - series: 'sybil_process_resident_memory_bytes{job="sybil-api",instance="sybil-api:3000"}'
         values: "419430400+2097152x40"
+      - series: 'sybil_recent_block_cache_len{job="sybil-api",instance="sybil-api:3000"}'
+        values: "100+0x40"
     alert_rule_test:
       - eval_time: 29m
         alertname: SybilApiMemoryGrowingFast
@@ -25,7 +27,18 @@ tests:
               component: sequencer
             exp_annotations:
               summary: "sybil-api RSS is growing persistently"
-              description: "RSS has grown faster than 32 MiB/hour for 30m. Correlate the recent-history cache, archive, outbox, actor queue, and workload panels before a high absolute-memory alert fires."
+              description: "After the recent-block cache finished warming, RSS grew faster than 32 MiB/hour for 30m. Correlate the archive, outbox, actor queue, and workload panels before a high absolute-memory alert fires."
+
+  - interval: 1m
+    input_series:
+      - series: 'sybil_process_resident_memory_bytes{job="sybil-api",instance="sybil-api:3000"}'
+        values: "419430400+2097152x40"
+      - series: 'sybil_recent_block_cache_len{job="sybil-api",instance="sybil-api:3000"}'
+        values: "1+2x40"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: SybilApiMemoryGrowingFast
+        exp_alerts: []
 
   - interval: 1m
     input_series:
