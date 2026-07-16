@@ -3417,7 +3417,7 @@ mod tests {
             block_interval: Duration::from_secs(60 * 60),
             ..SequencerConfig::default()
         };
-        let (seq, _) = make_test_sequencer_with_config(config);
+        let (seq, _) = make_test_sequencer_with_config(config.clone());
         let handle = SequencerHandle::spawn_with_store_arc(seq, Some(store.clone()));
 
         handle.produce_block().await.unwrap();
@@ -3425,17 +3425,11 @@ mod tests {
         let block3 = handle.produce_block().await.unwrap();
         assert_eq!(block3.canonical.header.height, 3);
 
-        let meta = tokio::time::timeout(Duration::from_secs(2), async {
-            loop {
-                let meta = store.canonical_archive_meta().unwrap();
-                if meta.last_maintenance_height == Some(3) {
-                    break meta;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("post-commit block/DA pruning should finish");
+        assert!(
+            handle.stop_and_wait(TEST_ACTOR_TIMEOUT).await,
+            "graceful shutdown should drain post-commit block/DA pruning"
+        );
+        let meta = store.canonical_archive_meta().unwrap();
         assert_eq!(meta.oldest_retained_height, Some(3));
         assert_eq!(meta.last_maintenance_height, Some(3));
         assert!(store.load_block(1).await.unwrap().is_none());
@@ -3452,7 +3446,12 @@ mod tests {
             3
         );
 
-        let pruned = match handle.get_block(1).await {
+        let restored = store.load_state().await.unwrap().unwrap();
+        let reader = SequencerHandle::spawn_with_store_arc(
+            BlockSequencer::restore(restored, config),
+            Some(store.clone()),
+        );
+        let pruned = match reader.get_block(1).await {
             Ok(block) => panic!(
                 "expected block 1 to be pruned, got height {}",
                 block.canonical.header.height
@@ -3467,7 +3466,7 @@ mod tests {
             }
         ));
         assert_eq!(
-            handle.get_block(3).await.unwrap().canonical.header.height,
+            reader.get_block(3).await.unwrap().canonical.header.height,
             3
         );
     }
