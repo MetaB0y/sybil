@@ -16,7 +16,8 @@ not own exchange mutation or settlement rules.
 Do not maintain an endpoint list here:
 
 - runtime schema: `GET /openapi.json`;
-- route policy and mounted tables: `src/app.rs` plus route-policy tests;
+- route policy and runtime mounts: the declarative registries in `src/app.rs`;
+  `tests/fixtures/route-policy.snapshot` is the reviewed manifest;
 - shared DTOs: `crates/sybil-api-types`;
 - handlers: `src/routes/`.
 

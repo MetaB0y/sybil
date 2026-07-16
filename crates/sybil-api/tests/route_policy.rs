@@ -1,5 +1,5 @@
-//! Route trust-boundary tests. These deliberately assert exact mount tables so
-//! write routes cannot drift between public, service, and dev tiers silently.
+//! Route trust-boundary tests. A compact reviewed snapshot pins tier membership,
+//! while real negative-auth requests prove each runtime policy independently.
 
 mod common;
 
@@ -15,9 +15,7 @@ use matching_sequencer::{AccountId, BridgeWithdrawalRequest};
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
 use serde_json::{Value, json};
-use sybil_api::app::{
-    DEV_ROUTE_TABLE, OWNER_ROUTE_TABLE, PUBLIC_ROUTE_TABLE, RouteMount, SERVICE_ROUTE_TABLE,
-};
+use sybil_api::app::{DEV_ROUTE_TABLE, OWNER_ROUTE_TABLE, PUBLIC_ROUTE_TABLE, SERVICE_ROUTE_TABLE};
 use sybil_api::config::ApiConfig;
 use tower::ServiceExt;
 
@@ -25,348 +23,19 @@ use common::test_app_with_config;
 
 const TOKEN: &str = "route-policy-token";
 
-fn exact_public_routes() -> &'static [RouteMount] {
-    &[
-        RouteMount {
-            method: "GET",
-            path: "/openapi.json",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/metrics",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/bots/decisions",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/bots/equity-series",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/leaderboard",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/health",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/state-root",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/da/{height}/manifest",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/onboarding",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/onboarding/accounts",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/accounts/{id}/keyop-state",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/accounts/{id}/keys/register",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/accounts/{id}/keys/revoke",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/accounts/{id}/profile",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/accounts/{id}/api-keys",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/accounts/{id}/api-keys/revoke",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/bridge/status",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/markets/search",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/markets/summary",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/markets",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/markets/groups",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/markets/prices",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/markets/{id}",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/markets/{id}/resolution",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/markets/{id}/prices/history",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/markets/{id}/prices/candles",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/markets/{id}/open-batch",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/activity/overview",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/events/{event_id}/traders",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/events/{event_id}/raw",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/feeds",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/orders/signed",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/orders/cancel/signed",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/blocks",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/blocks/latest",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v2/blocks/ws",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/blocks/{height}",
-        },
-    ]
-}
-
-fn exact_owner_routes() -> &'static [RouteMount] {
-    &[
-        RouteMount {
-            method: "GET",
-            path: "/v1/accounts/{id}",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/accounts/{id}/portfolio",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/accounts/{id}/fills",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/accounts/{id}/equity",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/accounts/{id}/events",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/accounts/{id}/orders",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/accounts/{id}/keys",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/accounts/{id}/api-keys",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/accounts/{id}/bridge-key",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/accounts/{id}/withdrawals",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/accounts/{id}/private-summary",
-        },
-    ]
-}
-
-fn exact_service_routes() -> &'static [RouteMount] {
-    &[
-        RouteMount {
-            method: "POST",
-            path: "/v1/accounts",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/blocks/ws",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/orders",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/proofs/state/{leaf_key_hex}",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/da/{height}/payload",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/prover/jobs/next",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/prover/jobs/{height}/ack",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/accounts/{id}/fund",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/accounts/{id}/keys",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/bridge/accounts/by-key/{key_hex}",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/bridge/deposits",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/bridge/withdrawals/pending",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/bridge/withdrawals",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/bridge/withdrawals/signed",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/bridge/withdrawals/l1-events",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/bridge/l1-height",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/markets",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/markets/groups",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/markets/groups/{group_id}/members",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/markets/{id}/resolve",
-        },
-        RouteMount {
-            method: "PUT",
-            path: "/v1/events/{event_id}/raw",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/feeds",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/markets/prices/reference",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/markets/{id}/metadata",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/admin/auto-resolutions",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/admin/auto-resolutions",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/admin/auto-resolutions/{id}/approve",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/admin/auto-resolutions/{id}/reject",
-        },
-    ]
-}
-
-fn exact_dev_routes() -> &'static [RouteMount] {
-    &[
-        RouteMount {
-            method: "GET",
-            path: "/v1/attestation",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/simulation/pause",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/simulation/resume",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/orders/pending",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/markets/{id}/orderbook",
-        },
-    ]
+fn render_route_policy_snapshot() -> String {
+    let mut snapshot = String::new();
+    for (tier, routes) in [
+        ("PUBLIC", PUBLIC_ROUTE_TABLE),
+        ("OWNER", OWNER_ROUTE_TABLE),
+        ("SERVICE", SERVICE_ROUTE_TABLE),
+        ("DEV", DEV_ROUTE_TABLE),
+    ] {
+        for route in routes {
+            snapshot.push_str(&format!("{tier} {} {}\n", route.method, route.path));
+        }
+    }
+    snapshot
 }
 
 fn temp_event_dir() -> String {
@@ -634,11 +303,11 @@ fn expected_deposit_root(
 }
 
 #[test]
-fn route_policy_mount_tables_are_exact() {
-    assert_eq!(PUBLIC_ROUTE_TABLE, exact_public_routes());
-    assert_eq!(OWNER_ROUTE_TABLE, exact_owner_routes());
-    assert_eq!(SERVICE_ROUTE_TABLE, exact_service_routes());
-    assert_eq!(DEV_ROUTE_TABLE, exact_dev_routes());
+fn route_policy_manifest_matches_reviewed_snapshot() {
+    assert_eq!(
+        render_route_policy_snapshot(),
+        include_str!("fixtures/route-policy.snapshot")
+    );
 }
 
 #[tokio::test]

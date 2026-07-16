@@ -1,5 +1,5 @@
-//! OpenAPI drift pin. This test enumerates every mounted route template across
-//! the three declarative mount tables and asserts each one is documented by the
+//! OpenAPI drift pin. This test enumerates every mounted method/path pair across
+//! the four declarative route registries and asserts each one is documented by the
 //! OpenAPI-aware runtime registrations — and, in reverse, that the spec
 //! documents nothing that is not mounted.
 //!
@@ -26,24 +26,39 @@ const OPENAPI_EXEMPT_PATHS: &[&str] = &[
 
 const EXPECTED_UNIT_FIELD_DESCRIPTIONS: usize = 138;
 
-/// Unique path templates across all three mount tables, minus the non-API
-/// exemptions. `MatchedPath`/utoipa both key on the path template (not the
-/// method), so GET+PUT on the same path collapse to a single documented path.
-fn documented_route_templates() -> BTreeSet<String> {
+/// Registered method/path pairs, minus the non-API exemptions.
+fn documented_route_mounts() -> BTreeSet<(String, String)> {
     PUBLIC_ROUTE_TABLE
         .iter()
         .chain(OWNER_ROUTE_TABLE)
         .chain(SERVICE_ROUTE_TABLE)
         .chain(DEV_ROUTE_TABLE)
-        .map(|mount| mount.path)
-        .filter(|path| !OPENAPI_EXEMPT_PATHS.contains(path))
-        .map(str::to_string)
+        .filter(|mount| !OPENAPI_EXEMPT_PATHS.contains(&mount.path))
+        .map(|mount| (mount.method.to_string(), mount.path.to_string()))
         .collect()
 }
 
-/// Path templates present in the generated OpenAPI document.
+/// Method/path pairs present in the generated OpenAPI document.
+fn openapi_route_mounts() -> BTreeSet<(String, String)> {
+    let document = openapi_json();
+    let paths = document["paths"].as_object().expect("OpenAPI paths object");
+    let mut mounts = BTreeSet::new();
+    for (path, item) in paths {
+        let item = item.as_object().expect("OpenAPI path item");
+        for method in ["get", "post", "put", "delete", "patch", "head", "options"] {
+            if item.contains_key(method) {
+                mounts.insert((method.to_ascii_uppercase(), path.clone()));
+            }
+        }
+    }
+    mounts
+}
+
 fn openapi_paths() -> BTreeSet<String> {
-    openapi_document(true).paths.paths.keys().cloned().collect()
+    openapi_route_mounts()
+        .into_iter()
+        .map(|(_, path)| path)
+        .collect()
 }
 
 fn openapi_json() -> serde_json::Value {
@@ -159,11 +174,11 @@ fn check_schema_unit_descriptions(
 
 #[test]
 fn openapi_documents_every_mounted_route() {
-    let mounted = documented_route_templates();
-    let documented = openapi_paths();
+    let mounted = documented_route_mounts();
+    let documented = openapi_route_mounts();
 
-    let missing_from_spec: Vec<&String> = mounted.difference(&documented).collect();
-    let extra_in_spec: Vec<&String> = documented.difference(&mounted).collect();
+    let missing_from_spec: Vec<&(String, String)> = mounted.difference(&documented).collect();
+    let extra_in_spec: Vec<&(String, String)> = documented.difference(&mounted).collect();
 
     assert!(
         missing_from_spec.is_empty() && extra_in_spec.is_empty(),

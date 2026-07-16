@@ -517,449 +517,143 @@ pub struct RouteMount {
     pub path: &'static str,
 }
 
-pub const PUBLIC_ROUTE_TABLE: &[RouteMount] = &[
-    RouteMount {
-        method: "GET",
-        path: "/openapi.json",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/metrics",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/bots/decisions",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/bots/equity-series",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/leaderboard",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/health",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/state-root",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/da/{height}/manifest",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/onboarding",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/onboarding/accounts",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/accounts/{id}/keyop-state",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/accounts/{id}/keys/register",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/accounts/{id}/keys/revoke",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/accounts/{id}/profile",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/accounts/{id}/api-keys",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/accounts/{id}/api-keys/revoke",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/bridge/status",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/markets/search",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/markets/summary",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/markets",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/markets/groups",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/markets/prices",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/markets/{id}",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/markets/{id}/resolution",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/markets/{id}/prices/history",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/markets/{id}/prices/candles",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/markets/{id}/open-batch",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/activity/overview",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/events/{event_id}/traders",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/events/{event_id}/raw",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/feeds",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/orders/signed",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/orders/cancel/signed",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/blocks",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/blocks/latest",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v2/blocks/ws",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/blocks/{height}",
-    },
-];
+/// Declare one trust tier's audited route registry. Each entry emits both the
+/// runtime mount and the policy manifest consumed by auth/OpenAPI tests. The
+/// handler's `utoipa::path` annotation remains an independent schema contract;
+/// `openapi_drift.rs` proves its method/path agrees with this registry.
+macro_rules! declare_route_registry {
+    (
+        $table:ident, $builder:ident,
+        manual { $( $manual_method:literal $manual_path:literal => $manual_route:expr; )* }
+        documented { $( $method:literal $path:literal => $handler:path; )* }
+    ) => {
+        pub const $table: &[RouteMount] = &[
+            $( RouteMount { method: $manual_method, path: $manual_path }, )*
+            $( RouteMount { method: $method, path: $path }, )*
+        ];
 
-/// Per-account reads that accept either an owner read key or the service token.
-pub const OWNER_ROUTE_TABLE: &[RouteMount] = &[
-    RouteMount {
-        method: "GET",
-        path: "/v1/accounts/{id}",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/accounts/{id}/portfolio",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/accounts/{id}/fills",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/accounts/{id}/equity",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/accounts/{id}/events",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/accounts/{id}/orders",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/accounts/{id}/keys",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/accounts/{id}/api-keys",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/accounts/{id}/bridge-key",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/accounts/{id}/withdrawals",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/accounts/{id}/private-summary",
-    },
-];
-
-pub const SERVICE_ROUTE_TABLE: &[RouteMount] = &[
-    RouteMount {
-        method: "POST",
-        path: "/v1/accounts",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/blocks/ws",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/orders",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/proofs/state/{leaf_key_hex}",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/da/{height}/payload",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/prover/jobs/next",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/prover/jobs/{height}/ack",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/accounts/{id}/fund",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/accounts/{id}/keys",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/bridge/accounts/by-key/{key_hex}",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/bridge/deposits",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/bridge/withdrawals/pending",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/bridge/withdrawals",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/bridge/withdrawals/signed",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/bridge/withdrawals/l1-events",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/bridge/l1-height",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/markets",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/markets/groups",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/markets/groups/{group_id}/members",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/markets/{id}/resolve",
-    },
-    RouteMount {
-        method: "PUT",
-        path: "/v1/events/{event_id}/raw",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/feeds",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/markets/prices/reference",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/markets/{id}/metadata",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/admin/auto-resolutions",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/admin/auto-resolutions",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/admin/auto-resolutions/{id}/approve",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/admin/auto-resolutions/{id}/reject",
-    },
-];
-
-pub const DEV_ROUTE_TABLE: &[RouteMount] = &[
-    RouteMount {
-        method: "GET",
-        path: "/v1/attestation",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/simulation/pause",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/simulation/resume",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/orders/pending",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/markets/{id}/orderbook",
-    },
-];
-
-fn public_routes() -> OpenApiRouter<AppState> {
-    OpenApiRouter::default()
-        .route("/metrics", axum::routing::get(prometheus_metrics))
-        .routes(openapi_routes!(routes::bots::get_bot_decisions))
-        .routes(openapi_routes!(routes::bots::get_bot_equity_series))
-        .routes(openapi_routes!(routes::leaderboard::get_leaderboard))
-        .routes(openapi_routes!(routes::system::health))
-        .routes(openapi_routes!(routes::system::state_root))
-        .routes(openapi_routes!(routes::da::get_da_manifest))
-        .routes(openapi_routes!(
-            routes::accounts::get_onboarding_policy,
-            routes::accounts::onboard_account,
-        ))
-        .routes(openapi_routes!(routes::accounts::get_account))
-        .routes(openapi_routes!(routes::accounts::get_keyop_state))
-        .routes(openapi_routes!(routes::accounts::list_account_keys))
-        .routes(openapi_routes!(routes::accounts::register_signed_key))
-        .routes(openapi_routes!(routes::accounts::revoke_key))
-        .routes(openapi_routes!(routes::accounts::set_profile))
-        .routes(openapi_routes!(
-            routes::accounts::list_api_keys,
-            routes::accounts::create_api_key,
-        ))
-        .routes(openapi_routes!(routes::accounts::revoke_api_key))
-        .routes(openapi_routes!(routes::accounts::get_private_summary))
-        .routes(openapi_routes!(routes::accounts::history::get_portfolio))
-        .routes(openapi_routes!(
-            routes::accounts::history::get_account_fills
-        ))
-        .routes(openapi_routes!(routes::accounts::history::get_equity))
-        .routes(openapi_routes!(
-            routes::accounts::history::get_account_history
-        ))
-        .routes(openapi_routes!(routes::bridge::account_key))
-        .routes(openapi_routes!(routes::bridge::list_account_withdrawals))
-        .routes(openapi_routes!(routes::orders::get_account_orders))
-        .routes(openapi_routes!(routes::bridge::status))
-        .routes(openapi_routes!(routes::markets::search_markets))
-        .routes(openapi_routes!(routes::markets::list_markets_summary))
-        .routes(openapi_routes!(routes::markets::list_markets))
-        .routes(openapi_routes!(routes::markets::list_market_groups))
-        .routes(openapi_routes!(routes::markets::get_prices))
-        .routes(openapi_routes!(routes::markets::get_market))
-        .routes(openapi_routes!(routes::markets::get_resolution))
-        .routes(openapi_routes!(routes::markets::get_price_history))
-        .routes(openapi_routes!(routes::markets::get_price_candles))
-        .routes(openapi_routes!(routes::aggregates::get_open_batch))
-        .routes(openapi_routes!(routes::aggregates::get_activity_overview))
-        .routes(openapi_routes!(routes::aggregates::get_event_traders))
-        .routes(openapi_routes!(routes::events::get_event_raw))
-        .routes(openapi_routes!(routes::feeds::list_feeds))
-        // Signed trader orders carry their own P256/WebAuthn authorization.
-        .routes(openapi_routes!(routes::orders::submit_signed_order))
-        .routes(openapi_routes!(routes::orders::cancel_signed_order))
-        .routes(openapi_routes!(routes::blocks::get_recent_blocks))
-        .routes(openapi_routes!(routes::blocks::get_latest_block))
-        .routes(openapi_routes!(routes::blocks::ws_blocks))
-        .routes(openapi_routes!(routes::blocks::get_block_by_height))
+        fn $builder() -> OpenApiRouter<AppState> {
+            let router = OpenApiRouter::default();
+            $( let router = router.route($manual_path, $manual_route); )*
+            $( let router = router.routes(openapi_routes!($handler)); )*
+            router
+        }
+    };
 }
 
-fn service_routes() -> OpenApiRouter<AppState> {
-    OpenApiRouter::default()
-        .routes(openapi_routes!(routes::accounts::create_account))
-        .routes(openapi_routes!(routes::blocks::ws_service_blocks))
-        // Unsigned orders can name arbitrary accounts and MM budgets.
-        .routes(openapi_routes!(routes::orders::submit_orders))
-        .routes(openapi_routes!(routes::proofs::get_state_proof))
-        .routes(openapi_routes!(routes::da::get_da_payload))
-        .routes(openapi_routes!(routes::prover::get_next_proof_job))
-        .routes(openapi_routes!(routes::prover::acknowledge_proof_job))
-        .routes(openapi_routes!(routes::accounts::fund_account))
-        .routes(openapi_routes!(routes::accounts::register_key))
-        .routes(openapi_routes!(routes::bridge::account_by_key))
-        .routes(openapi_routes!(routes::bridge::submit_l1_deposit))
-        .routes(openapi_routes!(routes::bridge::list_pending_withdrawals))
-        .routes(openapi_routes!(routes::bridge::create_withdrawal))
-        .routes(openapi_routes!(routes::bridge::create_signed_withdrawal))
-        .routes(openapi_routes!(routes::bridge::submit_l1_withdrawal_event))
-        .routes(openapi_routes!(routes::bridge::observe_l1_height))
-        .routes(openapi_routes!(routes::markets::create_market))
-        .routes(openapi_routes!(routes::markets::create_market_group))
-        .routes(openapi_routes!(routes::markets::extend_market_group))
-        .routes(openapi_routes!(routes::markets::resolve_market))
-        .routes(openapi_routes!(routes::events::put_event_raw))
-        .routes(openapi_routes!(routes::feeds::register_feed))
-        .routes(openapi_routes!(routes::markets::set_reference_prices))
-        .routes(openapi_routes!(routes::markets::set_market_metadata))
-        .routes(openapi_routes!(
-            routes::auto_resolution::submit_auto_resolution,
-            routes::auto_resolution::list_auto_resolutions,
-        ))
-        .routes(openapi_routes!(
-            routes::auto_resolution::approve_auto_resolution
-        ))
-        .routes(openapi_routes!(
-            routes::auto_resolution::reject_auto_resolution
-        ))
+async fn openapi_json(State(state): State<AppState>) -> Json<utoipa::openapi::OpenApi> {
+    Json(openapi_document(state.dev_mode))
 }
 
-fn dev_routes() -> OpenApiRouter<AppState> {
-    OpenApiRouter::default()
-        .routes(openapi_routes!(routes::system::attestation))
-        .routes(openapi_routes!(routes::system::pause))
-        .routes(openapi_routes!(routes::system::resume))
-        .routes(openapi_routes!(routes::orders::get_all_pending_orders))
-        .routes(openapi_routes!(routes::orders::get_market_orderbook))
+declare_route_registry! {
+    PUBLIC_ROUTE_TABLE, public_routes,
+    manual {
+        "GET" "/openapi.json" => axum::routing::get(openapi_json);
+        "GET" "/metrics" => axum::routing::get(prometheus_metrics);
+    }
+    documented {
+        "GET" "/v1/bots/decisions" => routes::bots::get_bot_decisions;
+        "GET" "/v1/bots/equity-series" => routes::bots::get_bot_equity_series;
+        "GET" "/v1/leaderboard" => routes::leaderboard::get_leaderboard;
+        "GET" "/v1/health" => routes::system::health;
+        "GET" "/v1/state-root" => routes::system::state_root;
+        "GET" "/v1/da/{height}/manifest" => routes::da::get_da_manifest;
+        "GET" "/v1/onboarding" => routes::accounts::get_onboarding_policy;
+        "POST" "/v1/onboarding/accounts" => routes::accounts::onboard_account;
+        "GET" "/v1/accounts/{id}/keyop-state" => routes::accounts::get_keyop_state;
+        "POST" "/v1/accounts/{id}/keys/register" => routes::accounts::register_signed_key;
+        "POST" "/v1/accounts/{id}/keys/revoke" => routes::accounts::revoke_key;
+        "POST" "/v1/accounts/{id}/profile" => routes::accounts::set_profile;
+        "POST" "/v1/accounts/{id}/api-keys" => routes::accounts::create_api_key;
+        "POST" "/v1/accounts/{id}/api-keys/revoke" => routes::accounts::revoke_api_key;
+        "GET" "/v1/bridge/status" => routes::bridge::status;
+        "GET" "/v1/markets/search" => routes::markets::search_markets;
+        "GET" "/v1/markets/summary" => routes::markets::list_markets_summary;
+        "GET" "/v1/markets" => routes::markets::list_markets;
+        "GET" "/v1/markets/groups" => routes::markets::list_market_groups;
+        "GET" "/v1/markets/prices" => routes::markets::get_prices;
+        "GET" "/v1/markets/{id}" => routes::markets::get_market;
+        "GET" "/v1/markets/{id}/resolution" => routes::markets::get_resolution;
+        "GET" "/v1/markets/{id}/prices/history" => routes::markets::get_price_history;
+        "GET" "/v1/markets/{id}/prices/candles" => routes::markets::get_price_candles;
+        "GET" "/v1/markets/{id}/open-batch" => routes::aggregates::get_open_batch;
+        "GET" "/v1/activity/overview" => routes::aggregates::get_activity_overview;
+        "GET" "/v1/events/{event_id}/traders" => routes::aggregates::get_event_traders;
+        "GET" "/v1/events/{event_id}/raw" => routes::events::get_event_raw;
+        "GET" "/v1/feeds" => routes::feeds::list_feeds;
+        "POST" "/v1/orders/signed" => routes::orders::submit_signed_order;
+        "POST" "/v1/orders/cancel/signed" => routes::orders::cancel_signed_order;
+        "GET" "/v1/blocks" => routes::blocks::get_recent_blocks;
+        "GET" "/v1/blocks/latest" => routes::blocks::get_latest_block;
+        "GET" "/v2/blocks/ws" => routes::blocks::ws_blocks;
+        "GET" "/v1/blocks/{height}" => routes::blocks::get_block_by_height;
+    }
+}
+
+// Per-account reads accept either an owner read key or the service token.
+declare_route_registry! {
+    OWNER_ROUTE_TABLE, owner_routes,
+    manual {}
+    documented {
+        "GET" "/v1/accounts/{id}" => routes::accounts::get_account;
+        "GET" "/v1/accounts/{id}/portfolio" => routes::accounts::history::get_portfolio;
+        "GET" "/v1/accounts/{id}/fills" => routes::accounts::history::get_account_fills;
+        "GET" "/v1/accounts/{id}/equity" => routes::accounts::history::get_equity;
+        "GET" "/v1/accounts/{id}/events" => routes::accounts::history::get_account_history;
+        "GET" "/v1/accounts/{id}/orders" => routes::orders::get_account_orders;
+        "GET" "/v1/accounts/{id}/keys" => routes::accounts::list_account_keys;
+        "GET" "/v1/accounts/{id}/api-keys" => routes::accounts::list_api_keys;
+        "GET" "/v1/accounts/{id}/bridge-key" => routes::bridge::account_key;
+        "GET" "/v1/accounts/{id}/withdrawals" => routes::bridge::list_account_withdrawals;
+        "GET" "/v1/accounts/{id}/private-summary" => routes::accounts::get_private_summary;
+    }
+}
+
+declare_route_registry! {
+    SERVICE_ROUTE_TABLE, service_routes,
+    manual {}
+    documented {
+        "POST" "/v1/accounts" => routes::accounts::create_account;
+        "GET" "/v1/blocks/ws" => routes::blocks::ws_service_blocks;
+        "POST" "/v1/orders" => routes::orders::submit_orders;
+        "GET" "/v1/proofs/state/{leaf_key_hex}" => routes::proofs::get_state_proof;
+        "GET" "/v1/da/{height}/payload" => routes::da::get_da_payload;
+        "GET" "/v1/prover/jobs/next" => routes::prover::get_next_proof_job;
+        "POST" "/v1/prover/jobs/{height}/ack" => routes::prover::acknowledge_proof_job;
+        "POST" "/v1/accounts/{id}/fund" => routes::accounts::fund_account;
+        "POST" "/v1/accounts/{id}/keys" => routes::accounts::register_key;
+        "GET" "/v1/bridge/accounts/by-key/{key_hex}" => routes::bridge::account_by_key;
+        "POST" "/v1/bridge/deposits" => routes::bridge::submit_l1_deposit;
+        "GET" "/v1/bridge/withdrawals/pending" => routes::bridge::list_pending_withdrawals;
+        "POST" "/v1/bridge/withdrawals" => routes::bridge::create_withdrawal;
+        "POST" "/v1/bridge/withdrawals/signed" => routes::bridge::create_signed_withdrawal;
+        "POST" "/v1/bridge/withdrawals/l1-events" => routes::bridge::submit_l1_withdrawal_event;
+        "POST" "/v1/bridge/l1-height" => routes::bridge::observe_l1_height;
+        "POST" "/v1/markets" => routes::markets::create_market;
+        "POST" "/v1/markets/groups" => routes::markets::create_market_group;
+        "POST" "/v1/markets/groups/{group_id}/members" => routes::markets::extend_market_group;
+        "POST" "/v1/markets/{id}/resolve" => routes::markets::resolve_market;
+        "PUT" "/v1/events/{event_id}/raw" => routes::events::put_event_raw;
+        "POST" "/v1/feeds" => routes::feeds::register_feed;
+        "POST" "/v1/markets/prices/reference" => routes::markets::set_reference_prices;
+        "POST" "/v1/markets/{id}/metadata" => routes::markets::set_market_metadata;
+        "POST" "/v1/admin/auto-resolutions" => routes::auto_resolution::submit_auto_resolution;
+        "GET" "/v1/admin/auto-resolutions" => routes::auto_resolution::list_auto_resolutions;
+        "POST" "/v1/admin/auto-resolutions/{id}/approve" => routes::auto_resolution::approve_auto_resolution;
+        "POST" "/v1/admin/auto-resolutions/{id}/reject" => routes::auto_resolution::reject_auto_resolution;
+    }
+}
+
+declare_route_registry! {
+    DEV_ROUTE_TABLE, dev_routes,
+    manual {}
+    documented {
+        "GET" "/v1/attestation" => routes::system::attestation;
+        "POST" "/v1/simulation/pause" => routes::system::pause;
+        "POST" "/v1/simulation/resume" => routes::system::resume;
+        "GET" "/v1/orders/pending" => routes::orders::get_all_pending_orders;
+        "GET" "/v1/markets/{id}/orderbook" => routes::orders::get_market_orderbook;
+    }
 }
 
 /// Generate the same OpenAPI document that the runtime router serves. Route
@@ -968,6 +662,7 @@ fn dev_routes() -> OpenApiRouter<AppState> {
 pub fn openapi_document(include_dev_routes: bool) -> utoipa::openapi::OpenApi {
     let mut routes = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .merge(public_routes())
+        .merge(owner_routes())
         .merge(service_routes());
     if include_dev_routes {
         routes = routes.merge(dev_routes());
@@ -1077,6 +772,7 @@ fn cors_layer(state: &AppState) -> CorsLayer {
 pub fn create_router(state: AppState) -> Router {
     let mut app = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .merge(public_routes())
+        .merge(owner_routes())
         .merge(
             service_routes()
                 .route_layer(middleware::from_fn_with_state(state.clone(), service_auth)),
@@ -1084,14 +780,7 @@ pub fn create_router(state: AppState) -> Router {
     if state.dev_mode {
         app = app.merge(dev_routes());
     }
-    let (app, openapi) = app.split_for_parts();
-    let app = app.route(
-        "/openapi.json",
-        axum::routing::get(move || {
-            let openapi = openapi.clone();
-            async move { Json(openapi) }
-        }),
-    );
+    let (app, _) = app.split_for_parts();
     let cors = cors_layer(&state);
 
     app.layer(middleware::from_fn_with_state(
