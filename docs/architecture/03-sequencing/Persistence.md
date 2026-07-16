@@ -84,7 +84,7 @@ Authoritative state needed to resume the exchange after a crash:
 | `qmdb` | slot-prefixed account snapshot keys | `Account` rows plus slot-local `height` and `next_account_id` |
 | `qmdb` | unprefixed typed-state keys in fenced A/B qMDBs | canonical account, bridge, market, market-group, order, and reservation leaves committed by `state_root` |
 | `redb` | `markets` | market definitions |
-| `redb` | `market_meta` | market metadata |
+| `redb` | `market_meta` | market metadata, including optional operator creation identity |
 | `redb` | `market_statuses` | market status driven by oracle/system logic |
 | `redb` | `market_groups` | market groups |
 | `redb` | `resolution_templates` | installed resolution templates referenced by market metadata |
@@ -174,6 +174,13 @@ Resolution templates are also persisted in the committed snapshot. A WAL alone
 would protect template installation only until the next block; once
 `save_block()` clears the acknowledged suffix, templates must be snapshot state
 like feeds and market metadata.
+
+Store layout v3 adds the canonical market creation key. Keyed market creation
+checks the live snapshot before WAL append: an exact retry is a read returning
+the existing id, while a conflict is rejected. The first creation remains
+durable-before-live and replay reconstructs the same key before any caller can
+retry. Layout v2 is rejected rather than loading unkeyed native markets and
+falling back to title/tag discovery; deployment requires a fresh genesis.
 
 ## Tier 3: Derived Views
 

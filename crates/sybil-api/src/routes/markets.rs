@@ -445,6 +445,8 @@ pub async fn get_market(
     request_body = CreateMarketRequest,
     responses(
         (status = 200, description = "Market created", body = CreateMarketResponse),
+        (status = 400, description = "Invalid market creation key", body = ApiErrorResponse),
+        (status = 409, description = "Creation key conflicts with an existing market", body = ApiErrorResponse),
         (status = 403, description = "Dev mode required")
     )
 )]
@@ -461,7 +463,8 @@ pub async fn create_market(
         )));
     }
 
-    let has_metadata = req.description.is_some()
+    let has_metadata = req.creation_key.is_some()
+        || req.description.is_some()
         || req.category.is_some()
         || req.tags.is_some()
         || req.resolution_criteria.is_some()
@@ -481,6 +484,7 @@ pub async fn create_market(
             resolution_config: req
                 .resolution_template
                 .map(|template| ResolutionConfig { template }),
+            creation_key: req.creation_key,
             committed_metadata_digest: None,
         };
         state

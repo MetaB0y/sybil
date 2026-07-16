@@ -1789,12 +1789,26 @@ mod tests {
             resolution_config: Some(ResolutionConfig {
                 template: "wal_template".to_string(),
             }),
+            creation_key: Some("native:wal-market".to_string()),
             committed_metadata_digest: None,
         };
         let metadata_market = handle
             .create_market_with_metadata("metadata wal market".to_string(), metadata.clone())
             .await
             .unwrap();
+        let mut retry_metadata = metadata.clone();
+        retry_metadata.created_at_ms += 1;
+        assert_eq!(
+            handle
+                .create_market_with_metadata(
+                    "metadata wal market".to_string(),
+                    retry_metadata.clone(),
+                )
+                .await
+                .unwrap(),
+            metadata_market,
+            "an exact keyed retry should not allocate a second market"
+        );
         let group_market = handle
             .create_market("group wal market".to_string())
             .await
@@ -1977,6 +1991,16 @@ mod tests {
             );
 
             let mut probe = restored_seq.clone();
+            assert_eq!(
+                probe
+                    .create_market_with_metadata(
+                        "metadata wal market".to_string(),
+                        retry_metadata.clone(),
+                    )
+                    .unwrap(),
+                metadata_market,
+                "restart round {restart_round} should retain keyed creation identity"
+            );
             let probe_block = probe
                 .produce_block(Vec::new(), 10_000 + restart_round)
                 .block;

@@ -1941,6 +1941,11 @@ export interface components {
     CreateMarketRequest: {
       /** @description Optional category (e.g., "sports", "politics", "crypto"). */
       category?: string | null;
+      /**
+       * @description Optional operator idempotency key. Repeating the same key and creation
+       *     fields returns the original market; conflicting reuse is rejected.
+       */
+      creation_key?: string | null;
       /** @description Optional description of the market. */
       description?: string | null;
       /**
@@ -5610,12 +5615,30 @@ export interface operations {
           "application/json": components["schemas"]["CreateMarketResponse"];
         };
       };
+      /** @description Invalid market creation key */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
+      };
       /** @description Dev mode required */
       403: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Creation key conflicts with an existing market */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
     };
   };

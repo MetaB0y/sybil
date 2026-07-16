@@ -205,6 +205,17 @@ pub enum SequencerError {
     /// The requested market was not found.
     #[error("market {market_id:?} not found")]
     MarketNotFound { market_id: MarketId },
+    /// An operator creation key is malformed at the canonical boundary.
+    #[error("invalid market creation key: {0}")]
+    InvalidMarketCreationKey(String),
+    /// A creation key already identifies a different immutable market spec.
+    #[error(
+        "market creation key {key:?} already identifies market {existing_market_id:?} with different creation fields"
+    )]
+    MarketCreationKeyConflict {
+        key: String,
+        existing_market_id: MarketId,
+    },
     /// The requested market group was not found.
     #[error("market group not found")]
     MarketGroupNotFound,

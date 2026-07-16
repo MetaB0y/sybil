@@ -3,7 +3,7 @@ tags: [zk, spec]
 layer: verification
 crate: sybil-verifier
 status: current
-last_verified: 2026-07-14
+last_verified: 2026-07-16
 ---
 
 # State Root Schema
@@ -46,7 +46,7 @@ typed-state qMDB whose active keyspace exactly matches the header root.
 |---|---|
 | `acct/{account_id}` | `id`, `balance`, `total_deposited`, non-zero `positions`, `events_digest`, `keys_digest`, `last_trading_nonce` |
 | `acct_resv/{account_id}` | aggregate reserved cash and positions from active resting orders |
-| `market/{market_id}` | binary market definition, lifecycle status/resolution, metadata digest, resolution template, and last clearing prices |
+| `market/{market_id}` | binary market definition, lifecycle status/resolution, metadata digest (including optional operator creation key), resolution template, and last clearing prices |
 | `market_group/{group_id}` | mutually exclusive market group name and member markets |
 | `order/{order_id}` | active resting order, owner, effective expiry, remaining quantity, and reservation metadata |
 | `sys/deposit_cursor` | highest consumed L1 deposit cursor |

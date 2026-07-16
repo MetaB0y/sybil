@@ -351,7 +351,7 @@ impl BlockSequencer {
                 Ok(())
             }
             ControlPlaneCommand::CreateMarketWithMetadata { name, metadata } => {
-                self.create_market_with_metadata(name, metadata);
+                self.create_market_with_metadata(name, metadata)?;
                 Ok(())
             }
             ControlPlaneCommand::CreateMarketGroup { name, market_ids } => {

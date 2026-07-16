@@ -2,10 +2,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use sybil_api_types::{CreateMarketGroupRequest, ExtendMarketGroupRequest, MarketResponse};
+use sybil_api_types::{CreateMarketGroupRequest, ExtendMarketGroupRequest};
 use sybil_client::SybilClient;
 
-use crate::{Error, NativeMarketCatalog, NativeMarketSpec, NativeQuoteRange, native_group_key};
+use crate::{Error, NativeMarketCatalog, NativeMarketSpec, NativeQuoteRange};
 
 pub const NATIVE_DEPLOYMENT_SCHEMA_VERSION: u32 = 1;
 
@@ -80,19 +80,14 @@ pub async fn apply_catalog(
         ));
     }
 
-    let existing = client.list_markets().await?;
     let specs = catalog.enabled_market_specs();
     let mut deployed = Vec::with_capacity(specs.len());
 
     for spec in &specs {
-        let market_id = find_existing_market(&existing, spec)?;
-        let market_id = match market_id {
-            Some(market_id) => market_id,
-            None => {
-                let response = client.create_market(&spec.create_request()).await?;
-                response.market_id
-            }
-        };
+        let market_id = client
+            .create_market(&spec.create_request())
+            .await?
+            .market_id;
         client
             .set_market_metadata(market_id, &spec.metadata_request())
             .await?;
@@ -113,52 +108,6 @@ pub async fn apply_catalog(
         genesis_hash,
         markets: deployed,
     })
-}
-
-fn find_existing_market(
-    markets: &[MarketResponse],
-    spec: &NativeMarketSpec,
-) -> Result<Option<u32>, Error> {
-    let event_id = native_group_key(&spec.template_id);
-    let exact: Vec<_> = markets
-        .iter()
-        .filter(|market| {
-            market.name == spec.name
-                && market.event_id.as_deref() == Some(&event_id)
-                && market.polymarket_condition_id.is_none()
-        })
-        .collect();
-    match exact.as_slice() {
-        [market] => Ok(Some(market.market_id)),
-        [_, _, ..] => Err(Error::Deployment(format!(
-            "multiple native markets match catalog key {}",
-            spec.market_key
-        ))),
-        [] => {
-            // Creation commits the canonical `native` tag before the off-block
-            // metadata write. This fallback lets a rerun recover from a crash
-            // between those two calls without creating a duplicate contract.
-            let tagged: Vec<_> = markets
-                .iter()
-                .filter(|market| {
-                    market.name == spec.name
-                        && market.polymarket_condition_id.is_none()
-                        && market
-                            .tags
-                            .as_ref()
-                            .is_some_and(|tags| tags.iter().any(|tag| tag == "native"))
-                })
-                .collect();
-            match tagged.as_slice() {
-                [] => Ok(None),
-                [market] => Ok(Some(market.market_id)),
-                _ => Err(Error::Deployment(format!(
-                    "multiple tagged native markets match catalog key {}",
-                    spec.market_key
-                ))),
-            }
-        }
-    }
 }
 
 async fn ensure_groups(
