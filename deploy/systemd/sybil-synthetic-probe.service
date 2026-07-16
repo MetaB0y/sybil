@@ -9,6 +9,9 @@ WorkingDirectory=/opt/sybil
 RuntimeDirectory=sybil-synthetic-probe
 Environment=TMPDIR=/run/sybil-synthetic-probe
 Environment=SYBIL_COMPOSE_PROJECT=sybil
+# The product devnet intentionally has no validity service. An explicit
+# validity deployment overrides this to fail in a systemd drop-in.
+Environment=SYBIL_SMOKE_PROOF_LAG=off
 ExecStart=/opt/sybil/scripts/synthetic-probe.sh --base-url https://172-104-31-54.nip.io --app-origin https://app.172-104-31-54.nip.io --block-interval 10
 TimeoutStartSec=120
 NoNewPrivileges=true
