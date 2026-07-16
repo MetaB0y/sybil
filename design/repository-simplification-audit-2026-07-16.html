@@ -1,0 +1,753 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Sybil repository simplification audit — 16 July 2026</title>
+  <style>
+    :root {
+      --ink: #17221d;
+      --muted: #5d6c65;
+      --paper: #f5f4ee;
+      --panel: #fffdf7;
+      --line: #d8d8cd;
+      --brand: #165b45;
+      --brand-2: #247e61;
+      --brand-soft: #e2f1e9;
+      --blue: #275c88;
+      --blue-soft: #e7f0f7;
+      --amber: #9b5c0a;
+      --amber-soft: #fff0ce;
+      --red: #9c3f36;
+      --red-soft: #f8e6e2;
+      --slate-soft: #eceeea;
+      --shadow: 0 16px 40px rgba(30, 45, 37, 0.08);
+      --radius: 16px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 10% 0%, rgba(36, 126, 97, 0.10), transparent 30rem),
+        var(--paper);
+      font: 16px/1.58 var(--sans);
+    }
+    a { color: var(--brand); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    a:hover { color: var(--brand-2); }
+    code {
+      padding: 0.12em 0.34em;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: rgba(255,255,255,0.58);
+      font: 0.88em/1.4 var(--mono);
+    }
+    pre {
+      margin: 1rem 0;
+      padding: 1rem;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #202a25;
+      color: #eef5f0;
+      font: 0.83rem/1.55 var(--mono);
+    }
+    h1, h2, h3 { line-height: 1.16; letter-spacing: -0.025em; }
+    h1 { max-width: 900px; margin: 0; font-size: clamp(2.2rem, 5.5vw, 4.5rem); }
+    h2 { margin: 0 0 1rem; font-size: clamp(1.65rem, 3vw, 2.35rem); }
+    h3 { margin: 1.65rem 0 0.55rem; font-size: 1.18rem; }
+    p { margin: 0.65rem 0 1rem; }
+    ul, ol { padding-left: 1.35rem; }
+    li + li { margin-top: 0.4rem; }
+
+    .masthead {
+      padding: 4.8rem max(1.25rem, calc((100vw - 1240px) / 2)) 3.2rem;
+      color: #f8fff9;
+      background:
+        linear-gradient(128deg, rgba(10, 37, 28, 0.96), rgba(22, 91, 69, 0.92)),
+        #123b2e;
+    }
+    .masthead .kicker {
+      margin-bottom: 1.2rem;
+      color: #a9e4ca;
+      font: 700 0.78rem/1.2 var(--mono);
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+    }
+    .masthead .lede { max-width: 860px; margin: 1.3rem 0 0; color: #d9eee4; font-size: 1.18rem; }
+    .meta-row { display: flex; flex-wrap: wrap; gap: 0.7rem; margin-top: 1.8rem; }
+    .meta-pill {
+      padding: 0.42rem 0.7rem;
+      border: 1px solid rgba(226, 249, 238, 0.28);
+      border-radius: 999px;
+      color: #e9f7ef;
+      background: rgba(255,255,255,0.07);
+      font: 0.78rem/1.3 var(--mono);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 230px minmax(0, 1fr);
+      gap: 2.1rem;
+      width: min(1240px, calc(100% - 2.5rem));
+      margin: 0 auto;
+      padding: 2rem 0 5rem;
+    }
+    nav {
+      position: sticky;
+      top: 1rem;
+      align-self: start;
+      max-height: calc(100vh - 2rem);
+      padding: 1rem;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: rgba(255,253,247,0.90);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+    nav strong { display: block; margin: 0.1rem 0 0.65rem; font-size: 0.78rem; letter-spacing: 0.1em; text-transform: uppercase; }
+    nav a { display: block; padding: 0.35rem 0.45rem; border-radius: 6px; color: var(--muted); font-size: 0.86rem; text-decoration: none; }
+    nav a:hover { color: var(--brand); background: var(--brand-soft); }
+    main { min-width: 0; }
+    section {
+      margin-bottom: 1.5rem;
+      padding: clamp(1.25rem, 3vw, 2.25rem);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      scroll-margin-top: 1rem;
+    }
+    section > :last-child { margin-bottom: 0; }
+    .section-intro { max-width: 850px; color: var(--muted); font-size: 1.03rem; }
+
+    .verdict {
+      padding: 1.35rem 1.45rem;
+      border-left: 6px solid var(--brand-2);
+      border-radius: 10px;
+      background: var(--brand-soft);
+      font-size: 1.08rem;
+    }
+    .verdict strong { color: #0f4b38; }
+    .callout {
+      margin: 1.2rem 0;
+      padding: 1rem 1.1rem;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--slate-soft);
+    }
+    .callout.warn { border-color: #e2c282; background: var(--amber-soft); }
+    .callout.info { border-color: #b7cee0; background: var(--blue-soft); }
+    .callout.danger { border-color: #e1b1aa; background: var(--red-soft); }
+
+    .stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.85rem; margin: 1.35rem 0; }
+    .stat {
+      min-height: 112px;
+      padding: 1rem;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+    }
+    .stat .value { display: block; color: var(--brand); font-size: 1.8rem; font-weight: 800; line-height: 1.1; }
+    .stat .label { display: block; margin-top: 0.45rem; color: var(--muted); font-size: 0.82rem; }
+
+    .decision-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.9rem; margin: 1.25rem 0; }
+    .decision-card { padding: 1.05rem 1.1rem; border: 1px solid var(--line); border-radius: 12px; }
+    .decision-card h3 { margin: 0 0 0.45rem; }
+    .decision-card p { margin: 0; color: var(--muted); }
+    .delete { border-top: 5px solid var(--red); background: #fff9f7; }
+    .isolate { border-top: 5px solid var(--blue); background: #f8fbfe; }
+    .decide { border-top: 5px solid var(--amber); background: #fffcf5; }
+    .keep { border-top: 5px solid var(--brand); background: #f8fdf9; }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 0.6rem;
+      align-items: stretch;
+      margin: 1.4rem 0;
+    }
+    .flow .node { position: relative; padding: 0.85rem; border: 1px solid #bed3c9; border-radius: 10px; background: var(--brand-soft); text-align: center; font-size: 0.84rem; }
+    .flow .node:not(:last-child)::after { content: "→"; position: absolute; z-index: 2; top: 50%; right: -0.72rem; color: var(--brand); font-weight: 800; transform: translateY(-50%); }
+    .flow .node small { display: block; margin-top: 0.25rem; color: var(--muted); }
+    .satellites { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.6rem; margin-top: 0.65rem; }
+    .satellites div { padding: 0.7rem; border: 1px dashed #aebbb4; border-radius: 9px; color: var(--muted); background: #fafaf6; text-align: center; font-size: 0.8rem; }
+
+    .table-wrap { width: 100%; margin: 1rem 0; overflow-x: auto; border: 1px solid var(--line); border-radius: 11px; }
+    table { width: 100%; border-collapse: collapse; background: #fff; font-size: 0.88rem; }
+    th, td { padding: 0.72rem 0.75rem; border-bottom: 1px solid var(--line); vertical-align: top; text-align: left; }
+    th { color: #33453c; background: #edf2ee; font-size: 0.73rem; letter-spacing: 0.06em; text-transform: uppercase; }
+    tbody tr:last-child td { border-bottom: 0; }
+    tbody tr:hover { background: #fbfcf9; }
+    td.num { white-space: nowrap; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+    .tag { display: inline-block; padding: 0.2rem 0.48rem; border-radius: 999px; font: 700 0.67rem/1.25 var(--mono); letter-spacing: 0.02em; text-transform: uppercase; white-space: nowrap; }
+    .tag.high, .tag.delete { color: #7c2921; background: var(--red-soft); }
+    .tag.medium, .tag.decide { color: #764305; background: var(--amber-soft); }
+    .tag.low, .tag.keep { color: #0f503a; background: var(--brand-soft); }
+    .tag.isolate { color: #1f4f77; background: var(--blue-soft); }
+    .tag.safe { color: #42524a; background: var(--slate-soft); }
+
+    .rank { display: inline-grid; width: 1.75rem; height: 1.75rem; place-items: center; border-radius: 50%; color: #fff; background: var(--brand); font-weight: 800; }
+    .finding { margin: 1.3rem 0; padding: 1.15rem 1.2rem; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+    .finding-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+    .finding h3 { margin: 0; font-size: 1.2rem; }
+    .finding .why { color: var(--muted); }
+    .evidence { padding: 0.75rem 0.9rem; border-radius: 8px; background: #f0f2ed; color: #405047; font-size: 0.86rem; }
+    .proposal { margin-top: 0.85rem; padding-left: 1rem; border-left: 3px solid var(--brand-2); }
+    .net { color: var(--brand); font-weight: 750; }
+
+    .bars { margin: 1rem 0; }
+    .bar-row { display: grid; grid-template-columns: 150px 1fr 82px; gap: 0.7rem; align-items: center; margin: 0.45rem 0; font-size: 0.82rem; }
+    .bar-track { height: 12px; overflow: hidden; border-radius: 999px; background: #e8ebe6; }
+    .bar-fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--brand), #55a786); }
+    .bar-value { color: var(--muted); text-align: right; font: 0.76rem var(--mono); }
+
+    .timeline { margin: 1.2rem 0 0; padding-left: 0; list-style: none; counter-reset: wave; }
+    .timeline li { position: relative; margin: 0 0 0.8rem; padding: 1rem 1rem 1rem 3.4rem; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+    .timeline li::before { counter-increment: wave; content: counter(wave); position: absolute; left: 1rem; top: 1rem; display: grid; width: 1.65rem; height: 1.65rem; place-items: center; border-radius: 50%; color: #fff; background: var(--brand); font-weight: 800; }
+    .timeline strong { display: block; margin-bottom: 0.25rem; }
+    .timeline span { color: var(--muted); }
+
+    details { margin: 0.75rem 0; border: 1px solid var(--line); border-radius: 9px; background: #fff; }
+    summary { padding: 0.75rem 0.9rem; cursor: pointer; color: var(--brand); font-weight: 750; }
+    details > div { padding: 0 0.9rem 0.9rem; }
+    .small { color: var(--muted); font-size: 0.84rem; }
+    .foot { color: var(--muted); font-size: 0.8rem; }
+
+    @media (max-width: 960px) {
+      .layout { grid-template-columns: 1fr; }
+      nav { position: static; display: flex; flex-wrap: wrap; gap: 0.2rem; max-height: none; }
+      nav strong { width: 100%; }
+      .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .flow { grid-template-columns: 1fr; }
+      .flow .node:not(:last-child)::after { content: "↓"; top: auto; right: 50%; bottom: -0.75rem; transform: translateX(50%); }
+      .satellites { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 640px) {
+      .masthead { padding-top: 3rem; }
+      .layout { width: min(100% - 1rem, 1240px); }
+      section { border-radius: 11px; }
+      .stat-grid, .decision-grid, .satellites { grid-template-columns: 1fr; }
+      .bar-row { grid-template-columns: 105px 1fr 65px; }
+      th, td { padding: 0.6rem; }
+    }
+    @media print {
+      :root { color-scheme: light; }
+      body { background: #fff; font-size: 10pt; }
+      .masthead { padding: 1.5cm; color: #111; background: #fff; border-bottom: 2px solid #333; }
+      .masthead .lede, .masthead .kicker, .meta-pill { color: #333; }
+      .layout { display: block; width: 100%; padding: 0; }
+      nav { display: none; }
+      section { margin: 0; padding: 0.7cm 0; break-inside: avoid; border: 0; border-bottom: 1px solid #ccc; border-radius: 0; box-shadow: none; }
+      .finding, .decision-card, .stat { break-inside: avoid; }
+      a { color: inherit; }
+    }
+  </style>
+</head>
+<body>
+  <header class="masthead">
+    <div class="kicker">Repository architecture · simplification · feature audit</div>
+    <h1>Sybil is safer and cleaner than its line count suggests—but it has not completed several successful extractions.</h1>
+    <p class="lede">A comprehensive static audit of the Rust workspace and its Python, web, deployment, data, and documentation boundaries, focused on what can be deleted, isolated, unified, or consciously retained.</p>
+    <div class="meta-row">
+      <span class="meta-pill">AUDIT DATE · 2026-07-16</span>
+      <span class="meta-pill">WORKSPACE · sybil-ws3</span>
+      <span class="meta-pill">PARENT · 431069cf</span>
+      <span class="meta-pill">25 RUST PACKAGES</span>
+      <span class="meta-pill">STATIC AUDIT + TARGETED BUILDS</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav aria-label="Report sections">
+      <strong>Contents</strong>
+      <a href="#executive">Executive verdict</a>
+      <a href="#snapshot">Scope &amp; numbers</a>
+      <a href="#architecture">System shape</a>
+      <a href="#improved">What already improved</a>
+      <a href="#matrix">Decision matrix</a>
+      <a href="#ranked">Ranked proposals</a>
+      <a href="#features">Feature disposition</a>
+      <a href="#rust">Rust detail</a>
+      <a href="#outside">Outside Rust</a>
+      <a href="#keep">Do not simplify away</a>
+      <a href="#roadmap">Practical sequence</a>
+      <a href="#validation">Validation plan</a>
+      <a href="#method">Method &amp; limits</a>
+    </nav>
+
+    <main>
+      <section id="executive">
+        <h2>Executive verdict</h2>
+        <div class="verdict">
+          <strong>The repository did not become simpler in raw size; it became more explicit and safer.</strong>
+          Recent work added real complexity for durability, proof retention, recovery, provider quorum, history isolation, and truthful failure states. Most of that complexity is justified. The simplification opportunity is now to remove the old path after the new path landed, and to stop research or optional products from sharing production ownership.
+        </div>
+
+        <div class="decision-grid">
+          <article class="decision-card delete">
+            <h3>Delete now</h3>
+            <p>The superseded prover mock binary, the no-op <code>viz</code> feature, the broken <code>sim-eg</code> recipe, and four source-unreferenced direct dependencies.</p>
+          </article>
+          <article class="decision-card isolate">
+            <h3>Isolate</h3>
+            <p>Research solvers, native-market provisioning, Arena analytics, and optional tracing should not broaden the default exchange runtime or production compile surface.</p>
+          </article>
+          <article class="decision-card decide">
+            <h3>Make product decisions</h3>
+            <p>LLM auto-resolution, the public Arena, SSE, and reserved oracle states each have a cost across multiple layers. Keep them only with an owned milestone.</p>
+          </article>
+          <article class="decision-card keep">
+            <h3>Keep deliberately</h3>
+            <p>The actor single-writer, qMDB/redb fence, verifier/guest separation, transactional history outbox, proof protocol, and integer truth are good complexity.</p>
+          </article>
+        </div>
+
+        <p><strong>Highest-leverage recommendation:</strong> finish the accepted history-service extraction. Public historical reads already use <code>sybil-history</code>, but the sequencer still retains several old in-process history query caches and their persistence/configuration surface. Completing that deletion makes the new service a simplification rather than an addition.</p>
+
+        <div class="callout info"><strong>Snapshot note.</strong> This report audits the clean <code>sybil-ws3</code> working copy at empty change <code>2e16d41e</code>, parent <code>431069cf</code>. The in-flight commit stack shown from another workspace—including the computer-use scenarios—is not part of this filesystem snapshot and was not treated as landed code.</div>
+      </section>
+
+      <section id="snapshot">
+        <h2>Scope and repository numbers</h2>
+        <p class="section-intro">The user-provided repository-wide count is the right headline. The audit then separated generated code, tests, research tools, product runtime, and protocol boundaries so that “many lines” was not mistaken for “too much architecture.”</p>
+
+        <div class="stat-grid">
+          <div class="stat"><span class="value">114,679</span><span class="label">Repo-wide Rust code lines in the supplied inventory</span></div>
+          <div class="stat"><span class="value">25</span><span class="label">Cargo workspace packages</span></div>
+          <div class="stat"><span class="value">≈34%</span><span class="label">Physical Rust lines classified as tests or test modules in <code>crates/</code></span></div>
+          <div class="stat"><span class="value">34,104</span><span class="label">Generated Python SDK lines across 249 files</span></div>
+        </div>
+
+        <div class="callout"><strong>Interpretation.</strong> Roughly one third of the Rust surface is verification, restart, integration, conformance, or property-test work. The largest Rust file is a sequencer test module; several other top files are test harnesses. Removing tests to improve line count would make the architecture worse.</div>
+
+        <h3>Rust source concentration</h3>
+        <div class="bars" aria-label="Physical Rust lines under each crate source directory">
+          <div class="bar-row"><span>matching-sequencer</span><div class="bar-track"><div class="bar-fill" style="width:100%"></div></div><span class="bar-value">37,470</span></div>
+          <div class="bar-row"><span>sybil-verifier</span><div class="bar-track"><div class="bar-fill" style="width:35.6%"></div></div><span class="bar-value">13,351</span></div>
+          <div class="bar-row"><span>sybil-api</span><div class="bar-track"><div class="bar-fill" style="width:33.2%"></div></div><span class="bar-value">12,428</span></div>
+          <div class="bar-row"><span>sybil-polymarket</span><div class="bar-track"><div class="bar-fill" style="width:22.7%"></div></div><span class="bar-value">8,516</span></div>
+          <div class="bar-row"><span>matching-solver</span><div class="bar-track"><div class="bar-fill" style="width:21%"></div></div><span class="bar-value">7,866</span></div>
+          <div class="bar-row"><span>sybil-prover</span><div class="bar-track"><div class="bar-fill" style="width:16.9%"></div></div><span class="bar-value">6,323</span></div>
+          <div class="bar-row"><span>matching-sim</span><div class="bar-track"><div class="bar-fill" style="width:9.7%"></div></div><span class="bar-value">3,640</span></div>
+        </div>
+        <p class="small">These are raw physical lines in each <code>src/</code> directory, including inline tests. Tokei counted 107,031 Rust code lines in <code>crates/</code> plus <code>fuzz/</code>; the repository-wide number is larger because guest/tool workspaces outside those directories are also Rust.</p>
+
+        <h3>What the line count overstates</h3>
+        <ul>
+          <li>The generated Python OpenAPI client is about two thirds of tracked Python lines, but is mechanically regenerated and is not two thirds of the authored design burden.</li>
+          <li>Large JSON is mostly frozen market, benchmark, or simulation data. It affects clone/review weight, not runtime architecture.</li>
+          <li>The small protocol crates are dependency firebreaks. A lower crate count would not necessarily mean a simpler system.</li>
+          <li>Verifier schemas are intentionally repetitive at native, canonical, witness, and guest boundaries. Consolidate encoders only when byte identity remains explicit and testable.</li>
+        </ul>
+      </section>
+
+      <section id="architecture">
+        <h2>The current system shape</h2>
+        <p class="section-intro">The production spine is coherent. Complexity becomes questionable mainly where a side feature crosses that spine or where an extraction left its predecessor behind.</p>
+
+        <div class="flow" aria-label="Core runtime flow">
+          <div class="node">Clients<small>web · Rust · Python</small></div>
+          <div class="node">sybil-api<small>auth · REST · streams</small></div>
+          <div class="node">matching-sequencer<small>single writer · fence</small></div>
+          <div class="node">RetainedCashSolver<small>HiGHS oracle</small></div>
+          <div class="node">sealed block<small>state root · witness</small></div>
+        </div>
+        <div class="satellites" aria-label="Systems attached to the core flow">
+          <div>sybil-verifier → sybil-zk</div>
+          <div>proof outbox → sybil-prover → L1</div>
+          <div>history outbox → sybil-history</div>
+          <div>Polymarket · Arena · oracle sidecars</div>
+        </div>
+
+        <h3>Boundaries that are doing useful work</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Boundary</th><th>Why it should remain</th><th>Audit view</th></tr></thead>
+            <tbody>
+              <tr><td><code>matching-engine</code> / <code>matching-solver</code></td><td>Integer domain truth stays separate from floating-point search.</td><td><span class="tag keep">Keep</span></td></tr>
+              <tr><td>sequencer actor / store fence</td><td>One writer, durable-before-live publication, and fail-stop integrity are central safety properties.</td><td><span class="tag keep">Keep</span></td></tr>
+              <tr><td><code>sybil-verifier</code> / <code>sybil-zk</code></td><td>Native verification owns semantics; guest code stays dependency-austere.</td><td><span class="tag keep">Keep</span></td></tr>
+              <tr><td><code>sybil-l1-protocol</code> / <code>sybil-l1-abi</code></td><td>Guest-safe hash domains do not inherit host-only Alloy dependencies.</td><td><span class="tag keep">Keep</span></td></tr>
+              <tr><td>history outbox / projector</td><td>History outages cannot block settlement, and private facts remain replayable.</td><td><span class="tag keep">Keep; finish cleanup</span></td></tr>
+              <tr><td>proof protocol / prover daemon</td><td>Portable jobs, exact acknowledgements, and proof artifacts have distinct retention and failure modes.</td><td><span class="tag keep">Keep</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="improved">
+        <h2>What already became simpler or more truthful</h2>
+        <p class="section-intro">The historical July review cannot be copied forward. Several of its largest concerns have already been resolved, often by adding short-term code to establish a better boundary.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Earlier concern</th><th>Current state</th><th>Remaining tail</th></tr></thead>
+            <tbody>
+              <tr><td>Sequencer “god module” and embedded simulation</td><td>Actor handlers, production phases, store modules, and <code>sequencer-sim</code> are separated.</td><td>Delete old history projections that survived the split; do not create more crates merely to reduce file size.</td></tr>
+              <tr><td>Verifier logic scattered across layers</td><td><code>sybil-verifier</code> is the native semantic owner; guest verification reuses the boundary.</td><td>Continue byte-identity consolidation only with golden pins.</td></tr>
+              <tr><td>API clients diverging</td><td>A shared Rust client exists; admin uses it; Python has a generated schema layer plus ergonomic wrapper.</td><td>Python streaming documentation and implementation disagree; migrate it to resumable WS.</td></tr>
+              <tr><td>History scans and pruning in the single-writer</td><td>ADR-0018 landed a transactional outbox and private <code>sybil-history</code> service.</td><td>The final deletion phase is incomplete: recent in-process query caches and knobs remain.</td></tr>
+              <tr><td>Unbounded or misleading operational states</td><td>Recent commits bounded proof jobs, archives, onboarding stock, and leaderboard/history cold starts; L1 paths fail-stop on integrity loss.</td><td>Prefer removing superseded caches over adding another layer of bounds.</td></tr>
+              <tr><td>Multiple names for one retained-cash algorithm</td><td>Old <code>EgSolver</code>/<code>IterLpSolver</code> compatibility names are gone.</td><td>A stale <code>sim-eg</code> just recipe still invokes the removed name.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="matrix">
+        <h2>Recommendation matrix</h2>
+        <p class="section-intro">“Delete” means the capability is superseded or inert. “Isolate” means keep the capability but remove it from default ownership. “Decide” means a product choice must precede code action.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Rank</th><th>Proposal</th><th>Action</th><th>Impact</th><th>Effort</th><th>Risk</th><th>Confidence</th></tr></thead>
+            <tbody>
+              <tr><td><span class="rank">1</span></td><td>Complete the history cutover cleanup</td><td><span class="tag delete">Delete old path</span></td><td>Very high</td><td>M</td><td>Medium</td><td>High</td></tr>
+              <tr><td><span class="rank">2</span></td><td>Separate production retained-cash from research solver surface</td><td><span class="tag isolate">Isolate</span></td><td>High</td><td>M</td><td>Low–medium</td><td>High</td></tr>
+              <tr><td><span class="rank">3</span></td><td>Remove the superseded <code>mock-live</code> prover feature/bin</td><td><span class="tag delete">Delete</span></td><td>Medium</td><td>S</td><td>Low</td><td>High</td></tr>
+              <tr><td><span class="rank">4</span></td><td>Make OTLP complete or absent</td><td><span class="tag decide">Decide</span></td><td>Medium</td><td>S or L</td><td>Low</td><td>High</td></tr>
+              <tr><td><span class="rank">5</span></td><td>Remove stale solver-viz switches and broken recipes</td><td><span class="tag delete">Delete / repair</span></td><td>Medium</td><td>S</td><td>Low</td><td>High</td></tr>
+              <tr><td><span class="rank">6</span></td><td>End the Rust API → Python SQLite ownership inversion</td><td><span class="tag decide">Decide / isolate</span></td><td>High</td><td>M–L</td><td>Product</td><td>High</td></tr>
+              <tr><td><span class="rank">7</span></td><td>Separate native provisioning and optional LLM resolution from the Polymarket mirror</td><td><span class="tag isolate">Isolate</span></td><td>High</td><td>M</td><td>Product</td><td>Medium–high</td></tr>
+              <tr><td><span class="rank">8</span></td><td>Migrate Python to resumable WS, then retire public SSE</td><td><span class="tag delete">Unify transport</span></td><td>Medium</td><td>M</td><td>Client migration</td><td>High</td></tr>
+              <tr><td><span class="rank">9</span></td><td>Remove unenterable oracle lifecycle states until implemented</td><td><span class="tag decide">Decide</span></td><td>Medium–high</td><td>M</td><td>Fresh genesis</td><td>Medium</td></tr>
+              <tr><td><span class="rank">10</span></td><td>Make one audited API route registry</td><td><span class="tag isolate">Unify</span></td><td>Medium</td><td>M</td><td>Security review</td><td>High</td></tr>
+              <tr><td><span class="rank">11</span></td><td>Add Compose service profiles around the minimal topology</td><td><span class="tag isolate">Isolate runtime</span></td><td>Medium</td><td>S–M</td><td>Ops</td><td>High</td></tr>
+              <tr><td><span class="rank">12</span></td><td>Centralize direct dependency versions and remove dead direct deps</td><td><span class="tag delete">Unify / delete</span></td><td>Low–medium</td><td>S</td><td>Low</td><td>High</td></tr>
+              <tr><td><span class="rank">13</span></td><td>Move generated Python SDK output out of ordinary review</td><td><span class="tag isolate">Package / generate</span></td><td>Low runtime, high repo hygiene</td><td>M</td><td>Build tooling</td><td>High</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="ranked">
+        <h2>Ranked proposals in detail</h2>
+
+        <article class="finding">
+          <div class="finding-head"><h3>1. Complete the history-service extraction by deleting the retained query caches</h3><span class="tag high">Highest leverage</span></div>
+          <p class="why">The system paid the cost of adding <code>sybil-history</code>, but still carries parts of the embedded predecessor. The accepted design explicitly says the extraction becomes simpler only after the old serving tables, query RPCs, pruning, and hot projections are removed.</p>
+          <p class="evidence"><strong>Evidence:</strong> account fills/events/equity and market price/candle REST routes now use <code>HistoryClient</code>. Meanwhile <code>AnalyticsState</code> still owns <code>FillRecorder</code>, <code>EquityTracker</code>, <code>AccountEventLog</code>, and retained <code>PriceTracker</code> points; API config still exposes four <code>max_recent_*</code> knobs. Direct public-route consumers of the old query methods were not found.</p>
+          <div class="proposal"><strong>Proposal.</strong> Keep current marks, total counters, cost basis, live aggregates, rolling 24-hour anchors/volume, and the pending outbox deltas. Remove the per-account recent fill rows, equity rows, event rows, general price-history rows, now-dead restore fields, query methods/messages, cache metrics, and configuration. Replace cache-shaped snapshot fallback plumbing with a direct committed-fact accumulator. Refactor <code>PriceTracker</code> into current/rolling state plus that accumulator so 24-hour stats are not accidentally deleted.</div>
+          <p class="net">Net result: one owner for historical queries, less sequencer memory and restore/snapshot plumbing, fewer config knobs, and a clearer validity-versus-product-data boundary.</p>
+        </article>
+
+        <article class="finding">
+          <div class="finding-head"><h3>2. Compile only the production solver in the production feature</h3><span class="tag isolate">Keep research</span></div>
+          <p class="why">Production always instantiates <code>RetainedCashSolver</code>, but <code>matching-sequencer</code> enables the broad <code>lp</code> feature. That same feature exports the LP-SLP baseline, pacing bundle, and decomposed solver. The capability is valuable; the ownership is too broad.</p>
+          <p class="evidence"><strong>Evidence:</strong> <code>RetainedCashSolver</code> is selected in both fresh and restored sequencers. Under <code>lp</code>, raw module sizes are approximately 1,593 lines for LP-SLP, 563 for pacing, 1,464 for decomposed, and 1,039 for retained-cash. Conic and MILP are already optional. Recent benchmark reports explicitly keep pacing and Clarabel as research candidates.</p>
+          <div class="proposal"><strong>Proposal.</strong> Rename/split the feature around intent: a <code>retained-cash</code> production feature containing HiGHS oracle/shared landing code and the production solver; a <code>research-solvers</code> feature or lab crate for LP-SLP, pacing, decomposed, Conic, MILP, experiments, and benchmarks. Do not delete pacing or decomposed while the solver and payoff-vector research roadmaps remain active.</div>
+          <p class="net">Net result: the deployed exchange exposes one algorithm, while the research laboratory remains rich and independently testable.</p>
+        </article>
+
+        <article class="finding">
+          <div class="finding-head"><h3>3. Delete the old <code>sybil-prover-mock</code> polling binary</h3><span class="tag delete">Safe removal</span></div>
+          <p class="why">There are two mock proving paths. The restart-safe prover daemon has a typed mock backend and is the path Compose and soak tests use. The feature-gated polling mock writes the older per-block artifact flow.</p>
+          <p class="evidence"><strong>Evidence:</strong> <code>mock_live.rs</code> plus its bin wrapper are 356 raw lines and pull optional <code>sybil-api-types</code>. No recipe, compose service, runbook command, or deployment invokes <code>sybil-prover-mock</code>. Base Compose explicitly runs <code>sybil-prover daemon</code> with <code>SYBIL_PROVER_PROOF_KIND=mock</code>.</p>
+          <div class="proposal"><strong>Proposal.</strong> Remove the <code>mock-live</code> feature, optional API-types dependency, bin target, module, and old producer naming where it is only legacy compatibility. Retain the daemon's typed mock backend for cheap integration.</div>
+          <p class="net">Net result: one durable proof ingestion/acknowledgement model in all environments.</p>
+        </article>
+
+        <article class="finding">
+          <div class="finding-head"><h3>4. Make OpenTelemetry complete or absent</h3><span class="tag decide">No half-state</span></div>
+          <p class="why">The API includes an OTLP exporter, but the repository has no deployed collector/backend, no end-to-end correlation, and almost no useful span tree. This is a documented “half-installed seed,” not an operational tracing system.</p>
+          <p class="evidence"><strong>Evidence:</strong> four direct OTel dependencies are unconditional in <code>sybil-api</code>; export occurs only when <code>OTEL_EXPORTER_OTLP_ENDPOINT</code> is set; no compose profile sets it. Commonware pulls OTel 0.31 while the API pulls 0.32, so the API graph contains both stacks. The design note is marked <code>proposal-needs-revalidation</code>.</p>
+          <div class="proposal"><strong>Proposal.</strong> Choose one of two coherent states. If causal tracing is a funded near-term task, gate it behind an <code>otel</code> build feature and land the collector/Tempo profile, correlation context, block spans, prover spans, and sampling policy together. If not, remove the API exporter/init dependencies until that project starts. Keep Prometheus, structured tracing logs, and alerts either way.</div>
+          <p class="net">Net result: no compiled telemetry stack that produces no usable traces.</p>
+        </article>
+
+        <article class="finding">
+          <div class="finding-head"><h3>5. Remove stale solver visualization switches; repair or archive the dashboard</h3><span class="tag delete">Safe core cleanup</span></div>
+          <p class="why">The <code>viz</code> feature claims to enable detailed phase snapshots but has no conditional code. The Streamlit loader still expects fields that the current exporter never emits. A just recipe still uses a solver name removed by an earlier cleanup.</p>
+          <p class="evidence"><strong>Evidence:</strong> no <code>cfg(feature = "viz")</code> exists; <code>VizSnapshot</code> emits final result, timing, orders, and fills only; dashboard pages expect <code>phase_snapshots</code> and liquidity. <code>just sim-eg</code> exits 2 because <code>eg</code> is not a valid solver choice.</p>
+          <div class="proposal"><strong>Proposal.</strong> Delete the empty feature and <code>sim-eg</code>. Move the JSON snapshot type from <code>matching-solver</code> to <code>matching-sim</code>, where export ownership belongs. Then either update the roughly 2.1k-line Streamlit dashboard to the actual schema and add a smoke test, or archive/delete it and keep the CLI/benchmark reports.</div>
+          <p class="net">Net result: commands and feature flags tell the truth; simulation presentation no longer leaks into the solver library.</p>
+        </article>
+
+        <article class="finding">
+          <div class="finding-head"><h3>6. Remove the API's direct dependency on Arena's SQLite schema</h3><span class="tag high">Boundary repair</span></div>
+          <p class="why">The architecture says Python Arena connects to Rust over HTTP, but the main API also opens the Python-owned <code>decisions.db</code> volume and knows its schema. This reverses ownership and makes a bundled SQLite library part of the exchange server.</p>
+          <p class="evidence"><strong>Evidence:</strong> <code>sybil-api</code> has bundled <code>rusqlite</code>, an <code>arena_db_path</code> config/state field, 118 lines of Arena metrics access, and a 1,038-line bots route module. Compose shares <code>arena-data</code>. The public web Arena view is 2,008 TSX lines and also feeds the activity page.</p>
+          <div class="proposal"><strong>Proposal.</strong> Make a product choice. If Arena is a first-class public surface, let Arena expose a small typed read API or publish stable facts into a history-owned projection; <code>sybil-api</code> may proxy/authorize but must not read Python storage. If Arena is an experiment, remove <code>/v1/bots/*</code> and <code>/arena</code> from the main exchange and keep the separate Arena dashboard.</div>
+          <p class="net">Net result: no cross-language database schema coupling, no SQLite C dependency in the API, and an honest product boundary.</p>
+        </article>
+
+        <article class="finding">
+          <div class="finding-head"><h3>7. Stop making the Polymarket mirror own native provisioning and optional LLM resolution</h3><span class="tag decide">Product boundary</span></div>
+          <p class="why"><code>sybil-polymarket</code> currently mirrors Polymarket, creates native catalog markets/groups, bootstraps their MM, polls arbitrary resolution sources, calls an LLM, signs proposals, and interacts with an API review board. Those are three products with different trust and failure models.</p>
+          <p class="evidence"><strong>Evidence:</strong> native provisioning is active through Compose; LLM auto-resolution is default-off and not enabled by current compose overlays. The native, auto-resolve, and LLM modules alone are 1,992 raw lines, before sync/mapping/API/store glue. The resolver review surface adds four service routes and sequencer persistence, but core settlement still uses immediate signed attestations.</p>
+          <div class="proposal"><strong>Proposal.</strong> Keep native markets if they are part of the product. Move catalog application to an idempotent one-shot admin/import command rather than a Polymarket actor. Put the resolver/review queue behind its own explicit experimental package or delete it until an enabled deployment and owner exist. The Polymarket sidecar should mirror, quote, and attest Polymarket events only.</div>
+          <p class="net">Net result: integrations are named by what they own, and an optional LLM can fail without broadening the mirror or core API.</p>
+        </article>
+
+        <article class="finding">
+          <div class="finding-head"><h3>8. Standardize first-party block consumption on resumable WebSocket</h3><span class="tag delete">Unify transport</span></div>
+          <p class="why">The API maintains REST replay, public SSE, public resumable WS, and service-authenticated canonical WS. Public WS is the documented recovery protocol; first-party Python still uses SSE without replay despite its README saying “WebSocket-first.”</p>
+          <p class="evidence"><strong>Evidence:</strong> Rust client and WS integration tests use <code>/v2/blocks/ws?from_block=N</code>. Python <code>stream_blocks()</code> connects only to <code>/v1/blocks/stream</code> and reconnects without a height cursor. Arena bots, runner, and live analyst consume that method.</p>
+          <div class="proposal"><strong>Proposal.</strong> Implement versioned public WS/replay in the Python wrapper, migrate Arena, hold SSE for one compatibility window if external clients exist, then remove the SSE route/module/docs/generated endpoint. Keep service WS because its canonical/private contract is different.</div>
+          <p class="net">Net result: one first-party public stream with explicit lag and retention-gap semantics.</p>
+        </article>
+
+        <article class="finding">
+          <div class="finding-head"><h3>9. Do not commit lifecycle states that the policy cannot enter</h3><span class="tag decide">Fresh-genesis choice</span></div>
+          <p class="why">The core oracle implements only <code>Immediate</code>, which transitions <code>Active → Resolved</code>. Yet proposed, challenged, and voided states cross sequencer, API, snapshot, canonical, witness, verifier, and guest schemas.</p>
+          <p class="evidence"><strong>Evidence:</strong> docs and code explicitly label <code>Proposed</code>, <code>Challenged</code>, and <code>Voided</code> as reserved. The current LLM resolver keeps its challenge queue outside core state and eventually submits an immediate signed attestation.</p>
+          <div class="proposal"><strong>Proposal.</strong> If optimistic dispute/void semantics are not a committed next milestone, reduce canonical market status to <code>Active</code>/<code>Resolved</code> and remove proposal/challenge payloads from <code>ResolutionRecord</code>. Reintroduce states with executable transitions, economics, adjudication, and conformance tests. Batch this with another planned fresh genesis.</div>
+          <p class="net">Net result: the validity schema describes executable protocol truth rather than future possibility. If trust-minimized resolution is imminent, keep it and assign the milestone instead.</p>
+        </article>
+
+        <article class="finding">
+          <div class="finding-head"><h3>10. Generate one audited route registry instead of maintaining four surfaces</h3><span class="tag isolate">Unify metadata</span></div>
+          <p class="why">API routes are registered in router builders, repeated in public/owner/service/dev tables, repeated again as exact expected arrays in policy tests, and represented in OpenAPI annotations. This is safety-motivated duplication, but it is still drift-prone.</p>
+          <p class="evidence"><strong>Evidence:</strong> <code>app.rs</code> is 1,103 code lines and <code>tests/route_policy.rs</code> is 1,085. The four route tables contain roughly 80 mounts. Metric labels already use Axum's <code>MatchedPath</code>, so the tables no longer serve that purpose.</p>
+          <div class="proposal"><strong>Proposal.</strong> Define a route declaration that binds handler, method/path, policy class, dev gating, and OpenAPI inclusion once, then emit the grouped routers and an auditable manifest. Preserve independent negative authorization tests and a checked-in policy snapshot; remove hand-copied full arrays.</div>
+          <p class="net">Net result: adding a route requires one declaration and one deliberate policy review, not synchronized edits across several lists.</p>
+        </article>
+
+        <article class="finding">
+          <div class="finding-head"><h3>11. Define a minimal Compose topology and opt into subsystems</h3><span class="tag isolate">Operational clarity</span></div>
+          <p class="why">Base Compose starts eleven services: exchange, history, web, mirror, mock prover, Arena worker/dashboard, VictoriaMetrics, vmalert, Grafana, and node exporter. The deployment-profile environment variable changes settings, but it does not simplify which services run.</p>
+          <p class="evidence"><strong>Evidence:</strong> no Compose <code>profiles:</code> entries were found. A new developer must understand the full product/integration/ops stack before starting the smallest useful exchange.</p>
+          <div class="proposal"><strong>Proposal.</strong> Introduce service profiles such as <code>core</code> (API/history/web), <code>validity</code> (prover/L1 helpers), <code>integrations</code> (Polymarket/Arena), and <code>ops</code> (metrics/alerts). Production selects explicit profiles; local quick start selects core. This is separate from <code>SYBIL_DEPLOYMENT_PROFILE</code>.</div>
+          <p class="net">Net result: optional products are operationally optional, and the minimal system is visible.</p>
+        </article>
+
+        <article class="finding">
+          <div class="finding-head"><h3>12. Remove dead direct dependencies and centralize versions</h3><span class="tag delete">Low risk</span></div>
+          <p class="why">Manifest repetition and unused direct dependencies create false ownership and make version drift harder to see.</p>
+          <p class="evidence"><strong>Evidence:</strong> static source search found no references for <code>rand</code>/<code>rand_chacha</code> in <code>matching-solver</code>, <code>sha3</code> in <code>sybil-proof-protocol</code>, or <code>getrandom</code> in <code>sybil-prover</code>. Commonware 2026.5.0 is repeated in sequencer/verifier/zk/escape manifests; direct Reqwest/Axum/redb versions also repeat.</p>
+          <div class="proposal"><strong>Proposal.</strong> Remove the four candidate direct dependencies and verify all targets/features. Move common direct versions to <code>[workspace.dependencies]</code>, while retaining per-crate feature selection. Do not attempt to force Commonware's transitive Reqwest/OTel versions to match direct versions without upstream compatibility.</div>
+          <p class="net">Net result: manifests describe real direct ownership and upgrades have one version locus.</p>
+        </article>
+
+        <article class="finding">
+          <div class="finding-head"><h3>13. Treat the generated Python client as a build artifact or package</h3><span class="tag isolate">Repo hygiene</span></div>
+          <p class="why">The generated client dominates Python file and line counts, making the repository look much larger and producing broad mechanical diffs whenever OpenAPI changes.</p>
+          <p class="evidence"><strong>Evidence:</strong> <code>arena/sybil_client/_generated</code> contains 249 tracked Python files and 34,104 lines. The hand-written wrapper imports generated models, so simply deleting the directory would break runtime.</p>
+          <div class="proposal"><strong>Proposal.</strong> Publish the generated SDK as a versioned internal package or generate it deterministically during packaging/CI and verify a schema hash. Keep the ergonomic wrapper and generated-code drift check. Do not hand-prune generated endpoints.</div>
+          <p class="net">Net result: ordinary reviews focus on authored Python while schema drift remains enforced.</p>
+        </article>
+      </section>
+
+      <section id="features">
+        <h2>Feature disposition</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Feature/capability</th><th>Current reality</th><th>Recommendation</th><th>Reason</th></tr></thead>
+            <tbody>
+              <tr><td><code>matching-solver/viz</code></td><td>Empty Cargo feature; no conditional code</td><td><span class="tag delete">Remove</span></td><td>It promises behavior it cannot enable.</td></tr>
+              <tr><td><code>sybil-prover/mock-live</code></td><td>Old polling mock alongside durable daemon mock</td><td><span class="tag delete">Remove</span></td><td>Superseded and not invoked.</td></tr>
+              <tr><td>LP-SLP baseline</td><td>Research/baseline; not selected in production</td><td><span class="tag isolate">Lab</span></td><td>Useful comparator, wrong production surface.</td></tr>
+              <tr><td>Pacing bundle</td><td>Fresh, promising research with measured landing tails</td><td><span class="tag isolate">Keep in lab</span></td><td>Not dead; not yet production.</td></tr>
+              <tr><td>Conic / MILP</td><td>Independent references, already feature-gated</td><td><span class="tag isolate">Keep in lab</span></td><td>Valuable differential checks; expensive defaults.</td></tr>
+              <tr><td>Decomposed solver</td><td>Research and future payoff-vector head start</td><td><span class="tag isolate">Keep in lab</span></td><td>Supports the stated conditional-market thesis.</td></tr>
+              <tr><td>General payoff-vector order</td><td>Serialized but one-hot-gated at four layers</td><td><span class="tag keep">Keep with explicit gate</span></td><td>Exploratory docs call it the product moat. Delete only if that strategy is abandoned.</td></tr>
+              <tr><td><code>PriceCondition</code></td><td>Not exposed by the public simple-order API</td><td><span class="tag decide">Tie to payoff roadmap</span></td><td>Cross-layer latent complexity; remove if not part of the bounded conditional milestone.</td></tr>
+              <tr><td>OpenTelemetry exporter</td><td>Half-installed, no backend/correlation</td><td><span class="tag decide">Complete or remove</span></td><td>Current middle state yields little value.</td></tr>
+              <tr><td>LLM auto-resolution</td><td>Default-off; review queue exists; not enabled in Compose</td><td><span class="tag decide">Isolate or remove</span></td><td>Large cross-layer optional feature with trust implications.</td></tr>
+              <tr><td>Native market catalog</td><td>Active in Compose, provisioned by Polymarket process</td><td><span class="tag isolate">Move ownership</span></td><td>Native markets are not a Polymarket responsibility.</td></tr>
+              <tr><td>Public SSE</td><td>Python first-party client still depends on it</td><td><span class="tag decide">Migrate then remove</span></td><td>WS already owns replay/recovery semantics.</td></tr>
+              <tr><td>Public Arena</td><td>Crosses Rust, Python DB, web, metrics, and deploy</td><td><span class="tag decide">Product choice</span></td><td>High feature cost; may still be a differentiator.</td></tr>
+              <tr><td>Dev UI and <code>m-dev</code></td><td>Useful diagnostics plus a legacy mocked route</td><td><span class="tag safe">Audit after Arena decision</span></td><td>Remove the legacy mock route if the live dev zone fully replaces it; do not remove computer-use acceptance surfaces mid-flight.</td></tr>
+              <tr><td>Time-in-force variants</td><td>Used by frontend and Arena</td><td><span class="tag keep">Keep</span></td><td>Real trading semantics, not speculative generality.</td></tr>
+              <tr><td>P256 + WebAuthn</td><td>Bot and human auth paths</td><td><span class="tag keep">Keep</span></td><td>Two user classes with shared canonical action bytes.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="rust">
+        <h2>Rust-specific observations</h2>
+        <p class="section-intro">Most Rust simplification should happen by correcting ownership and feature topology, not by merging the 25 packages.</p>
+
+        <h3>Largest production-oriented files</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>File</th><th>Code lines</th><th>Audit interpretation</th></tr></thead>
+            <tbody>
+              <tr><td><code>matching-sequencer/src/order_book.rs</code></td><td class="num">1,555</td><td>Domain-dense core. Split only around an invariant-preserving API; size alone is not a reason.</td></tr>
+              <tr><td><code>sybil-verifier/src/sidecar.rs</code></td><td class="num">1,547</td><td>Validity checks justify explicitness; prefer shared typed helpers over a cosmetic file split.</td></tr>
+              <tr><td><code>sybil-verifier/src/settlement.rs</code></td><td class="num">1,541</td><td>Critical integer semantics. Keep heavily tested and local.</td></tr>
+              <tr><td><code>sybil-verifier/src/witness_schema.rs</code></td><td class="num">1,539</td><td>Schema code is verbose by nature; generated or shared encoders require byte pins.</td></tr>
+              <tr><td><code>matching-solver/src/lp_solver.rs</code></td><td class="num">1,272</td><td>Research baseline currently compiled with production retained-cash.</td></tr>
+              <tr><td><code>sybil-l1-indexer/src/main.rs</code></td><td class="num">1,168</td><td>Potential future module split by provider quorum, lifecycle, and submission; recent hardening is active.</td></tr>
+              <tr><td><code>sybil-api/src/app.rs</code></td><td class="num">1,103</td><td>Route/OpenAPI/policy metadata duplication is the main simplification, not arbitrary splitting.</td></tr>
+              <tr><td><code>sybil-polymarket/src/mm.rs</code></td><td class="num">1,070</td><td>MM is product logic; first separate native/resolver ownership from the crate.</td></tr>
+              <tr><td><code>matching-solver/src/decomposed.rs</code></td><td class="num">1,063</td><td>Research/future combinatorial solver; isolate from production.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Why the biggest files do not identify the biggest problems</h3>
+        <p>The largest Rust files overall include <code>sequencer/tests.rs</code> (3,765 code lines), <code>actor/handle.rs</code> (3,216, with a large inline test module), API integration tests (2,268), store tests (2,134), and <code>sybil-zk/src/lib.rs</code> (2,280, also test-heavy). The more important smell is a single concept owned in multiple places—such as history or Arena—not a long file with one clear invariant domain.</p>
+
+        <h3>Crate-level disposition</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Group</th><th>Crates</th><th>Disposition</th></tr></thead>
+            <tbody>
+              <tr><td>Matching core</td><td>engine, solver, sequencer</td><td>Keep boundaries; narrow solver production feature; finish analytics cleanup.</td></tr>
+              <tr><td>Validity/proving</td><td>signing, verifier, zk, proof-protocol, prover, escape-claim, custody</td><td>Keep boundaries; remove legacy mock-live only.</td></tr>
+              <tr><td>L1</td><td>l1-protocol, l1-abi, l1-indexer</td><td>Keep guest/host/indexer separation. Recent fail-stop/quorum complexity is justified.</td></tr>
+              <tr><td>API/history</td><td>api, api-types, client, history-types, history</td><td>Keep DTO/client/service boundaries; remove embedded history tail and route metadata duplication.</td></tr>
+              <tr><td>Integrations</td><td>oracle, polymarket</td><td>Keep signed attestation boundary; reduce speculative core states and split native/resolver ownership.</td></tr>
+              <tr><td>Lab/tooling</td><td>matching-scenarios, matching-sim, sequencer-sim, loadtest, golden-vectors</td><td>Keep outside runtime; make features/recipes truthful.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="outside">
+        <h2>Cross-language and repository hygiene</h2>
+
+        <h3>Python</h3>
+        <ul>
+          <li><strong>Generated SDK:</strong> 249 files / 34,104 lines should be treated as generated output, not manually simplified. Package or regenerate it.</li>
+          <li><strong>Arena runtime:</strong> the live bot system is substantial and intentional. Its SQLite read model should remain Python-owned.</li>
+          <li><strong>Two Streamlit products:</strong> Arena dashboards are active; the root solver dashboard has schema drift. Do not conflate them.</li>
+          <li><strong>Documentation drift:</strong> the Python SDK README says WebSocket-first, while code is SSE-only. Fix behavior first, then docs.</li>
+        </ul>
+
+        <h3>Web</h3>
+        <ul>
+          <li>The generated TypeScript API schema is 6,608 lines and should remain generated.</li>
+          <li>The largest authored component is <code>arena-view.tsx</code> at 2,008 lines, reinforcing that the Arena product decision has large downstream consequences.</li>
+          <li>Several core UI files are 700–1,400 lines. Split them only by stable state/model boundaries; extracting tiny components without reducing shared state would increase navigation cost.</li>
+          <li><code>/m-dev/[id]</code> explicitly uses legacy mock data. If the live <code>/dev</code> zone covers the same diagnostics, remove the mocked route in a separate web cleanup.</li>
+          <li>The in-flight computer-use acceptance work was not present in this snapshot. Preserve acceptance scenarios while evaluating the product UI; they are a test surface, not an obvious feature deletion.</li>
+        </ul>
+
+        <h3>Tooling, data, and docs</h3>
+        <ul>
+          <li>The 824-line justfile has 124 recipes. Remove stale aliases first, then group recipes with imported justfiles or thin domain scripts if navigation remains costly. The proof and deploy recipes encode real operational sequences and should not be deleted merely for length.</li>
+          <li>Benchmark result JSON and frozen market datasets account for much of the 128k JSON lines. Move bulky reproducible outputs to release artifacts/object storage only if clone/review cost is a problem; retain protocol declarations, summaries, hashes, and goldens.</li>
+          <li><code>frontend/archive</code> is only four documents and clearly marked. It is low-value cleanup compared with runtime ownership.</li>
+          <li>The architecture vault is unusually useful and currently reflects the history and deployment boundaries. Keep it, but remove or mark stale operational instructions at the same time as code paths.</li>
+        </ul>
+      </section>
+
+      <section id="keep">
+        <h2>Complexity that should not be “simplified” away</h2>
+        <div class="callout warn"><strong>Safety complexity is not accidental complexity.</strong> The latest devnet-hardening work adds branches because silent continuation would be wrong. Preserve fail-stop and restart proofs even when they increase line count.</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Keep</th><th>Why</th></tr></thead>
+            <tbody>
+              <tr><td>qMDB plus redb</td><td>They are complementary: qMDB proves canonical state; redb stores the fence, outboxes, blocks, metadata, and recovery coordination.</td></tr>
+              <tr><td>Single-writer actor model</td><td>It makes ordering and durable-before-live invariants explicit. Replacing it with shared mutex state would be shorter and less trustworthy.</td></tr>
+              <tr><td>Native verifier and guest-safe verifier boundary</td><td>Host tooling and proof-guest constraints are genuinely different dependency environments.</td></tr>
+              <tr><td>History service and transactional outbox</td><td>The service is justified; the simplification is deleting the embedded predecessor, not merging history back.</td></tr>
+              <tr><td>Provider quorum, finality, and deep-reorg fail-stop</td><td>L1 ingress controls money. Multiple providers and halt states are necessary defensive complexity.</td></tr>
+              <tr><td>Bounded proof/archive/onboarding storage</td><td>Unbounded durable stock is an operational failure mode. Prefer one owner and one retention policy, not no policy.</td></tr>
+              <tr><td>Conformance, crash, restart, and branch-coverage tests</td><td>They explain the high Rust line count and are exactly the evidence safety-sensitive state machines need.</td></tr>
+              <tr><td>Research solver references</td><td>Independent methods expose model, landing, and numerical bugs. Isolate them from production; do not erase the differential laboratory.</td></tr>
+              <tr><td>General payoff-vector representation—if the thesis remains</td><td>The conditional/combinatorial design identifies it as Sybil's differentiator. Keep the one-hot safety gate until a bounded implementation is ready.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="roadmap">
+        <h2>A practical simplification sequence</h2>
+        <p class="section-intro">Do the low-risk truthfulness changes first, then finish already-accepted architectural migrations. Product deletions come after explicit decisions, preferably before the next fresh genesis.</p>
+        <ol class="timeline">
+          <li><strong>Wave 1 · truthful surface (1–2 days)</strong><span>Remove <code>mock-live</code>, the no-op <code>viz</code> feature, broken <code>sim-eg</code>, and the four candidate dead direct dependencies. Correct Python streaming docs. Decide whether OTLP is temporarily removed or fully scheduled.</span></li>
+          <li><strong>Wave 2 · complete existing extractions (3–7 days)</strong><span>Delete sequencer history query caches/persistence while retaining live/rolling state and outbox fact construction. Split the retained-cash production feature from research solvers. Add regression tests for restart, 24-hour aggregates, history delivery, and production solver identity.</span></li>
+          <li><strong>Wave 3 · unify interfaces (3–7 days)</strong><span>Migrate Python/Arena to resumable public WS and retire SSE after compatibility review. Replace copied API route inventories with one audited declaration. Add Compose service profiles.</span></li>
+          <li><strong>Wave 4 · product boundary decisions</strong><span>Choose whether the public Arena, native catalog, and LLM resolver are core product. Repair their ownership if kept; remove the full vertical if not. Do not leave default-off code spanning API, store, web, and deployment indefinitely.</span></li>
+          <li><strong>Wave 5 · validity cleanup at a fresh genesis</strong><span>If optimistic/void resolution is not imminent, remove reserved lifecycle variants. Re-evaluate <code>PriceCondition</code> and payoff-vector generality only as a product-strategy decision; batch any canonical changes with the next planned genesis.</span></li>
+        </ol>
+
+        <h3>Suggested acceptance criteria</h3>
+        <ul>
+          <li>The production binary can name exactly one matching algorithm, while research commands can still run all comparators.</li>
+          <li>No public history request calls the sequencer actor or reads a sequencer-owned history cache.</li>
+          <li>The API no longer opens a Python-owned database file.</li>
+          <li>Every enabled telemetry exporter has a deployed backend and a documented span/correlation path.</li>
+          <li>Every Cargo feature changes compilation or behavior and has at least one feature-matrix check.</li>
+          <li>Every long-lived sidecar name matches the domain it owns.</li>
+          <li>The minimal local stack is a documented, runnable subset of production—not all optional products at once.</li>
+        </ul>
+      </section>
+
+      <section id="validation">
+        <h2>Validation required while simplifying</h2>
+        <p>Each removal should be a small <code>jj</code> change with its own invariant-focused verification. A useful sequence is:</p>
+        <pre>jj status
+cargo check -p matching-solver --all-features --all-targets
+cargo check -p sybil-prover --all-features --all-targets
+cargo test -p matching-sequencer
+cargo test -p sybil-history
+cargo test -p sybil-api
+cargo test -p sybil-verifier
+just check-consensus
+just docs-check
+just compose-smoke
+cd arena &amp;&amp; uv run pytest tests/ -v
+cd frontend/web &amp;&amp; pnpm test &amp;&amp; pnpm build</pre>
+
+        <h3>Extra proof by proposal</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Change</th><th>Additional evidence</th></tr></thead>
+            <tbody>
+              <tr><td>History cache deletion</td><td>Restart/catch-up tests, outbox duplicate/gap tests, 24h volume/price-anchor regressions, and API 503/completeness semantics.</td></tr>
+              <tr><td>Solver feature split</td><td><code>cargo hack</code> feature powerset, sequencer default-solver identity test, solver conformance, and benchmark command smoke.</td></tr>
+              <tr><td>SSE retirement</td><td>Python reconnect/replay/retention-gap tests and a live Arena soak across an API restart.</td></tr>
+              <tr><td>Oracle state reduction</td><td>Golden vectors, witness/public-input fingerprints, native/guest byte identity, fresh-genesis runbook.</td></tr>
+              <tr><td>Arena boundary</td><td>Contract tests between Arena read model and API/web, plus failure isolation when Arena is absent.</td></tr>
+              <tr><td>Route registry unification</td><td>Independent negative auth matrix, OpenAPI drift check, production/dev mount tests, and rate-limit coverage.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout info"><strong>Audit build result.</strong> On the audited snapshot, <code>cargo check -p matching-solver --all-features --all-targets</code> and <code>cargo check -p sybil-prover --all-features --all-targets</code> both passed. The stale <code>sim-eg</code> command was executed separately and failed exactly as expected with an invalid solver value.</div>
+      </section>
+
+      <section id="method">
+        <h2>Method, evidence, and limitations</h2>
+        <p>The audit read the root and crate-level <code>AGENTS.md</code> files, the current architecture overview/spec, crate dependency map, accepted history ADR, deployment profile, solver reports, conditional-market design, observability proposal, and the historical July architecture review. It then inspected Cargo metadata/features, source reachability, route consumers, compose topology, generated-code boundaries, large files, dependency duplication, and current command wiring.</p>
+
+        <details>
+          <summary>Primary evidence paths</summary>
+          <div>
+            <ul>
+              <li><code>Cargo.toml</code> and <code>crates/*/Cargo.toml</code></li>
+              <li><code>docs/SPEC.md</code>, <code>docs/architecture/Sybil Architecture.md</code>, and <code>docs/architecture/Crate Dependency Map.md</code></li>
+              <li><code>docs/adr/0018-extract-private-history-service.md</code></li>
+              <li><code>design/history-service-architecture-2026-07-12.md</code></li>
+              <li><code>design/pacing-bundle-landing-tail-study-2026-07-14.md</code></li>
+              <li><code>design/conditional-combinatorial-markets.md</code></li>
+              <li><code>design/observability-otel-2026-07.md</code></li>
+              <li><code>crates/matching-sequencer/src/analytics.rs</code>, trackers, store commit/restore, and actor API</li>
+              <li><code>crates/sybil-api/src/app.rs</code>, history routes, Arena routes/state, and telemetry init</li>
+              <li><code>crates/matching-solver/src/lib.rs</code>, solver modules, and <code>matching-sim</code> CLI</li>
+              <li><code>crates/sybil-polymarket/src</code>, compose overlays, Arena client, and frontend Arena/dev surfaces</li>
+            </ul>
+          </div>
+        </details>
+
+        <details>
+          <summary>Limitations</summary>
+          <div>
+            <ul>
+              <li>This is a static architecture and feature audit, not a production profile. Runtime memory, latency, binary-size, and query-load savings are not claimed without measurement.</li>
+              <li>“Unused” means no source/config/docs invocation was found in this snapshot. Before deletion, all target and feature combinations must still be compiled.</li>
+              <li>Line counts are directional. Raw physical lines, Tokei code lines, generated lines, and inline-test classification answer different questions.</li>
+              <li>Product value cannot be inferred from source alone. Arena, LLM resolution, and conditional markets are explicitly presented as decisions rather than automatic deletions.</li>
+              <li>Other workspaces may land changes after parent <code>431069cf</code>; rebase the audit evidence before implementing a proposal that overlaps them.</li>
+            </ul>
+          </div>
+        </details>
+
+        <p class="foot">Prepared 16 July 2026. This report intentionally proposes no runtime code changes; it is a decision and sequencing artifact for follow-up <code>jj</code> changes.</p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
