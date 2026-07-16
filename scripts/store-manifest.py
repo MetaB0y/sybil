@@ -103,6 +103,7 @@ def build_manifest(args: argparse.Namespace) -> None:
             "compose_project": args.project or None,
             "container": args.container,
             "image": args.image,
+            "image_id": args.image_id,
             "data_dir": args.data_dir,
         },
         "consistency": {
@@ -172,6 +173,7 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--project", default="")
     build.add_argument("--container", required=True)
     build.add_argument("--image", required=True)
+    build.add_argument("--image-id", required=True)
     build.add_argument("--data-dir", required=True)
     build.set_defaults(func=build_manifest)
 

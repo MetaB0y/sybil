@@ -49,7 +49,8 @@ redb recovers its last ACID commit, and the redb fence selects the matching
 qMDB slot. The API is briefly unresponsive during the copy, but the container
 is not stopped or recreated.
 
-After resuming the source, the script boots the source image against a second,
+After resuming the source, the script boots the source container's immutable
+runtime image ID (not its mutable configured tag) against a second,
 throwaway copy with a 24-hour block interval. It records the state that actually
 restores—not a racy API sample taken before the freeze—in `manifest.json`.
 The manifest records two roots because acknowledged WAL rows replay on startup:
