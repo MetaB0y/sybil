@@ -1,229 +1,167 @@
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use serde::Serialize;
-
-#[derive(Debug, Serialize)]
-pub struct ErrorBody {
-    pub error: String,
-    pub code: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub details: Option<String>,
-}
+use sybil_api_types::{
+    ApiErrorDetails, ApiErrorResponse, MARKET_NOT_FOUND_CODE, MARKET_NOT_TRADEABLE_CODE,
+};
 
 #[derive(Debug)]
 pub struct AppError {
     pub status: StatusCode,
-    pub body: ErrorBody,
+    pub body: Box<ApiErrorResponse>,
     pub retry_after_secs: Option<u64>,
 }
 
 impl AppError {
-    pub fn bad_request(error: impl Into<String>) -> Self {
+    fn new(status: StatusCode, error: impl Into<String>, code: &str) -> Self {
+        Self::with_error_details(status, error, code, None)
+    }
+
+    fn with_error_details(
+        status: StatusCode,
+        error: impl Into<String>,
+        code: &str,
+        details: Option<ApiErrorDetails>,
+    ) -> Self {
         Self {
-            status: StatusCode::BAD_REQUEST,
-            body: ErrorBody {
+            status,
+            body: Box::new(ApiErrorResponse {
                 error: error.into(),
-                code: "BAD_REQUEST".to_string(),
-                details: None,
-            },
+                code: code.to_string(),
+                details,
+            }),
             retry_after_secs: None,
         }
+    }
+
+    pub fn bad_request(error: impl Into<String>) -> Self {
+        Self::new(StatusCode::BAD_REQUEST, error, "BAD_REQUEST")
     }
 
     pub fn not_found(error: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::NOT_FOUND,
-            body: ErrorBody {
-                error: error.into(),
-                code: "NOT_FOUND".to_string(),
-                details: None,
-            },
-            retry_after_secs: None,
-        }
+        Self::new(StatusCode::NOT_FOUND, error, "NOT_FOUND")
+    }
+
+    pub fn market_not_found(market_id: u32) -> Self {
+        Self::with_error_details(
+            StatusCode::NOT_FOUND,
+            format!("Market {market_id} not found"),
+            MARKET_NOT_FOUND_CODE,
+            Some(ApiErrorDetails {
+                message: None,
+                market_id: Some(market_id),
+                market_status: None,
+            }),
+        )
+    }
+
+    pub fn market_not_tradeable(market_id: u32, market_status: impl Into<String>) -> Self {
+        let market_status = market_status.into();
+        Self::with_error_details(
+            StatusCode::CONFLICT,
+            format!("Market {market_id} is not tradeable ({market_status})"),
+            MARKET_NOT_TRADEABLE_CODE,
+            Some(ApiErrorDetails {
+                message: None,
+                market_id: Some(market_id),
+                market_status: Some(market_status),
+            }),
+        )
     }
 
     pub fn gone(error: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::GONE,
-            body: ErrorBody {
-                error: error.into(),
-                code: "RETENTION_GONE".to_string(),
-                details: None,
-            },
-            retry_after_secs: None,
-        }
+        Self::new(StatusCode::GONE, error, "RETENTION_GONE")
     }
 
     pub fn forbidden(error: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::FORBIDDEN,
-            body: ErrorBody {
-                error: error.into(),
-                code: "FORBIDDEN".to_string(),
-                details: None,
-            },
-            retry_after_secs: None,
-        }
+        Self::new(StatusCode::FORBIDDEN, error, "FORBIDDEN")
     }
 
     pub fn unauthorized(error: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::UNAUTHORIZED,
-            body: ErrorBody {
-                error: error.into(),
-                code: "UNAUTHORIZED".to_string(),
-                details: None,
-            },
-            retry_after_secs: None,
-        }
+        Self::new(StatusCode::UNAUTHORIZED, error, "UNAUTHORIZED")
     }
 
     pub fn internal(error: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            body: ErrorBody {
-                error: error.into(),
-                code: "INTERNAL_ERROR".to_string(),
-                details: None,
-            },
-            retry_after_secs: None,
-        }
+        Self::new(StatusCode::INTERNAL_SERVER_ERROR, error, "INTERNAL_ERROR")
     }
 
     pub fn conflict(error: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::CONFLICT,
-            body: ErrorBody {
-                error: error.into(),
-                code: "CONFLICT".to_string(),
-                details: None,
-            },
-            retry_after_secs: None,
-        }
+        Self::new(StatusCode::CONFLICT, error, "CONFLICT")
     }
 
     pub fn public_account_capacity_exhausted(capacity: u64) -> Self {
-        Self {
-            status: StatusCode::CONFLICT,
-            body: ErrorBody {
-                error: format!(
-                    "Public account capacity {capacity} is exhausted; use an existing account or contact the operator"
-                ),
-                code: "PUBLIC_ACCOUNT_CAPACITY_EXHAUSTED".to_string(),
-                details: None,
-            },
-            retry_after_secs: None,
-        }
+        Self::new(
+            StatusCode::CONFLICT,
+            format!(
+                "Public account capacity {capacity} is exhausted; use an existing account or contact the operator"
+            ),
+            "PUBLIC_ACCOUNT_CAPACITY_EXHAUSTED",
+        )
     }
 
     pub fn replay_nonce_stale(error: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::CONFLICT,
-            body: ErrorBody {
-                error: error.into(),
-                code: "REPLAY_NONCE_STALE".to_string(),
-                details: None,
-            },
-            retry_after_secs: None,
-        }
+        Self::new(StatusCode::CONFLICT, error, "REPLAY_NONCE_STALE")
     }
 
     pub fn service_unavailable(error: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            body: ErrorBody {
-                error: error.into(),
-                code: "SERVICE_UNAVAILABLE".to_string(),
-                details: None,
-            },
-            retry_after_secs: None,
-        }
+        Self::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            error,
+            "SERVICE_UNAVAILABLE",
+        )
     }
 
     pub fn bridge_unavailable() -> Self {
-        Self {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            body: ErrorBody {
-                error: "Bridge deposits and withdrawals are unavailable because no L1 domain is configured"
-                    .to_string(),
-                code: "BRIDGE_UNAVAILABLE".to_string(),
-                details: None,
-            },
-            retry_after_secs: None,
-        }
+        Self::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Bridge deposits and withdrawals are unavailable because no L1 domain is configured",
+            "BRIDGE_UNAVAILABLE",
+        )
     }
 
     pub fn bridge_domain_mismatch() -> Self {
-        Self {
-            status: StatusCode::BAD_REQUEST,
-            body: ErrorBody {
-                error: "Bridge request does not match the configured chain, vault, and token"
-                    .to_string(),
-                code: "BRIDGE_DOMAIN_MISMATCH".to_string(),
-                details: None,
-            },
-            retry_after_secs: None,
-        }
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "Bridge request does not match the configured chain, vault, and token",
+            "BRIDGE_DOMAIN_MISMATCH",
+        )
     }
 
     pub fn history_unavailable(error: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            body: ErrorBody {
-                error: error.into(),
-                code: "HISTORY_UNAVAILABLE".to_string(),
-                details: None,
-            },
-            retry_after_secs: None,
-        }
+        Self::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            error,
+            "HISTORY_UNAVAILABLE",
+        )
     }
 
     pub fn history_incomplete(error: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            body: ErrorBody {
-                error: error.into(),
-                code: "HISTORY_INCOMPLETE".to_string(),
-                details: None,
-            },
-            retry_after_secs: None,
-        }
+        Self::new(StatusCode::SERVICE_UNAVAILABLE, error, "HISTORY_INCOMPLETE")
     }
 
     pub fn sequencer_integrity_halted() -> Self {
-        Self {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            body: ErrorBody {
-                error: "Sequencer writes are unavailable after an integrity failure".to_string(),
-                code: "SEQUENCER_INTEGRITY_HALTED".to_string(),
-                details: None,
-            },
-            retry_after_secs: None,
-        }
+        Self::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Sequencer writes are unavailable after an integrity failure",
+            "SEQUENCER_INTEGRITY_HALTED",
+        )
     }
 
     pub fn mempool_full() -> Self {
-        Self {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            body: ErrorBody {
-                error: "Mempool full".to_string(),
-                code: "MEMPOOL_FULL".to_string(),
-                details: None,
-            },
-            retry_after_secs: None,
-        }
+        Self::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Mempool full",
+            "MEMPOOL_FULL",
+        )
     }
 
     pub fn rate_limited(retry_after_secs: u64) -> Self {
-        Self {
-            status: StatusCode::TOO_MANY_REQUESTS,
-            body: ErrorBody {
-                error: "Rate limited".to_string(),
-                code: "RATE_LIMITED".to_string(),
-                details: None,
-            },
-            retry_after_secs: Some(retry_after_secs),
-        }
+        let mut error = Self::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Rate limited",
+            "RATE_LIMITED",
+        );
+        error.retry_after_secs = Some(retry_after_secs);
+        error
     }
 
     pub fn dev_mode_required() -> Self {
@@ -312,8 +250,8 @@ impl From<matching_sequencer::SequencerError> for AppError {
             matching_sequencer::SequencerError::ProfileInvalid(msg) => {
                 AppError::bad_request(format!("Invalid profile: {msg}"))
             }
-            matching_sequencer::SequencerError::MarketNotFound => {
-                AppError::not_found("Market not found")
+            matching_sequencer::SequencerError::MarketNotFound { market_id } => {
+                AppError::market_not_found(market_id.0)
             }
             matching_sequencer::SequencerError::MarketGroupNotFound => {
                 AppError::not_found("Market group not found")
@@ -339,8 +277,8 @@ impl From<matching_sequencer::SequencerError> for AppError {
             matching_sequencer::SequencerError::OracleError(msg) => {
                 AppError::bad_request(format!("Oracle error: {}", msg))
             }
-            matching_sequencer::SequencerError::InvalidMarketState(msg) => {
-                AppError::conflict(format!("Invalid market state: {msg}"))
+            matching_sequencer::SequencerError::MarketNotTradeable { market_id, status } => {
+                AppError::market_not_tradeable(market_id.0, status)
             }
             matching_sequencer::SequencerError::Bridge(msg) => {
                 AppError::bad_request(format!("Bridge error: {msg}"))
@@ -382,7 +320,11 @@ impl From<crate::history::HistoryClientError> for AppError {
 
 impl AppError {
     fn with_details(mut self, details: impl Into<String>) -> Self {
-        self.body.details = Some(details.into());
+        self.body.details = Some(ApiErrorDetails {
+            message: Some(details.into()),
+            market_id: None,
+            market_status: None,
+        });
         self
     }
 }
@@ -408,5 +350,23 @@ mod tests {
         assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(error.body.code, "HISTORY_INCOMPLETE");
         assert_eq!(error.body.error, "window predates history");
+    }
+
+    #[test]
+    fn market_not_found_preserves_machine_readable_identity() {
+        let error = AppError::market_not_found(42);
+        assert_eq!(error.status, StatusCode::NOT_FOUND);
+        assert_eq!(error.body.code, MARKET_NOT_FOUND_CODE);
+        assert_eq!(error.body.details.unwrap().market_id, Some(42));
+    }
+
+    #[test]
+    fn market_not_tradeable_preserves_identity_and_status() {
+        let error = AppError::market_not_tradeable(7, "resolved");
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        assert_eq!(error.body.code, MARKET_NOT_TRADEABLE_CODE);
+        let details = error.body.details.unwrap();
+        assert_eq!(details.market_id, Some(7));
+        assert_eq!(details.market_status.as_deref(), Some("resolved"));
     }
 }

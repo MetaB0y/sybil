@@ -3315,7 +3315,10 @@ mod tests {
         let result = handle
             .resolve_market(MarketId::new(999), Nanos(NANOS_PER_DOLLAR))
             .await;
-        assert!(matches!(result, Err(SequencerError::MarketNotFound)));
+        assert!(matches!(
+            result,
+            Err(SequencerError::MarketNotFound { market_id }) if market_id == MarketId::new(999)
+        ));
     }
 
     #[tokio::test]

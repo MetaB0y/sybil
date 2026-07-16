@@ -203,8 +203,8 @@ pub enum SequencerError {
     #[error("invalid profile: {0}")]
     ProfileInvalid(String),
     /// The requested market was not found.
-    #[error("market not found")]
-    MarketNotFound,
+    #[error("market {market_id:?} not found")]
+    MarketNotFound { market_id: MarketId },
     /// The requested market group was not found.
     #[error("market group not found")]
     MarketGroupNotFound,
@@ -229,9 +229,9 @@ pub enum SequencerError {
     /// Oracle error during resolution.
     #[error("oracle error: {0}")]
     OracleError(String),
-    /// Market lifecycle transition is not valid in the current state.
-    #[error("invalid market state: {0}")]
-    InvalidMarketState(String),
+    /// The requested market exists but is not open for trading.
+    #[error("market {market_id:?} is not tradeable ({status})")]
+    MarketNotTradeable { market_id: MarketId, status: String },
     /// Bridge deposit or withdrawal validation failed.
     #[error("bridge error: {0}")]
     Bridge(String),

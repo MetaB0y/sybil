@@ -9,7 +9,7 @@ use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sybil_api_types::request::{CreateMarketRequest, ResolveMarketRequest};
-use sybil_api_types::response::{CreateMarketResponse, ResolveMarketResponse};
+use sybil_api_types::response::{ApiErrorResponse, CreateMarketResponse, ResolveMarketResponse};
 use sybil_client::SybilClient;
 use thiserror::Error;
 
@@ -100,14 +100,6 @@ enum CliError {
     InvalidArgs(String),
 }
 
-#[derive(Debug, Deserialize)]
-struct ApiErrorBody {
-    error: String,
-    #[allow(dead_code)]
-    code: Option<String>,
-    details: Option<String>,
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 struct AuditEntry {
     timestamp_ms: u64,
@@ -195,9 +187,15 @@ impl ApiClient {
                 Ok(parsed)
             }
             Err(sybil_client::Error::Api { status, body }) => {
-                let message = match serde_json::from_str::<ApiErrorBody>(&body) {
+                let message = match serde_json::from_str::<ApiErrorResponse>(&body) {
                     Ok(parsed) => match parsed.details {
-                        Some(details) => format!("{} ({details})", parsed.error),
+                        Some(details) => {
+                            let rendered = details.message.clone().unwrap_or_else(|| {
+                                serde_json::to_string(&details)
+                                    .unwrap_or_else(|_| "structured details".to_string())
+                            });
+                            format!("{} ({rendered})", parsed.error)
+                        }
                         None => parsed.error,
                     },
                     Err(_) => body.clone(),

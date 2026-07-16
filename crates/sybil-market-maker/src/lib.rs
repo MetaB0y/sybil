@@ -842,31 +842,21 @@ impl MmActor {
     }
 }
 
-/// Extract the non-tradeable market id from a whole-batch rejection.
-///
-/// sybil-api validates every order against the live market set and fails the
-/// entire submission with `{"error":"Market <id> not found", ...}` (HTTP 400)
-/// as soon as one order targets a market that is gone/untradeable. Parsing that
-/// id out is the cleanest mechanism the current API surfaces — no probing or
-/// per-market bisection needed — so we drop exactly that market and let the
-/// next block re-form the batch without it.
+/// Extract the non-tradeable market id from a typed whole-batch rejection.
 fn poisoned_market_from_error(err: &sybil_client::Error) -> Option<u32> {
-    let sybil_client::Error::Api { status: 400, body } = err else {
+    let sybil_client::Error::Api {
+        status: 404 | 409, ..
+    } = err
+    else {
         return None;
     };
-    // The body is JSON (`{"error": "...", "code": "..."}`); fall back to the
-    // raw text if it is not the shape we expect.
-    let message = serde_json::from_str::<serde_json::Value>(body)
-        .ok()
-        .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
-        .unwrap_or_else(|| body.clone());
-
-    if !message.contains("not found") {
+    let response = err.api_error_response()?;
+    if response.code != sybil_api_types::MARKET_NOT_FOUND_CODE
+        && response.code != sybil_api_types::MARKET_NOT_TRADEABLE_CODE
+    {
         return None;
     }
-    let rest = message.strip_prefix("Market ")?;
-    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-    digits.parse().ok()
+    response.details?.market_id
 }
 
 fn now_ms() -> u64 {
@@ -969,23 +959,28 @@ mod tests {
         }
     }
 
-    fn sybil_api_error(body: &str) -> sybil_client::Error {
+    fn sybil_api_error(status: u16, body: &str) -> sybil_client::Error {
         sybil_client::Error::Api {
-            status: 400,
+            status,
             body: body.to_string(),
         }
     }
 
     #[test]
-    fn poisoned_market_parsed_from_json_rejection() {
-        let err = sybil_api_error(r#"{"error":"Market 42 not found","code":"BAD_REQUEST"}"#);
+    fn poisoned_market_uses_structured_not_found_rejection() {
+        let err = sybil_api_error(
+            404,
+            r#"{"error":"Market 42 not found","code":"MARKET_NOT_FOUND","details":{"market_id":42}}"#,
+        );
         assert_eq!(poisoned_market_from_error(&err), Some(42));
     }
 
     #[test]
-    fn poisoned_market_parsed_from_raw_message() {
-        // Defensive: also handles a non-JSON body carrying the same message.
-        let err = sybil_api_error("Market 7 not found");
+    fn poisoned_market_uses_structured_non_tradeable_rejection() {
+        let err = sybil_api_error(
+            409,
+            r#"{"error":"Market 7 is not tradeable (resolved)","code":"MARKET_NOT_TRADEABLE","details":{"market_id":7,"market_status":"resolved"}}"#,
+        );
         assert_eq!(poisoned_market_from_error(&err), Some(7));
     }
 
@@ -993,7 +988,8 @@ mod tests {
     fn poisoned_market_ignores_unrelated_rejections() {
         assert_eq!(
             poisoned_market_from_error(&sybil_api_error(
-                r#"{"error":"Invalid price","code":"BAD_REQUEST"}"#
+                400,
+                r#"{"error":"Invalid price","code":"BAD_REQUEST"}"#,
             )),
             None
         );
@@ -1001,7 +997,7 @@ mod tests {
         assert_eq!(
             poisoned_market_from_error(&sybil_client::Error::Api {
                 status: 500,
-                body: "Market 3 not found".to_string(),
+                body: r#"{"error":"Market 3 not found","code":"MARKET_NOT_FOUND","details":{"market_id":3}}"#.to_string(),
             }),
             None
         );

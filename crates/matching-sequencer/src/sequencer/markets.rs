@@ -77,14 +77,14 @@ impl BlockSequencer {
         market_id: MarketId,
     ) -> Result<(usize, bool), SequencerError> {
         if self.markets.get(market_id).is_none() {
-            return Err(SequencerError::MarketNotFound);
+            return Err(SequencerError::MarketNotFound { market_id });
         }
         let status = self.lifecycle.market_status(market_id);
         if !status.is_tradeable() {
-            return Err(SequencerError::InvalidMarketState(format!(
-                "market {market_id:?} is not tradeable ({})",
-                status.as_str()
-            )));
+            return Err(SequencerError::MarketNotTradeable {
+                market_id,
+                status: status.as_str().to_string(),
+            });
         }
 
         let group_index =
@@ -117,7 +117,7 @@ impl BlockSequencer {
         timestamp_ms: u64,
     ) -> Result<ResolutionRecord, SequencerError> {
         if self.markets.get(market_id).is_none() {
-            return Err(SequencerError::MarketNotFound);
+            return Err(SequencerError::MarketNotFound { market_id });
         }
 
         let record = self
@@ -137,7 +137,7 @@ impl BlockSequencer {
         timestamp_ms: u64,
     ) -> Result<ResolutionRecord, SequencerError> {
         if self.markets.get(market_id).is_none() {
-            return Err(SequencerError::MarketNotFound);
+            return Err(SequencerError::MarketNotFound { market_id });
         }
 
         let record = self

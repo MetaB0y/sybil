@@ -6,6 +6,31 @@ use serde::{Deserialize, Serialize};
 
 use crate::request::BridgeWithdrawalL1Status;
 
+pub const MARKET_NOT_FOUND_CODE: &str = "MARKET_NOT_FOUND";
+pub const MARKET_NOT_TRADEABLE_CODE: &str = "MARKET_NOT_TRADEABLE";
+
+/// Stable machine-readable context attached to an API error.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ApiErrorDetails {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub market_id: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub market_status: Option<String>,
+}
+
+/// Error envelope returned by every non-success REST response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ApiErrorResponse {
+    pub error: String,
+    pub code: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<ApiErrorDetails>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AccountResponse {

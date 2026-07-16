@@ -1414,6 +1414,19 @@ export interface components {
       /** Format: int64 */
       order_id: number;
     };
+    /** @description Stable machine-readable context attached to an API error. */
+    ApiErrorDetails: {
+      /** Format: int32 */
+      market_id?: number | null;
+      market_status?: string | null;
+      message?: string | null;
+    };
+    /** @description Error envelope returned by every non-success REST response. */
+    ApiErrorResponse: {
+      code: string;
+      details?: null | components["schemas"]["ApiErrorDetails"];
+      error: string;
+    };
     /** @description A read-scoped bearer API key's metadata (never the token or its hash). */
     ApiKeyResponse: {
       /** Format: int64 */
@@ -6148,14 +6161,27 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
-      /** @description Account not found */
+      /** @description Account or market not found */
       404: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
+      };
+      /** @description Market is not tradeable */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
     };
   };

@@ -7,6 +7,8 @@ from .account_key_response import AccountKeyResponse
 from .account_response import AccountResponse
 from .activity_overview_response import ActivityOverviewResponse
 from .admit_timing_view_response import AdmitTimingViewResponse
+from .api_error_details import ApiErrorDetails
+from .api_error_response import ApiErrorResponse
 from .api_key_response import ApiKeyResponse
 from .attestation_response import AttestationResponse
 from .attestation_response_pcr_values import AttestationResponsePcrValues
@@ -166,6 +168,8 @@ __all__ = (
     "AccountResponse",
     "ActivityOverviewResponse",
     "AdmitTimingViewResponse",
+    "ApiErrorDetails",
+    "ApiErrorResponse",
     "ApiKeyResponse",
     "AttestationResponse",
     "AttestationResponsePcrValues",
