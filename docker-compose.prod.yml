@@ -76,8 +76,11 @@ services:
     logging: *default-logging
   sybil-l1-indexer:
     environment:
-      SYBIL_L1_RPC_URLS: "${SYBIL_L1_RPC_URLS:?Set at least two comma-separated independent L1 RPC URLs in /opt/sybil/.env}"
-      SYBIL_L1_RPC_IDS: "${SYBIL_L1_RPC_IDS:?Set matching comma-separated non-secret provider IDs in /opt/sybil/.env}"
+      # Compose interpolates inactive profile services too. Keep ordinary
+      # private-devnet deploys independent of L1 credentials; the indexer CLI
+      # still rejects missing/invalid providers if this profile is enabled.
+      SYBIL_L1_RPC_URLS: "${SYBIL_L1_RPC_URLS:-}"
+      SYBIL_L1_RPC_IDS: "${SYBIL_L1_RPC_IDS:-}"
       SYBIL_L1_TRUST_MODE: "unanimous-finalized"
       SYBIL_L1_VAULT: "${SYBIL_L1_VAULT:-}"
       SYBIL_SERVICE_TOKEN: "${SYBIL_SERVICE_TOKEN:?Set SYBIL_SERVICE_TOKEN in /opt/sybil/.env}"
