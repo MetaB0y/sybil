@@ -1325,6 +1325,7 @@ mod tests {
             Ok(BridgeStatusResponse {
                 deposit_cursor: self.cursor,
                 deposit_root_hex: String::new(),
+                configured_domain: None,
                 observed_l1_height: 0,
                 next_withdrawal_id: 0,
                 withdrawal_count: 0,
