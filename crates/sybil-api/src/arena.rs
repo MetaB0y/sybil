@@ -1,118 +1,83 @@
-//! Shared read-only access to the arena bot SQLite database.
+//! Typed client for Arena-owned analytics.
 //!
-//! Two call sites read this DB: the Prometheus scrape ([`load_bot_metrics_snapshot`],
-//! driven from `app.rs`) and the `/v1/bots/decisions` feed (`routes::bots`). The
-//! connection opener and the small `sqlite_master`/`COUNT(*)` helpers live here so
-//! both readers share one implementation rather than keeping private copies.
-//!
-//! This is intentionally the read side only — pushing metrics from the arena itself
-//! is a separate, larger redesign and out of scope here.
+//! Arena owns its SQLite database and schema. The public API proxies stable
+//! JSON documents from Arena's private read service; it never mounts or opens
+//! the Python-owned database.
 
-use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
-use rusqlite::{Connection, OpenFlags};
+use reqwest::StatusCode;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
-/// Open the arena DB read-only, or `None` when the path is unset, missing, or
-/// cannot be opened. A short busy timeout lets a scrape ride out a concurrent
-/// arena write instead of erroring immediately.
-pub fn open_read_only(path: &str) -> Option<Connection> {
-    let path = path.trim();
-    if path.is_empty() || !Path::new(path).exists() {
-        return None;
-    }
-    match Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    ) {
-        Ok(conn) => {
-            let _ = conn.busy_timeout(Duration::from_millis(750));
-            Some(conn)
+use crate::config::ApiConfig;
+
+#[derive(Clone)]
+pub struct ArenaReadClient {
+    base_url: Arc<str>,
+    token: Arc<str>,
+    http: reqwest::Client,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ArenaReadError {
+    #[error("Arena read request failed: {0}")]
+    Request(#[from] reqwest::Error),
+    #[error("Arena read service returned {status}: {body}")]
+    Response { status: StatusCode, body: String },
+}
+
+impl ArenaReadClient {
+    pub fn from_config(config: &ApiConfig) -> Result<Option<Self>, reqwest::Error> {
+        let base_url = config.arena_read_url.trim().trim_end_matches('/');
+        if base_url.is_empty() {
+            return Ok(None);
         }
-        Err(error) => {
-            tracing::warn!(path, error = %error, "failed to open arena bot db");
-            None
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_millis(config.arena_read_timeout_ms.max(1)))
+            .build()?;
+        Ok(Some(Self {
+            base_url: Arc::from(base_url),
+            token: Arc::from(config.arena_read_token.trim()),
+            http,
+        }))
+    }
+
+    pub async fn decisions<Q: Serialize + ?Sized, R: DeserializeOwned>(
+        &self,
+        query: &Q,
+    ) -> Result<R, ArenaReadError> {
+        self.get("v1/decisions", query).await
+    }
+
+    pub async fn equity_series<Q: Serialize + ?Sized, R: DeserializeOwned>(
+        &self,
+        query: &Q,
+    ) -> Result<R, ArenaReadError> {
+        self.get("v1/equity-series", query).await
+    }
+
+    async fn get<Q: Serialize + ?Sized, R: DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &Q,
+    ) -> Result<R, ArenaReadError> {
+        let response = self
+            .http
+            .get(format!("{}/{path}", self.base_url))
+            .bearer_auth(self.token.as_ref())
+            .query(query)
+            .send()
+            .await?;
+        let status = response.status();
+        if status.is_success() {
+            return response.json().await.map_err(Into::into);
         }
+        let body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "unreadable response".to_string());
+        Err(ArenaReadError::Response { status, body })
     }
-}
-
-/// Whether `table` exists in the arena DB.
-pub fn table_exists(conn: &Connection, table: &str) -> bool {
-    conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
-        [table],
-        |row| row.get::<_, i64>(0),
-    )
-    .map(|v| v == 1)
-    .unwrap_or(false)
-}
-
-/// Row count for `table`, or 0 when the table is missing or the query fails.
-pub fn count_rows(conn: &Connection, table: &str) -> i64 {
-    if !table_exists(conn, table) {
-        return 0;
-    }
-    let sql = format!("SELECT COUNT(*) FROM {table}");
-    conn.query_row(&sql, [], |row| row.get::<_, i64>(0))
-        .unwrap_or(0)
-}
-
-#[derive(Debug, Default)]
-pub struct BotMetricsSnapshot {
-    pub db_available: bool,
-    pub traders: Vec<TraderMetricsSnapshot>,
-}
-
-impl BotMetricsSnapshot {
-    pub fn unavailable() -> Self {
-        Self::default()
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct TraderMetricsSnapshot {
-    pub name: String,
-    pub total_fills: Option<i64>,
-    pub total_orders: Option<i64>,
-}
-
-/// Snapshot of arena bot metrics for the Prometheus scrape.
-pub fn load_bot_metrics_snapshot(path: &str) -> BotMetricsSnapshot {
-    let Some(conn) = open_read_only(path) else {
-        return BotMetricsSnapshot::unavailable();
-    };
-    if !table_exists(&conn, "portfolio_snapshots") {
-        return BotMetricsSnapshot::unavailable();
-    }
-
-    BotMetricsSnapshot {
-        db_available: true,
-        traders: load_latest_trader_snapshots(&conn),
-    }
-}
-
-fn load_latest_trader_snapshots(conn: &Connection) -> Vec<TraderMetricsSnapshot> {
-    let mut stmt = match conn.prepare(
-        "SELECT p.trader_name, p.total_fills, p.total_orders
-         FROM portfolio_snapshots p
-         JOIN (
-           SELECT trader_name, MAX(id) AS id FROM portfolio_snapshots GROUP BY trader_name
-         ) latest ON p.trader_name = latest.trader_name AND p.id = latest.id",
-    ) {
-        Ok(stmt) => stmt,
-        Err(error) => {
-            tracing::warn!(error = %error, "failed to prepare trader snapshot metrics query");
-            return Vec::new();
-        }
-    };
-    let Ok(rows) = stmt.query_map([], |row| {
-        Ok(TraderMetricsSnapshot {
-            name: row.get(0)?,
-            total_fills: row.get(1)?,
-            total_orders: row.get(2)?,
-        })
-    }) else {
-        return Vec::new();
-    };
-    rows.filter_map(Result::ok).collect()
 }

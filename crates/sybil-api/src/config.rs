@@ -88,6 +88,19 @@ pub struct ApiConfig {
     #[arg(long, default_value = "10000", env = "SYBIL_HISTORY_TIMEOUT_MS")]
     pub history_timeout_ms: u64,
 
+    /// Private Arena analytics service base URL. Empty keeps bot analytics
+    /// unavailable without coupling the API to Arena's storage.
+    #[arg(long, default_value = "", env = "SYBIL_ARENA_READ_URL")]
+    pub arena_read_url: String,
+
+    /// Dedicated read-only bearer shared with the Arena analytics service.
+    #[arg(long, default_value = "", env = "SYBIL_ARENA_READ_TOKEN")]
+    pub arena_read_token: String,
+
+    /// Timeout for one internal Arena analytics request.
+    #[arg(long, default_value = "3000", env = "SYBIL_ARENA_READ_TIMEOUT_MS")]
+    pub arena_read_timeout_ms: u64,
+
     /// Comma-separated browser origins allowed by CORS in production. Empty =
     /// no cross-origin CORS headers; same-origin browser requests still work.
     #[arg(long, env = "SYBIL_CORS_ORIGINS", value_delimiter = ',')]
@@ -398,11 +411,6 @@ pub struct ApiConfig {
     #[arg(long, env = "SYBIL_IMPORT_WITNESS_GENESIS_HASH")]
     pub genesis_hash: Option<String>,
 
-    /// Path to arena's live decisions SQLite database. Empty disables native
-    /// bot-decision analytics in the dashboard.
-    #[arg(long, default_value = "", env = "SYBIL_ARENA_DB_PATH")]
-    pub arena_db_path: String,
-
     /// Path to the JSON file that persists off-block `MarketRefData`
     /// (Polymarket mirror metadata: event id/title, images, end dates,
     /// category). Empty = volatile in-memory only (state lost on restart;
@@ -448,6 +456,9 @@ impl Default for ApiConfig {
             history_token: String::new(),
             history_poll_ms: 250,
             history_timeout_ms: 10_000,
+            arena_read_url: String::new(),
+            arena_read_token: String::new(),
+            arena_read_timeout_ms: 3_000,
             cors_origins: Vec::new(),
             http_trusted_proxy_cidrs: Vec::new(),
             block_interval_ms: 500,
@@ -498,7 +509,6 @@ impl Default for ApiConfig {
             payload: None,
             expect_state_root: None,
             genesis_hash: None,
-            arena_db_path: String::new(),
             market_ref_data_path: String::new(),
             event_snapshot_dir: String::new(),
             admin_feed_key_path: String::new(),

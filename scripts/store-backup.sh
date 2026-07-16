@@ -158,7 +158,7 @@ docker run -d --name "$INSPECT_CONTAINER" --network none \
     -e SYBIL_DATA_DIR=/data \
     -e SYBIL_PORT=3000 \
     -e SYBIL_BLOCK_INTERVAL_MS=86400000 \
-    -e SYBIL_ARENA_DB_PATH= \
+    -e SYBIL_ARENA_READ_URL= \
     -e SYBIL_EVENT_SNAPSHOT_DIR= \
     -e SYBIL_MARKET_REF_DATA_PATH= \
     --entrypoint sybil-api "$SOURCE_IMAGE" >/dev/null
