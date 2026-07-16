@@ -3,7 +3,7 @@ tags: [solver, crate, fisher-market, market-maker]
 layer: solver
 crate: matching-solver
 status: current
-last_verified: 2026-07-14
+last_verified: 2026-07-16
 ---
 
 # Retained cash solver
@@ -83,6 +83,11 @@ optimal. Backend and landing failures are surfaced directly.
 > `crates/matching-solver/src/retained_cash_solver.rs` — objective, oracle loop, exact line search, and certificate  
 > `crates/matching-solver/src/lp_solver.rs` — LP oracle and integer/pricing epilogue  
 > `benchmarks/solver/protocol-v2.json` — preregistered shared-capital evaluation
+
+The Cargo feature `retained-cash` exposes this production solver and keeps its
+HiGHS oracle private. The broader `lp` feature adds the public LP baseline and
+other research solvers; `matching-sequencer` intentionally enables only
+`retained-cash`.
 
 ## See also
 

@@ -1,11 +1,11 @@
 //! Unified solver interface for prediction market matching.
 
-#[cfg(any(feature = "lp", feature = "conic", feature = "milp"))]
+#[cfg(any(feature = "retained-cash", feature = "conic", feature = "milp"))]
 use std::borrow::Cow;
-#[cfg(any(feature = "lp", feature = "conic", feature = "milp"))]
+#[cfg(any(feature = "retained-cash", feature = "conic", feature = "milp"))]
 use std::collections::HashSet;
 
-#[cfg(any(feature = "lp", feature = "conic", feature = "milp"))]
+#[cfg(any(feature = "retained-cash", feature = "conic", feature = "milp"))]
 use matching_engine::Order;
 use matching_engine::Problem;
 
@@ -15,18 +15,18 @@ use crate::PipelineResult;
 ///
 /// - Buyer (no negative payoffs) -> +1.0
 /// - Seller (any negative payoff) -> -1.0
-#[cfg(any(feature = "lp", feature = "conic", feature = "milp"))]
+#[cfg(any(feature = "retained-cash", feature = "conic", feature = "milp"))]
 pub(crate) fn order_sign(order: &Order) -> f64 {
     if order.is_seller() { -1.0 } else { 1.0 }
 }
 
-#[cfg(any(feature = "lp", feature = "conic", feature = "milp"))]
+#[cfg(any(feature = "retained-cash", feature = "conic", feature = "milp"))]
 pub(crate) struct SupportedProblem<'a> {
     pub problem: Cow<'a, Problem>,
     pub rejected_orders: usize,
 }
 
-#[cfg(any(feature = "lp", feature = "conic", feature = "milp"))]
+#[cfg(any(feature = "retained-cash", feature = "conic", feature = "milp"))]
 pub(crate) fn filter_supported_problem<'a>(
     problem: &'a Problem,
     solver_name: &str,
@@ -85,7 +85,10 @@ pub trait Solver: Send + Sync {
     fn name(&self) -> &str;
 }
 
-#[cfg(all(test, any(feature = "lp", feature = "conic", feature = "milp")))]
+#[cfg(all(
+    test,
+    any(feature = "retained-cash", feature = "conic", feature = "milp")
+))]
 mod tests {
     use matching_engine::{
         MarketId, MmConstraint, MmId, MmSide, NANOS_PER_DOLLAR, Nanos, Order, Problem, Qty,

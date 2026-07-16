@@ -44,6 +44,7 @@ Main files are `solver.rs`, `result.rs`, each `*_solver.rs`, `milp.rs`, and
 `decomposed.rs`; `viz.rs` is reporting support.
 
 ```bash
+cargo test -p matching-solver --features retained-cash
 cargo test -p matching-solver
 cargo test -p matching-solver --features lp,conic,milp
 ```

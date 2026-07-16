@@ -56,6 +56,7 @@ impl LpSolver {
         }
     }
 
+    #[cfg(feature = "lp")]
     pub fn with_config(config: LpConfig) -> Self {
         Self { config }
     }

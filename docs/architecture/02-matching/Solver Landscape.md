@@ -3,7 +3,7 @@ tags: [solver, overview]
 layer: solver
 crate: matching-solver
 status: current
-last_verified: 2026-07-14
+last_verified: 2026-07-16
 ---
 
 # Solver landscape
@@ -13,7 +13,7 @@ last_verified: 2026-07-14
 
 | Solver | Feature | MM-budget approach | Role |
 |---|---|---|---|
-| [[Retained Cash Solver|`RetainedCashSolver`]] | `lp` | Generalized Frank--Wolfe on affine-to-log MM utility | Production default |
+| [[Retained Cash Solver|`RetainedCashSolver`]] | `retained-cash` | Generalized Frank--Wolfe on affine-to-log MM utility | Production default |
 | [[Pacing Bundle Solver|`PacingBundleSolver`]] | `lp` | Fully corrective primal atoms from the convex pacing dual | Research candidate |
 | [[LP Solver|`LpSolver`]] | `lp` | Solve, linearize budgets at discovered prices, re-solve once by default | Low-latency baseline |
 | [[Conic Solver|`ConicSolver`]] | `conic` | Clarabel exponential-cone formulation, then projection LP | Interior-point reference |
@@ -47,6 +47,13 @@ reduction, including its exact linear complete-set correction.
 integer validity: convergence, a configured iteration cap, backend failure,
 and projection failure are not interchangeable. `matching-sim` compares
 results; `sybil-verifier` decides validity.
+
+The production sequencer enables only `retained-cash`. The `lp` feature adds
+the public LP baseline, pacing-bundle solver, and decomposition experiment;
+`conic` includes that research surface because its reference implementation
+reuses the same LP projection utilities. This build boundary keeps production
+coupled to the certified solver it actually invokes without deleting research
+implementations.
 
 ## Important boundaries
 

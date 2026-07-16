@@ -1,4 +1,4 @@
-#[cfg(any(feature = "lp", feature = "conic", feature = "milp"))]
+#[cfg(any(feature = "retained-cash", feature = "conic", feature = "milp"))]
 mod conformance {
     use std::{
         collections::{BTreeMap, BTreeSet, HashMap, HashSet},
@@ -969,7 +969,7 @@ mod conformance {
         run_solver_conformance(&solver, AvailabilityPolicy::RequireCandidate);
     }
 
-    #[cfg(feature = "lp")]
+    #[cfg(feature = "retained-cash")]
     #[test]
     fn retained_cash_solver_conformance() {
         let solver =
@@ -1032,7 +1032,7 @@ mod conformance {
     }
 }
 
-#[cfg(not(any(feature = "lp", feature = "conic", feature = "milp")))]
+#[cfg(not(any(feature = "retained-cash", feature = "conic", feature = "milp")))]
 #[test]
 fn solver_conformance_no_solver_features_enabled() {
     eprintln!(

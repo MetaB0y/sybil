@@ -75,7 +75,7 @@ mod lp {
 // Retained-cash Solver Benchmarks
 // ============================================================================
 
-#[cfg(feature = "lp")]
+#[cfg(feature = "retained-cash")]
 mod retained_cash {
     use matching_engine::Problem;
     use matching_scenarios::{ScenarioConfig, generate_scenario};
