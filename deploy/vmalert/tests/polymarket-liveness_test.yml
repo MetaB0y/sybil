@@ -1,0 +1,51 @@
+# Prometheus-compatible tests for Polymarket owner-process liveness.
+
+rule_files:
+  - ../rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: missing Polymarket scrape target pages
+    interval: 1m
+    input_series:
+      - series: 'up{job="sybil-polymarket",instance="sybil-polymarket:9105"}'
+        values: "0+0x5"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: PolymarketIntegrationDown
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: PolymarketIntegrationDown
+        exp_alerts:
+          - exp_labels:
+              job: sybil-polymarket
+              instance: "sybil-polymarket:9105"
+              severity: critical
+              component: polymarket
+            exp_annotations:
+              summary: "Polymarket integration scrape target is down"
+              description: "VictoriaMetrics has not been able to scrape the Polymarket owner process for 3m. Check the container and its monitoring listener."
+
+  - name: live process with stale actor progress pages
+    interval: 1m
+    input_series:
+      - series: 'up{job="sybil-polymarket",instance="sybil-polymarket:9105"}'
+        values: "1+0x5"
+      - series: 'sybil_polymarket_ready{job="sybil-polymarket",instance="sybil-polymarket:9105"}'
+        values: "0+0x5"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: PolymarketIntegrationNotReady
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: PolymarketIntegrationNotReady
+        exp_alerts:
+          - exp_labels:
+              job: sybil-polymarket
+              instance: "sybil-polymarket:9105"
+              severity: critical
+              component: polymarket
+            exp_annotations:
+              summary: "Polymarket integration actor progress is stale"
+              description: "At least one required Polymarket sync, feed, MM, or enabled resolution actor has not produced successful progress inside its cadence-derived health window for 2m."

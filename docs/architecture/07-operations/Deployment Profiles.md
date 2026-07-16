@@ -319,6 +319,16 @@ success/failure counters. Compose checks readiness directly and
 VictoriaMetrics scrapes the same owner; `sybil-api` does not infer native MM
 health from orders or fills.
 
+The Polymarket integration follows the same owner-health rule on private port
+9105, but its readiness composes all required actors: catalog sync, provider
+price feed, the shared MM, and resolution when a signer is configured. Each
+actor writes progress only; none reads monitoring state or coordinates through
+it. Stale windows are three actor cadences with conservative floors (including
+twice the MM price-expiry window for the feed). Process liveness remains a
+separate `/healthz`, while `/readyz`, `/metrics`, Compose, VictoriaMetrics, and
+vmalert expose which owner stopped progressing. API-side reference-price
+expiry remains an independent consumer safety boundary.
+
 The initial history redb retains raw batches, fills, events, equity, prices,
 and candles without the former 30/31-day and global-row ceilings. This removes
 arbitrary product truncation but makes outbox/service volume monitoring and

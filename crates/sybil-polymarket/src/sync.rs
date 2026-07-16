@@ -10,6 +10,7 @@ use tracing::{info, warn};
 use crate::config::Config;
 use crate::feed::FeedMessage;
 use crate::mapping::{GroupInfo, MappingStore};
+use crate::monitoring::IntegrationProgress;
 use crate::polymarket::gamma::GammaClient;
 #[cfg(test)]
 use crate::polymarket::types::{GammaEvent, GammaMarket};
@@ -45,6 +46,7 @@ pub struct SyncActor {
     /// Exact child conditions retained from fetched curated parent events.
     /// This is mirror policy only; it is not protocol-validity state.
     curated_condition_ids: HashSet<String>,
+    progress: IntegrationProgress,
 }
 
 struct PendingMmNotification {
@@ -78,21 +80,31 @@ impl SyncActor {
             first_sync: true,
             curated_event_ids,
             curated_condition_ids: curated_condition_ids.into_iter().collect(),
+            progress: IntegrationProgress::default(),
         }
+    }
+
+    pub fn with_progress(mut self, progress: IntegrationProgress) -> Self {
+        self.progress = progress;
+        self
     }
 
     pub async fn run(mut self, cancel: tokio_util::sync::CancellationToken) {
         info!("SyncActor started");
 
         loop {
+            let mut succeeded = true;
             if let Err(e) = self.sync_once().await {
+                succeeded = false;
                 warn!(error = %e, "sync cycle failed");
             }
 
             // Save mapping after each cycle
             if let Err(e) = self.mapping.read().await.save() {
+                succeeded = false;
                 warn!(error = %e, "failed to save mapping");
             }
+            self.progress.record_sync_cycle(succeeded);
 
             tokio::select! {
                 _ = cancel.cancelled() => {

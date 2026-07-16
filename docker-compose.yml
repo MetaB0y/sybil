@@ -168,6 +168,7 @@ services:
       - "--mm-max-orders-per-block=64"
       - "--mapping-store-path=/data/polymarket_mapping.json"
       - "--curated-markets-path=/etc/sybil/curated_markets.json"
+      - "--monitoring-bind=0.0.0.0:9105"
     environment:
       RUST_LOG: "sybil_polymarket=info"
     volumes:
@@ -177,6 +178,14 @@ services:
       sybil-api:
         condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9105/readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      # A fresh genesis may require the first catalog sync to create and
+      # annotate the curated market set before any feed/MM progress exists.
+      start_period: 180s
 
     logging: *default-logging
   sybil-native-admin:
