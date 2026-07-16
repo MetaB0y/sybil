@@ -21,7 +21,7 @@ uv run python examples/full_competition.py
 ## Architecture
 
 ```
-Bots (Python)  →  sybil_client  →  HTTP/SSE  →  sybil-api (Rust)
+Bots (Python)  →  sybil_client  →  HTTP/WebSocket  →  sybil-api (Rust)
                                                       ↓
                                               matching-sequencer
                                                       ↓

@@ -28,7 +28,7 @@ flowchart TB
     end
 
     subgraph edge["Authenticated interface boundary"]
-        API["sybil-api<br/>REST · WebSocket · SSE · OpenAPI"]
+        API["sybil-api<br/>REST · WebSocket · OpenAPI"]
         AUTH["P256 / WebAuthn<br/>service tiers · replay nonces"]
         API --- AUTH
     end
@@ -73,7 +73,7 @@ flowchart TB
     PM -.->|"markets · prices · signed resolutions · liquidity"| API
     API --> ACTOR
     API -->|"authorized historical reads"| HIST
-    BLOCK -.->|"WS first-party · SSE convenience · REST history"| users
+    BLOCK -.->|"resumable WebSocket · REST history"| users
     L1 -.->|"indexed deposits / withdrawals"| API
 ```
 
@@ -146,7 +146,7 @@ The vault frontmatter is authoritative about document status: `current` means im
   import, and user-side custody/reconstruction/escape tooling.
 - WebAuthn/P256 admission, atomic authorization WAL rows, committed per-account trading nonces, and shared native/guest verification of key operations plus ordinary order/cancel intent.
 - Witness v10, committed last clearing prices, deposit quarantine, exact-keyspace proofs, and guest/native commitment agreement. Deployment repinning is coordinated with the epoch guest.
-- REST, resumable WebSocket, convenience SSE, OpenAPI, shared Rust client, Python agents, and the Polymarket integration.
+- REST, resumable WebSocket, OpenAPI, shared Rust client, Python agents, and the Polymarket integration.
 
 ### Still incomplete as a production trust system
 
@@ -177,7 +177,7 @@ Read [[Threat Model]] first. Then follow [[Block Witness]], [[Four-Layer Verific
 
 ### 05 — Interfaces and resolution
 
-See [[REST API]], [[P256 Authentication]], [[Attestation]], [[WebSocket Block Stream]], [[SSE Block Stream]], and [[Market Resolution]].
+See [[REST API]], [[P256 Authentication]], [[Attestation]], [[WebSocket Block Stream]], and [[Market Resolution]].
 
 ### 06 — Agents
 

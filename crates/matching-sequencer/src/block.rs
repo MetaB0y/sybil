@@ -102,7 +102,7 @@ pub struct Block {
 /// Per-block sidecar data derived during block production.
 ///
 /// This is not canonical protocol data: it is not part of the block hash,
-/// state root, events root, or witness. API/SSE consumers receive it next to
+/// state root, events root, or witness. API stream consumers receive it next to
 /// the block so product views do not have to reconstruct common summaries.
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct BlockAnalytics {

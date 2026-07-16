@@ -38,9 +38,11 @@ products and must not share one vague "DA" promise.
    lifecycle sidecars.
 2. **Full canonical blocks are private service data.** The existing v1
    WebSocket shape remains available only behind service authentication. The
-   privacy-preserving public replay protocol is `/v2/blocks/ws`; REST and SSE
-   return the same public projection. Canonicality means the operator stores and
-   proves a row, not that the row must be publicly presented.
+   privacy-preserving public replay protocol is `/v2/blocks/ws`; REST and that
+   stream return the same public projection. The original live-only SSE route
+   was retired after first-party Python consumers migrated to resumable replay.
+   Canonicality means the operator stores and proves a row, not that the row
+   must be publicly presented.
 3. **Exact account financial publication is opt-in.** A leaderboard row exists
    only while the account has a non-empty display name set by the signed profile
    operation. The settings UI must say that opting in publishes the account id,

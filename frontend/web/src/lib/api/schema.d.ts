@@ -483,26 +483,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/v1/blocks/stream": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /**
-     * GET /v1/blocks/stream
-     * @description Third-party convenience SSE stream of public block aggregates. First-party clients should use GET /v2/blocks/ws?from_block=N for replay/resume, versioned envelopes, and lag/retention-gap signalling.
-     */
-    get: operations["stream_blocks"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/v1/blocks/ws": {
     parameters: {
       query?: never;
@@ -5205,24 +5185,6 @@ export interface operations {
       };
       /** @description No blocks produced yet */
       404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  stream_blocks: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Third-party convenience SSE stream of block events */
-      200: {
         headers: {
           [name: string]: unknown;
         };

@@ -273,9 +273,9 @@ pub struct ApiConfig {
     #[arg(long, default_value = "4", env = "SYBIL_HTTP_DA_MAX_CONCURRENCY")]
     pub http_da_max_concurrency: usize,
 
-    /// Maximum anonymous public block streams held concurrently across SSE
-    /// and WebSocket. The authenticated service stream has a separate trust
-    /// boundary and does not consume this budget.
+    /// Maximum anonymous public WebSocket block streams held concurrently.
+    /// The authenticated service stream has a separate trust boundary and
+    /// does not consume this budget.
     #[arg(
         long,
         default_value = "256",

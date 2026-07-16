@@ -12,7 +12,7 @@ retrieval, and historical product views. OpenAPI is generated for clients.
 Current exchange reads/writes use `SequencerHandle`; historical reads are
 owner-authorized here and proxied to the private `sybil-history` service.
 
-The endpoint groups are: **System** (`/v1/health`, `/v1/state-root`), **Proofs** (`/v1/proofs/state/{leaf_key_hex}`), **Data Availability** (`/v1/da/{height}/manifest`, `/v1/da/{height}/payload`), **Accounts** (create, query balance/positions, fund, register keys), **Markets** (list, create, query details/prices/groups, resolve), **Orders** (submit unsigned or [[P256 Authentication|signed]]), **Bridge** (status, account bridge keys, L1 deposits, signed/unsigned withdrawal leaves), and **Blocks** (latest, by height, privacy-preserving [[WebSocket Block Stream|public WebSocket stream]] at `/v2/blocks/ws?from_block=N`, plus [[SSE Block Stream|SSE]] as a third-party convenience). `/v1/health` reads committed height and genesis hash in one actor snapshot; snapshot failure returns 503 rather than reporting a partial chain identity as healthy. Operator/service writes, the state-proof and DA-payload custody surfaces, authenticated canonical v1 block stream, and bridge operations require `Authorization: Bearer $SYBIL_SERVICE_TOKEN`; an unset token fails closed. Dev mode skips that service bearer check for local workflows and additionally mounts simulation pause/resume, diagnostic all-pending/orderbook listings, and the explicit unverified [[Attestation|attestation shape stub]].
+The endpoint groups are: **System** (`/v1/health`, `/v1/state-root`), **Proofs** (`/v1/proofs/state/{leaf_key_hex}`), **Data Availability** (`/v1/da/{height}/manifest`, `/v1/da/{height}/payload`), **Accounts** (create, query balance/positions, fund, register keys), **Markets** (list, create, query details/prices/groups, resolve), **Orders** (submit unsigned or [[P256 Authentication|signed]]), **Bridge** (status, account bridge keys, L1 deposits, signed/unsigned withdrawal leaves), and **Blocks** (latest, by height, and the privacy-preserving [[WebSocket Block Stream|public WebSocket stream]] at `/v2/blocks/ws?from_block=N`). `/v1/health` reads committed height and genesis hash in one actor snapshot; snapshot failure returns 503 rather than reporting a partial chain identity as healthy. Operator/service writes, the state-proof and DA-payload custody surfaces, authenticated canonical v1 block stream, and bridge operations require `Authorization: Bearer $SYBIL_SERVICE_TOKEN`; an unset token fails closed. Dev mode skips that service bearer check for local workflows and additionally mounts simulation pause/resume, diagnostic all-pending/orderbook listings, and the explicit unverified [[Attestation|attestation shape stub]].
 
 Per-account reads (`/accounts/{id}`, portfolio, fills, equity, events, orders,
 signing-key metadata, read-key metadata, bridge key, active withdrawals, and private summary) require
@@ -23,7 +23,7 @@ remain unauthenticated. Leaderboard rows are limited to accounts that
 explicitly opt in by signing a non-empty public display name; the settings UI
 discloses the financial fields that choice publishes.
 
-Public block REST/SSE responses are an allowlisted market tape: header
+Public block REST/WebSocket responses are an allowlisted market tape: header
 commitments, prices, aggregate analytics, the bridge deposit root/count, and
 sanitized resolved-market ids. They do not contain fills, rejection rows,
 account-bearing system events, individual bridge leaves, or derived order
@@ -197,9 +197,7 @@ Block history reads distinguish missing data from retained-history gaps:
 `GET /v1/blocks/{height}` returns `410 Gone` with code `RETENTION_GONE` when
 the requested height is below the retained `blocks_full` floor. First-party
 WebSocket block replay sends a versioned `retention_gap` envelope before
-closing when `?from_block=` starts before durable block retention. SSE remains
-a live-only convenience stream and does not expose a replay cursor or retained
-floor.
+closing when `?from_block=` starts before durable block retention.
 
 All exchange mutation remains in the `SequencerActor`. Order-write endpoints
 first pass through cheap global/per-client HTTP token buckets before JSON or
@@ -293,7 +291,6 @@ row. In-memory API instances return 503 because they have no durable outbox.
 ## See Also
 - [[Order Types]] — the `OrderSpec` enum submitted via the API
 - [[WebSocket Block Stream]] — public v2 market tape and authenticated v1 canonical stream
-- [[SSE Block Stream]] — third-party convenience stream via `/v1/blocks/stream`
 - [[Block Data Boundaries]] — API composition vs. canonical protocol data
 - [[P256 Authentication]] — signed order submission
 - [[Actor Mailbox Monitoring]] — sequencer queue-depth metric and alerts

@@ -56,8 +56,8 @@ The surface the bots actually use — conveniences the raw generated client does
 - **`SybilClient`** — one async `httpx` client; `service_token` auth header; methods returning the
   ergonomic dataclasses in `types.py` (`get_account`, `list_markets`, `get_prices`, `submit_orders`,
   `buy_yes/no` + `sell_yes/no`, `get_portfolio`, `get_account_fills`, `resolve_market`, …).
-- **Block streaming** — `stream_blocks()` (WebSocket-first per SYB-171, SSE fallback) with automatic
-  reconnect + backoff on connection drops.
+- **Block streaming** — `stream_blocks()` uses the versioned public WebSocket
+  with height-based resume, duplicate suppression, and reconnect backoff.
 - **Unit conversions** — the exchange speaks integer **share-units** (`SHARE_SCALE = 1000` per share)
   and integer **nanodollars** (`NANOS_PER_DOLLAR = 1e9` per $). The layer converts at the boundary:
   - `shares_to_quantity_units()` / `quantity_units_to_shares()`
@@ -82,6 +82,6 @@ higher-risk because the live bots run on this path:
 
 1. Move plain request/response endpoints (`get_market`, `list_markets`, `get_prices`) onto the
    generated route functions, keeping the thin dataclass return types.
-2. Keep the bespoke paths hand-written: `stream_blocks` (WS/SSE + reconnect), `submit_orders`
+2. Keep the bespoke paths hand-written: `stream_blocks` (WebSocket resume + reconnect), `submit_orders`
    (signing + nonces), anything with retry semantics.
 3. Do it endpoint-by-endpoint behind the existing tests; never in one sweep.

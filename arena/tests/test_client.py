@@ -1,5 +1,9 @@
 """Tests for sybil_client."""
 
+import json
+
+import pytest
+
 from sybil_client import BuyNo, BuyYes, SellNo, SellYes
 from sybil_client.types import (
     NANOS_PER_DOLLAR,
@@ -200,11 +204,11 @@ def test_fill_cursor_gap_requires_reconciliation(monkeypatch):
     assert error.value.status_code == 410
 
 
-class _FakeStreamCM:
-    """Async context manager mimicking httpx's client.stream(...)."""
+class _FakeWebSocket:
+    """Async context manager and iterator matching ``websockets.connect``."""
 
-    def __init__(self, lines, raise_exc=None):
-        self._lines = lines
+    def __init__(self, messages=(), raise_exc=None):
+        self._messages = iter(messages)
         self._raise_exc = raise_exc
 
     async def __aenter__(self):
@@ -215,34 +219,43 @@ class _FakeStreamCM:
     async def __aexit__(self, *args):
         return False
 
-    async def aiter_lines(self):
-        for line in self._lines:
-            yield line
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self._messages)
+        except StopIteration:
+            raise StopAsyncIteration from None
 
 
-class _FakeStreamingHttp:
-    def __init__(self):
-        self.calls = 0
+class _FakeConnect:
+    def __init__(self, connections):
+        self.connections = iter(connections)
+        self.urls = []
 
-    def stream(self, method, path):
-        import httpx
-
-        self.calls += 1
-        if self.calls == 1:
-            # First connection drops before yielding anything.
-            return _FakeStreamCM([], raise_exc=httpx.ConnectError("boom"))
-        return _FakeStreamCM(['data: {"height": 5}', 'data: {"height": 6}'])
+    def __call__(self, url, **kwargs):
+        self.urls.append(url)
+        return next(self.connections)
 
 
-async def test_stream_blocks_reconnects_after_drop():
-    # AR-3: a dropped SSE connection must be retried with backoff instead of
-    # ending the stream (which would tear down the consuming bot).
+async def test_stream_blocks_reconnects_from_next_height(monkeypatch):
     from sybil_client import SybilClient
+    import sybil_client.client as client_module
 
     client = SybilClient("http://example.invalid")
-    client._client = _FakeStreamingHttp()
     client._stream_reconnect_base_s = 0.0
     client._stream_reconnect_max_s = 0.0
+    def envelope(height):
+        return json.dumps({"v": 2, "type": "block", "data": {"height": height}})
+
+    fake_connect = _FakeConnect(
+        [
+            _FakeWebSocket([envelope(5)]),
+            _FakeWebSocket([envelope(5), envelope(6)]),
+        ]
+    )
+    monkeypatch.setattr(client_module, "connect", fake_connect)
 
     heights = []
     gen = client.stream_blocks()
@@ -255,7 +268,29 @@ async def test_stream_blocks_reconnects_after_drop():
         await gen.aclose()
 
     assert heights == [5, 6]
-    assert client._client.calls == 2  # reconnected once after the drop
+    assert fake_connect.urls == [
+        "ws://example.invalid/v2/blocks/ws",
+        "ws://example.invalid/v2/blocks/ws?from_block=6",
+    ]
+
+
+async def test_stream_blocks_surfaces_retention_gap(monkeypatch):
+    from sybil_client import BlockStreamGapError, SybilClient
+    import sybil_client.client as client_module
+
+    message = json.dumps(
+        {
+            "v": 2,
+            "type": "retention_gap",
+            "requested_height": 5,
+            "retention_min_height": 10,
+            "head_height": 20,
+        }
+    )
+    monkeypatch.setattr(client_module, "connect", _FakeConnect([_FakeWebSocket([message])]))
+
+    with pytest.raises(BlockStreamGapError, match="retention_min=10"):
+        await anext(SybilClient("https://example.invalid").stream_blocks(from_block=5))
 
 
 def test_parse_market_preserves_polymarket_condition_id():

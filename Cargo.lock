@@ -6758,7 +6758,6 @@ dependencies = [
  "sybil-zk",
  "thiserror 2.0.18",
  "tokio",
- "tokio-stream",
  "tokio-tungstenite 0.30.0",
  "tokio-util",
  "tower",

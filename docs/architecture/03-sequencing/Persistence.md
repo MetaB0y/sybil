@@ -306,7 +306,7 @@ This is the whole reason the commit fence lives in redb.
 - Uncommitted block-local fill, price, equity, and account-event fact buffers.
   They are rebuilt by normal block processing; committed facts are already in
   the transactional outbox and historical queries use `sybil-history`.
-- SSE ring buffer contents
+- Live WebSocket broadcast-buffer contents
 - Transient external feed state such as recently pushed reference prices
 
 ## Restart Stress Testing
