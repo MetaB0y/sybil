@@ -20,7 +20,7 @@ COPY scripts/ scripts/
 COPY feeds/ feeds/
 COPY markets/ markets/
 
-EXPOSE 8501
+EXPOSE 8501 9101 9103
 
 # Default: run the live trading bots
 ENTRYPOINT ["uv", "run", "--no-sync", "python", "-m", "live.runner"]

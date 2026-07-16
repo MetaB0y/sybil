@@ -1,15 +1,8 @@
 """Prometheus metrics owned by the live arena process (SYB-211).
 
-This module covers *only* the observability that the arena process alone can
-produce: news-feed poll health, market-selection sizing, and LLM call volume.
-
-The per-trader portfolio series (``sybil_bot_*``) are deliberately NOT
-exported here. sybil-api already owns that pipeline: ``crates/sybil-api/src/
-arena.rs`` reads the arena SQLite DB (``portfolio_snapshots``) on every scrape
-and publishes ``sybil_bot_db_available``, ``sybil_bot_total_orders``, and
-``sybil_bot_total_fills``. Re-exporting those from the arena would create
-duplicate series on a second scrape target with subtly different values, so we
-leave them to the API and only fill the arena-only gaps.
+This includes the per-trader portfolio series derived from Arena's private
+SQLite database. Keeping the collector beside the writer prevents Rust/API
+services from depending on Python-owned storage or mounting its volume.
 
 Fail-open (SYB-185): every hook swallows its own exceptions. A metrics failure
 must never take down a feed poll or a trader loop. prometheus_client's counter
@@ -20,11 +13,70 @@ belt-and-suspenders for the unexpected.
 from __future__ import annotations
 
 import logging
+import sqlite3
 import time
+from pathlib import Path
 
 from prometheus_client import CollectorRegistry, Counter, Gauge, start_http_server
+from prometheus_client.core import GaugeMetricFamily
 
 log = logging.getLogger(__name__)
+
+
+class BotPortfolioCollector:
+    """Scrape-time bot totals from the latest Arena portfolio snapshots."""
+
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+
+    def collect(self):
+        available = GaugeMetricFamily(
+            "sybil_bot_db_available", "Whether the Arena decision database is readable."
+        )
+        traders = GaugeMetricFamily(
+            "sybil_bot_traders_total", "Traders with a durable Arena portfolio snapshot."
+        )
+        fills = GaugeMetricFamily(
+            "sybil_bot_total_fills",
+            "Latest cumulative fill count reported by each Arena trader.",
+            labels=["trader"],
+        )
+        orders = GaugeMetricFamily(
+            "sybil_bot_total_orders",
+            "Latest cumulative order count reported by each Arena trader.",
+            labels=["trader"],
+        )
+        rows = []
+        try:
+            if not self.db_path or not Path(self.db_path).exists():
+                raise FileNotFoundError(self.db_path)
+            uri = Path(self.db_path).resolve().as_uri() + "?mode=ro"
+            with sqlite3.connect(uri, uri=True, timeout=0.75) as conn:
+                columns = {
+                    str(row[1])
+                    for row in conn.execute("PRAGMA table_info(portfolio_snapshots)").fetchall()
+                }
+                if not {"total_fills", "total_orders"}.issubset(columns):
+                    raise sqlite3.OperationalError("portfolio snapshot totals are unavailable")
+                rows = conn.execute(
+                    "SELECT p.trader_name, p.total_fills, p.total_orders "
+                    "FROM portfolio_snapshots p JOIN ("
+                    "SELECT trader_name, MAX(id) AS id FROM portfolio_snapshots "
+                    "GROUP BY trader_name) latest "
+                    "ON p.trader_name = latest.trader_name AND p.id = latest.id"
+                ).fetchall()
+            available.add_metric([], 1)
+        except (OSError, sqlite3.Error):
+            available.add_metric([], 0)
+            log.debug("Arena portfolio metrics unavailable", exc_info=True)
+        traders.add_metric([], len(rows))
+        for trader, total_fills, total_orders in rows:
+            fills.add_metric([str(trader)], total_fills or 0)
+            orders.add_metric([str(trader)], total_orders or 0)
+        yield available
+        yield traders
+        yield fills
+        yield orders
 
 
 class ArenaMetrics:
@@ -35,8 +87,15 @@ class ArenaMetrics:
     and so the exporter serves exactly this arena's series.
     """
 
-    def __init__(self, registry: CollectorRegistry | None = None):
+    def __init__(
+        self,
+        registry: CollectorRegistry | None = None,
+        *,
+        db_path: str | None = None,
+    ):
         self.registry = registry or CollectorRegistry()
+        if db_path is not None:
+            self.registry.register(BotPortfolioCollector(db_path))
 
         # -- Market selection (arena-only: which markets the runner picked) --
         self.selected_markets = Gauge(

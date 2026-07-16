@@ -13,7 +13,6 @@ use utoipa::OpenApi;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes as openapi_routes;
 
-use crate::arena;
 use crate::routes;
 use crate::state::AppState;
 use crate::types::error::AppError;
@@ -184,7 +183,6 @@ async fn prometheus_metrics(State(state): State<AppState>) -> impl IntoResponse 
             .increment(1);
         tracing::warn!("live market metrics collection timed out; rendering cached metrics");
     }
-    record_bot_metrics(&state).await;
     state.prometheus.render()
 }
 
@@ -310,28 +308,6 @@ async fn record_live_market_metrics(state: &AppState) {
             .copied()
             .fold(0i64, i64::saturating_add) as f64,
     );
-}
-
-async fn record_bot_metrics(state: &AppState) {
-    let path = state.arena_db_path.clone();
-    let snapshot =
-        match tokio::task::spawn_blocking(move || arena::load_bot_metrics_snapshot(&path)).await {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                tracing::warn!(error = %error, "bot metrics task failed");
-                arena::BotMetricsSnapshot::unavailable()
-            }
-        };
-
-    metrics::gauge!("sybil_bot_db_available").set(if snapshot.db_available { 1.0 } else { 0.0 });
-    metrics::gauge!("sybil_bot_traders_total").set(snapshot.traders.len() as f64);
-
-    for trader in snapshot.traders {
-        metrics::gauge!("sybil_bot_total_fills", "trader" => trader.name.clone())
-            .set(trader.total_fills.unwrap_or(0) as f64);
-        metrics::gauge!("sybil_bot_total_orders", "trader" => trader.name)
-            .set(trader.total_orders.unwrap_or(0) as f64);
-    }
 }
 
 async fn http_metrics(req: Request<axum::body::Body>, next: Next) -> Response {

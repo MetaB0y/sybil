@@ -1,36 +1,20 @@
-use std::collections::HashMap;
-use std::path::Path;
-
 use axum::Json;
 use axum::extract::{Query, State};
-use rusqlite::types::Value as SqlValue;
-use rusqlite::{Connection, params_from_iter};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::arena::{count_rows, open_read_only, table_exists};
 use crate::state::AppState;
-use crate::types::error::AppError;
 
 const DEFAULT_BOT_DECISION_LIMIT: usize = 50;
 const MAX_BOT_DECISION_LIMIT: usize = 500;
 const DEFAULT_BOT_EQUITY_LIMIT: usize = 200;
 const MAX_BOT_EQUITY_LIMIT: usize = 1_000;
 
-type SnapshotRow = (
-    String,
-    Option<i64>,
-    Option<f64>,
-    Option<f64>,
-    Option<f64>,
-    Option<i64>,
-    Option<i64>,
-    Option<String>,
-);
-
 /// GET /v1/bots/decisions
 ///
-/// Native arena / bot analytics feed. Public (unauthenticated) read route.
+/// Public bot analytics backed by Arena's private typed read service. The Rust
+/// API owns the public route and contract, while Python owns its storage and
+/// query semantics.
 #[utoipa::path(
     tag = "routesbots",
     get,
@@ -48,27 +32,29 @@ type SnapshotRow = (
 pub async fn get_bot_decisions(
     State(state): State<AppState>,
     Query(params): Query<BotDecisionParams>,
-) -> Result<Json<BotDecisionFeedResponse>, AppError> {
-    let path = state.arena_db_path.clone();
-    let limit = bot_decision_query_limit(params.limit);
-    let trader = clean_query_text(params.trader);
-    let market_id = params.market_id;
-    let since = clean_query_text(params.since);
-
-    let response = tokio::task::spawn_blocking(move || {
-        load_bot_decisions(path, limit, trader, market_id, since)
-    })
-    .await
-    .map_err(|e| AppError::internal(format!("bot decision task failed: {e}")))?;
-
-    Ok(Json(response))
+) -> Json<BotDecisionFeedResponse> {
+    let query = ArenaDecisionQuery {
+        limit: bot_decision_query_limit(params.limit),
+        trader: clean_query_text(params.trader),
+        market_id: params.market_id,
+        since: clean_query_text(params.since),
+    };
+    let Some(client) = &state.arena else {
+        return Json(unavailable("Arena read service is not configured"));
+    };
+    match client.decisions(&query).await {
+        Ok(response) => Json(response),
+        Err(error) => {
+            tracing::warn!(%error, "Arena decision read failed");
+            Json(unavailable("Arena read service is unavailable"))
+        }
+    }
 }
 
 /// GET /v1/bots/equity-series
 ///
-/// Native arena per-bot portfolio-value time series from `portfolio_snapshots`.
-/// Public (unauthenticated) read route. Dense result sets are downsampled with a
-/// naive stride after a bounded count query; the latest point is retained.
+/// Public per-bot portfolio-value series proxied from Arena's private typed
+/// read service. Dense results are bounded and downsampled by Arena.
 #[utoipa::path(
     tag = "routesbots",
     get,
@@ -85,18 +71,28 @@ pub async fn get_bot_decisions(
 pub async fn get_bot_equity_series(
     State(state): State<AppState>,
     Query(params): Query<BotEquitySeriesParams>,
-) -> Result<Json<BotEquitySeriesResponse>, AppError> {
-    let path = state.arena_db_path.clone();
-    let limit = bot_equity_query_limit(params.limit);
-    let trader = clean_query_text(params.trader);
-    let since = clean_query_text(params.since);
-
-    let response =
-        tokio::task::spawn_blocking(move || load_bot_equity_series(path, limit, trader, since))
-            .await
-            .map_err(|e| AppError::internal(format!("bot equity task failed: {e}")))?;
-
-    Ok(Json(response))
+) -> Json<BotEquitySeriesResponse> {
+    let query = ArenaEquityQuery {
+        trader: clean_query_text(params.trader),
+        since: clean_query_text(params.since),
+        limit: bot_equity_query_limit(params.limit),
+    };
+    let Some(client) = &state.arena else {
+        return Json(unavailable_equity(
+            &query,
+            "Arena read service is not configured",
+        ));
+    };
+    match client.equity_series(&query).await {
+        Ok(response) => Json(response),
+        Err(error) => {
+            tracing::warn!(%error, "Arena equity read failed");
+            Json(unavailable_equity(
+                &query,
+                "Arena read service is unavailable",
+            ))
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -114,7 +110,27 @@ pub struct BotEquitySeriesParams {
     pub limit: Option<usize>,
 }
 
-#[derive(Debug, Serialize, utoipa::ToSchema)]
+#[derive(Debug, Serialize)]
+struct ArenaDecisionQuery {
+    limit: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trader: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    market_id: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    since: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ArenaEquityQuery {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trader: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    since: Option<String>,
+    limit: usize,
+}
+
+#[derive(Debug, Deserialize, Serialize, utoipa::ToSchema)]
 pub struct BotDecisionFeedResponse {
     pub db_available: bool,
     pub db_path: Option<String>,
@@ -125,7 +141,7 @@ pub struct BotDecisionFeedResponse {
     pub token_usage: Vec<TokenUsageResponse>,
 }
 
-#[derive(Debug, Default, Serialize, utoipa::ToSchema)]
+#[derive(Debug, Default, Deserialize, Serialize, utoipa::ToSchema)]
 pub struct BotStatsResponse {
     pub decisions: i64,
     pub articles: i64,
@@ -135,7 +151,7 @@ pub struct BotStatsResponse {
     pub latest_decision_timestamp: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, utoipa::ToSchema)]
 pub struct BotSummaryResponse {
     pub trader_name: String,
     /// Durable sequencer account recorded with the latest Arena snapshot.
@@ -162,7 +178,7 @@ pub struct BotSummaryResponse {
     pub snapshot_timestamp: Option<String>,
 }
 
-#[derive(Debug, Serialize, utoipa::ToSchema)]
+#[derive(Debug, Deserialize, Serialize, utoipa::ToSchema)]
 pub struct BotDecisionResponse {
     pub id: i64,
     pub trader_name: String,
@@ -182,7 +198,7 @@ pub struct BotDecisionResponse {
     pub no_pos: Option<f64>,
 }
 
-#[derive(Debug, Serialize, utoipa::ToSchema)]
+#[derive(Debug, Deserialize, Serialize, utoipa::ToSchema)]
 pub struct TokenUsageResponse {
     pub trader_name: String,
     pub calls: i64,
@@ -192,7 +208,7 @@ pub struct TokenUsageResponse {
     pub latest_model: Option<String>,
 }
 
-#[derive(Debug, Serialize, utoipa::ToSchema)]
+#[derive(Debug, Deserialize, Serialize, utoipa::ToSchema)]
 pub struct BotEquitySeriesResponse {
     pub db_available: bool,
     pub db_path: Option<String>,
@@ -208,7 +224,7 @@ pub struct BotEquitySeriesResponse {
     pub points: Vec<BotEquityPointResponse>,
 }
 
-#[derive(Debug, Serialize, utoipa::ToSchema)]
+#[derive(Debug, Deserialize, Serialize, utoipa::ToSchema)]
 pub struct BotEquityPointResponse {
     pub id: i64,
     pub trader_name: String,
@@ -220,156 +236,10 @@ pub struct BotEquityPointResponse {
     pub total_orders: Option<i64>,
 }
 
-fn load_bot_decisions(
-    db_path: String,
-    limit: usize,
-    trader: Option<String>,
-    market_id: Option<u32>,
-    since: Option<String>,
-) -> BotDecisionFeedResponse {
-    let path = db_path.trim();
-    if path.is_empty() {
-        return unavailable(None, "SYBIL_ARENA_DB_PATH is not configured");
-    }
-
-    if !Path::new(path).exists() {
-        return unavailable(Some(path.to_string()), "arena decision database not found");
-    }
-
-    let Some(conn) = open_read_only(path) else {
-        return unavailable(
-            Some(path.to_string()),
-            "failed to open arena decision database",
-        );
-    };
-
-    if !table_exists(&conn, "decisions") {
-        return unavailable(Some(path.to_string()), "decisions table is missing");
-    }
-
-    let summaries = match load_summaries(&conn) {
-        Ok(rows) => rows,
-        Err(e) => {
-            return unavailable(
-                Some(path.to_string()),
-                format!("failed to load bot summaries: {e}"),
-            );
-        }
-    };
-    let decisions =
-        match load_recent_decisions(&conn, limit, trader.as_deref(), market_id, since.as_deref()) {
-            Ok(rows) => rows,
-            Err(e) => {
-                return unavailable(
-                    Some(path.to_string()),
-                    format!("failed to load bot decisions: {e}"),
-                );
-            }
-        };
-    let token_usage = load_token_usage(&conn).unwrap_or_default();
-
-    let stats = BotStatsResponse {
-        decisions: count_rows(&conn, "decisions"),
-        articles: count_rows(&conn, "articles"),
-        snapshots: count_rows(&conn, "portfolio_snapshots"),
-        token_usage: count_rows(&conn, "token_usage"),
-        traders: summaries.iter().filter(|summary| summary.active).count(),
-        latest_decision_timestamp: latest_decision_timestamp(&conn),
-    };
-
-    BotDecisionFeedResponse {
-        db_available: true,
-        db_path: Some(path.to_string()),
-        error: None,
-        stats,
-        summaries,
-        decisions,
-        token_usage,
-    }
-}
-
-fn load_bot_equity_series(
-    db_path: String,
-    limit: usize,
-    trader: Option<String>,
-    since: Option<String>,
-) -> BotEquitySeriesResponse {
-    let path = db_path.trim();
-    if path.is_empty() {
-        return unavailable_equity(
-            None,
-            trader,
-            since,
-            limit,
-            "SYBIL_ARENA_DB_PATH is not configured",
-        );
-    }
-
-    if !Path::new(path).exists() {
-        return unavailable_equity(
-            Some(path.to_string()),
-            trader,
-            since,
-            limit,
-            "arena decision database not found",
-        );
-    }
-
-    let Some(conn) = open_read_only(path) else {
-        return unavailable_equity(
-            Some(path.to_string()),
-            trader,
-            since,
-            limit,
-            "failed to open arena decision database",
-        );
-    };
-
-    if !table_exists(&conn, "portfolio_snapshots") {
-        return unavailable_equity(
-            Some(path.to_string()),
-            trader,
-            since,
-            limit,
-            "portfolio_snapshots table is missing",
-        );
-    }
-
-    let (points, source_rows, stride) =
-        match load_equity_points(&conn, limit, trader.as_deref(), since.as_deref()) {
-            Ok(rows) => rows,
-            Err(e) => {
-                return unavailable_equity(
-                    Some(path.to_string()),
-                    trader,
-                    since,
-                    limit,
-                    format!("failed to load bot equity series: {e}"),
-                );
-            }
-        };
-    let returned_rows = points.len();
-
-    BotEquitySeriesResponse {
-        db_available: true,
-        db_path: Some(path.to_string()),
-        error: None,
-        trader,
-        since,
-        limit,
-        server_cap: MAX_BOT_EQUITY_LIMIT,
-        source_rows,
-        returned_rows,
-        downsampled: source_rows > returned_rows,
-        stride,
-        points,
-    }
-}
-
-fn unavailable(path: Option<String>, error: impl Into<String>) -> BotDecisionFeedResponse {
+fn unavailable(error: impl Into<String>) -> BotDecisionFeedResponse {
     BotDecisionFeedResponse {
         db_available: false,
-        db_path: path,
+        db_path: None,
         error: Some(error.into()),
         stats: BotStatsResponse::default(),
         summaries: Vec::new(),
@@ -379,19 +249,16 @@ fn unavailable(path: Option<String>, error: impl Into<String>) -> BotDecisionFee
 }
 
 fn unavailable_equity(
-    path: Option<String>,
-    trader: Option<String>,
-    since: Option<String>,
-    limit: usize,
+    query: &ArenaEquityQuery,
     error: impl Into<String>,
 ) -> BotEquitySeriesResponse {
     BotEquitySeriesResponse {
         db_available: false,
-        db_path: path,
+        db_path: None,
         error: Some(error.into()),
-        trader,
-        since,
-        limit,
+        trader: query.trader.clone(),
+        since: query.since.clone(),
+        limit: query.limit,
         server_cap: MAX_BOT_EQUITY_LIMIT,
         source_rows: 0,
         returned_rows: 0,
@@ -399,575 +266,6 @@ fn unavailable_equity(
         stride: 1,
         points: Vec::new(),
     }
-}
-
-fn latest_decision_timestamp(conn: &Connection) -> Option<String> {
-    conn.query_row(
-        "SELECT timestamp FROM decisions ORDER BY id DESC LIMIT 1",
-        [],
-        |row| row.get::<_, Option<String>>(0),
-    )
-    .ok()
-    .flatten()
-}
-
-fn load_summaries(conn: &Connection) -> rusqlite::Result<Vec<BotSummaryResponse>> {
-    let mut summaries = HashMap::<String, BotSummaryResponse>::new();
-
-    let mut stmt = conn.prepare(
-        "SELECT trader_name, COUNT(*) AS decision_count, AVG(ABS(fair_value - market_price)) AS avg_edge \
-         FROM decisions GROUP BY trader_name",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok(BotSummaryResponse {
-            trader_name: row.get(0)?,
-            decision_count: row.get(1)?,
-            avg_edge: row.get(2)?,
-            ..BotSummaryResponse::default()
-        })
-    })?;
-    for row in rows {
-        let summary = row?;
-        summaries.insert(summary.trader_name.clone(), summary);
-    }
-
-    let mut stmt = conn.prepare(
-        "SELECT d.trader_name, d.market_id, d.market_name, d.timestamp, d.fair_value, d.market_price, d.balance \
-         FROM decisions d \
-         JOIN (SELECT trader_name, MAX(id) AS id FROM decisions GROUP BY trader_name) latest \
-           ON d.trader_name = latest.trader_name AND d.id = latest.id",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        let fair_value: Option<f64> = row.get(4)?;
-        let market_price: Option<f64> = row.get(5)?;
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, Option<i64>>(1)?,
-            row.get::<_, Option<String>>(2)?,
-            row.get::<_, Option<String>>(3)?,
-            fair_value,
-            market_price,
-            row.get::<_, Option<f64>>(6)?,
-            edge(fair_value, market_price),
-        ))
-    })?;
-    for row in rows {
-        let (
-            trader_name,
-            market_id,
-            market_name,
-            timestamp,
-            fair_value,
-            market_price,
-            balance,
-            edge,
-        ) = row?;
-        let summary = summaries
-            .entry(trader_name.clone())
-            .or_insert_with(|| BotSummaryResponse {
-                trader_name,
-                ..BotSummaryResponse::default()
-            });
-        summary.latest_market_id = market_id;
-        summary.latest_market_name = market_name;
-        summary.latest_timestamp = timestamp;
-        summary.latest_fair_value = fair_value;
-        summary.latest_market_price = market_price;
-        summary.latest_balance = balance;
-        summary.latest_edge = edge;
-    }
-
-    load_latest_snapshots(conn, &mut summaries, None);
-    if let Some(run_id) = apply_active_runtime_membership(conn, &mut summaries)? {
-        replace_active_runtime_summary_rows(conn, &mut summaries, &run_id)?;
-    }
-
-    let mut rows: Vec<_> = summaries.into_values().collect();
-    rows.sort_by(|a, b| {
-        b.active
-            .cmp(&a.active)
-            .then_with(|| b.scored.cmp(&a.scored))
-            .then_with(|| b.latest_timestamp.cmp(&a.latest_timestamp))
-            .then_with(|| b.decision_count.cmp(&a.decision_count))
-            .then_with(|| a.trader_name.cmp(&b.trader_name))
-    });
-    Ok(rows)
-}
-
-fn apply_active_runtime_membership(
-    conn: &Connection,
-    summaries: &mut HashMap<String, BotSummaryResponse>,
-) -> rusqlite::Result<Option<String>> {
-    if !table_exists(conn, "arena_runs") || !table_exists(conn, "arena_run_participants") {
-        return Ok(None);
-    }
-
-    let mut stmt = conn.prepare(
-        "SELECT p.run_id, p.trader_name, p.role, p.scored \
-         FROM arena_run_participants p \
-         JOIN arena_runs r ON r.run_id = p.run_id \
-         WHERE r.run_id = ( \
-             SELECT run_id FROM arena_runs \
-             WHERE stopped_at_utc IS NULL \
-               AND julianday(heartbeat_at_utc) >= julianday('now', '-15 minutes') \
-             ORDER BY started_at_utc DESC LIMIT 1 \
-         )",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, bool>(3)?,
-        ))
-    })?;
-    let mut active_run_id = None;
-    for row in rows {
-        let (run_id, trader_name, role, scored) = row?;
-        active_run_id = Some(run_id);
-        let summary = summaries
-            .entry(trader_name.clone())
-            .or_insert_with(|| BotSummaryResponse {
-                trader_name,
-                ..BotSummaryResponse::default()
-            });
-        summary.active = true;
-        summary.scored = scored && role == "competitor";
-        summary.role = Some(role);
-    }
-    Ok(active_run_id)
-}
-
-fn replace_active_runtime_summary_rows(
-    conn: &Connection,
-    summaries: &mut HashMap<String, BotSummaryResponse>,
-    run_id: &str,
-) -> rusqlite::Result<()> {
-    for summary in summaries.values_mut().filter(|summary| summary.active) {
-        summary.decision_count = 0;
-        summary.avg_edge = None;
-        summary.latest_timestamp = None;
-        summary.latest_market_id = None;
-        summary.latest_market_name = None;
-        summary.latest_fair_value = None;
-        summary.latest_market_price = None;
-        summary.latest_edge = None;
-        summary.latest_balance = None;
-        summary.portfolio_value = None;
-        summary.pnl = None;
-        summary.total_fills = None;
-        summary.total_orders = None;
-        summary.snapshot_timestamp = None;
-    }
-
-    let mut stmt = conn.prepare(
-        "SELECT trader_name, COUNT(*) AS decision_count, \
-                AVG(ABS(fair_value - market_price)) AS avg_edge \
-         FROM decisions WHERE run_id = ?1 GROUP BY trader_name",
-    )?;
-    let rows = stmt.query_map([run_id], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, i64>(1)?,
-            row.get::<_, Option<f64>>(2)?,
-        ))
-    })?;
-    for row in rows {
-        let (trader_name, decision_count, avg_edge) = row?;
-        let Some(summary) = summaries
-            .get_mut(&trader_name)
-            .filter(|summary| summary.active)
-        else {
-            continue;
-        };
-        summary.decision_count = decision_count;
-        summary.avg_edge = avg_edge;
-    }
-
-    let mut stmt = conn.prepare(
-        "SELECT d.trader_name, d.market_id, d.market_name, d.timestamp, \
-                d.fair_value, d.market_price, d.balance \
-         FROM decisions d \
-         JOIN (SELECT trader_name, MAX(id) AS id FROM decisions \
-               WHERE run_id = ?1 GROUP BY trader_name) latest \
-           ON d.trader_name = latest.trader_name AND d.id = latest.id",
-    )?;
-    let rows = stmt.query_map([run_id], |row| {
-        let fair_value: Option<f64> = row.get(4)?;
-        let market_price: Option<f64> = row.get(5)?;
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, Option<i64>>(1)?,
-            row.get::<_, Option<String>>(2)?,
-            row.get::<_, Option<String>>(3)?,
-            fair_value,
-            market_price,
-            row.get::<_, Option<f64>>(6)?,
-            edge(fair_value, market_price),
-        ))
-    })?;
-    for row in rows {
-        let (
-            trader_name,
-            market_id,
-            market_name,
-            timestamp,
-            fair_value,
-            market_price,
-            balance,
-            latest_edge,
-        ) = row?;
-        let Some(summary) = summaries
-            .get_mut(&trader_name)
-            .filter(|summary| summary.active)
-        else {
-            continue;
-        };
-        summary.latest_market_id = market_id;
-        summary.latest_market_name = market_name;
-        summary.latest_timestamp = timestamp;
-        summary.latest_fair_value = fair_value;
-        summary.latest_market_price = market_price;
-        summary.latest_balance = balance;
-        summary.latest_edge = latest_edge;
-    }
-
-    load_latest_snapshots(conn, summaries, Some(run_id));
-    Ok(())
-}
-
-fn load_latest_snapshots(
-    conn: &Connection,
-    summaries: &mut HashMap<String, BotSummaryResponse>,
-    run_id: Option<&str>,
-) {
-    if !table_exists(conn, "portfolio_snapshots") {
-        return;
-    }
-
-    let with_account = conn.prepare(
-        "SELECT p.trader_name, p.account_id, p.balance, p.portfolio_value, p.pnl, p.total_fills, p.total_orders, p.timestamp \
-         FROM portfolio_snapshots p \
-         JOIN (SELECT trader_name, MAX(id) AS id FROM portfolio_snapshots \
-               WHERE (?1 IS NULL OR run_id = ?1) GROUP BY trader_name) latest \
-           ON p.trader_name = latest.trader_name AND p.id = latest.id",
-    );
-
-    if let Ok(mut stmt) = with_account
-        && let Ok(rows) = stmt.query_map([run_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<i64>>(1)?,
-                row.get::<_, Option<f64>>(2)?,
-                row.get::<_, Option<f64>>(3)?,
-                row.get::<_, Option<f64>>(4)?,
-                row.get::<_, Option<i64>>(5)?,
-                row.get::<_, Option<i64>>(6)?,
-                row.get::<_, Option<String>>(7)?,
-            ))
-        })
-    {
-        for row in rows.flatten() {
-            apply_snapshot(summaries, row);
-        }
-        return;
-    }
-
-    let with_totals = conn.prepare(
-        "SELECT p.trader_name, p.balance, p.portfolio_value, p.pnl, p.total_fills, p.total_orders, p.timestamp \
-         FROM portfolio_snapshots p \
-         JOIN (SELECT trader_name, MAX(id) AS id FROM portfolio_snapshots \
-               WHERE (?1 IS NULL OR run_id = ?1) GROUP BY trader_name) latest \
-           ON p.trader_name = latest.trader_name AND p.id = latest.id",
-    );
-
-    if let Ok(mut stmt) = with_totals
-        && let Ok(rows) = stmt.query_map([run_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                None,
-                row.get::<_, Option<f64>>(1)?,
-                row.get::<_, Option<f64>>(2)?,
-                row.get::<_, Option<f64>>(3)?,
-                row.get::<_, Option<i64>>(4)?,
-                row.get::<_, Option<i64>>(5)?,
-                row.get::<_, Option<String>>(6)?,
-            ))
-        })
-    {
-        for row in rows.flatten() {
-            apply_snapshot(summaries, row);
-        }
-        return;
-    }
-
-    let Ok(mut stmt) = conn.prepare(
-        "SELECT p.trader_name, p.balance, p.portfolio_value, p.pnl, p.timestamp \
-         FROM portfolio_snapshots p \
-         JOIN (SELECT trader_name, MAX(id) AS id FROM portfolio_snapshots \
-               WHERE (?1 IS NULL OR run_id = ?1) GROUP BY trader_name) latest \
-           ON p.trader_name = latest.trader_name AND p.id = latest.id",
-    ) else {
-        return;
-    };
-    let Ok(rows) = stmt.query_map([run_id], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            None,
-            row.get::<_, Option<f64>>(1)?,
-            row.get::<_, Option<f64>>(2)?,
-            row.get::<_, Option<f64>>(3)?,
-            None,
-            None,
-            row.get::<_, Option<String>>(4)?,
-        ))
-    }) else {
-        return;
-    };
-    for row in rows.flatten() {
-        apply_snapshot(summaries, row);
-    }
-}
-
-fn apply_snapshot(summaries: &mut HashMap<String, BotSummaryResponse>, row: SnapshotRow) {
-    let (
-        trader_name,
-        account_id,
-        balance,
-        portfolio_value,
-        pnl,
-        total_fills,
-        total_orders,
-        timestamp,
-    ) = row;
-    let summary = summaries
-        .entry(trader_name.clone())
-        .or_insert_with(|| BotSummaryResponse {
-            trader_name,
-            ..BotSummaryResponse::default()
-        });
-    if summary.latest_balance.is_none() {
-        summary.latest_balance = balance;
-    }
-    summary.account_id = account_id;
-    summary.portfolio_value = portfolio_value;
-    summary.pnl = pnl;
-    summary.total_fills = total_fills;
-    summary.total_orders = total_orders;
-    summary.snapshot_timestamp = timestamp;
-}
-
-fn load_recent_decisions(
-    conn: &Connection,
-    limit: usize,
-    trader: Option<&str>,
-    market_id: Option<u32>,
-    since: Option<&str>,
-) -> rusqlite::Result<Vec<BotDecisionResponse>> {
-    let (where_clause, mut params) = decision_filters(trader, market_id, since);
-    let sql = format!(
-        "SELECT id, trader_name, market_id, market_name, timestamp, analysis, fair_value, market_price, \
-                orders, motivation, llm_duration_s, balance, yes_pos, no_pos, article_urls \
-         FROM decisions {where_clause} ORDER BY id DESC LIMIT ?"
-    );
-    params.push(SqlValue::Integer(limit as i64));
-
-    let mut stmt = conn.prepare(&sql)?;
-    let mapper = |row: &rusqlite::Row<'_>| {
-        let fair_value: Option<f64> = row.get(6)?;
-        let market_price: Option<f64> = row.get(7)?;
-        Ok(BotDecisionResponse {
-            id: row.get(0)?,
-            trader_name: row.get(1)?,
-            market_id: row.get(2)?,
-            market_name: row.get(3)?,
-            timestamp: row.get(4)?,
-            analysis: row.get(5)?,
-            motivation: row.get(9)?,
-            fair_value,
-            market_price,
-            edge: edge(fair_value, market_price),
-            orders: json_column(row.get(8)?),
-            article_urls: json_column(row.get(14)?),
-            llm_duration_s: row.get(10)?,
-            balance: row.get(11)?,
-            yes_pos: row.get(12)?,
-            no_pos: row.get(13)?,
-        })
-    };
-
-    let rows = stmt.query_map(params_from_iter(params), mapper)?;
-    rows.collect()
-}
-
-fn load_equity_points(
-    conn: &Connection,
-    limit: usize,
-    trader: Option<&str>,
-    since: Option<&str>,
-) -> rusqlite::Result<(Vec<BotEquityPointResponse>, usize, usize)> {
-    let (where_clause, params) = snapshot_filters(trader, since);
-    let count_sql = format!("SELECT COUNT(*) FROM portfolio_snapshots {where_clause}");
-    let source_rows: usize = conn
-        .query_row(&count_sql, params_from_iter(params.clone()), |row| {
-            row.get::<_, i64>(0)
-        })?
-        .max(0) as usize;
-    if source_rows == 0 {
-        return Ok((Vec::new(), 0, 1));
-    }
-
-    let stride = if source_rows > limit {
-        source_rows.div_ceil(limit)
-    } else {
-        1
-    };
-    let mut query_params = params;
-    query_params.push(SqlValue::Integer(stride as i64));
-    query_params.push(SqlValue::Integer(stride as i64));
-    query_params.push(SqlValue::Integer((limit + 1) as i64));
-
-    let sql = equity_sample_sql(&where_clause, true);
-    let rows = match query_equity_points(conn, &sql, query_params.clone()) {
-        Ok(rows) => rows,
-        Err(_) => {
-            let fallback_sql = equity_sample_sql(&where_clause, false);
-            query_equity_points(conn, &fallback_sql, query_params)?
-        }
-    };
-
-    Ok((trim_sampled_rows(rows, limit), source_rows, stride))
-}
-
-fn query_equity_points(
-    conn: &Connection,
-    sql: &str,
-    params: Vec<SqlValue>,
-) -> rusqlite::Result<Vec<BotEquityPointResponse>> {
-    let mut stmt = conn.prepare(sql)?;
-    let rows = stmt.query_map(params_from_iter(params), |row| {
-        Ok(BotEquityPointResponse {
-            id: row.get(0)?,
-            trader_name: row.get(1)?,
-            timestamp: row.get(2)?,
-            balance: row.get(3)?,
-            portfolio_value: row.get(4)?,
-            pnl: row.get(5)?,
-            total_fills: row.get(6)?,
-            total_orders: row.get(7)?,
-        })
-    })?;
-    rows.collect()
-}
-
-fn equity_sample_sql(where_clause: &str, include_totals: bool) -> String {
-    let totals = if include_totals {
-        "total_fills, total_orders"
-    } else {
-        "NULL AS total_fills, NULL AS total_orders"
-    };
-    format!(
-        "SELECT id, trader_name, timestamp, balance, portfolio_value, pnl, total_fills, total_orders \
-         FROM ( \
-           SELECT id, trader_name, timestamp, balance, portfolio_value, pnl, {totals}, \
-                  ROW_NUMBER() OVER (ORDER BY id ASC) AS rn, \
-                  COUNT(*) OVER () AS total_rows \
-           FROM portfolio_snapshots {where_clause} \
-         ) sampled \
-         WHERE ? <= 1 OR ((rn - 1) % ?) = 0 OR rn = total_rows \
-         ORDER BY id ASC \
-         LIMIT ?"
-    )
-}
-
-fn trim_sampled_rows(
-    mut rows: Vec<BotEquityPointResponse>,
-    limit: usize,
-) -> Vec<BotEquityPointResponse> {
-    if rows.len() <= limit {
-        return rows;
-    }
-    let latest = rows.pop().expect("rows is non-empty");
-    rows.truncate(limit.saturating_sub(1));
-    rows.push(latest);
-    rows
-}
-
-fn decision_filters(
-    trader: Option<&str>,
-    market_id: Option<u32>,
-    since: Option<&str>,
-) -> (String, Vec<SqlValue>) {
-    let mut clauses = Vec::new();
-    let mut params = Vec::new();
-    if let Some(trader) = trader {
-        clauses.push("trader_name = ?");
-        params.push(SqlValue::Text(trader.to_string()));
-    }
-    if let Some(market_id) = market_id {
-        clauses.push("market_id = ?");
-        params.push(SqlValue::Integer(i64::from(market_id)));
-    }
-    if let Some(since) = since {
-        clauses.push("timestamp >= ?");
-        params.push(SqlValue::Text(since.to_string()));
-    }
-    (where_clause(&clauses), params)
-}
-
-fn snapshot_filters(trader: Option<&str>, since: Option<&str>) -> (String, Vec<SqlValue>) {
-    let mut clauses = Vec::new();
-    let mut params = Vec::new();
-    if let Some(trader) = trader {
-        clauses.push("trader_name = ?");
-        params.push(SqlValue::Text(trader.to_string()));
-    }
-    if let Some(since) = since {
-        clauses.push("timestamp >= ?");
-        params.push(SqlValue::Text(since.to_string()));
-    }
-    (where_clause(&clauses), params)
-}
-
-fn where_clause(clauses: &[&str]) -> String {
-    if clauses.is_empty() {
-        String::new()
-    } else {
-        format!("WHERE {}", clauses.join(" AND "))
-    }
-}
-
-fn load_token_usage(conn: &Connection) -> rusqlite::Result<Vec<TokenUsageResponse>> {
-    if !table_exists(conn, "token_usage") {
-        return Ok(Vec::new());
-    }
-
-    let mut stmt = conn.prepare(
-        "SELECT trader_name, COUNT(*) AS calls, \
-                COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(completion_tokens), 0), \
-                AVG(duration_s), MAX(model) \
-         FROM token_usage GROUP BY trader_name ORDER BY calls DESC",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok(TokenUsageResponse {
-            trader_name: row.get(0)?,
-            calls: row.get(1)?,
-            prompt_tokens: row.get(2)?,
-            completion_tokens: row.get(3)?,
-            avg_latency_s: row.get(4)?,
-            latest_model: row.get(5)?,
-        })
-    })?;
-    rows.collect()
-}
-
-fn edge(fair_value: Option<f64>, market_price: Option<f64>) -> Option<f64> {
-    Some((fair_value? - market_price?).abs())
-}
-
-fn json_column(text: Option<String>) -> Value {
-    text.and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| Value::Array(Vec::new()))
 }
 
 fn clean_query_text(value: Option<String>) -> Option<String> {
@@ -993,234 +291,37 @@ fn bot_equity_query_limit(limit: Option<usize>) -> usize {
 mod tests {
     use super::*;
 
-    fn decisions_table(conn: &Connection) {
-        conn.execute_batch(
-            "CREATE TABLE decisions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                run_id TEXT,
-                trader_name TEXT,
-                market_id INTEGER,
-                market_name TEXT,
-                timestamp TEXT,
-                article_urls TEXT,
-                analysis TEXT,
-                fair_value REAL,
-                market_price REAL,
-                orders TEXT,
-                motivation TEXT,
-                raw_llm_response TEXT,
-                llm_duration_s REAL,
-                balance REAL,
-                yes_pos REAL,
-                no_pos REAL
-            );",
-        )
-        .expect("create decisions table");
-    }
-
-    fn snapshots_table(conn: &Connection) {
-        conn.execute_batch(
-            "CREATE TABLE portfolio_snapshots (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                run_id TEXT,
-                trader_name TEXT,
-                account_id INTEGER,
-                timestamp TEXT,
-                balance REAL,
-                portfolio_value REAL,
-                pnl REAL,
-                positions TEXT,
-                total_fills INTEGER DEFAULT 0,
-                total_orders INTEGER DEFAULT 0
-            );",
-        )
-        .expect("create snapshots table");
-    }
-
-    fn arena_runtime_tables(conn: &Connection) {
-        conn.execute_batch(
-            "CREATE TABLE arena_runs (
-                run_id TEXT PRIMARY KEY,
-                started_at_utc TEXT NOT NULL,
-                heartbeat_at_utc TEXT NOT NULL,
-                stopped_at_utc TEXT
-            );
-            CREATE TABLE arena_run_participants (
-                run_id TEXT NOT NULL,
-                trader_name TEXT NOT NULL,
-                role TEXT NOT NULL,
-                scored INTEGER NOT NULL,
-                PRIMARY KEY (run_id, trader_name)
-            );",
-        )
-        .expect("create Arena runtime tables");
+    #[test]
+    fn limits_default_and_clamp_at_public_boundary() {
+        assert_eq!(bot_decision_query_limit(None), 50);
+        assert_eq!(bot_decision_query_limit(Some(0)), 1);
+        assert_eq!(bot_decision_query_limit(Some(501)), 500);
+        assert_eq!(bot_equity_query_limit(None), 200);
+        assert_eq!(bot_equity_query_limit(Some(0)), 1);
+        assert_eq!(bot_equity_query_limit(Some(1_001)), 1_000);
     }
 
     #[test]
-    fn bot_decision_query_limit_defaults_and_clamps() {
-        assert_eq!(bot_decision_query_limit(None), DEFAULT_BOT_DECISION_LIMIT);
-        assert_eq!(bot_decision_query_limit(Some(0)), 1);
-        assert_eq!(bot_decision_query_limit(Some(42)), 42);
+    fn empty_filters_are_not_forwarded() {
+        assert_eq!(clean_query_text(None), None);
+        assert_eq!(clean_query_text(Some("  ".to_string())), None);
         assert_eq!(
-            bot_decision_query_limit(Some(MAX_BOT_DECISION_LIMIT + 1)),
-            MAX_BOT_DECISION_LIMIT
+            clean_query_text(Some(" alice ".to_string())).as_deref(),
+            Some("alice")
         );
     }
 
     #[test]
-    fn load_recent_decisions_filters_trader_market_and_since() {
-        let conn = Connection::open_in_memory().expect("sqlite");
-        decisions_table(&conn);
-        for (trader, market_id, timestamp, fair_value) in [
-            ("alice", 7, "2026-07-01T00:00:00+00:00", 0.41),
-            ("alice", 7, "2026-07-02T00:00:00+00:00", 0.42),
-            ("alice", 8, "2026-07-03T00:00:00+00:00", 0.81),
-            ("bob", 7, "2026-07-04T00:00:00+00:00", 0.50),
-        ] {
-            conn.execute(
-                "INSERT INTO decisions (
-                    trader_name, market_id, market_name, timestamp, article_urls,
-                    analysis, fair_value, market_price, orders, motivation,
-                    raw_llm_response, llm_duration_s, balance, yes_pos, no_pos
-                ) VALUES (?1, ?2, 'Market', ?3, '[]', 'analysis', ?4, 0.40, '[]', 'why', '{}', 1.0, 99.0, 5.0, 3.0)",
-                rusqlite::params![trader, market_id, timestamp, fair_value],
-            )
-            .expect("insert decision");
-        }
-
-        let rows = load_recent_decisions(
-            &conn,
-            10,
-            Some("alice"),
-            Some(7),
-            Some("2026-07-02T00:00:00+00:00"),
-        )
-        .expect("load decisions");
-
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].trader_name, "alice");
-        assert_eq!(rows[0].market_id, Some(7));
-        assert_eq!(rows[0].fair_value, Some(0.42));
-        assert_eq!(rows[0].yes_pos, Some(5.0));
-        assert_eq!(rows[0].no_pos, Some(3.0));
-    }
-
-    #[test]
-    fn summaries_mark_only_the_live_runtime_and_preserve_diagnostic_roles() {
-        let conn = Connection::open_in_memory().expect("sqlite");
-        decisions_table(&conn);
-        snapshots_table(&conn);
-        arena_runtime_tables(&conn);
-        for (run_id, trader, fair_value, market_price) in [
-            (Some("old"), "alice", 0.1, 0.9),
-            (None, "old-experiment", 0.2, 0.8),
-            (Some("live"), "alice", 0.6, 0.5),
-        ] {
-            conn.execute(
-                "INSERT INTO decisions (
-                    run_id, trader_name, timestamp, fair_value, market_price
-                ) VALUES (?1, ?2, '2026-07-15T00:00:00+00:00', ?3, ?4)",
-                rusqlite::params![run_id, trader, fair_value, market_price],
-            )
-            .expect("insert decision");
-        }
-        for (run_id, trader, portfolio_value, pnl) in [
-            (Some("old"), "alice", 500.0, 400.0),
-            (None, "old-experiment", 92.0, -8.0),
-            (Some("live"), "alice", 104.0, 4.0),
-            (Some("live"), "Fast-0", 102.0, 2.0),
-            (Some("old"), "no-baseline", 900.0, 800.0),
-        ] {
-            conn.execute(
-                "INSERT INTO portfolio_snapshots (
-                    run_id, trader_name, account_id, timestamp, balance, portfolio_value, pnl,
-                    positions, total_fills, total_orders
-                ) VALUES (?1, ?2, 7, '2026-07-15T00:00:00+00:00', 100.0, ?3, ?4, '{}', 1, 2)",
-                rusqlite::params![run_id, trader, portfolio_value, pnl],
-            )
-            .expect("insert snapshot");
-        }
-        conn.execute(
-            "INSERT INTO arena_runs (run_id, started_at_utc, heartbeat_at_utc)
-             VALUES ('live', datetime('now'), datetime('now'))",
-            [],
-        )
-        .expect("insert live runtime");
-        for (trader, role, scored) in [
-            ("alice", "competitor", 1),
-            ("no-baseline", "competitor", 1),
-            // Defensive read boundary: an invalid migrated/corrupt role/score
-            // pair must not enter public competition totals.
-            ("Fast-0", "load", 1),
-        ] {
-            conn.execute(
-                "INSERT INTO arena_run_participants (run_id, trader_name, role, scored)
-                 VALUES ('live', ?1, ?2, ?3)",
-                rusqlite::params![trader, role, scored],
-            )
-            .expect("insert runtime participant");
-        }
-
-        let rows = load_summaries(&conn).expect("load summaries");
-        let alice = rows.iter().find(|row| row.trader_name == "alice").unwrap();
-        assert!(alice.active);
-        assert!(alice.scored);
-        assert_eq!(alice.role.as_deref(), Some("competitor"));
-        assert_eq!(alice.decision_count, 1);
-        assert!((alice.avg_edge.unwrap() - 0.1).abs() < 1e-12);
-        assert_eq!(alice.portfolio_value, Some(104.0));
-        assert_eq!(alice.pnl, Some(4.0));
-        assert_eq!(alice.account_id, Some(7));
-        let no_baseline = rows
-            .iter()
-            .find(|row| row.trader_name == "no-baseline")
-            .unwrap();
-        assert!(no_baseline.active);
-        assert!(no_baseline.scored);
-        assert_eq!(no_baseline.portfolio_value, None);
-        assert_eq!(no_baseline.pnl, None);
-        let fast = rows.iter().find(|row| row.trader_name == "Fast-0").unwrap();
-        assert!(fast.active);
-        assert!(!fast.scored);
-        assert_eq!(fast.role.as_deref(), Some("load"));
-        let old = rows
-            .iter()
-            .find(|row| row.trader_name == "old-experiment")
-            .unwrap();
-        assert!(!old.active);
-        assert!(!old.scored);
-        assert_eq!(old.role, None);
-    }
-
-    #[test]
-    fn load_equity_points_downsamples_and_keeps_latest() {
-        let conn = Connection::open_in_memory().expect("sqlite");
-        snapshots_table(&conn);
-        for idx in 0..5 {
-            conn.execute(
-                "INSERT INTO portfolio_snapshots (
-                    trader_name, timestamp, balance, portfolio_value, pnl,
-                    positions, total_fills, total_orders
-                ) VALUES ('alice', ?1, 100.0, ?2, ?3, '{}', ?4, ?5)",
-                rusqlite::params![
-                    format!("2026-07-0{}T00:00:00+00:00", idx + 1),
-                    100.0 + f64::from(idx),
-                    f64::from(idx),
-                    idx,
-                    idx + 10,
-                ],
-            )
-            .expect("insert snapshot");
-        }
-
-        let (rows, source_rows, stride) =
-            load_equity_points(&conn, 2, Some("alice"), None).expect("load equity");
-
-        assert_eq!(source_rows, 5);
-        assert_eq!(stride, 3);
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].portfolio_value, Some(100.0));
-        assert_eq!(rows[1].portfolio_value, Some(104.0));
-        assert_eq!(rows[1].total_orders, Some(14));
+    fn unavailable_equity_preserves_effective_query() {
+        let query = ArenaEquityQuery {
+            trader: Some("alice".to_string()),
+            since: Some("2026-07-01".to_string()),
+            limit: 42,
+        };
+        let response = unavailable_equity(&query, "offline");
+        assert!(!response.db_available);
+        assert_eq!(response.trader.as_deref(), Some("alice"));
+        assert_eq!(response.limit, 42);
+        assert_eq!(response.stride, 1);
     }
 }

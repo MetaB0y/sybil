@@ -1,6 +1,7 @@
 """Tests for the arena Prometheus metrics subsystem (SYB-211)."""
 
 import asyncio
+import sqlite3
 
 from live.metrics import ArenaMetrics
 from live.news_feed import NewsFeed
@@ -47,6 +48,26 @@ def test_two_instances_do_not_collide():
     a.set_market_selection(5, 2)
     assert _value(a, "sybil_arena_selected_markets") == 5
     assert _value(b, "sybil_arena_selected_markets") == 0
+
+
+def test_arena_owns_latest_portfolio_metrics(tmp_path):
+    db_path = tmp_path / "arena.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "CREATE TABLE portfolio_snapshots ("
+            "id INTEGER PRIMARY KEY, trader_name TEXT, total_fills INTEGER, total_orders INTEGER)"
+        )
+        conn.executemany(
+            "INSERT INTO portfolio_snapshots VALUES (?, 'alice', ?, ?)",
+            [(1, 2, 3), (2, 5, 8)],
+        )
+
+    metrics = ArenaMetrics(db_path=str(db_path))
+
+    assert _value(metrics, "sybil_bot_db_available") == 1
+    assert _value(metrics, "sybil_bot_traders_total") == 1
+    assert _value(metrics, "sybil_bot_total_fills", {"trader": "alice"}) == 5
+    assert _value(metrics, "sybil_bot_total_orders", {"trader": "alice"}) == 8
 
 
 def test_set_market_selection_sets_gauges():

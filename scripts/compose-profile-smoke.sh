@@ -8,6 +8,7 @@ cd "$(dirname "$0")/.."
 export OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}"
 export SYBIL_SERVICE_TOKEN="${SYBIL_SERVICE_TOKEN:-compose-smoke-service-token}"
 export SYBIL_HISTORY_TOKEN="${SYBIL_HISTORY_TOKEN:-compose-smoke-history-token}"
+export SYBIL_ARENA_READ_TOKEN="${SYBIL_ARENA_READ_TOKEN:-compose-smoke-arena-token}"
 export SYBIL_WEBAUTHN_RP_ID="${SYBIL_WEBAUTHN_RP_ID:-app.example.test}"
 export SYBIL_WEBAUTHN_ORIGIN="${SYBIL_WEBAUTHN_ORIGIN:-https://app.example.test}"
 export GF_SECURITY_ADMIN_PASSWORD="${GF_SECURITY_ADMIN_PASSWORD:-compose-smoke-grafana-password}"
@@ -165,9 +166,23 @@ for compose_file in docker-compose.yml docker-compose.prod.yml; do
     grep -Fq -- '"--metrics-port=9101"' "$compose_file" \
         || fail "$compose_file does not enable the arena metrics exporter"
 done
+grep -Fq 'ARENA_READ_API_PORT: "9103"' docker-compose.yml \
+    || fail "base Compose does not enable the private Arena read API"
+grep -Fq 'SYBIL_ARENA_READ_URL: "http://sybil-arena:9103"' docker-compose.yml \
+    || fail "sybil-api is not wired to the typed Arena read boundary"
+api_service_block=$(
+    awk '
+        /^  sybil-api:/ { in_service = 1; next }
+        in_service && /^  [[:alnum:]_-]+:/ { exit }
+        in_service { print }
+    ' docker-compose.yml
+)
+if grep -Fq 'arena-data:' <<<"$api_service_block"; then
+    fail "sybil-api still mounts Python-owned Arena storage"
+fi
 grep -Fq 'targets: ["sybil-arena:9101"]' deploy/prometheus.yml \
     || fail "VictoriaMetrics does not scrape the arena metrics exporter"
-pass "arena metrics are enabled and scraped in dev/prod compose"
+pass "Arena owns its authenticated read boundary, storage, and scraped metrics"
 
 prod_arena_service_block=$(
     awk '

@@ -11,7 +11,6 @@ services:
   sybil-api:
     volumes:
       - sybil-data:/data
-      - arena-data:/arena-data
     environment:
       # Selects the prod durability posture and arms the startup preflight
       # guardrail (SYB-133): sybil-api refuses to boot if any dev-only knob is
@@ -39,7 +38,8 @@ services:
       # Public devnet runs persistent by default. To intentionally reset,
       # stop sybil-api and remove or replace the sybil-data volume.
       SYBIL_DATA_DIR: "/data"
-      SYBIL_ARENA_DB_PATH: "/arena-data/decisions.db"
+      SYBIL_ARENA_READ_URL: "http://sybil-arena:9103"
+      SYBIL_ARENA_READ_TOKEN: "${SYBIL_ARENA_READ_TOKEN:?Set SYBIL_ARENA_READ_TOKEN in /opt/sybil/.env}"
       SYBIL_HISTORY_URL: "http://sybil-history:3003"
       SYBIL_HISTORY_TOKEN: "${SYBIL_HISTORY_TOKEN:?Set SYBIL_HISTORY_TOKEN in /opt/sybil/.env}"
       # Off-block Polymarket mirror metadata (event id/title, images, end
@@ -110,6 +110,7 @@ services:
       - ./arena.env
     environment:
       SYBIL_SERVICE_TOKEN: "${SYBIL_SERVICE_TOKEN:?Set SYBIL_SERVICE_TOKEN in /opt/sybil/.env}"
+      ARENA_READ_API_TOKEN: "${SYBIL_ARENA_READ_TOKEN:?Set SYBIL_ARENA_READ_TOKEN in /opt/sybil/.env}"
     command:
       - "--sybil-url=http://sybil-api:3000"
       - "--model=deepseek/deepseek-v4-flash"

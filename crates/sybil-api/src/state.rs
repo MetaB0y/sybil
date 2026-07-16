@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex as AsyncMutex, RwLock, Semaphore};
 use tokio_util::sync::CancellationToken;
 
+use crate::arena::ArenaReadClient;
 use crate::config::ApiConfig;
 use crate::history::HistoryClient;
 use crate::webauthn::WebAuthnVerifierConfig;
@@ -248,6 +249,8 @@ pub struct AppState {
     /// Private remote history projection. Historical endpoints fail explicitly
     /// when absent; they never fall back to scanning the sequencer actor.
     pub history: Option<HistoryClient>,
+    /// Typed private boundary to Python-owned Arena analytics.
+    pub arena: Option<ArenaReadClient>,
     /// API-owned immutable authorization view. `None` means it has not yet
     /// been initialized; the first read performs one snapshot RPC. Normal
     /// history reads never enter the sequencer mailbox.
@@ -286,8 +289,6 @@ pub struct AppState {
     /// `None` disables the raw-event endpoints. Ensured to exist (never wiped)
     /// on startup in `main` (SYB-153) so snapshots persist across restart.
     pub event_snapshot_dir: Option<PathBuf>,
-    /// Path to arena's live decision database, when configured.
-    pub arena_db_path: String,
     /// Cheap pre-handler limiter for order endpoints. Sequencer admission has
     /// authoritative account/global limits; this bounds parsing/signature work.
     pub http_order_limiter: Arc<HttpRateLimiter>,
@@ -376,6 +377,13 @@ impl AppState {
                     None
                 }
             },
+            arena: match ArenaReadClient::from_config(config) {
+                Ok(client) => client,
+                Err(error) => {
+                    tracing::warn!(%error, "Arena read client disabled");
+                    None
+                }
+            },
             read_api_key_owners: Arc::new(RwLock::new(None)),
             leaderboard_bases: Arc::new(RwLock::new(None)),
             read_model_init_lock: Arc::new(AsyncMutex::new(())),
@@ -390,7 +398,6 @@ impl AppState {
             market_ref_data: Arc::new(RwLock::new(initial_ref_data)),
             market_ref_data_path,
             event_snapshot_dir,
-            arena_db_path: config.arena_db_path.clone(),
             http_order_limiter: Arc::new(HttpRateLimiter::new(
                 config.http_order_global_rps,
                 config.http_order_global_burst,

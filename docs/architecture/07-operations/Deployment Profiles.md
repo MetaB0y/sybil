@@ -59,6 +59,8 @@ reflects base `docker-compose.yml`; "prod" reflects base + `docker-compose.prod.
 | `SYBIL_SERVICE_TOKEN` | unset | unset | **set** (required) | **yes — blocks** |
 | `SYBIL_HISTORY_URL` | compose service | compose service | `http://sybil-history:3003` | **yes — blocks** |
 | `SYBIL_HISTORY_TOKEN` | Compose dev secret | Compose dev secret | **set, dedicated** | **yes — blocks** |
+| `SYBIL_ARENA_READ_URL` | compose service | compose service | `http://sybil-arena:9103` | **yes — blocks** |
+| `SYBIL_ARENA_READ_TOKEN` | Compose dev secret | Compose dev secret | **set, dedicated** | **yes — blocks** |
 | `SYBIL_CORS_ORIGINS` | permissive (dev) | permissive (dev) | explicit allowlist | no |
 | `SYBIL_HTTP_TRUSTED_PROXY_CIDRS` | empty (peer IP only) | empty (peer IP only) | exact audited Caddy-facing CIDR or empty | no |
 | `SYBIL_ALLOW_DEV_KNOBS` | n/a | n/a | `false` | override only |
@@ -71,7 +73,6 @@ reflects base `docker-compose.yml`; "prod" reflects base + `docker-compose.prod.
 | `SYBIL_MARKET_REF_DATA_PATH` | unset (volatile) | unset (volatile) | `/data/market_ref_data.json` | no (degraded) |
 | `SYBIL_ADMIN_FEED_KEY_PATH` | unset (ephemeral) | unset (ephemeral) | `/data/admin-feed.key` | **yes — blocks** |
 | `SYBIL_EVENT_SNAPSHOT_DIR` | unset | `/data/event_snapshots` | `/data/event_snapshots` | no |
-| `SYBIL_ARENA_DB_PATH` | unset | `/arena-data/decisions.db` | `/arena-data/decisions.db` | no |
 | `SYBIL_HISTORY_DATA_DIR` | `/history-data` in Compose | `/history-data` | `/history-data` | enforced by history process |
 | `SYBIL_HISTORY_MAX_QUERY_CONCURRENCY` | `16` | `16` | `16` | no |
 
@@ -282,6 +283,16 @@ actually emits the outbox. A direct in-memory `cargo run` still trades but
 cannot deliver committed history. Production preflight therefore requires both canonical persistence
 and the history connection/credential. A history outage returns explicit 503s
 from historical endpoints while trading continues and outbox rows accumulate.
+
+## Arena analytics ownership
+
+The Arena worker exclusively owns `/data/decisions.db`, its schema, and all
+queries over it. It serves a small bearer-authenticated read API on private port
+9103 and publishes the derived `sybil_bot_*` metrics from its existing port
+9101 exporter. `sybil-api` preserves the public `/v1/bots/*` contracts by
+proxying typed JSON; it does not mount `arena-data`, link SQLite, or understand
+Python tables. If the optional `integrations` profile is absent, bot analytics
+degrade to an explicit unavailable document while trading remains healthy.
 
 The initial history redb retains raw batches, fills, events, equity, prices,
 and candles without the former 30/31-day and global-row ceilings. This removes

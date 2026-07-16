@@ -32,6 +32,7 @@ from .metrics import ArenaMetrics, start_metrics_server
 from .news_feed import NewsFeed, PairedNewsBatchBarrier
 from .outcomes import DEFAULT_OUTCOME_RECORD_INTERVAL_S, record_outcomes_loop
 from .personas import PERSONAS
+from .read_api import start_read_server
 from .strategy import FairValueFreshnessConfig, FlatStrategy, KellyStrategy
 from .synthetic import (
     CrossingNoiseTrader,
@@ -92,6 +93,9 @@ class LiveConfig:
     db_path: str = ""
     metrics_host: str = "0.0.0.0"
     metrics_port: int = 0  # <=0 disables the exporter (default: off)
+    read_api_host: str = "0.0.0.0"
+    read_api_port: int = 0  # <=0 disables the private Arena read service
+    read_api_token: str = ""
     personas: list[str] = field(default_factory=lambda: list(PERSONAS.keys()))
     market_ids: list[int] | None = None  # Manual market selection (overrides auto)
     # Opt-in concurrent Stage 1 A/B. Supplying an id enables the experiment;
@@ -938,11 +942,20 @@ async def run_live(config: LiveConfig):
     db = DecisionDB(db_path)
     log.info("Decision DB: %s", db_path)
 
-    # Arena-owned metrics exporter (off by default; sybil-api owns sybil_bot_*).
-    metrics = ArenaMetrics()
+    # Arena owns both its metrics and its typed read boundary over the private
+    # SQLite store. Other services never mount or query this database directly.
+    metrics = ArenaMetrics(db_path=db_path)
     metrics_server = start_metrics_server(metrics, config.metrics_port, config.metrics_host)
     if metrics_server is not None:
         log.info("Arena metrics listening on %s:%d", config.metrics_host, config.metrics_port)
+    read_server = start_read_server(
+        db_path,
+        config.read_api_host,
+        config.read_api_port,
+        config.read_api_token,
+    )
+    if read_server is not None:
+        log.info("Arena read API listening on %s:%d", config.read_api_host, config.read_api_port)
 
     async with SybilClient(config.sybil_url) as client:
         # 1. Discover markets. When reference prices are required, arena may
@@ -1583,6 +1596,9 @@ def main():
         db_path=args.db_path,
         metrics_host=args.metrics_host,
         metrics_port=args.metrics_port,
+        read_api_host=os.environ.get("ARENA_READ_API_HOST", "0.0.0.0"),
+        read_api_port=_env_int("ARENA_READ_API_PORT", 0),
+        read_api_token=os.environ.get("ARENA_READ_API_TOKEN", ""),
         personas=args.personas,
         market_ids=market_ids,
         stage1_ab_experiment_id=stage1_ab_experiment_id,

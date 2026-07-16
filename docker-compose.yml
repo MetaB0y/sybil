@@ -22,7 +22,8 @@ services:
       # The mirror rejects a token after 30s without a tick; the API adds an
       # independent 60s per-market fail-closed ceiling if the publisher dies.
       SYBIL_REFERENCE_PRICE_TTL_MS: "${SYBIL_REFERENCE_PRICE_TTL_MS:-60000}"
-      SYBIL_ARENA_DB_PATH: "/arena-data/decisions.db"
+      SYBIL_ARENA_READ_URL: "http://sybil-arena:9103"
+      SYBIL_ARENA_READ_TOKEN: "${SYBIL_ARENA_READ_TOKEN:-sybil-arena-dev-only}"
       SYBIL_HISTORY_URL: "http://sybil-history:3003"
       SYBIL_HISTORY_TOKEN: "${SYBIL_HISTORY_TOKEN:-sybil-history-dev-only}"
       SYBIL_DATA_DIR: "/data"
@@ -55,7 +56,6 @@ services:
       RUST_LOG: "warn,sybil_api=info,matching_sequencer=info,sybil_prover=info,commonware_storage=error,tower_http=warn"
     volumes:
       - sybil-data:/data
-      - arena-data:/arena-data
     restart: unless-stopped
     stop_grace_period: 10s
     logging: *default-logging
@@ -227,6 +227,8 @@ services:
       - "--metrics-port=9101"
     environment:
       PYTHONUNBUFFERED: "1"
+      ARENA_READ_API_PORT: "9103"
+      ARENA_READ_API_TOKEN: "${SYBIL_ARENA_READ_TOKEN:-sybil-arena-dev-only}"
     volumes:
       - arena-data:/data
     depends_on:

@@ -194,6 +194,22 @@ pub fn collect_deviations(config: &ApiConfig) -> Vec<Deviation> {
             dev_only: true,
         });
     }
+    if !is_set(&config.arena_read_url) {
+        out.push(Deviation {
+            knob: "SYBIL_ARENA_READ_URL",
+            value: "<unset> (bot analytics disabled)".to_string(),
+            prod_intended: "<set>",
+            dev_only: true,
+        });
+    }
+    if !is_set(&config.arena_read_token) {
+        out.push(Deviation {
+            knob: "SYBIL_ARENA_READ_TOKEN",
+            value: "<unset> (private Arena boundary unauthenticated)".to_string(),
+            prod_intended: "<set>",
+            dev_only: true,
+        });
+    }
     if config.recent_block_cache_capacity != 100 {
         out.push(Deviation {
             knob: "SYBIL_RECENT_BLOCK_CACHE_CAPACITY",
@@ -328,6 +344,8 @@ mod tests {
             service_token: "tok".to_string(),
             history_url: "http://sybil-history:3003".to_string(),
             history_token: "history-tok".to_string(),
+            arena_read_url: "http://sybil-arena:9103".to_string(),
+            arena_read_token: "arena-tok".to_string(),
             data_dir: "/data".to_string(),
             market_ref_data_path: "/data/ref.json".to_string(),
             admin_feed_key_path: "/data/admin.key".to_string(),
