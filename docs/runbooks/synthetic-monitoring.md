@@ -107,8 +107,12 @@ target disappears. Semantic alert ownership and incident response are in the
 
 ## Install the five-minute timer
 
-`just deploy-sync` copies the probe and shared helper into `/opt/sybil/scripts`
-and copies the units under `/opt/sybil/deploy/systemd`. Then the operator runs:
+`just deploy-monitoring` and `just deploy-all` copy the probe and shared helper,
+install the checked-in units, reload systemd, and idempotently enable/start the
+timer. To converge only this unit without recreating monitoring containers, run
+`just deploy-install-synthetic-probe`.
+
+The equivalent manual installation is:
 
 ```bash
 cd /opt/sybil

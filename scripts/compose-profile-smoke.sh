@@ -499,6 +499,27 @@ grep -Fq 'crates/sybil-native/native_markets.json' <<<"$deploy_sync_recipe" \
     || fail "deploy-sync does not transfer native provisioning input"
 pass "deploy-sync preserves separate Polymarket and native catalog ownership"
 
+deploy_probe_recipe=$(
+    awk '
+        /^deploy-install-synthetic-probe:/ { in_recipe = 1; next }
+        in_recipe && /^[[:alnum:]_-]+[^:]*:/ { exit }
+        in_recipe { print }
+    ' justfile
+)
+for expected in \
+    'sybil-synthetic-probe.service' \
+    'sybil-synthetic-probe.timer' \
+    'systemctl daemon-reload' \
+    'systemctl enable --now sybil-synthetic-probe.timer'; do
+    grep -Fq "$expected" <<<"$deploy_probe_recipe" \
+        || fail "scheduled probe deployment is missing $expected"
+done
+grep -Eq '^deploy-monitoring:.*deploy-install-synthetic-probe' justfile \
+    || fail "monitoring deploy does not converge the scheduled probe"
+grep -Eq '^deploy-all:.*deploy-install-synthetic-probe' justfile \
+    || fail "all-stack deploy does not converge the scheduled probe"
+pass "monitoring deploys converge checked-in scripts and systemd units"
+
 deploy_verify_recipe=$(
     awk '
         /^deploy-verify:/ { in_recipe = 1; next }
