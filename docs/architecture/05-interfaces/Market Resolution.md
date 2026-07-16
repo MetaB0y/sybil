@@ -24,7 +24,7 @@ flowchart LR
     PAY --> WIT["Witness + state root"]
 ```
 
-The external signer may fetch arbitrary networks or use human/LLM review. None of that logic enters validity. The core sees only the signed result and the installed feed/template policy.
+The external signer may fetch arbitrary networks or use human review. None of that logic enters validity. The core sees only the signed result and the installed feed/template policy. Native markets currently use explicit operator resolution; the former dormant LLM resolver was removed rather than carrying an unexercised policy surface in production packages.
 
 In the production Compose profile, the admin feed's signing scalar is generated
 once at `/data/admin-feed.key` inside the persistent `sybil-data` volume and
@@ -42,7 +42,7 @@ stateDiagram-v2
     Resolved --> [*]
 ```
 
-`Proposed`, `Challenged`, and `Voided` remain reserved type variants; the core policy does not enter them. The Polymarket auto-resolver may hold a signed proposal in its own durable review/challenge queue before submitting it, but final settlement still uses the immediate attestation path.
+`Proposed`, `Challenged`, and `Voided` remain reserved type variants; the core policy does not enter them.
 
 ## Payout and groups
 
@@ -66,7 +66,7 @@ stateDiagram-v2
 > `crates/sybil-oracle/src/attestation.rs` — signed resolution payload  
 > `crates/matching-sequencer/src/market_lifecycle.rs` — templates, feeds, status  
 > `crates/matching-sequencer/src/settlement.rs` — payout and group update  
-> `crates/sybil-polymarket/src/autoresolve.rs` — optional resolver-side LLM/review workflow
+> `crates/sybil-polymarket/src/resolution.rs` — source-bound Polymarket resolution workflow
 
 ## See also
 

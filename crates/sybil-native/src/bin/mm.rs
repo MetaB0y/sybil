@@ -1,0 +1,185 @@
+use std::path::{Path, PathBuf};
+
+use clap::Parser;
+use serde::{Deserialize, Serialize};
+use sybil_api_types::NANOS_PER_DOLLAR;
+use sybil_client::SybilClient;
+use sybil_market_maker::{MmActor, MmConfig, MmMessage, PriceSnapshot, QuoteRange};
+use sybil_native::{Error, NativeDeployment};
+use tokio::sync::{mpsc, watch};
+use tokio_util::sync::CancellationToken;
+
+#[derive(Debug, Parser)]
+#[command(
+    name = "sybil-native-mm",
+    about = "Provide static-anchor flash liquidity to provisioned native markets"
+)]
+struct Config {
+    #[arg(long, default_value = "http://localhost:3000", env = "SYBIL_URL")]
+    sybil_url: String,
+    #[arg(long, env = "NATIVE_DEPLOYMENT_PATH")]
+    deployment_path: PathBuf,
+    #[arg(long, env = "NATIVE_MM_STATE_PATH")]
+    state_path: PathBuf,
+    #[arg(
+        long,
+        default_value = "1000000",
+        env = "NATIVE_MM_INITIAL_BALANCE_DOLLARS"
+    )]
+    initial_balance_dollars: f64,
+    #[arg(long, default_value = "0.02", env = "NATIVE_MM_HALF_SPREAD")]
+    half_spread: f64,
+    #[arg(long, default_value = "5000", env = "NATIVE_MM_BUDGET_DOLLARS")]
+    budget_dollars: f64,
+    #[arg(long, default_value = "100", env = "NATIVE_MM_QUOTE_SIZE_DOLLARS")]
+    quote_size_dollars: f64,
+    #[arg(long, default_value = "0.05", env = "NATIVE_MM_GAMMA")]
+    gamma: f64,
+    #[arg(long, default_value = "5000", env = "NATIVE_MM_MAX_POSITION")]
+    max_position: u64,
+    #[arg(long, default_value = "512", env = "NATIVE_MM_MAX_ORDERS_PER_BLOCK")]
+    max_orders_per_block: usize,
+    #[arg(long, default_value = "50000", env = "NATIVE_MM_MAX_EXPOSURE_DOLLARS")]
+    max_exposure_dollars: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct MmState {
+    genesis_hash: String,
+    account_id: u64,
+}
+
+impl Config {
+    fn mm_config(&self) -> MmConfig {
+        MmConfig {
+            mm_half_spread: self.half_spread,
+            mm_budget_dollars: self.budget_dollars,
+            mm_quote_size_dollars: self.quote_size_dollars,
+            mm_gamma: self.gamma,
+            mm_max_position: self.max_position,
+            mm_max_orders_per_block: self.max_orders_per_block,
+            mm_max_exposure_dollars: self.max_exposure_dollars,
+            ..MmConfig::default()
+        }
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("failed to install rustls crypto provider");
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "sybil_native=info,sybil_market_maker=info".into()),
+        )
+        .init();
+    let config = Config::parse();
+    let deployment = NativeDeployment::load(&config.deployment_path)?;
+    let token = std::env::var("SYBIL_SERVICE_TOKEN")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    let http = reqwest::Client::new();
+    let client = SybilClient::new(http, config.sybil_url.clone(), token);
+    let health = client.health().await?;
+    if health
+        .genesis_hash
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+        != deployment.genesis_hash
+    {
+        return Err(Error::Deployment(
+            "native deployment belongs to a different genesis; rerun sybil-native-admin"
+                .to_string(),
+        )
+        .into());
+    }
+
+    let account_id = resolve_account(&client, &config, &deployment).await?;
+    let channel_size = deployment.markets.len().max(1);
+    let (mm_tx, mm_rx) = mpsc::channel(channel_size);
+    for market in &deployment.markets {
+        mm_tx
+            .send(MmMessage::MarketNative {
+                sybil_market_id: market.market_id,
+                native_market_key: market.market_key.clone(),
+                quote_range: QuoteRange {
+                    min: market.quote_range.min,
+                    max: market.quote_range.max,
+                    initial: market.quote_range.initial,
+                },
+                group_key: market.group_key.clone(),
+                group_size: market.group_size,
+            })
+            .await
+            .map_err(|error| Error::Deployment(error.to_string()))?;
+    }
+    let (_price_tx, price_rx) = watch::channel(PriceSnapshot::default());
+    let (live_tx, _live_rx) = watch::channel(0usize);
+    let actor = MmActor::new(
+        config.mm_config(),
+        client,
+        account_id,
+        price_rx,
+        mm_rx,
+        live_tx,
+    );
+    let cancel = CancellationToken::new();
+    let actor_cancel = cancel.clone();
+    let mut actor_handle = tokio::spawn(async move { actor.run(actor_cancel).await });
+    tokio::select! {
+        result = tokio::signal::ctrl_c() => result?,
+        result = &mut actor_handle => result?,
+    }
+    cancel.cancel();
+    if !actor_handle.is_finished() {
+        actor_handle.await?;
+    }
+    tracing::info!("native MM shutdown complete");
+    Ok(())
+}
+
+async fn resolve_account(
+    client: &SybilClient,
+    config: &Config,
+    deployment: &NativeDeployment,
+) -> Result<u64, Error> {
+    if let Ok(state) = load_state(&config.state_path)
+        && state.genesis_hash == deployment.genesis_hash
+        && client.get_account(state.account_id).await.is_ok()
+    {
+        tracing::info!(
+            account_id = state.account_id,
+            "reattached native MM account"
+        );
+        return Ok(state.account_id);
+    }
+    let balance_nanos = (config.initial_balance_dollars * NANOS_PER_DOLLAR as f64) as u64;
+    let account = client.create_bare_account(balance_nanos).await?;
+    save_state(
+        &config.state_path,
+        &MmState {
+            genesis_hash: deployment.genesis_hash.clone(),
+            account_id: account.account_id,
+        },
+    )?;
+    tracing::info!(account_id = account.account_id, "created native MM account");
+    Ok(account.account_id)
+}
+
+fn load_state(path: &Path) -> Result<MmState, Error> {
+    Ok(serde_json::from_slice(&std::fs::read(path)?)?)
+}
+
+fn save_state(path: &Path, state: &MmState) -> Result<(), Error> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let temp = path.with_extension("json.tmp");
+    std::fs::write(&temp, serde_json::to_vec_pretty(state)?)?;
+    std::fs::rename(temp, path)?;
+    Ok(())
+}

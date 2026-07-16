@@ -4,7 +4,7 @@ use sybil_api_types::{NANOS_PER_DOLLAR, OrderSpec};
 
 use super::{QuoteRange, shares_to_qty_units, whole_shares_to_qty_units};
 
-// QuoteEngine — pure pricing logic, no IO
+// Pure pricing logic, independent of discovery and reference-price providers.
 // --------------------------------------------------------------------------- //
 
 /// Inputs to the quoting engine for one market.

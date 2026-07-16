@@ -213,7 +213,7 @@ replacement has passed verification.
    ```bash
    cd /opt/sybil
    docker compose -f docker-compose.yml -f docker-compose.prod.yml \
-     stop sybil-polymarket sybil-arena sybil-prover sybil-api
+     stop sybil-polymarket sybil-native-mm sybil-arena sybil-prover sybil-api
    ```
 
    Stop the separately managed L1 indexer too, if enabled.

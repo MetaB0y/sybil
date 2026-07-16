@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::time::Duration;
 
 use tokio::sync::{mpsc, watch};
@@ -7,56 +6,13 @@ use tracing::{info, warn};
 use crate::config::Config;
 use crate::polymarket::gamma::GammaClient;
 use crate::polymarket::ws;
+pub use sybil_market_maker::{PriceSnapshot, PriceUpdateSource as PriceSource};
 
 /// Message from SyncActor to FeedActor.
 #[derive(Debug)]
 pub enum FeedMessage {
     /// New token IDs to subscribe to.
     SubscribeTokens(Vec<String>),
-}
-
-/// Source of the most recent price update.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum PriceSource {
-    #[default]
-    None,
-    WebSocket,
-    RestFallback,
-}
-
-/// Snapshot of reference prices from Polymarket.
-#[derive(Debug, Clone, Default)]
-pub struct PriceSnapshot {
-    /// token_id -> midpoint price (0.0 to 1.0)
-    pub midpoints: HashMap<String, f64>,
-    /// token_id -> timestamp of that token's last update (ms since epoch).
-    /// Parallel to `midpoints`. Enables per-token staleness (PM-4) instead of
-    /// a single global clock that a busy neighbour token keeps alive.
-    pub token_updated_ms: HashMap<String, u64>,
-    /// Timestamp of last update to ANY token (ms since epoch). Retained for
-    /// coarse "feed is alive" diagnostics; per-token freshness lives in
-    /// `token_updated_ms`.
-    pub last_updated_ms: u64,
-    /// Source of the most recent update.
-    pub source: PriceSource,
-}
-
-impl PriceSnapshot {
-    /// Record a fresh midpoint for `token_id`, stamping its per-token clock.
-    pub fn record_midpoint(&mut self, token_id: String, price: f64, now_ms: u64) {
-        self.token_updated_ms.insert(token_id.clone(), now_ms);
-        self.midpoints.insert(token_id, price);
-    }
-
-    /// True when `token_id` has not updated within `max_age_ms` of `now_ms`
-    /// (or was never seen). A stale token is neither quoted nor pushed as a
-    /// live reference price.
-    pub fn token_is_stale(&self, token_id: &str, now_ms: u64, max_age_ms: u64) -> bool {
-        match self.token_updated_ms.get(token_id) {
-            Some(&ts) => now_ms.saturating_sub(ts) > max_age_ms,
-            None => true,
-        }
-    }
 }
 
 /// Price feed actor. Maintains a WebSocket connection to Polymarket CLOB,

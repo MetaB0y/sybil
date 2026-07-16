@@ -1,5 +1,5 @@
 {
-  "description": "Native Sybil AI market catalog (rev 4, 2026-07-15). Grouped children carry explicit natural-language market titles in addition to their parent event titles. Duplicate legacy contracts are consolidated; the distinct final-week OpenRouter event is retained; source-event artwork is self-hosted from reviewed brand assets.",
+  "description": "Native Sybil AI market catalog (rev 4, 2026-07-15), owned by sybil-native. Grouped children carry explicit natural-language market titles in addition to their parent event titles. Duplicate legacy contracts are consolidated; the distinct final-week OpenRouter event is retained; source-event artwork is self-hosted from reviewed brand assets.",
   "markets": [
     {
       "id": "aa_intelligence_leader_eoy2026",

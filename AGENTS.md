@@ -44,6 +44,8 @@ sybil/
 │   ├── sybil-history-types/       # Neutral sequencer-to-history facts and query DTOs
 │   ├── sybil-loadtest/            # Goose HTTP load and architectural-isolation checks
 │   ├── sybil-client/              # Shared Rust HTTP/WebSocket client
+│   ├── sybil-market-maker/        # Provider-neutral flash-liquidity actor
+│   ├── sybil-native/              # Native catalog provisioning and MM runtime
 │   ├── sybil-signing/             # Canonical client-action signing bytes
 │   ├── sybil-oracle/              # Oracle/resolution service
 │   ├── sybil-verifier/            # Native canonical witness/state verification
@@ -55,7 +57,7 @@ sybil/
 │   ├── sybil-l1-protocol/          # Guest-safe Rust/Solidity bridge hash domains
 │   ├── sybil-l1-abi/               # Host-only Alloy contract bindings
 │   ├── sybil-l1-indexer/           # L1 deposit/withdrawal lifecycle sidecar
-│   └── sybil-polymarket/           # External market mirror and MM integration
+│   └── sybil-polymarket/           # Polymarket mirror, prices, MM, resolution
 ├── arena/                         # Python: trading bots, client SDK, simulation framework (has its own AGENTS.md)
 │   ├── sim/                       #   Generic simulation framework (clock, news_trader, runner)
 │   ├── markets/                   #   Per-market config (iran/ with personas, sources, datasets)

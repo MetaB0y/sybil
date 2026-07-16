@@ -10,13 +10,10 @@ use tracing::{error, info, warn};
 
 use sybil_api_types::NANOS_PER_DOLLAR;
 use sybil_client::SybilClient;
-use sybil_polymarket::autoresolve::{AutoResolveActor, AutoResolveConfig};
+use sybil_market_maker::{MmActor, MmMessage, PriceSnapshot};
 use sybil_polymarket::config::Config;
-use sybil_polymarket::feed::{FeedActor, PriceSnapshot};
-use sybil_polymarket::llm::OpenRouterClient;
+use sybil_polymarket::feed::FeedActor;
 use sybil_polymarket::mapping::MappingStore;
-use sybil_polymarket::mm::{MmActor, MmMessage, QuoteRange};
-use sybil_polymarket::native::{NativeMarketCatalog, NativeQuoteRange};
 use sybil_polymarket::polymarket::gamma::GammaClient;
 use sybil_polymarket::resolution::ResolutionActor;
 use sybil_polymarket::signer::ResolutionSigner;
@@ -63,14 +60,6 @@ async fn resolve_mm_account(
     Ok(account.account_id)
 }
 
-fn to_mm_quote_range(range: NativeQuoteRange) -> QuoteRange {
-    QuoteRange {
-        min: range.min,
-        max: range.max,
-        initial: range.initial,
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Install rustls crypto provider (needed for WebSocket TLS)
@@ -109,19 +98,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             (events, conditions)
         };
-    let native_catalog = if config.native_markets_path.is_empty() {
-        NativeMarketCatalog::default()
-    } else {
-        let catalog = NativeMarketCatalog::load(std::path::Path::new(&config.native_markets_path))?;
-        let enabled = catalog.enabled_market_specs().len();
-        info!(
-            path = %config.native_markets_path,
-            templates = catalog.len(),
-            enabled_markets = enabled,
-            "loaded native market template catalog"
-        );
-        catalog
-    };
     let sybil_service_token = std::env::var("SYBIL_SERVICE_TOKEN")
         .ok()
         .and_then(|value| (!value.trim().is_empty()).then_some(value));
@@ -141,7 +117,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!(
         events = mapping_store.event_count(),
         markets = mapping_store.market_count(),
-        native_markets = mapping_store.native_market_count(),
         "loaded mapping store"
     );
     let mapping = Arc::new(RwLock::new(mapping_store));
@@ -311,51 +286,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     existing_mirror.sort_by_key(|(sybil_market_id, _, _, _)| std::cmp::Reverse(*sybil_market_id));
 
-    let mut existing_mm = Vec::new();
-    {
-        let mapping = mapping.read().await;
-        for spec in native_catalog.enabled_market_specs() {
-            let Some(sybil_market_id) = mapping.native_market_id(&spec.market_key) else {
-                continue;
-            };
-            let (group_key, group_size) = if spec.group_key.is_some() {
-                let group = mapping.native_group(&spec.template_id);
-                let in_group = group
-                    .as_ref()
-                    .is_some_and(|group| group.sybil_market_ids.contains(&sybil_market_id));
-                if !in_group {
-                    warn!(
-                        sybil_market_id,
-                        native_market_key = %spec.market_key,
-                        "skipping native MM bootstrap until group mapping exists"
-                    );
-                    continue;
-                }
-                (
-                    spec.group_key.clone(),
-                    group.map(|group| group.sybil_market_ids.len()).unwrap_or(0),
-                )
-            } else {
-                (None, 0)
-            };
-            existing_mm.push(MmMessage::MarketNative {
-                sybil_market_id,
-                native_market_key: spec.market_key,
-                quote_range: to_mm_quote_range(spec.quote_range),
-                group_key,
-                group_size,
-            });
-        }
-    }
-    existing_mm.extend(existing_mirror.iter().map(
-        |(sybil_market_id, yes_token_id, group_key, group_size)| MmMessage::MarketMirrored {
-            sybil_market_id: *sybil_market_id,
-            yes_token_id: yes_token_id.clone(),
-            initial_mid: 0.5,
-            group_key: group_key.clone(),
-            group_size: *group_size,
-        },
-    ));
+    let mut existing_mm: Vec<_> = existing_mirror
+        .iter()
+        .map(
+            |(sybil_market_id, yes_token_id, group_key, group_size)| MmMessage::MarketMirrored {
+                sybil_market_id: *sybil_market_id,
+                yes_token_id: yes_token_id.clone(),
+                initial_mid: 0.5,
+                group_key: group_key.clone(),
+                group_size: *group_size,
+            },
+        )
+        .collect();
 
     if config.mm_max_markets > 0 && existing_mm.len() > config.mm_max_markets {
         info!(
@@ -417,8 +359,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Spawn actors
     let config_sync = config.clone();
     let config_feed = config.clone();
-    let config_mm = config.clone();
-    let native_catalog_sync = native_catalog.clone();
+    let config_mm = config.market_maker_config();
 
     let mapping_for_sync = mapping.clone();
     let sync_handle = tasks.spawn(async move {
@@ -432,7 +373,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             mm_live_rx,
             curated_event_ids,
             curated_condition_ids,
-            native_catalog_sync,
         );
         actor.run(cancel_sync).await;
     });
@@ -485,80 +425,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
     };
 
-    // Auto-resolution actor (SYB-48). Native `api_poll` markets past their end
-    // time are fetched + LLM-judged; high-confidence outcomes are signed and
-    // held through a challenge window, then finalized through the SAME signed
-    // resolve path. DEFAULT OFF, and additionally requires a signer key +
-    // OPENROUTER_API_KEY — any of those missing keeps it disabled.
-    let autoresolve_handle: tokio::task::JoinHandle<()> = {
-        let openrouter_key = std::env::var("OPENROUTER_API_KEY")
-            .ok()
-            .and_then(|v| (!v.trim().is_empty()).then_some(v));
-        let disabled_reason = if !config.autoresolve_enabled {
-            Some("AUTORESOLVE_ENABLED is false")
-        } else if config.signer_key_path.is_empty() {
-            Some("SIGNER_KEY_PATH not set")
-        } else if native_catalog.is_empty() {
-            Some("no native market catalog loaded")
-        } else if openrouter_key.is_none() {
-            Some("OPENROUTER_API_KEY not set")
-        } else {
-            None
-        };
-
-        if let Some(reason) = disabled_reason {
-            info!(reason, "auto-resolution actor disabled");
-            let cancel_idle = cancel.clone();
-            tasks.spawn(async move { cancel_idle.cancelled().await })
-        } else {
-            let signer =
-                ResolutionSigner::load_or_create(std::path::Path::new(&config.signer_key_path))?;
-            info!(
-                pubkey = signer.pubkey_hex(),
-                model = %config.autoresolve_model,
-                "loaded auto-resolution signer; register this pubkey as a resolution feed on sybil-api"
-            );
-            let autoresolve_config = AutoResolveConfig {
-                enabled: true,
-                poll_interval_secs: config.autoresolve_poll_interval_secs,
-                confidence_propose: config.autoresolve_confidence_propose,
-                confidence_review: config.autoresolve_confidence_review,
-                challenge_window_ms: config.autoresolve_challenge_window_hours * 60 * 60 * 1000,
-                source_min_interval_secs: config.autoresolve_source_min_interval_secs,
-                fetch_timeout_secs: 30,
-                model: config.autoresolve_model.clone(),
-            };
-            let llm = Arc::new(OpenRouterClient::new(
-                http.clone(),
-                openrouter_key.expect("openrouter key present in enabled branch"),
-                config.autoresolve_model.clone(),
-            ));
-            let sybil_client_autoresolve = SybilClient::new(
-                http.clone(),
-                config.sybil_url.clone(),
-                std::env::var("SYBIL_SERVICE_TOKEN")
-                    .ok()
-                    .and_then(|value| (!value.trim().is_empty()).then_some(value)),
-            );
-            let catalog = native_catalog.clone();
-            let mapping_for_autoresolve = mapping.clone();
-            let http_autoresolve = http.clone();
-            let cancel_autoresolve = cancel.clone();
-            tasks.spawn(async move {
-                let actor = AutoResolveActor::new(
-                    autoresolve_config,
-                    catalog,
-                    mapping_for_autoresolve,
-                    sybil_client_autoresolve,
-                    llm,
-                    signer,
-                    http_autoresolve,
-                );
-                actor.run(cancel_autoresolve).await;
-            })
-        }
-    };
-
     // Wait for shutdown signal
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
@@ -584,13 +450,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 error!(error = %e, "ResolutionActor panicked");
             } else {
                 error!("ResolutionActor exited unexpectedly");
-            }
-        }
-        r = autoresolve_handle => {
-            if let Err(e) = r {
-                error!(error = %e, "AutoResolveActor panicked");
-            } else {
-                error!("AutoResolveActor exited unexpectedly");
             }
         }
     }

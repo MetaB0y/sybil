@@ -17,7 +17,6 @@ and signing helpers; it never imports sequencer or solver state.
 SyncActor ── subscriptions/market notices ──► FeedActor / MmActor
 FeedActor ── latest CLOB reference snapshot ──► MmActor
 ResolutionActor ── signed resolved-source outcome ──► sybil-api
-AutoResolveActor (optional, native markets only) ── review queue ──► sybil-api
 ```
 
 - `SyncActor` polls Gamma, creates markets/groups, writes provenance metadata,
@@ -27,11 +26,6 @@ AutoResolveActor (optional, native markets only) ── review queue ──► s
   budget-constrained reference liquidity.
 - `ResolutionActor` follows closed mirrored markets and submits signed
   attestations only when the source outcome is unambiguous.
-- `AutoResolveActor` is disabled by default. It evaluates configured native
-  `api_poll` sources with an LLM, fails closed on fetch/parse/range errors, and
-  keeps high-confidence proposals in a durable resolver-side review window.
-  Approval or expiry still enters the ordinary signed immediate-attestation
-  path; the core oracle has no challenge policy.
 
 ## Boundaries and invariants
 
@@ -49,12 +43,11 @@ AutoResolveActor (optional, native markets only) ── review queue ──► s
 - Provider keys and signer material come from environment/files; never log or
   commit them.
 
-## Catalog modes
+## Curation
 
-`curated_markets.json` is the authoritative curated event-id list;
-`native_markets.json` is the native-market catalog. Do not copy their contents,
-live status, thresholds, or prices into this guide—they change independently.
-Loaders validate both files, and malformed configured catalogs fail startup.
+`curated_markets.json` is the authoritative curated Polymarket event-id list.
+Native catalogs and static-anchor liquidity belong to `sybil-native`; this
+crate must not create or resolve native markets.
 
 ## Code map
 
@@ -62,12 +55,11 @@ Loaders validate both files, and malformed configured catalogs fail startup.
 |---|---|
 | Configuration/orchestration | `config.rs`, `main.rs` |
 | Gamma/CLOB clients | `polymarket/` |
-| Sync runtime/mapping/catalog | `sync.rs`, `mapping.rs`, `curated.rs`, `native.rs` |
+| Sync runtime/mapping/curation | `sync.rs`, `mapping.rs`, `curated.rs` |
 | Pure sync/group/metadata planning | `sync/planning.rs` |
-| Price feed/MM runtime | `feed.rs`, `mm.rs` |
-| Pure MM quote construction | `mm/quotes.rs` |
+| Price feed | `feed.rs` |
+| Shared MM runtime | `../sybil-market-maker/` |
 | Resolution | `resolution.rs`, `signer.rs` |
-| Optional LLM resolver | `autoresolve.rs`, `llm.rs` |
 | Display categorization | `categorize.rs` |
 
 Run `--help` for current flags instead of duplicating the Clap contract here.

@@ -168,19 +168,61 @@ services:
       - "--mm-max-orders-per-block=64"
       - "--mapping-store-path=/data/polymarket_mapping.json"
       - "--curated-markets-path=/etc/sybil/curated_markets.json"
-      - "--native-markets-path=/etc/sybil/native_markets.json"
     environment:
       RUST_LOG: "sybil_polymarket=info"
     volumes:
       - polymarket-data:/data
       - ./crates/sybil-polymarket/curated_markets.json:/etc/sybil/curated_markets.json:ro
-      - ./crates/sybil-polymarket/native_markets.json:/etc/sybil/native_markets.json:ro
     depends_on:
       sybil-api:
         condition: service_healthy
     restart: unless-stopped
 
     logging: *default-logging
+  sybil-native-admin:
+    profiles: ["integrations"]
+    image: sybil-api:latest
+    mem_limit: "128m"
+    memswap_limit: "192m"
+    entrypoint: ["sybil-native-admin"]
+    command:
+      - "--sybil-url=http://sybil-api:3000"
+      - "--catalog-path=/etc/sybil/native_markets.json"
+      - "--deployment-path=/native-data/deployment.json"
+    environment:
+      SYBIL_SERVICE_TOKEN: "${SYBIL_SERVICE_TOKEN:-sybil-local-service}"
+      RUST_LOG: "sybil_native=info"
+    volumes:
+      - native-data:/native-data
+      - ./crates/sybil-native/native_markets.json:/etc/sybil/native_markets.json:ro
+    depends_on:
+      sybil-api:
+        condition: service_healthy
+    restart: "no"
+    logging: *default-logging
+
+  sybil-native-mm:
+    profiles: ["integrations"]
+    image: sybil-api:latest
+    mem_limit: "192m"
+    memswap_limit: "256m"
+    entrypoint: ["sybil-native-mm"]
+    command:
+      - "--sybil-url=http://sybil-api:3000"
+      - "--deployment-path=/native-data/deployment.json"
+      - "--state-path=/native-data/mm-state.json"
+      - "--max-orders-per-block=512"
+    environment:
+      SYBIL_SERVICE_TOKEN: "${SYBIL_SERVICE_TOKEN:-sybil-local-service}"
+      RUST_LOG: "sybil_native=info,sybil_market_maker=info"
+    volumes:
+      - native-data:/native-data
+    depends_on:
+      sybil-native-admin:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    logging: *default-logging
+
   sybil-prover:
     profiles: ["validity"]
     image: sybil-api:latest
@@ -363,6 +405,8 @@ volumes:
     name: vmdata
   polymarket-data:
     name: polymarket-data
+  native-data:
+    name: native-data
   arena-data:
     name: arena-data
   prover-data:

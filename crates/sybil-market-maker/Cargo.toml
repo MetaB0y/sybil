@@ -1,0 +1,21 @@
+[package]
+name = "sybil-market-maker"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Reusable flash-liquidity market maker for Sybil markets"
+
+[dependencies]
+sybil-api-types = { path = "../sybil-api-types" }
+sybil-client = { path = "../sybil-client" }
+tokio = { workspace = true, features = ["full"] }
+tokio-util = { workspace = true }
+futures-util = "0.3"
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+reqwest = { workspace = true }
+
+[lints.clippy]
+disallowed_types = "allow"

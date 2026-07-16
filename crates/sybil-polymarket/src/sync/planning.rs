@@ -1,7 +1,5 @@
 use crate::categorize::derive_categories;
 use crate::mapping::GroupInfo;
-use crate::mm::QuoteRange;
-use crate::native::NativeQuoteRange;
 use crate::polymarket::types::{GammaEvent, GammaMarket, parse_iso8601_to_ms};
 use sybil_api_types::{MarketGroupResponse, SetMarketMetadataRequest};
 
@@ -101,35 +99,6 @@ pub(super) fn mm_group_membership(
         )
     } else {
         (None, 0)
-    }
-}
-
-pub(super) fn native_mm_group_membership(
-    sybil_market_id: u32,
-    expected_group_key: Option<String>,
-    group: Option<&GroupInfo>,
-) -> (Option<String>, usize) {
-    let Some(group_key) = expected_group_key else {
-        return (None, 0);
-    };
-    let in_group = group
-        .as_ref()
-        .is_some_and(|group| group.sybil_market_ids.contains(&sybil_market_id));
-    if in_group {
-        (
-            Some(group_key),
-            group.map(|group| group.sybil_market_ids.len()).unwrap_or(0),
-        )
-    } else {
-        (None, 0)
-    }
-}
-
-pub(super) fn to_mm_quote_range(range: NativeQuoteRange) -> QuoteRange {
-    QuoteRange {
-        min: range.min,
-        max: range.max,
-        initial: range.initial,
     }
 }
 

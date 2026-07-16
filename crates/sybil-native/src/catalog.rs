@@ -1,4 +1,4 @@
-//! Native Sybil market template catalog (SYB-151).
+//! Native Sybil market template catalog.
 //!
 //! This is the non-Polymarket creation path: checked-in JSON defines native
 //! markets, the sync actor expands enabled templates into Sybil market-create
@@ -14,7 +14,7 @@ use sybil_api_types::{CreateMarketRequest, SetMarketMetadataRequest};
 use url::Url;
 
 use crate::error::Error;
-use crate::polymarket::types::parse_iso8601_to_ms;
+use crate::parse_iso8601_to_ms;
 
 const CATEGORICAL_SUM_TOLERANCE: f64 = 1e-9;
 

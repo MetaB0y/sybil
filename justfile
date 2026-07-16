@@ -667,10 +667,11 @@ COMPOSE_TELEGRAM := "docker compose -f docker-compose.yml -f docker-compose.prod
 
 # Sync compose configs + deploy/ directory to server
 deploy-sync:
-    ssh {{SERVER}} 'mkdir -p /opt/sybil/scripts/lib /opt/sybil/crates/sybil-polymarket && touch /opt/sybil/arena.env'
+    ssh {{SERVER}} 'mkdir -p /opt/sybil/scripts/lib /opt/sybil/crates/sybil-polymarket /opt/sybil/crates/sybil-native && touch /opt/sybil/arena.env'
     scp docker-compose.yml docker-compose.prod.yml docker-compose.telegram.yml {{SERVER}}:/opt/sybil/
     scp -r deploy {{SERVER}}:/opt/sybil/
-    scp crates/sybil-polymarket/curated_markets.json crates/sybil-polymarket/native_markets.json {{SERVER}}:/opt/sybil/crates/sybil-polymarket/
+    scp crates/sybil-polymarket/curated_markets.json {{SERVER}}:/opt/sybil/crates/sybil-polymarket/
+    scp crates/sybil-native/native_markets.json {{SERVER}}:/opt/sybil/crates/sybil-native/
     scp scripts/ops-smoke.sh scripts/store-backup.sh scripts/store-restore-drill.sh scripts/store-manifest.py scripts/synthetic-probe.sh {{SERVER}}:/opt/sybil/scripts/
     scp scripts/lib/smoke-common.sh {{SERVER}}:/opt/sybil/scripts/lib/
 
@@ -685,7 +686,7 @@ deploy-openrouter-env-check:
 deploy-api: deploy-sync deploy-prod-env-check && deploy-verify
     DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-api
     docker save sybil-api:latest | ssh {{SERVER}} docker load
-    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-api sybil-polymarket sybil-prover'
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-api sybil-native-admin sybil-native-mm sybil-polymarket sybil-prover'
 
 # Restart the durable daemon. Real STARK mode is run on measured prover
 # hardware with `just prover-daemon-stark`, not the current 2 GB web host.
@@ -698,7 +699,7 @@ deploy-prover-daemon: deploy-sync deploy-prod-env-check
 deploy-reset-state confirm: deploy-prod-env-check
     @test "{{confirm}}" = "CONFIRM" || (echo 'Refusing to reset production state. Run: just deploy-reset-state CONFIRM' >&2; exit 2)
     ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} --profile l1-indexer down; else {{COMPOSE_PROD}} --profile l1-indexer down; fi'
-    ssh {{SERVER}} 'docker volume rm sybil-data history-data polymarket-data arena-data prover-data prover-artifacts prover-jobs sybil_prover-jobs sybil_prover-artifacts l1-indexer-data vmdata || true'
+    ssh {{SERVER}} 'docker volume rm sybil-data history-data polymarket-data native-data arena-data prover-data prover-artifacts prover-jobs sybil_prover-jobs sybil_prover-artifacts l1-indexer-data vmdata || true'
     ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --remove-orphans; else {{COMPOSE_PROD}} up -d --remove-orphans; fi'
 
 # Build and deploy arena bots + dashboard. Requires OPENROUTER_API_KEY in /opt/sybil/arena.env.

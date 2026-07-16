@@ -4,15 +4,78 @@ use futures_util::StreamExt;
 use tokio::sync::{mpsc, watch};
 use tracing::{debug, info, warn};
 
-use crate::config::Config;
-use crate::error::Error;
-use crate::feed::PriceSnapshot;
 use sybil_api_types::*;
 use sybil_client::{PublicBlockStreamEvent, SybilClient};
 
 mod quotes;
 
 pub use quotes::{QuoteConfig, QuoteInput, generate_quotes, select_rotating_quotes};
+
+/// Reference-price update source, retained for provider diagnostics.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum PriceUpdateSource {
+    #[default]
+    None,
+    WebSocket,
+    RestFallback,
+}
+
+/// Latest provider-owned token reference snapshot.
+#[derive(Debug, Clone, Default)]
+pub struct PriceSnapshot {
+    pub midpoints: HashMap<String, f64>,
+    pub token_updated_ms: HashMap<String, u64>,
+    pub last_updated_ms: u64,
+    pub source: PriceUpdateSource,
+}
+
+impl PriceSnapshot {
+    pub fn record_midpoint(&mut self, token_id: String, price: f64, now_ms: u64) {
+        self.token_updated_ms.insert(token_id.clone(), now_ms);
+        self.midpoints.insert(token_id, price);
+    }
+
+    pub fn token_is_stale(&self, token_id: &str, now_ms: u64, max_age_ms: u64) -> bool {
+        match self.token_updated_ms.get(token_id) {
+            Some(&timestamp) => now_ms.saturating_sub(timestamp) > max_age_ms,
+            None => true,
+        }
+    }
+}
+
+/// Runtime-only MM policy shared by native and mirrored market processes.
+#[derive(Debug, Clone)]
+pub struct MmConfig {
+    pub mm_half_spread: f64,
+    pub mm_budget_dollars: f64,
+    pub mm_quote_size_dollars: f64,
+    pub mm_gamma: f64,
+    pub mm_max_position: u64,
+    pub mm_max_orders_per_block: usize,
+    pub mm_max_exposure_dollars: f64,
+    pub mm_vol_window: usize,
+    pub mm_min_spread: f64,
+    pub mm_sync_interval_blocks: u64,
+    pub mm_staleness_ms: u64,
+}
+
+impl Default for MmConfig {
+    fn default() -> Self {
+        Self {
+            mm_half_spread: 0.02,
+            mm_budget_dollars: 1_000.0,
+            mm_quote_size_dollars: 100.0,
+            mm_gamma: 0.05,
+            mm_max_position: 5_000,
+            mm_max_orders_per_block: 512,
+            mm_max_exposure_dollars: 50_000.0,
+            mm_vol_window: 30,
+            mm_min_spread: 0.005,
+            mm_sync_interval_blocks: 1,
+            mm_staleness_ms: 30_000,
+        }
+    }
+}
 
 /// Default variance prior for markets with insufficient price history.
 const DEFAULT_VARIANCE: f64 = 0.0005;
@@ -233,7 +296,7 @@ impl MmState {
 /// - Dynamic budget that shrinks as exposure grows
 /// - Position limits with unwind-only mode
 pub struct MmActor {
-    config: Config,
+    config: MmConfig,
     sybil_client: SybilClient,
     account_id: u64,
     price_rx: watch::Receiver<PriceSnapshot>,
@@ -246,7 +309,7 @@ pub struct MmActor {
 
 impl MmActor {
     pub fn new(
-        config: Config,
+        config: MmConfig,
         sybil_client: SybilClient,
         account_id: u64,
         price_rx: watch::Receiver<PriceSnapshot>,
@@ -674,7 +737,6 @@ impl MmActor {
                 None
             }
             Err(e) => {
-                let e = Error::from(e);
                 let poisoned = poisoned_market_from_error(&e);
                 warn!(block = block_height, error = %e, poisoned, "order submission failed");
                 poisoned
@@ -691,8 +753,8 @@ impl MmActor {
 /// id out is the cleanest mechanism the current API surfaces — no probing or
 /// per-market bisection needed — so we drop exactly that market and let the
 /// next block re-form the batch without it.
-fn poisoned_market_from_error(err: &Error) -> Option<u32> {
-    let Error::SybilApi { status: 400, body } = err else {
+fn poisoned_market_from_error(err: &sybil_client::Error) -> Option<u32> {
+    let sybil_client::Error::Api { status: 400, body } = err else {
         return None;
     };
     // The body is JSON (`{"error": "...", "code": "..."}`); fall back to the
@@ -720,10 +782,9 @@ fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::Parser as _;
 
-    fn sybil_api_error(body: &str) -> Error {
-        Error::SybilApi {
+    fn sybil_api_error(body: &str) -> sybil_client::Error {
+        sybil_client::Error::Api {
             status: 400,
             body: body.to_string(),
         }
@@ -752,7 +813,7 @@ mod tests {
         );
         // Non-400 statuses are never treated as poison.
         assert_eq!(
-            poisoned_market_from_error(&Error::SybilApi {
+            poisoned_market_from_error(&sybil_client::Error::Api {
                 status: 500,
                 body: "Market 3 not found".to_string(),
             }),
@@ -764,14 +825,7 @@ mod tests {
         let (price_tx, price_rx) = watch::channel(PriceSnapshot::default());
         let (_mm_tx, mm_rx) = mpsc::channel(16);
         let client = SybilClient::new(reqwest::Client::new(), "http://localhost".into(), None);
-        let actor = MmActor::new(
-            Config::parse_from(["sybil-polymarket"]),
-            client,
-            1,
-            price_rx,
-            mm_rx,
-            live_tx,
-        );
+        let actor = MmActor::new(MmConfig::default(), client, 1, price_rx, mm_rx, live_tx);
         (actor, price_tx)
     }
 
@@ -1115,7 +1169,7 @@ mod tests {
 
     #[test]
     fn default_submission_limit_covers_two_sided_206_market_epoch() {
-        let runtime_config = Config::parse_from(["sybil-polymarket"]);
+        let runtime_config = MmConfig::default();
         assert_eq!(runtime_config.mm_max_orders_per_block, 512);
 
         let quote_config = default_config();
