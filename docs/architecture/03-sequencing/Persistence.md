@@ -2,7 +2,7 @@
 tags: [infrastructure, storage]
 layer: sequencer
 status: current
-last_verified: 2026-07-15
+last_verified: 2026-07-16
 ---
 
 # Persistence
@@ -220,11 +220,12 @@ Other sequencer-owned durable serving rows are:
   cursor bounds rows examined per pass while moving past unacknowledged jobs;
   a digest mismatch aborts the whole transaction.
 
-Recent in-memory fill/price/event/equity caches may still support live
-analytics computations, but no public historical endpoint depends on them and
-startup does not hydrate them from legacy history tables. Aggregate tracker
-snapshots needed for current product values (for example all-time fill counts
-and cost basis) remain sequencer snapshots rather than historical scans.
+The sequencer holds fill, price, event, and equity facts only until the next
+fenced block snapshot has copied them into the product-history outbox. It does
+not retain queryable per-account or per-market history afterward. Compact
+aggregate tracker snapshots needed for current product values (for example
+all-time fill counts, rolling-volume anchors, and cost basis) remain sequencer
+state rather than historical scans.
 
 Canonical full-block and DA retention remains a bounded post-commit maintenance
 job. Product-history retention, backups, projections, and later archive/rollup
@@ -302,9 +303,9 @@ This is the whole reason the commit fence lives in redb.
 
 **Lost on crash:**
 
-- Recent in-memory fill, price, equity, and account-event cache contents. These
-  caches are diagnostic/current-value aids; historical queries use
-  `sybil-history`.
+- Uncommitted block-local fill, price, equity, and account-event fact buffers.
+  They are rebuilt by normal block processing; committed facts are already in
+  the transactional outbox and historical queries use `sybil-history`.
 - SSE ring buffer contents
 - Transient external feed state such as recently pushed reference prices
 

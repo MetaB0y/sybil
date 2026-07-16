@@ -7,6 +7,7 @@
 
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 pub const COMMITTED_HISTORY_SCHEMA_V1: u16 = 1;
 
@@ -329,6 +330,34 @@ impl CommittedHistoryBatchV1 {
 pub struct FillCursor {
     pub block_height: u64,
     pub order_id: u64,
+}
+
+impl FillCursor {
+    pub const MIN: Self = Self {
+        block_height: 0,
+        order_id: 0,
+    };
+
+    pub const fn new(block_height: u64, order_id: u64) -> Self {
+        Self {
+            block_height,
+            order_id,
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        let (block_height, order_id) = value.split_once('.')?;
+        Some(Self::new(
+            block_height.parse().ok()?,
+            order_id.parse().ok()?,
+        ))
+    }
+}
+
+impl fmt::Display for FillCursor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}", self.block_height, self.order_id)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

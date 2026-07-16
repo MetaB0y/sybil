@@ -3557,7 +3557,6 @@ mod tests {
         let path = temp_store_path("price-history");
         let store = Arc::new(crate::store::Store::open(&path).unwrap());
         let config = SequencerConfig {
-            max_recent_price_points_per_market: 1,
             block_interval: Duration::from_secs(60),
             min_resting_order_notional_nanos: 0,
             ..SequencerConfig::default()
@@ -3706,8 +3705,6 @@ mod tests {
         let store = Arc::new(crate::store::Store::open(&path).unwrap());
         let config = SequencerConfig {
             block_interval: Duration::from_secs(60),
-            max_recent_equity_points_per_account: 0,
-            max_recent_account_events_per_account: 0,
             min_resting_order_notional_nanos: 0,
             ..SequencerConfig::default()
         };

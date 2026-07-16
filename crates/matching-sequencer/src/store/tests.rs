@@ -1795,18 +1795,10 @@ async fn test_store_restores_fill_totals_without_hydrating_fill_history() {
     seq.set_profile(seller, Some("seller".into()), None)
         .unwrap();
 
-    assert!(
-        !seq.analytics().account_fills(buyer, None, 10, 0).is_empty(),
-        "sanity check: block should record buyer fills before persistence"
-    );
     store.save_block(seq.snapshot()).await.unwrap();
 
     let restored = store.load_state().await.unwrap().unwrap();
     let restored_seq = BlockSequencer::restore(restored, oracle, store_test_sequencer_config());
-    let fills = restored_seq
-        .analytics()
-        .account_fills(buyer, Some(market_id), 10, 0);
-    assert!(fills.is_empty());
     assert_eq!(restored_seq.analytics().total_fills(buyer), 1);
     assert_eq!(restored_seq.analytics().total_fills(seller), 1);
     let ranked: Vec<_> = restored_seq
@@ -2228,7 +2220,6 @@ async fn import_witness_drill_restores_head_and_produces_children() {
 }
 
 #[tokio::test]
-#[ignore = "fill serving moved to sybil-history"]
 async fn test_store_reopens_after_committed_trade_and_restores_qmdb_state() {
     use crate::sequencer::{BlockSequencer, OrderSubmission};
     use matching_engine::{NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
@@ -2332,10 +2323,6 @@ async fn test_store_reopens_after_committed_trade_and_restores_qmdb_state() {
     );
 
     let restored_seq = BlockSequencer::restore(restored, oracle, store_test_sequencer_config());
-    let fills = restored_seq
-        .analytics()
-        .account_fills(buyer, Some(market_id), 10, 0);
-    assert!(fills.is_empty());
     assert_eq!(restored_seq.analytics().total_fills(buyer), 1);
 }
 

@@ -313,14 +313,6 @@ pub struct ApiConfig {
     #[arg(long, default_value = "100", env = "SYBIL_RECENT_BLOCK_CACHE_CAPACITY")]
     pub recent_block_cache_capacity: usize,
 
-    /// Recent price points retained for current rolling analytics.
-    #[arg(
-        long,
-        default_value = "2000",
-        env = "SYBIL_MAX_RECENT_PRICE_POINTS_PER_MARKET"
-    )]
-    pub max_recent_price_points_per_market: usize,
-
     /// Canonical replay heights and paired DA artifacts retained locally.
     #[arg(
         long,
@@ -369,29 +361,6 @@ pub struct ApiConfig {
         env = "SYBIL_ACKNOWLEDGED_PROOF_JOB_MAX_ROWS_PER_PASS"
     )]
     pub acknowledged_proof_job_max_rows_per_pass: usize,
-
-    /// Recent fill records retained for current diagnostics.
-    #[arg(
-        long,
-        default_value = "5000",
-        env = "SYBIL_MAX_RECENT_FILLS_PER_ACCOUNT"
-    )]
-    pub max_recent_fills_per_account: usize,
-
-    /// Recent equity points retained for current diagnostics.
-    #[arg(
-        long,
-        default_value = "0",
-        env = "SYBIL_MAX_RECENT_EQUITY_POINTS_PER_ACCOUNT"
-    )]
-    pub max_recent_equity_points_per_account: usize,
-    /// Recent account events retained for current diagnostics.
-    #[arg(
-        long,
-        default_value = "0",
-        env = "SYBIL_MAX_RECENT_ACCOUNT_EVENTS_PER_ACCOUNT"
-    )]
-    pub max_recent_account_events_per_account: usize,
 
     /// Sequencer actor queue depth that logs a warning.
     #[arg(long, default_value = "1000", env = "SYBIL_ACTOR_QUEUE_WARN_DEPTH")]
@@ -515,16 +484,12 @@ impl Default for ApiConfig {
             webauthn_origin: "http://localhost:3000".to_string(),
             webauthn_require_uv: true,
             recent_block_cache_capacity: 100,
-            max_recent_price_points_per_market: 2_000,
             canonical_archive_retention_blocks: 0,
             canonical_archive_maintenance_interval_blocks: 1_000,
             canonical_archive_max_rows_per_pass: 10_000,
             acknowledged_proof_job_retention_blocks: 0,
             acknowledged_proof_job_maintenance_interval_blocks: 1_000,
             acknowledged_proof_job_max_rows_per_pass: 10_000,
-            max_recent_fills_per_account: 5_000,
-            max_recent_equity_points_per_account: 0,
-            max_recent_account_events_per_account: 0,
             actor_queue_warn_depth: 1_000,
             actor_queue_error_depth: 5_000,
             liquidity_band_nanos: 50_000_000,

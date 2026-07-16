@@ -43,9 +43,6 @@ pub struct SequencerConfig {
     /// In-memory cache of recent canonical blocks. This is distinct from both
     /// the bounded replay archive and the product-history service.
     pub recent_block_cache_capacity: usize,
-    /// Maximum recent price points retained per market for current rolling
-    /// analytics. Product charts are served by `sybil-history`.
-    pub max_recent_price_points_per_market: usize,
     /// Canonical replay heights (and paired DA artifacts) retained locally.
     /// Zero disables archive maintenance.
     pub canonical_archive_retention_blocks: u64,
@@ -60,13 +57,6 @@ pub struct SequencerConfig {
     pub acknowledged_proof_job_maintenance_interval_blocks: u64,
     /// Maximum old proof-job rows examined in one maintenance pass.
     pub acknowledged_proof_job_max_rows_per_pass: usize,
-    /// Recent fill records retained for current diagnostics. Durable product
-    /// history lives only in `sybil-history`.
-    pub max_recent_fills_per_account: usize,
-    /// Recent equity points retained for current diagnostics and tests.
-    pub max_recent_equity_points_per_account: usize,
-    /// Recent account events retained for current diagnostics and tests.
-    pub max_recent_account_events_per_account: usize,
     /// Queue depth where actor mailbox pressure should be logged as a warning.
     /// Set to 0 to disable warning logs.
     pub actor_queue_warn_depth: usize,
@@ -102,20 +92,12 @@ impl Default for SequencerConfig {
             min_resting_order_notional_nanos: DEFAULT_MIN_RESTING_ORDER_NOTIONAL_NANOS,
             max_pending_bundles_per_account: 100,
             recent_block_cache_capacity: 100,
-            max_recent_price_points_per_market:
-                crate::price_tracker::DEFAULT_MAX_RECENT_PRICE_POINTS_PER_MARKET,
             canonical_archive_retention_blocks: 0,
             canonical_archive_maintenance_interval_blocks: 1_000,
             canonical_archive_max_rows_per_pass: 10_000,
             acknowledged_proof_job_retention_blocks: 0,
             acknowledged_proof_job_maintenance_interval_blocks: 1_000,
             acknowledged_proof_job_max_rows_per_pass: 10_000,
-            max_recent_fills_per_account:
-                crate::fill_recorder::DEFAULT_MAX_RECENT_FILLS_PER_ACCOUNT,
-            max_recent_equity_points_per_account:
-                crate::aggregates::DEFAULT_MAX_RECENT_EQUITY_POINTS,
-            max_recent_account_events_per_account:
-                crate::aggregates::DEFAULT_MAX_RECENT_ACCOUNT_EVENTS_PER_ACCOUNT,
             actor_queue_warn_depth: 1_000,
             actor_queue_error_depth: 5_000,
             liquidity_band_nanos: 50_000_000,

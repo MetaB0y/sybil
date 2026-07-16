@@ -37,7 +37,7 @@ use history::{
 };
 pub use history::{get_account_fills, get_account_history, get_equity, get_portfolio};
 #[cfg(test)]
-use matching_sequencer::AccountFillCursor;
+use sybil_history_types::FillCursor;
 
 fn sequencer_auth_scheme(scheme: AuthScheme) -> AccountAuthScheme {
     match scheme {
@@ -1247,15 +1247,9 @@ mod tests {
 
     #[test]
     fn fill_cursor_gap_includes_start_sentinel_after_pruning() {
-        assert!(fill_cursor_has_gap(Some(AccountFillCursor::MIN), Some(1)));
-        assert!(fill_cursor_has_gap(
-            Some(AccountFillCursor::new(4, 9)),
-            Some(4)
-        ));
-        assert!(!fill_cursor_has_gap(
-            Some(AccountFillCursor::new(5, 1)),
-            Some(4)
-        ));
+        assert!(fill_cursor_has_gap(Some(FillCursor::MIN), Some(1)));
+        assert!(fill_cursor_has_gap(Some(FillCursor::new(4, 9)), Some(4)));
+        assert!(!fill_cursor_has_gap(Some(FillCursor::new(5, 1)), Some(4)));
         assert!(!fill_cursor_has_gap(None, Some(4)));
     }
 }

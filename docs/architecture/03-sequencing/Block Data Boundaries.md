@@ -3,7 +3,7 @@ tags: [infrastructure, analytics]
 layer: sequencer
 crate: matching-sequencer
 status: current
-last_verified: 2026-07-13
+last_verified: 2026-07-16
 ---
 
 Sybil keeps canonical block data separate from derived product data. A
@@ -59,9 +59,9 @@ not make them protocol truth.
 
 Long-lived fills, account events, equity series, price history, candles, and
 windowed leaderboard anchors belong to `sybil-history`. The sequencer exports a
-small block-local fact batch through its fenced transactional outbox, but does
-not own the serving indexes or execute historical scans. See [[Historical Data
-Serving]].
+small block-local fact batch through its fenced transactional outbox and then
+clears those pending buffers. It does not retain a query-history fallback, own
+the serving indexes, or execute historical scans. See [[Historical Data Serving]].
 
 ## Indicative Cache
 

@@ -6,7 +6,6 @@ use super::*;
 pub struct AnalyticsRestoredState {
     pub last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
     pub market_volumes: HashMap<MarketId, u64>,
-    pub account_fills: Vec<(AccountId, AccountFillRecord)>,
     pub trader_tracker: TraderTrackerSnapshot,
     pub rolling_volume: RollingVolumeSnapshot,
     pub rolling_price_anchors: RollingPriceAnchorsSnapshot,
@@ -338,8 +337,6 @@ impl Store {
             StoreError::CorruptLayout(format!("acknowledged direct-admit row {error}"))
         })?;
 
-        let account_fills = Vec::new();
-
         let bridge_state: BridgeState = {
             let table = txn.open_table(BRIDGE_STATE)?;
             match table.get(KEY_BRIDGE_STATE)? {
@@ -479,7 +476,6 @@ impl Store {
             clearing_prices = last_clearing_prices.len(),
             resting_orders = resting_orders.len(),
             acknowledged_writes = acknowledged_writes.len(),
-            account_fills = account_fills.len(),
             data_feeds = data_feeds.len(),
             resolution_templates = resolution_templates.len(),
             bridge_deposit_cursor = bridge_state.deposit_cursor,
@@ -504,7 +500,6 @@ impl Store {
             analytics: AnalyticsRestoredState {
                 last_clearing_prices,
                 market_volumes,
-                account_fills,
                 trader_tracker,
                 rolling_volume,
                 rolling_price_anchors,

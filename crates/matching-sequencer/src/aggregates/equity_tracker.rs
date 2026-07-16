@@ -1,11 +1,11 @@
-//! Off-block per-account equity series (t, portfolio_value, deposited).
+//! Block-local per-account equity fact accumulator.
 //!
 //! Sampled at block finalize: always for accounts that traded this block,
 //! plus a periodic sweep over known accounts so price-driven equity changes
-//! land between trades. The in-memory ring is a bounded recent-value cache;
-//! committed block deltas are exported through the product-history outbox.
+//! land between trades. Facts live here only until the next fenced history
+//! batch; queryable series belong to `sybil-history`.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
 use matching_engine::{MarketId, Nanos, signed_notional_nanos};
 
@@ -13,9 +13,6 @@ use crate::account::{AccountId, AccountStore};
 
 /// Minimum wall-clock gap between periodic full sweeps (ms).
 pub const EQUITY_SAMPLE_INTERVAL_MS: u64 = 60_000;
-/// Max points retained per account (~30 days at one point/minute).
-pub const DEFAULT_MAX_RECENT_EQUITY_POINTS: usize = 43_200;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EquityPoint {
     pub height: u64,
@@ -26,17 +23,15 @@ pub struct EquityPoint {
 
 #[derive(Clone)]
 pub struct EquityTracker {
-    points: HashMap<AccountId, VecDeque<EquityPoint>>,
     known: HashSet<AccountId>,
     last_sweep_ms: u64,
-    max_points: usize,
     /// Points appended since the last `clear_pending`. Cleared after commit.
     pending: Vec<(AccountId, EquityPoint)>,
 }
 
 impl Default for EquityTracker {
     fn default() -> Self {
-        Self::with_retention(DEFAULT_MAX_RECENT_EQUITY_POINTS)
+        Self::new()
     }
 }
 
@@ -64,15 +59,9 @@ fn portfolio_value_nanos(
 
 impl EquityTracker {
     pub fn new() -> Self {
-        Self::with_retention(DEFAULT_MAX_RECENT_EQUITY_POINTS)
-    }
-
-    pub fn with_retention(max_points: usize) -> Self {
         Self {
-            points: HashMap::new(),
             known: HashSet::new(),
             last_sweep_ms: 0,
-            max_points,
             pending: Vec::new(),
         }
     }
@@ -94,18 +83,6 @@ impl EquityTracker {
 
     pub fn known_account_count(&self) -> usize {
         self.known.len()
-    }
-
-    pub fn retained_account_count(&self) -> usize {
-        self.points.len()
-    }
-
-    pub fn retained_point_count(&self) -> usize {
-        self.points.values().map(VecDeque::len).sum()
-    }
-
-    pub fn retention_per_account(&self) -> usize {
-        self.max_points
     }
 
     /// Record equity at block finalize. `touched` = accounts that traded this
@@ -141,22 +118,7 @@ impl EquityTracker {
                 deposited_nanos: account.total_deposited,
             };
             self.pending.push((aid, point));
-            if self.max_points > 0 {
-                let ring = self.points.entry(aid).or_default();
-                ring.push_back(point);
-                while ring.len() > self.max_points {
-                    ring.pop_front();
-                }
-            }
         }
-    }
-
-    /// All retained points for an account, oldest-first.
-    pub fn series(&self, account_id: AccountId) -> Vec<EquityPoint> {
-        self.points
-            .get(&account_id)
-            .map(|r| r.iter().copied().collect())
-            .unwrap_or_default()
     }
 }
 
@@ -178,15 +140,15 @@ mod tests {
 
         // First block: touched account sampled.
         t.record(&touched, &accounts, &prices, 1, 1_000);
-        assert_eq!(t.series(aid).len(), 1);
+        assert_eq!(t.pending().len(), 1);
         assert_eq!(
-            t.series(aid)[0].portfolio_value_nanos,
+            t.pending()[0].1.portfolio_value_nanos,
             1_000 * NANOS_PER_DOLLAR as i64
         );
 
         // Next block, not due, not touched → no new point.
         t.record(&HashSet::new(), &accounts, &prices, 2, 2_000);
-        assert_eq!(t.series(aid).len(), 1);
+        assert_eq!(t.pending().len(), 1);
 
         // Past the sweep interval → known account sampled even though untouched.
         t.record(
@@ -196,6 +158,6 @@ mod tests {
             3,
             1_000 + EQUITY_SAMPLE_INTERVAL_MS,
         );
-        assert_eq!(t.series(aid).len(), 2);
+        assert_eq!(t.pending().len(), 2);
     }
 }

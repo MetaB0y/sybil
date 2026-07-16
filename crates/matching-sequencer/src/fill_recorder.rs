@@ -1,34 +1,26 @@
-//! Records fill history per account for querying.
+//! Builds block-local fill facts and current per-account fill totals.
+//!
+//! Durable/queryable fill history belongs to `sybil-history`. This component
+//! retains only the uncommitted export delta needed by the next fenced history
+//! batch plus the all-time counters used by current product views.
 
 use std::collections::HashMap;
 
-use matching_engine::{Fill, MarketId, Order, compute_fill_settlement};
+use matching_engine::{Fill, Order, compute_fill_settlement};
 
 use crate::account::{AccountId, AccountStore};
 use crate::aggregates::CostBasisTracker;
-use crate::market_info::{AccountFillCursor, AccountFillRecord};
+use crate::market_info::AccountFillRecord;
 
-/// Bounded in-memory fill history retained per account.
-///
-/// Full fill history is exported to `sybil-history`; the actor retains only a
-/// recent diagnostic/current-value window.
-pub const DEFAULT_MAX_RECENT_FILLS_PER_ACCOUNT: usize = 5_000;
-
-/// Records fill history per account.
+/// Accumulates current fill totals and the next committed history delta.
 #[derive(Clone)]
 pub struct FillRecorder {
-    account_fills: HashMap<AccountId, Vec<AccountFillRecord>>,
-    max_recent_per_account: usize,
-    /// Records appended since the last committed block snapshot. This is the
-    /// product-history export delta and is intentionally not bounded by
-    /// `max_recent_per_account`; the cap only applies to the recent cache.
+    /// Records appended since the last committed block snapshot.
     pending_delta: Vec<(AccountId, AccountFillRecord)>,
     /// All-time fill count per account, excluding `AccountId::MINT`. One
     /// fill record bumps the per-account counter once regardless of how
     /// many markets the underlying order touches (the fill IS the trade
     /// event — multi-market orders still produce one fill per match).
-    /// Survives the `MAX_RECENT_FILLS_PER_ACCOUNT` trim, which only drops
-    /// the bounded `account_fills` records.
     total_count: HashMap<AccountId, u64>,
 }
 
@@ -40,109 +32,22 @@ impl Default for FillRecorder {
 
 impl FillRecorder {
     pub fn new() -> Self {
-        Self::with_retention(DEFAULT_MAX_RECENT_FILLS_PER_ACCOUNT)
-    }
-
-    pub fn with_retention(max_recent_per_account: usize) -> Self {
         Self {
-            account_fills: HashMap::new(),
-            max_recent_per_account,
             pending_delta: Vec::new(),
             total_count: HashMap::new(),
         }
     }
 
-    pub fn restore(records: Vec<(AccountId, AccountFillRecord)>) -> Self {
-        Self::restore_with_retention(records, DEFAULT_MAX_RECENT_FILLS_PER_ACCOUNT)
-    }
-
-    pub fn restore_with_retention(
-        records: Vec<(AccountId, AccountFillRecord)>,
-        max_recent_per_account: usize,
-    ) -> Self {
-        let mut account_fills: HashMap<AccountId, Vec<AccountFillRecord>> = HashMap::new();
-        for (account_id, record) in records {
-            account_fills.entry(account_id).or_default().push(record);
-        }
-        for fills in account_fills.values_mut() {
-            fills.sort_by_key(|record| (record.block_height, record.order_id));
-            trim_account_fills(fills, max_recent_per_account);
-        }
+    pub fn restore_with_counts(total_count: HashMap<AccountId, u64>) -> Self {
         Self {
-            account_fills,
-            max_recent_per_account,
-            pending_delta: Vec::new(),
-            // Cold-start the total counter from the visible window. After
-            // trim this under-reports, which is acceptable until snapshot
-            // round-tripping for total_count lands alongside C1.
-            total_count: HashMap::new(),
-        }
-    }
-
-    /// Restore both the bounded fill window AND the all-time fill counter
-    /// in one call. Used by the persistence path so total_count survives
-    /// restart even when the visible window has been trimmed.
-    pub fn restore_with_counts(
-        records: Vec<(AccountId, AccountFillRecord)>,
-        total_count: HashMap<AccountId, u64>,
-        max_recent_per_account: usize,
-    ) -> Self {
-        let mut recorder = Self::restore_with_retention(records, max_recent_per_account);
-        recorder.total_count = total_count;
-        recorder
-    }
-
-    /// Restore records produced by [`crate::store::Store::recover_account_fills`].
-    ///
-    /// The store has already bounded each account's records and returns them
-    /// newest-first. Reverse each group into the recorder's oldest-first
-    /// internal order without sorting or trimming the cold-start input.
-    pub fn restore_bounded_newest_first_with_counts(
-        records: Vec<(AccountId, AccountFillRecord)>,
-        total_count: HashMap<AccountId, u64>,
-        max_recent_per_account: usize,
-    ) -> Self {
-        let mut account_fills: HashMap<AccountId, Vec<AccountFillRecord>> = HashMap::new();
-        for (account_id, record) in records {
-            account_fills.entry(account_id).or_default().push(record);
-        }
-        for fills in account_fills.values_mut() {
-            debug_assert!(fills.len() <= max_recent_per_account);
-            fills.reverse();
-        }
-        Self {
-            account_fills,
-            max_recent_per_account,
             pending_delta: Vec::new(),
             total_count,
         }
     }
 
-    pub fn snapshot(&self) -> Vec<(AccountId, AccountFillRecord)> {
-        let mut records: Vec<_> = self
-            .account_fills
-            .iter()
-            .flat_map(|(&account_id, fills)| {
-                fills
-                    .iter()
-                    .cloned()
-                    .map(move |record| (account_id, record))
-            })
-            .collect();
-        records.sort_by_key(|(account_id, record)| {
-            (account_id.0, record.block_height, record.order_id)
-        });
-        records
-    }
-
     /// Fills appended since the last committed off-block snapshot.
     pub fn pending_delta(&self) -> &[(AccountId, AccountFillRecord)] {
         &self.pending_delta
-    }
-
-    /// Number of fill records held by the bounded in-process recent cache.
-    pub fn retained_record_count(&self) -> usize {
-        self.account_fills.values().map(Vec::len).sum()
     }
 
     pub fn clear_pending(&mut self) {
@@ -160,7 +65,7 @@ impl FillRecorder {
         self.total_count.get(&account_id).copied().unwrap_or(0)
     }
 
-    /// Record fills from a block into per-account fill history. Also drives
+    /// Record fills from a block into its export delta. Also drives
     /// the cost-basis tracker (C1) so realized PnL accumulates in lockstep
     /// with the fill window. The tracker reaches into `accounts` for
     /// post-fill position state (the prior position is `current - delta`).
@@ -235,84 +140,13 @@ impl FillRecorder {
                 timestamp_ms,
                 position_deltas,
             };
-            self.pending_delta.push((account_id, record.clone()));
-
-            let records = self.account_fills.entry(account_id).or_default();
-            records.push(record);
-            trim_account_fills(records, self.max_recent_per_account);
+            self.pending_delta.push((account_id, record));
 
             // All-time counter: skip MINT (system account, not a user trade).
             if account_id != AccountId::MINT {
                 *self.total_count.entry(account_id).or_insert(0) += 1;
             }
         }
-    }
-
-    /// Get fill records for an account, optionally filtered by market, served
-    /// **newest-first**. The stored vec is sorted ascending by `(block_height,
-    /// order_id)`, so we reverse before paginating: `limit`/`offset` then page
-    /// from the most recent fill. This keeps the default window glued to recent
-    /// activity — so avg-fill / fill-count on freshly-filled open orders are
-    /// covered — and only fills older than the window fall off the tail (rather
-    /// than recent ones never appearing).
-    pub fn account_fills(
-        &self,
-        account_id: AccountId,
-        market_id_filter: Option<MarketId>,
-        limit: usize,
-        offset: usize,
-    ) -> Vec<AccountFillRecord> {
-        let Some(fills) = self.account_fills.get(&account_id) else {
-            return Vec::new();
-        };
-        fills
-            .iter()
-            .rev()
-            .filter(|f| {
-                market_id_filter
-                    .is_none_or(|mid| f.position_deltas.iter().any(|(m, _, _)| *m == mid))
-            })
-            .skip(offset)
-            .take(limit)
-            .cloned()
-            .collect()
-    }
-
-    /// Get fill records for an account strictly after `after`, served
-    /// oldest-to-newest in stable cursor order. This is the forward-tailing
-    /// API; unlike offset-from-newest pagination, inserts at the head cannot
-    /// shift the client's place.
-    pub fn account_fills_after(
-        &self,
-        account_id: AccountId,
-        market_id_filter: Option<MarketId>,
-        after: Option<AccountFillCursor>,
-        limit: usize,
-    ) -> Vec<AccountFillRecord> {
-        let Some(fills) = self.account_fills.get(&account_id) else {
-            return Vec::new();
-        };
-        let mut out: Vec<_> = fills
-            .iter()
-            .filter(|record| {
-                after.is_none_or(|cursor| AccountFillCursor::from_record(record) > cursor)
-            })
-            .filter(|record| {
-                market_id_filter
-                    .is_none_or(|mid| record.position_deltas.iter().any(|(m, _, _)| *m == mid))
-            })
-            .cloned()
-            .collect();
-        out.sort_by_key(AccountFillCursor::from_record);
-        out.truncate(limit);
-        out
-    }
-}
-
-fn trim_account_fills(fills: &mut Vec<AccountFillRecord>, max_recent_per_account: usize) {
-    let overflow = fills.len().saturating_sub(max_recent_per_account);
-    if overflow > 0 {
-        fills.drain(0..overflow);
     }
 }
 
@@ -322,145 +156,14 @@ mod tests {
     use matching_engine::{Fill, MarketSet, NANOS_PER_DOLLAR, Nanos, Qty, outcome_buy};
 
     #[test]
-    fn fill_history_is_bounded_per_account_on_record() {
-        let mut markets = MarketSet::new();
-        let market = markets.add_binary("bounded");
-        let order = outcome_buy(&markets, 1, market, 0, NANOS_PER_DOLLAR / 2, 1);
-        let mut orders = HashMap::new();
-        orders.insert(order.id, &order);
-
-        let max_fills = 8;
-        let mut recorder = FillRecorder::with_retention(max_fills);
-        let mut cb = CostBasisTracker::new();
-        let accounts = AccountStore::new();
-        let mut log = crate::aggregates::AccountEventLog::new();
-        for height in 1..=(max_fills as u64 + 5) {
-            let mut fill = Fill::new(order.id, Qty(1), Nanos(NANOS_PER_DOLLAR / 2));
-            fill.account_id = 42;
-            recorder.record_fills(
-                &[fill],
-                &orders,
-                height,
-                height * 1_000,
-                &mut cb,
-                &accounts,
-                &mut log,
-            );
-        }
-
-        let fills = recorder.account_fills(AccountId(42), None, max_fills + 10, 0);
-        assert_eq!(fills.len(), max_fills);
-        // Served newest-first: most recent retained fill leads, oldest trails.
-        assert_eq!(fills.first().unwrap().block_height, max_fills as u64 + 5);
-        assert_eq!(fills.last().unwrap().block_height, 6);
-    }
-
-    #[test]
-    fn fill_history_is_bounded_per_account_on_restore() {
-        let max_fills = 8;
-        let records = (1..=(max_fills as u64 + 5))
-            .map(|height| {
-                (
-                    AccountId(7),
-                    AccountFillRecord {
-                        order_id: height,
-                        fill_qty: 1,
-                        fill_price: Nanos(NANOS_PER_DOLLAR / 2),
-                        block_height: height,
-                        timestamp_ms: height * 1_000,
-                        position_deltas: Vec::new(),
-                    },
-                )
-            })
-            .collect();
-
-        let recorder = FillRecorder::restore_with_retention(records, max_fills);
-        let fills = recorder.account_fills(AccountId(7), None, usize::MAX, 0);
-        assert_eq!(fills.len(), max_fills);
-        // Served newest-first after restore + trim: most recent retained leads.
-        assert_eq!(fills.first().unwrap().block_height, max_fills as u64 + 5);
-    }
-
-    #[test]
-    fn cursor_pagination_is_forward_stable_across_new_fills() {
-        let mut markets = MarketSet::new();
-        let market = markets.add_binary("cursor");
-        let order = outcome_buy(&markets, 1, market, 0, NANOS_PER_DOLLAR / 2, 1);
-        let mut orders = HashMap::new();
-        orders.insert(order.id, &order);
-
-        let mut recorder = FillRecorder::with_retention(10);
-        let mut cb = CostBasisTracker::new();
-        let accounts = AccountStore::new();
-        let mut log = crate::aggregates::AccountEventLog::new();
-
-        for height in 1..=2 {
-            let mut fill = Fill::new(order.id, Qty(1), Nanos(NANOS_PER_DOLLAR / 2));
-            fill.account_id = 42;
-            recorder.record_fills(
-                &[fill],
-                &orders,
-                height,
-                height * 1_000,
-                &mut cb,
-                &accounts,
-                &mut log,
-            );
-        }
-
-        let first_page =
-            recorder.account_fills_after(AccountId(42), None, Some(AccountFillCursor::MIN), 1);
-        assert_eq!(first_page.len(), 1);
-        assert_eq!(first_page[0].block_height, 1);
-        let cursor = AccountFillCursor::from_record(&first_page[0]);
-
-        let mut fill = Fill::new(order.id, Qty(1), Nanos(NANOS_PER_DOLLAR / 2));
-        fill.account_id = 42;
-        recorder.record_fills(&[fill], &orders, 3, 3_000, &mut cb, &accounts, &mut log);
-
-        let next_page = recorder.account_fills_after(AccountId(42), None, Some(cursor), 10);
-        let heights: Vec<u64> = next_page.iter().map(|record| record.block_height).collect();
-        assert_eq!(heights, vec![2, 3]);
-    }
-
-    #[test]
-    fn cursor_pagination_survives_hot_retention_trim() {
-        let records = (1..=4)
-            .map(|height| {
-                (
-                    AccountId(7),
-                    AccountFillRecord {
-                        order_id: height,
-                        fill_qty: 1,
-                        fill_price: Nanos(NANOS_PER_DOLLAR / 2),
-                        block_height: height,
-                        timestamp_ms: height * 1_000,
-                        position_deltas: Vec::new(),
-                    },
-                )
-            })
-            .collect();
-        let recorder = FillRecorder::restore_with_retention(records, 2);
-
-        let fills = recorder.account_fills_after(
-            AccountId(7),
-            None,
-            Some(AccountFillCursor::new(1, 1)),
-            10,
-        );
-        let heights: Vec<u64> = fills.iter().map(|record| record.block_height).collect();
-        assert_eq!(heights, vec![3, 4]);
-    }
-
-    #[test]
-    fn pending_delta_is_captured_before_hot_retention_trim() {
+    fn pending_delta_captures_fill_facts_until_commit() {
         let mut markets = MarketSet::new();
         let market = markets.add_binary("cap0");
         let order = outcome_buy(&markets, 1, market, 0, NANOS_PER_DOLLAR / 2, 1);
         let mut orders = HashMap::new();
         orders.insert(order.id, &order);
 
-        let mut recorder = FillRecorder::with_retention(0);
+        let mut recorder = FillRecorder::new();
         let mut cb = CostBasisTracker::new();
         let accounts = AccountStore::new();
         let mut log = crate::aggregates::AccountEventLog::new();
@@ -468,13 +171,10 @@ mod tests {
         fill.account_id = 42;
         recorder.record_fills(&[fill], &orders, 1, 1_000, &mut cb, &accounts, &mut log);
 
-        assert!(
-            recorder
-                .account_fills_after(AccountId(42), None, Some(AccountFillCursor::MIN), 10)
-                .is_empty()
-        );
         assert_eq!(recorder.pending_delta().len(), 1);
         assert_eq!(recorder.pending_delta()[0].1.block_height, 1);
+        recorder.clear_pending();
+        assert!(recorder.pending_delta().is_empty());
     }
 
     #[test]
@@ -522,9 +222,8 @@ mod tests {
         let mut log = crate::aggregates::AccountEventLog::new();
         recorder.record_fills(&[fill], &orders, 1, 1_000, &mut cb, &accounts, &mut log);
 
-        // MINT fills still land in account_fills (we may want to query
-        // them) but total_count must not include them — MINT is a system
-        // account, not a trader.
+        // MINT facts may still be exported, but current user trade counts must
+        // not include the system account.
         assert_eq!(recorder.total_fills(AccountId::MINT), 0);
     }
 

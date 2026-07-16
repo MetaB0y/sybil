@@ -16,7 +16,6 @@ pub struct Store {
 pub struct AnalyticsSnapshot<'a> {
     pub last_clearing_prices: &'a HashMap<MarketId, Vec<Nanos>>,
     pub market_volumes: &'a HashMap<MarketId, u64>,
-    pub account_fills: Vec<(AccountId, AccountFillRecord)>,
     pub trader_tracker: TraderTrackerSnapshot,
     pub rolling_volume: RollingVolumeSnapshot,
     pub rolling_price_anchors: RollingPriceAnchorsSnapshot,
@@ -119,17 +118,8 @@ fn build_committed_history_batch(
         AccountEquityFact, AccountEventFact, AccountFillFact, MarketPriceFact, PositionDeltaFact,
     };
 
-    // The explicit delta is authoritative. Current-height cache rows cover
-    // standalone/test callers that have already cleared pending state; the map
-    // makes the overlap idempotent without re-exporting older hot-cache rows.
     let mut fills = BTreeMap::new();
-    for (account_id, record) in snapshot
-        .analytics
-        .account_fills
-        .iter()
-        .filter(|(_, record)| record.block_height == snapshot.header.height)
-        .chain(snapshot.analytics.fill_history_delta.iter())
-    {
+    for (account_id, record) in &snapshot.analytics.fill_history_delta {
         fills.insert(
             (account_id.0, record.block_height, record.order_id),
             AccountFillFact {

@@ -109,56 +109,6 @@ fn qi(shares: u64) -> i64 {
     q(shares) as i64
 }
 
-type LifecycleHistoryRow = (
-    u64,
-    u64,
-    u8,
-    Option<u32>,
-    Option<u64>,
-    Option<&'static str>,
-    Option<&'static str>,
-    Option<u64>,
-    Option<u64>,
-    Option<&'static str>,
-    Option<i64>,
-    Option<i64>,
-);
-
-fn lifecycle_history_rows(
-    analytics: &AnalyticsState,
-    account_ids: &[AccountId],
-) -> Vec<LifecycleHistoryRow> {
-    let mut rows = Vec::new();
-    for account_id in account_ids {
-        for event in analytics.account_history(*account_id, usize::MAX, None, None) {
-            if !matches!(
-                event.kind,
-                crate::aggregates::HistoryKind::Placed
-                    | crate::aggregates::HistoryKind::Rejected
-                    | crate::aggregates::HistoryKind::Expired
-            ) {
-                continue;
-            }
-            rows.push((
-                event.account_id.0,
-                event.block_height,
-                event.kind as u8,
-                event.market_id.map(|market| market.0),
-                event.order_id,
-                event.side,
-                event.outcome,
-                event.qty,
-                event.price_nanos,
-                event.reason,
-                event.required_nanos,
-                event.available_nanos,
-            ));
-        }
-    }
-    rows.sort();
-    rows
-}
-
 fn fund_scenario_account(accounts: &mut AccountStore, markets: &MarketSet) -> AccountId {
     let account_id = accounts.create_account(1_000_000_000_000_000);
     let account = accounts.get_mut(account_id).expect("account exists");
@@ -250,7 +200,6 @@ fn restored_analytics_from(seq: &BlockSequencer) -> crate::store::AnalyticsResto
     crate::store::AnalyticsRestoredState {
         last_clearing_prices: seq.analytics().last_clearing_prices().clone(),
         market_volumes: seq.analytics().market_volumes().clone(),
-        account_fills: Vec::new(),
         trader_tracker: Default::default(),
         rolling_volume: Default::default(),
         rolling_price_anchors: Default::default(),
@@ -1352,7 +1301,7 @@ fn placed_order_stats_count_mm_batch_orders() {
 }
 
 #[test]
-fn derived_view_stream_rebuilds_order_stats_and_lifecycle_history_over_scenarios() {
+fn derived_view_stream_rebuilds_order_stats_over_scenarios() {
     let scenarios = [
         ScenarioConfig::quick().with_seed(216),
         ScenarioConfig::small().with_seed(166),
@@ -1360,7 +1309,8 @@ fn derived_view_stream_rebuilds_order_stats_and_lifecycle_history_over_scenarios
 
     for config in scenarios {
         let problem = generate_scenario(config);
-        let (mut sequencer, submissions, account_ids) = sequencer_from_scenario_problem(problem, 5);
+        let (mut sequencer, submissions, _account_ids) =
+            sequencer_from_scenario_problem(problem, 5);
         let replay_config = sequencer.config.clone();
 
         let productions = vec![
@@ -1371,8 +1321,6 @@ fn derived_view_stream_rebuilds_order_stats_and_lifecycle_history_over_scenarios
 
         let live_order_stats =
             rmp_serde::to_vec(&sequencer.analytics().order_stats_snapshot()).unwrap();
-        let live_history = lifecycle_history_rows(sequencer.analytics(), &account_ids);
-
         let mut replay = AnalyticsState::new(&replay_config);
         for production in &productions {
             let sealed = production.sealed_block();
@@ -1387,11 +1335,6 @@ fn derived_view_stream_rebuilds_order_stats_and_lifecycle_history_over_scenarios
         assert_eq!(
             replay_order_stats, live_order_stats,
             "stream-rebuilt order stats must match live analytics"
-        );
-        assert_eq!(
-            lifecycle_history_rows(&replay, &account_ids),
-            live_history,
-            "stream-rebuilt lifecycle history must match live analytics"
         );
     }
 }
@@ -1747,7 +1690,6 @@ fn test_resting_orders_survive_restart_and_match() {
         analytics: crate::store::AnalyticsRestoredState {
             last_clearing_prices: seq_a.analytics().last_clearing_prices().clone(),
             market_volumes: seq_a.analytics().market_volumes().clone(),
-            account_fills: Vec::new(),
             trader_tracker: Default::default(),
             rolling_volume: Default::default(),
             rolling_price_anchors: Default::default(),
@@ -1868,7 +1810,6 @@ fn restore_advances_next_order_id_past_replayed_admit_log_before_pending_bundles
         analytics: crate::store::AnalyticsRestoredState {
             last_clearing_prices: committed.analytics().last_clearing_prices().clone(),
             market_volumes: committed.analytics().market_volumes().clone(),
-            account_fills: Vec::new(),
             trader_tracker: Default::default(),
             rolling_volume: Default::default(),
             rolling_price_anchors: Default::default(),
@@ -1974,7 +1915,6 @@ fn restored_pending_bundle_revalidates_against_replayed_admit_reservations() {
         analytics: crate::store::AnalyticsRestoredState {
             last_clearing_prices: committed.analytics().last_clearing_prices().clone(),
             market_volumes: committed.analytics().market_volumes().clone(),
-            account_fills: Vec::new(),
             trader_tracker: Default::default(),
             rolling_volume: Default::default(),
             rolling_price_anchors: Default::default(),
@@ -3940,16 +3880,6 @@ fn stp_undo_preserves_other_accounts_same_block_expired_history_and_state_root()
                     && removed.exit_reason == crate::block::RemovedOrderExitReason::Expired
             })
     );
-    assert!(
-        seq.analytics()
-            .account_history(expiring_account, usize::MAX, None, None)
-            .iter()
-            .any(|event| {
-                event.order_id == Some(expiring_order_id)
-                    && event.kind == crate::aggregates::HistoryKind::Expired
-            })
-    );
-
     assert_eq!(
         production.block.header.state_root,
         production.witness.header.state_root

@@ -609,18 +609,16 @@
       }
     },
     {
-      "title": "Sequencer Retention and Backpressure",
+      "title": "Sequencer State and Backpressure",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 101 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [
-        { "expr": "sybil_recent_price_point_entries", "legendFormat": "recent price points", "refId": "A" },
-        { "expr": "sybil_recent_fill_entries", "legendFormat": "recent fills", "refId": "B" },
-        { "expr": "sybil_recent_equity_point_entries", "legendFormat": "recent equity points", "refId": "C" },
-        { "expr": "sybil_recent_account_event_entries", "legendFormat": "recent account events", "refId": "D" },
-        { "expr": "sybil_recent_block_cache_len", "legendFormat": "recent blocks", "refId": "E" },
-        { "expr": "sybil_product_history_outbox_backlog_rows", "legendFormat": "history outbox", "refId": "F" },
-        { "expr": "max(sybil_actor_queue_depth)", "legendFormat": "actor queue", "refId": "G" }
+        { "expr": "sybil_recent_block_cache_len", "legendFormat": "recent blocks", "refId": "A" },
+        { "expr": "sybil_product_history_outbox_backlog_rows", "legendFormat": "history outbox", "refId": "B" },
+        { "expr": "max(sybil_actor_queue_depth)", "legendFormat": "actor queue", "refId": "C" },
+        { "expr": "sybil_pending_orders", "legendFormat": "pending orders", "refId": "D" },
+        { "expr": "sybil_state_accounts_total", "legendFormat": "state accounts", "refId": "E" }
       ],
       "fieldConfig": {
         "defaults": { "unit": "none", "custom": { "drawStyle": "line", "fillOpacity": 10 } },

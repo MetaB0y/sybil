@@ -21,7 +21,6 @@ use crate::block::{
 };
 use crate::error::RejectionReason;
 use crate::fill_recorder::FillRecorder;
-use crate::market_info::{AccountFillCursor, AccountFillRecord, PricePoint};
 use crate::order_book::{OrderBook, RestingOrder};
 use crate::price_tracker::{PriceTracker, RollingPriceAnchorsSnapshot, RollingVolumeSnapshot};
 use crate::sequencer::SequencerConfig;
@@ -69,54 +68,38 @@ impl OrderHistoryOptions {
 }
 
 impl AnalyticsState {
-    pub fn new(config: &SequencerConfig) -> Self {
+    pub fn new(_config: &SequencerConfig) -> Self {
         Self {
-            price_tracker: PriceTracker::with_retention(config.max_recent_price_points_per_market),
-            fill_recorder: FillRecorder::with_retention(config.max_recent_fills_per_account),
+            price_tracker: PriceTracker::new(),
+            fill_recorder: FillRecorder::new(),
             trader_tracker: TraderTracker::new(),
             liquidity_tracker: LiquidityTracker::new(),
             order_stats_tracker: OrderStatsTracker::new(),
             welfare_tracker: WelfareTracker::new(),
             cost_basis_tracker: CostBasisTracker::new(),
             first_deposit_ms: HashMap::new(),
-            equity_tracker: EquityTracker::with_retention(
-                config.max_recent_equity_points_per_account,
-            ),
-            account_event_log: AccountEventLog::with_retention(
-                config.max_recent_account_events_per_account,
-            ),
+            equity_tracker: EquityTracker::new(),
+            account_event_log: AccountEventLog::new(),
         }
     }
 
-    pub fn restore(input: AnalyticsRestoredState, config: &SequencerConfig) -> Self {
-        let mut price_tracker = PriceTracker::with_state_and_retention(
-            input.last_clearing_prices,
-            input.market_volumes,
-            config.max_recent_price_points_per_market,
-        );
+    pub fn restore(input: AnalyticsRestoredState, _config: &SequencerConfig) -> Self {
+        let mut price_tracker =
+            PriceTracker::with_state(input.last_clearing_prices, input.market_volumes);
         price_tracker.restore_rolling_volume(input.rolling_volume);
         price_tracker.restore_rolling_price_anchors(input.rolling_price_anchors);
 
         Self {
             price_tracker,
-            fill_recorder: FillRecorder::restore_bounded_newest_first_with_counts(
-                input.account_fills,
-                input.fill_total_counts,
-                config.max_recent_fills_per_account,
-            ),
+            fill_recorder: FillRecorder::restore_with_counts(input.fill_total_counts),
             trader_tracker: TraderTracker::restore(input.trader_tracker),
             liquidity_tracker: LiquidityTracker::restore(input.liquidity_tracker),
             order_stats_tracker: OrderStatsTracker::restore(input.order_stats_tracker),
             welfare_tracker: WelfareTracker::restore(input.welfare_tracker),
             cost_basis_tracker: CostBasisTracker::restore(input.cost_basis_tracker),
             first_deposit_ms: input.first_deposit_ms,
-            equity_tracker: EquityTracker::with_retention(
-                config.max_recent_equity_points_per_account,
-            ),
-            account_event_log: AccountEventLog::with_retention_and_next_seq(
-                config.max_recent_account_events_per_account,
-                input.next_product_event_seq,
-            ),
+            equity_tracker: EquityTracker::new(),
+            account_event_log: AccountEventLog::with_next_seq(input.next_product_event_seq),
         }
     }
 
@@ -124,7 +107,6 @@ impl AnalyticsState {
         AnalyticsSnapshot {
             last_clearing_prices: self.last_clearing_prices(),
             market_volumes: self.market_volumes(),
-            account_fills: self.fill_snapshot(),
             trader_tracker: self.trader_snapshot(),
             rolling_volume: self.rolling_volume_snapshot(),
             rolling_price_anchors: self.rolling_price_anchors_snapshot(),
@@ -178,27 +160,6 @@ impl AnalyticsState {
         )
     }
 
-    pub fn price_history(
-        &self,
-        market_id: MarketId,
-        from_ms: Option<u64>,
-        to_ms: Option<u64>,
-    ) -> Vec<PricePoint> {
-        self.price_tracker.price_history(market_id, from_ms, to_ms)
-    }
-
-    /// Sizes of the bounded in-process recent-history caches. These are
-    /// operational diagnostics only; durable product history is owned by
-    /// `sybil-history` and is not included here.
-    pub fn recent_history_cache_counts(&self) -> RecentHistoryCacheCounts {
-        RecentHistoryCacheCounts {
-            price_points: self.price_tracker.retained_point_count(),
-            fills: self.fill_recorder.retained_record_count(),
-            equity_points: self.equity_tracker.retained_point_count(),
-            account_events: self.account_event_log.retained_event_count(),
-        }
-    }
-
     pub fn price_n_hours_ago(
         &self,
         market_id: MarketId,
@@ -214,32 +175,6 @@ impl AnalyticsState {
         now_ms: u64,
     ) -> HashMap<MarketId, (u64, u64)> {
         self.price_tracker.all_market_prices_n_hours_ago(n, now_ms)
-    }
-
-    pub fn account_fills(
-        &self,
-        account_id: AccountId,
-        market_id_filter: Option<MarketId>,
-        limit: usize,
-        offset: usize,
-    ) -> Vec<AccountFillRecord> {
-        self.fill_recorder
-            .account_fills(account_id, market_id_filter, limit, offset)
-    }
-
-    pub fn account_fills_after(
-        &self,
-        account_id: AccountId,
-        market_id_filter: Option<MarketId>,
-        after: Option<AccountFillCursor>,
-        limit: usize,
-    ) -> Vec<AccountFillRecord> {
-        self.fill_recorder
-            .account_fills_after(account_id, market_id_filter, after, limit)
-    }
-
-    pub fn fill_snapshot(&self) -> Vec<(AccountId, AccountFillRecord)> {
-        self.fill_recorder.snapshot()
     }
 
     pub fn total_fill_counts(&self) -> HashMap<AccountId, u64> {
@@ -678,23 +613,8 @@ impl AnalyticsState {
             .record(touched, accounts, prices, height, timestamp_ms);
     }
 
-    pub fn equity_series(&self, account_id: AccountId) -> Vec<crate::aggregates::EquityPoint> {
-        self.equity_tracker.series(account_id)
-    }
-
     pub fn record_history(&mut self, event: HistoryEvent) {
         self.account_event_log.append(event);
-    }
-
-    pub fn account_history(
-        &self,
-        account_id: AccountId,
-        limit: usize,
-        before: Option<(u64, u64)>,
-        category: Option<&str>,
-    ) -> Vec<HistoryEvent> {
-        self.account_event_log
-            .query(account_id, limit, before, category)
     }
 
     pub fn pending_account_history(
@@ -764,12 +684,4 @@ impl AnalyticsState {
     pub fn seed_equity_known(&mut self, ids: impl IntoIterator<Item = AccountId>) {
         self.equity_tracker.seed_known(ids);
     }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct RecentHistoryCacheCounts {
-    pub price_points: usize,
-    pub fills: usize,
-    pub equity_points: usize,
-    pub account_events: usize,
 }

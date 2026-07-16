@@ -320,7 +320,7 @@ mod tests {
     use super::*;
 
     /// An `ApiConfig` that passes a prod preflight cleanly: durable, locked
-    /// down, caches at their prod-intended values.
+    /// down, with the canonical block cache at its prod-intended value.
     fn prod_ready_config() -> ApiConfig {
         ApiConfig {
             deployment_profile: "prod".to_string(),
@@ -335,10 +335,6 @@ mod tests {
             webauthn_origin: sybil_verifier::key_op_auth::EXPECTED_WEBAUTHN_ORIGIN.to_string(),
             webauthn_require_uv: true,
             public_account_grant_nanos: 0,
-            max_recent_fills_per_account: 5_000,
-            max_recent_price_points_per_market: 2_000,
-            max_recent_equity_points_per_account: 0,
-            max_recent_account_events_per_account: 0,
             recent_block_cache_capacity: 100,
             ..ApiConfig::default()
         }

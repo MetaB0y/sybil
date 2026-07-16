@@ -1389,11 +1389,10 @@ async fn list_markets_reports_traded_volume() {
 }
 
 #[tokio::test]
-async fn market_price_history_is_projected_beyond_recent_cache() {
+async fn market_price_history_is_projected_by_history_service() {
     let (app, handle) = test_app_with_store_config(
         true,
         SequencerConfig {
-            max_recent_price_points_per_market: 1,
             block_interval: Duration::from_secs(60),
             ..SequencerConfig::default()
         },
@@ -2668,7 +2667,7 @@ async fn account_equity_series_is_served_by_history_service() {
 }
 
 #[tokio::test]
-async fn account_fills_are_served_by_history_service_with_zero_recent_cap() {
+async fn account_fills_are_served_by_history_service() {
     let (app, handle) = test_app_with_store_zero_caps(true).await;
 
     let (_, body) = post_json(app.clone(), "/v1/markets", json!({ "name": "FillDb?" })).await;
