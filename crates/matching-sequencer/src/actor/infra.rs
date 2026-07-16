@@ -1,5 +1,22 @@
 use super::*;
 
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ScheduledTickGate {
+    queued: Arc<AtomicBool>,
+}
+
+impl ScheduledTickGate {
+    pub(crate) fn try_queue(&self) -> bool {
+        self.queued
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    }
+
+    pub(crate) fn started(&self) {
+        self.queued.store(false, Ordering::Release);
+    }
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct IndicativeSolveGate {
     in_flight: bool,
