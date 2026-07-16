@@ -493,14 +493,17 @@ groups:
           description: "sybil-api RSS is above 800 MiB on a host where the current container limit is 1.25 GiB; global host pressure may kill it before the cgroup limit (current: {{ $value | humanize1024 }}B)."
 
       - alert: SybilApiMemoryGrowingFast
-        expr: deriv(sybil_process_resident_memory_bytes[30m]) * 3600 > 32 * 1024 * 1024
+        expr: |
+          deriv(sybil_process_resident_memory_bytes[30m]) * 3600 > 32 * 1024 * 1024
+          and on(job, instance)
+          changes(sybil_recent_block_cache_len[5m]) == 0
         for: 30m
         labels:
           severity: warning
           component: sequencer
         annotations:
           summary: "sybil-api RSS is growing persistently"
-          description: "RSS has grown faster than 32 MiB/hour for 30m. Correlate the recent-history cache, archive, outbox, actor queue, and workload panels before a high absolute-memory alert fires."
+          description: "After the recent-block cache finished warming, RSS grew faster than 32 MiB/hour for 30m. Correlate the archive, outbox, actor queue, and workload panels before a high absolute-memory alert fires."
 
       - alert: HostMemoryLow
         expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.10
