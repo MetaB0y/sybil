@@ -2274,8 +2274,6 @@ export interface components {
        */
       categories?: string[] | null;
       category?: string | null;
-      /** Format: int64 */
-      challenge_deadline_ms?: number | null;
       /**
        * @description Whether Polymarket has closed this market. Off-block; the frontend
        *     filters closed markets out of the listing.
@@ -3268,8 +3266,7 @@ export interface components {
       quantity: number;
     };
     /**
-     * @description Detailed view of a market's resolution state. Unresolved markets return
-     *     `status = "active"` (or `proposed`/`challenged` for future policies) with
+     * @description Detailed view of a market's resolution state. Active markets return
      *     `payout_nanos = None`.
      */
     ResolutionResponse: {
@@ -3300,8 +3297,6 @@ export interface components {
       payout_nanos: string;
     };
     ResolveMarketResponse: {
-      /** Format: int64 */
-      challenge_deadline_ms?: number | null;
       /** Format: int32 */
       market_id: number;
       /**

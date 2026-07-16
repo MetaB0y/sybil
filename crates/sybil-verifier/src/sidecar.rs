@@ -762,8 +762,7 @@ fn verify_market_transition(witness: &BlockWitness, violations: &mut Vec<Violati
             match resolution_events.get(&market_id).copied() {
                 Some(payout_nanos) => match &post_market.status {
                     MarketStatusSnapshot::Resolved { record }
-                        if record.market_id == market_id && record.payout_nanos == payout_nanos => {
-                    }
+                        if record.payout_nanos == payout_nanos => {}
                     status => violations.push(Violation {
                         kind: ViolationKind::SidecarMarketStatusMismatch,
                         details: format!(
@@ -839,7 +838,7 @@ fn verify_market_transition(witness: &BlockWitness, violations: &mut Vec<Violati
     for (event_market, payout_nanos) in &resolution_events {
         match post_markets.get(event_market).map(|market| &market.status) {
             Some(MarketStatusSnapshot::Resolved { record })
-                if record.market_id == *event_market && record.payout_nanos == *payout_nanos => {}
+                if record.payout_nanos == *payout_nanos => {}
             Some(status) => violations.push(Violation {
                 kind: ViolationKind::SidecarMarketStatusMismatch,
                 details: format!(
@@ -859,7 +858,7 @@ fn verify_market_transition(witness: &BlockWitness, violations: &mut Vec<Violati
 
     for market_id in &witness.resolved_markets {
         match post_markets.get(market_id).map(|market| &market.status) {
-            Some(MarketStatusSnapshot::Resolved { .. } | MarketStatusSnapshot::Voided) => {}
+            Some(MarketStatusSnapshot::Resolved { .. }) => {}
             Some(status) => violations.push(Violation {
                 kind: ViolationKind::SidecarMarketStatusMismatch,
                 details: format!(
@@ -1341,12 +1340,9 @@ mod tests {
             num_outcomes: 2,
             status: MarketStatusSnapshot::Resolved {
                 record: ResolutionRecordSnapshot {
-                    market_id: MarketId::new(5),
                     payout_nanos: Nanos(NANOS_PER_DOLLAR),
                     resolved_by: OracleSourceSnapshot::Admin,
                     resolved_at_ms: 1_000,
-                    proposal: None,
-                    challenge: None,
                 },
             },
             metadata_digest: [5u8; 32],

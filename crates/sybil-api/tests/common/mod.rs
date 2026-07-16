@@ -15,7 +15,7 @@ use http_body_util::BodyExt;
 use matching_engine::MarketSet;
 use matching_sequencer::store::Store;
 use matching_sequencer::{
-    AccountStore, AdminOracle, BlockSequencer, PublicKey, SequencerConfig, SequencerHandle,
+    AccountStore, BlockSequencer, PublicKey, SequencerConfig, SequencerHandle,
 };
 use p256::ecdsa::SigningKey;
 use p256::elliptic_curve::rand_core::UnwrapErr;
@@ -101,14 +101,8 @@ pub async fn test_app_with_bootstrap(
 ) -> (Router, SequencerHandle, SigningKey, FeedId) {
     let accounts = AccountStore::new();
     let markets = MarketSet::new();
-    let oracle = Arc::new(AdminOracle::new());
-    let sequencer = BlockSequencer::with_default_solver(
-        accounts,
-        markets,
-        vec![],
-        oracle,
-        SequencerConfig::default(),
-    );
+    let sequencer =
+        BlockSequencer::with_default_solver(accounts, markets, vec![], SequencerConfig::default());
     let handle = SequencerHandle::spawn(sequencer);
 
     let admin_key = <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
@@ -140,8 +134,8 @@ pub async fn test_app_with_bootstrap(
     (create_router(state), handle, admin_key, admin_feed_id)
 }
 
-/// Create a test app without the oracle bootstrap (legacy path used by older
-/// integration tests — the admin unsigned dev-mode resolve path still works).
+/// Create a test app without feed/template bootstrap. The trusted unsigned
+/// dev-mode resolution path remains available.
 #[allow(dead_code)]
 pub async fn test_app(dev_mode: bool) -> (Router, SequencerHandle) {
     test_app_with_config(ApiConfig {
@@ -159,13 +153,12 @@ pub async fn test_app(dev_mode: bool) -> (Router, SequencerHandle) {
 pub async fn test_app_with_config(config: ApiConfig) -> (Router, SequencerHandle) {
     let accounts = AccountStore::new();
     let markets = MarketSet::new();
-    let oracle = Arc::new(AdminOracle::new());
     let sequencer_config = SequencerConfig {
         min_resting_order_notional_nanos: config.min_resting_order_notional_nanos,
         ..SequencerConfig::default()
     };
     let sequencer =
-        BlockSequencer::with_default_solver(accounts, markets, vec![], oracle, sequencer_config);
+        BlockSequencer::with_default_solver(accounts, markets, vec![], sequencer_config);
     let handle = SequencerHandle::spawn(sequencer);
     let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()
@@ -212,9 +205,8 @@ pub async fn test_app_with_store_api_config(
 ) -> (Router, SequencerHandle) {
     let accounts = AccountStore::new();
     let markets = MarketSet::new();
-    let oracle = Arc::new(AdminOracle::new());
     let sequencer =
-        BlockSequencer::with_default_solver(accounts, markets, vec![], oracle, sequencer_config);
+        BlockSequencer::with_default_solver(accounts, markets, vec![], sequencer_config);
     let store = Arc::new(Store::open(&temp_store_path()).expect("test store opens"));
     let handle = SequencerHandle::spawn_with_shared_store(sequencer, Some(Arc::clone(&store)));
     handle
@@ -232,12 +224,11 @@ pub async fn test_app_with_store_api_config(
 pub async fn test_app_with_store_zero_caps(dev_mode: bool) -> (Router, SequencerHandle) {
     let accounts = AccountStore::new();
     let markets = MarketSet::new();
-    let oracle = Arc::new(AdminOracle::new());
     let config = SequencerConfig {
         block_interval: Duration::from_secs(60 * 60),
         ..SequencerConfig::default()
     };
-    let sequencer = BlockSequencer::with_default_solver(accounts, markets, vec![], oracle, config);
+    let sequencer = BlockSequencer::with_default_solver(accounts, markets, vec![], config);
     let store = Arc::new(Store::open(&temp_store_path()).expect("test store opens"));
     let handle = SequencerHandle::spawn_with_shared_store(sequencer, Some(Arc::clone(&store)));
     handle

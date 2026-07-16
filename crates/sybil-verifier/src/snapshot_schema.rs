@@ -4,10 +4,9 @@ use matching_engine::MarketId;
 
 use crate::canonical::append_order;
 use crate::types::{
-    AccountReservationSnapshot, AccountSnapshot, BridgeStateSnapshot, ChallengeSnapshot,
-    MarketGroupSnapshot, MarketSnapshot, MarketStatusSnapshot, OracleSourceSnapshot,
-    ResolutionProposalSnapshot, ResolutionRecordSnapshot, RestingOrderSnapshot,
-    StateSidecarSnapshot, WithdrawalSnapshot,
+    AccountReservationSnapshot, AccountSnapshot, BridgeStateSnapshot, MarketGroupSnapshot,
+    MarketSnapshot, MarketStatusSnapshot, OracleSourceSnapshot, ResolutionRecordSnapshot,
+    RestingOrderSnapshot, StateSidecarSnapshot, WithdrawalSnapshot,
 };
 
 #[derive(Clone, Copy)]
@@ -94,60 +93,17 @@ impl<'a> SnapshotByteVisitor<'a> {
     fn append_market_status(&mut self, status: &MarketStatusSnapshot) {
         match status {
             MarketStatusSnapshot::Active => self.out.push(0),
-            MarketStatusSnapshot::Proposed {
-                proposal,
-                challenge_deadline_ms,
-            } => {
-                self.out.push(1);
-                self.append_resolution_proposal(proposal);
-                append_u64(self.out, *challenge_deadline_ms);
-            }
-            MarketStatusSnapshot::Challenged {
-                proposal,
-                challenge,
-            } => {
-                self.out.push(2);
-                self.append_resolution_proposal(proposal);
-                self.append_challenge(challenge);
-            }
             MarketStatusSnapshot::Resolved { record } => {
-                self.out.push(3);
+                self.out.push(1);
                 self.append_resolution_record(record);
             }
-            MarketStatusSnapshot::Voided => self.out.push(4),
         }
     }
 
-    fn append_resolution_proposal(&mut self, proposal: &ResolutionProposalSnapshot) {
-        append_u64(self.out, proposal.id);
-        append_market_id(self.out, proposal.market_id);
-        append_u64(self.out, proposal.payout_nanos.0);
-        self.append_oracle_source(&proposal.source);
-        append_u64(self.out, proposal.proposed_at_ms);
-        append_option_string(self.out, proposal.reason.as_deref());
-    }
-
-    fn append_challenge(&mut self, challenge: &ChallengeSnapshot) {
-        append_u64(self.out, challenge.id);
-        append_u64(self.out, challenge.challenger);
-        append_u64(self.out, challenge.proposal_id);
-        append_u64(self.out, challenge.bond_amount.0);
-        append_u64(self.out, challenge.proposed_payout_nanos.0);
-        append_string(self.out, &challenge.reason);
-        append_u64(self.out, challenge.challenged_at_ms);
-    }
-
     fn append_resolution_record(&mut self, record: &ResolutionRecordSnapshot) {
-        append_market_id(self.out, record.market_id);
         append_u64(self.out, record.payout_nanos.0);
         self.append_oracle_source(&record.resolved_by);
         append_u64(self.out, record.resolved_at_ms);
-        append_option(self.out, record.proposal.as_ref(), |out, proposal| {
-            SnapshotByteVisitor::new(out).append_resolution_proposal(proposal);
-        });
-        append_option(self.out, record.challenge.as_ref(), |out, challenge| {
-            SnapshotByteVisitor::new(out).append_challenge(challenge);
-        });
     }
 
     fn append_oracle_source(&mut self, source: &OracleSourceSnapshot) {
@@ -157,7 +113,6 @@ impl<'a> SnapshotByteVisitor<'a> {
                 self.out.push(1);
                 append_u64(self.out, *feed_id);
             }
-            OracleSourceSnapshot::AutomatedL0 => self.out.push(2),
         }
     }
 }
@@ -321,26 +276,6 @@ pub(crate) fn append_market_id(out: &mut Vec<u8>, market: MarketId) {
 pub(crate) fn append_string(out: &mut Vec<u8>, value: &str) {
     append_u64(out, value.len() as u64);
     out.extend_from_slice(value.as_bytes());
-}
-
-pub(crate) fn append_option_string(out: &mut Vec<u8>, value: Option<&str>) {
-    match value {
-        Some(value) => {
-            out.push(1);
-            append_string(out, value);
-        }
-        None => out.push(0),
-    }
-}
-
-pub(crate) fn append_option<T>(out: &mut Vec<u8>, value: Option<&T>, append: fn(&mut Vec<u8>, &T)) {
-    match value {
-        Some(value) => {
-            out.push(1);
-            append(out, value);
-        }
-        None => out.push(0),
-    }
 }
 
 pub(crate) fn append_u32(out: &mut Vec<u8>, value: u32) {

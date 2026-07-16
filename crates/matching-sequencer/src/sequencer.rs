@@ -6,7 +6,7 @@ use matching_engine::{
     derive_order_direction,
 };
 use matching_solver::{PipelineResult, Solver};
-use sybil_oracle::{MarketStatus, Oracle, ResolutionRecord};
+use sybil_oracle::{MarketStatus, ResolutionRecord};
 use sybil_verifier::{
     AccountSnapshot, BlockWitness, L1DepositWitness, SystemEventWitness, WitnessBlockHeader,
     WitnessOrder, WitnessRejection,
@@ -95,7 +95,7 @@ pub struct BlockSequencer {
     /// synchronously by the sequencer, but kept separate from core matching,
     /// settlement, and witness state.
     analytics: AnalyticsState,
-    /// Market lifecycle: statuses, oracle, metadata.
+    /// Market lifecycle: statuses, resolution policies, feeds, and metadata.
     pub lifecycle: crate::market_lifecycle::MarketLifecycle,
     /// P256 public key to account mapping.
     pubkey_registry: HashMap<crate::crypto::PublicKey, crate::crypto::RegisteredPubkey>,

@@ -395,51 +395,11 @@ fn market_status_snapshot(
 ) -> sybil_verifier::MarketStatusSnapshot {
     match status {
         sybil_oracle::MarketStatus::Active => sybil_verifier::MarketStatusSnapshot::Active,
-        sybil_oracle::MarketStatus::Proposed {
-            proposal,
-            challenge_deadline_ms,
-        } => sybil_verifier::MarketStatusSnapshot::Proposed {
-            proposal: resolution_proposal_snapshot(proposal),
-            challenge_deadline_ms,
-        },
-        sybil_oracle::MarketStatus::Challenged {
-            proposal,
-            challenge,
-        } => sybil_verifier::MarketStatusSnapshot::Challenged {
-            proposal: resolution_proposal_snapshot(proposal),
-            challenge: challenge_snapshot(challenge),
-        },
         sybil_oracle::MarketStatus::Resolved { record } => {
             sybil_verifier::MarketStatusSnapshot::Resolved {
                 record: resolution_record_snapshot(record),
             }
         }
-        sybil_oracle::MarketStatus::Voided => sybil_verifier::MarketStatusSnapshot::Voided,
-    }
-}
-
-fn resolution_proposal_snapshot(
-    proposal: sybil_oracle::ResolutionProposal,
-) -> sybil_verifier::ResolutionProposalSnapshot {
-    sybil_verifier::ResolutionProposalSnapshot {
-        id: proposal.id.0,
-        market_id: proposal.market_id,
-        payout_nanos: proposal.payout_nanos,
-        source: oracle_source_snapshot(proposal.source),
-        proposed_at_ms: proposal.proposed_at_ms,
-        reason: proposal.reason,
-    }
-}
-
-fn challenge_snapshot(challenge: sybil_oracle::Challenge) -> sybil_verifier::ChallengeSnapshot {
-    sybil_verifier::ChallengeSnapshot {
-        id: challenge.id.0,
-        challenger: challenge.challenger,
-        proposal_id: challenge.proposal_id.0,
-        bond_amount: challenge.bond_amount,
-        proposed_payout_nanos: challenge.proposed_payout_nanos,
-        reason: challenge.reason,
-        challenged_at_ms: challenge.challenged_at_ms,
     }
 }
 
@@ -447,12 +407,9 @@ fn resolution_record_snapshot(
     record: sybil_oracle::ResolutionRecord,
 ) -> sybil_verifier::ResolutionRecordSnapshot {
     sybil_verifier::ResolutionRecordSnapshot {
-        market_id: record.market_id,
         payout_nanos: record.payout_nanos,
         resolved_by: oracle_source_snapshot(record.resolved_by),
         resolved_at_ms: record.resolved_at_ms,
-        proposal: record.proposal.map(resolution_proposal_snapshot),
-        challenge: record.challenge.map(challenge_snapshot),
     }
 }
 
@@ -463,9 +420,6 @@ fn oracle_source_snapshot(
         sybil_oracle::OracleSource::Admin => sybil_verifier::OracleSourceSnapshot::Admin,
         sybil_oracle::OracleSource::DataFeed(feed_id) => {
             sybil_verifier::OracleSourceSnapshot::DataFeed(feed_id.0)
-        }
-        sybil_oracle::OracleSource::AutomatedL0 => {
-            sybil_verifier::OracleSourceSnapshot::AutomatedL0
         }
     }
 }
@@ -484,8 +438,7 @@ mod tests {
     use crate::market_lifecycle::MarketLifecycle;
     use matching_engine::{MarketId, MarketSet};
     use proptest::prelude::*;
-    use std::sync::Arc;
-    use sybil_oracle::{AdminOracle, MarketStatus, OracleSource, ResolutionRecord};
+    use sybil_oracle::{MarketStatus, OracleSource, ResolutionRecord};
     use sybil_verifier::AccountSnapshot;
 
     #[test]
@@ -662,7 +615,7 @@ mod tests {
         let market_id = markets.add_binary("Rain tomorrow");
         let groups = Vec::new();
         let prices = HashMap::new();
-        let mut lifecycle = MarketLifecycle::new(Arc::new(AdminOracle::new()));
+        let mut lifecycle = MarketLifecycle::new();
 
         let active_root = compute_complete_state_root(
             &accounts,
@@ -696,12 +649,9 @@ mod tests {
             market_id,
             MarketStatus::Resolved {
                 record: ResolutionRecord {
-                    market_id,
                     payout_nanos: matching_engine::Nanos(1_000_000_000),
                     resolved_by: OracleSource::Admin,
                     resolved_at_ms: 1_000,
-                    proposal: None,
-                    challenge: None,
                 },
             },
         );

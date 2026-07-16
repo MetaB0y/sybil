@@ -13,9 +13,7 @@ use tokio_util::task::TaskTracker;
 use tracing_subscriber::EnvFilter;
 
 use matching_engine::MarketSet;
-use matching_sequencer::{
-    AccountStore, AdminOracle, BlockSequencer, SequencerConfig, SequencerHandle,
-};
+use matching_sequencer::{AccountStore, BlockSequencer, SequencerConfig, SequencerHandle};
 use sybil_oracle::{FeedPubkey, ResolutionPolicy, ResolutionTemplate, TemplateId};
 
 use sybil_api::app::create_router;
@@ -321,8 +319,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         None
     };
-
-    let oracle = Arc::new(AdminOracle::new());
     let restored = if let Some(store) = store.as_ref() {
         match store.load_state().await {
             Ok(state) => state,
@@ -348,7 +344,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "Restored from persistent store"
         );
 
-        let mut sequencer = match BlockSequencer::try_restore(state, oracle, seq_config) {
+        let mut sequencer = match BlockSequencer::try_restore(state, seq_config) {
             Ok(sequencer) => sequencer,
             Err(e) => {
                 tracing::error!(error = %e, "failed to replay acknowledged writes");
@@ -373,8 +369,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         let num_markets = markets.len();
         let accounts = AccountStore::new();
-        let sequencer =
-            BlockSequencer::with_default_solver(accounts, markets, vec![], oracle, seq_config);
+        let sequencer = BlockSequencer::with_default_solver(accounts, markets, vec![], seq_config);
 
         tracing::info!(num_markets, "Starting fresh (no persistent state)");
 

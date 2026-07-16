@@ -17,12 +17,9 @@
 //! Everything here runs entirely in-process against `BlockSequencer::produce_block`
 //! (no HTTP, no actor/mailbox), mirroring the harness in `tests/invariants.rs`.
 
-use std::sync::Arc;
-
 use matching_engine::{MarketId, MarketSet, NANOS_PER_DOLLAR, Qty, outcome_buy};
 use matching_sequencer::{
-    AccountId, AccountStore, AdminOracle, BlockProduction, BlockSequencer, OrderSubmission,
-    SequencerConfig,
+    AccountId, AccountStore, BlockProduction, BlockSequencer, OrderSubmission, SequencerConfig,
 };
 
 const INITIAL_BALANCE: i64 = 1_000 * NANOS_PER_DOLLAR as i64;
@@ -41,15 +38,8 @@ fn setup() -> (BlockSequencer, MarketId, AccountId, AccountId) {
 
     let mut markets = MarketSet::new();
     let market = markets.add_binary("Will it fill?");
-
-    let oracle = Arc::new(AdminOracle::new());
-    let seq = BlockSequencer::with_default_solver(
-        accounts,
-        markets,
-        vec![],
-        oracle,
-        SequencerConfig::default(),
-    );
+    let seq =
+        BlockSequencer::with_default_solver(accounts, markets, vec![], SequencerConfig::default());
     (seq, market, buyer_yes, buyer_no)
 }
 

@@ -639,12 +639,9 @@ mod tests {
         let mut resolved = market.clone();
         resolved.status = MarketStatusSnapshot::Resolved {
             record: ResolutionRecordSnapshot {
-                market_id: MarketId::new(1),
                 payout_nanos: Nanos(1_000_000_000),
                 resolved_by: OracleSourceSnapshot::Admin,
                 resolved_at_ms: 42,
-                proposal: None,
-                challenge: None,
             },
         };
 

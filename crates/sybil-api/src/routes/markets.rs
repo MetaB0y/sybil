@@ -115,7 +115,6 @@ fn build_market_response(args: BuildMarketResponseArgs<'_>) -> MarketResponse {
         no_price_nanos: args.no_price_nanos,
         status: args.status.as_str().to_string(),
         payout_nanos: args.status.payout_nanos().map(|n| n.0),
-        challenge_deadline_ms: args.status.challenge_deadline_ms(),
         description: args
             .metadata
             .map(|m| m.description.clone())
@@ -657,7 +656,6 @@ pub async fn resolve_market(
         market_id: id,
         payout_nanos: req.payout_nanos,
         status: status.as_str().to_string(),
-        challenge_deadline_ms: status.challenge_deadline_ms(),
     }))
 }
 

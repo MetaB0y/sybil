@@ -107,9 +107,6 @@ impl BlockSequencer {
         self.lifecycle.market_statuses()
     }
 
-    pub fn oracle(&self) -> Arc<dyn Oracle> {
-        self.lifecycle.oracle()
-    }
     pub fn market_metadata(&self, market_id: MarketId) -> Option<&MarketMetadata> {
         self.lifecycle.market_metadata(market_id)
     }

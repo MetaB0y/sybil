@@ -38,8 +38,7 @@ impl Store {
         let genesis_hash = import_genesis_hash(&witness, genesis_hash)?;
 
         let restored = restored_state_from_witness(&witness, &config, genesis_hash)?;
-        let oracle = Arc::new(AdminOracle::new());
-        let sequencer = BlockSequencer::try_restore(restored, oracle, config)
+        let sequencer = BlockSequencer::try_restore(restored, config)
             .map_err(|error| StoreError::WitnessImport(error.to_string()))?;
         let snapshot = sequencer.snapshot();
         let rebuilt_sidecar = state_sidecar_snapshot_from_resting_orders(
@@ -249,7 +248,7 @@ fn restored_state_from_witness(
         ));
     }
 
-    let mut lifecycle = MarketLifecycle::new(Arc::new(AdminOracle::new()));
+    let mut lifecycle = MarketLifecycle::new();
     for (&market_id, status) in &market_statuses {
         lifecycle.set_market_status(market_id, status.clone());
     }
@@ -501,49 +500,9 @@ fn market_state_from_sidecar(
 fn market_status_from_snapshot(status: &MarketStatusSnapshot) -> MarketStatus {
     match status {
         MarketStatusSnapshot::Active => MarketStatus::Active,
-        MarketStatusSnapshot::Proposed {
-            proposal,
-            challenge_deadline_ms,
-        } => MarketStatus::Proposed {
-            proposal: resolution_proposal_from_snapshot(proposal),
-            challenge_deadline_ms: *challenge_deadline_ms,
-        },
-        MarketStatusSnapshot::Challenged {
-            proposal,
-            challenge,
-        } => MarketStatus::Challenged {
-            proposal: resolution_proposal_from_snapshot(proposal),
-            challenge: challenge_from_snapshot(challenge),
-        },
         MarketStatusSnapshot::Resolved { record } => MarketStatus::Resolved {
             record: resolution_record_from_snapshot(record),
         },
-        MarketStatusSnapshot::Voided => MarketStatus::Voided,
-    }
-}
-
-fn resolution_proposal_from_snapshot(
-    proposal: &sybil_verifier::ResolutionProposalSnapshot,
-) -> ResolutionProposal {
-    ResolutionProposal {
-        id: ProposalId(proposal.id),
-        market_id: proposal.market_id,
-        payout_nanos: proposal.payout_nanos,
-        source: oracle_source_from_snapshot(&proposal.source),
-        proposed_at_ms: proposal.proposed_at_ms,
-        reason: proposal.reason.clone(),
-    }
-}
-
-fn challenge_from_snapshot(challenge: &sybil_verifier::ChallengeSnapshot) -> Challenge {
-    Challenge {
-        id: ChallengeId(challenge.id),
-        challenger: challenge.challenger,
-        proposal_id: ProposalId(challenge.proposal_id),
-        bond_amount: challenge.bond_amount,
-        proposed_payout_nanos: challenge.proposed_payout_nanos,
-        reason: challenge.reason.clone(),
-        challenged_at_ms: challenge.challenged_at_ms,
     }
 }
 
@@ -551,15 +510,9 @@ fn resolution_record_from_snapshot(
     record: &sybil_verifier::ResolutionRecordSnapshot,
 ) -> ResolutionRecord {
     ResolutionRecord {
-        market_id: record.market_id,
         payout_nanos: record.payout_nanos,
         resolved_by: oracle_source_from_snapshot(&record.resolved_by),
         resolved_at_ms: record.resolved_at_ms,
-        proposal: record
-            .proposal
-            .as_ref()
-            .map(resolution_proposal_from_snapshot),
-        challenge: record.challenge.as_ref().map(challenge_from_snapshot),
     }
 }
 
@@ -567,7 +520,6 @@ fn oracle_source_from_snapshot(source: &OracleSourceSnapshot) -> OracleSource {
     match source {
         OracleSourceSnapshot::Admin => OracleSource::Admin,
         OracleSourceSnapshot::DataFeed(feed_id) => OracleSource::DataFeed(FeedId(*feed_id)),
-        OracleSourceSnapshot::AutomatedL0 => OracleSource::AutomatedL0,
     }
 }
 

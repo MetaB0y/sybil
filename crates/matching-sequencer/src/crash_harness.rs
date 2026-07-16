@@ -1,6 +1,6 @@
 // Crash-injection test harness compiled into the lib for integration tests.
-// Its `.unwrap()`s assert setup invariants of a test scenario (keys, oracle
-// wiring, deterministic RNG); a panic here is the intended test-failure signal.
+// Its `.unwrap()`s assert setup invariants of a test scenario (keys and
+// deterministic RNG); a panic here is the intended test-failure signal.
 #![allow(clippy::unwrap_used)]
 
 use std::collections::{HashMap, HashSet};
@@ -12,7 +12,6 @@ use matching_engine::{MarketId, MarketSet, NANOS_PER_DOLLAR, outcome_buy};
 use p256::ecdsa::SigningKey;
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
-use sybil_oracle::AdminOracle;
 
 use crate::account::{AccountId, AccountStore};
 use crate::actor::{SequencerHandle, SequencerTestCrashpoint};
@@ -254,13 +253,8 @@ impl Harness {
         let m0 = markets.add_binary("crash-fi market 0");
         let m1 = markets.add_binary("crash-fi market 1");
 
-        let mut seq = BlockSequencer::with_default_solver(
-            accounts,
-            markets,
-            vec![],
-            Arc::new(AdminOracle::new()),
-            config.clone(),
-        );
+        let mut seq =
+            BlockSequencer::with_default_solver(accounts, markets, vec![], config.clone());
         for (&account_id, key) in &keys {
             seq.register_pubkey(account_id, PublicKey(*key.verifying_key()))
                 .unwrap();
@@ -422,8 +416,7 @@ impl Harness {
         assert_eq!(decoded_job.block_height, header.height);
         assert_eq!(decoded_job.state_root, header.state_root);
         let has_uncommitted_wal = has_uncommitted_wal(&restored);
-        let seq =
-            BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), self.config.clone());
+        let seq = BlockSequencer::restore(restored, self.config.clone());
         let live_recomputed = compute_complete_state_root(
             &seq.accounts,
             seq.bridge_state(),
@@ -1024,13 +1017,8 @@ async fn bridge_state_size_is_bounded_across_deposits_and_root_survives_restart(
     let mut accounts = AccountStore::new();
     let account_id = accounts.create_account(0);
     let config = SequencerConfig::default();
-    let mut seq = BlockSequencer::with_default_solver(
-        accounts,
-        MarketSet::new(),
-        Vec::new(),
-        Arc::new(AdminOracle::new()),
-        config.clone(),
-    );
+    let mut seq =
+        BlockSequencer::with_default_solver(accounts, MarketSet::new(), Vec::new(), config.clone());
     let serialized_size_bound = rmp_serde::to_vec(&crate::bridge::BridgeState {
         deposit_cursor: u64::MAX,
         deposit_root: [u8::MAX; 32],
@@ -1084,7 +1072,7 @@ async fn bridge_state_size_is_bounded_across_deposits_and_root_survives_restart(
         rmp_serde::to_vec(&restored.bridge_state).unwrap().len() <= serialized_size_bound,
         "restored bridge state exceeded its fixed-field serialization bound"
     );
-    let restored_seq = BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config);
+    let restored_seq = BlockSequencer::restore(restored, config);
     let restarted_root = compute_complete_state_root(
         &restored_seq.accounts,
         restored_seq.bridge_state(),

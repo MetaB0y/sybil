@@ -13,9 +13,7 @@ use matching_engine::{
 };
 use matching_scenarios::{ScenarioConfig, generate_scenario};
 use proptest::prelude::*;
-use sybil_oracle::{
-    AdminOracle, ResolutionAttestation, ResolutionPolicy, ResolutionTemplate, TemplateId,
-};
+use sybil_oracle::{ResolutionAttestation, ResolutionPolicy, ResolutionTemplate, TemplateId};
 
 fn setup() -> (MarketSet, MarketId) {
     let mut markets = MarketSet::new();
@@ -27,7 +25,6 @@ fn make_sequencer(balance: i64) -> (BlockSequencer, AccountId) {
     let mut accounts = AccountStore::new();
     let aid = accounts.create_account(balance);
     let markets = MarketSet::new();
-    let oracle = Arc::new(AdminOracle::new());
     // Most kernel tests exercise settlement/replay semantics with deliberately
     // tiny fixture quantities. Admission-floor behavior has dedicated tests
     // below, so keep that product policy out of unrelated kernel assertions.
@@ -36,7 +33,7 @@ fn make_sequencer(balance: i64) -> (BlockSequencer, AccountId) {
         ..SequencerConfig::default()
     };
     (
-        BlockSequencer::with_default_solver(accounts, markets, vec![], oracle, config),
+        BlockSequencer::with_default_solver(accounts, markets, vec![], config),
         aid,
     )
 }
@@ -174,7 +171,6 @@ fn sequencer_from_scenario_problem(
         accounts,
         problem.markets,
         problem.market_groups,
-        Arc::new(AdminOracle::new()),
         config,
     );
 
@@ -282,15 +278,8 @@ fn sequencer_with_single_market(balance: i64) -> (BlockSequencer, AccountId, Mar
     let (markets, market) = setup();
     let mut accounts = AccountStore::new();
     let aid = accounts.create_account(balance);
-    let oracle = Arc::new(AdminOracle::new());
     (
-        BlockSequencer::with_default_solver(
-            accounts,
-            markets,
-            vec![],
-            oracle,
-            SequencerConfig::default(),
-        ),
+        BlockSequencer::with_default_solver(accounts, markets, vec![], SequencerConfig::default()),
         aid,
         market,
     )
@@ -740,11 +729,7 @@ fn pending_l1_cancel_replay_restores_refund_once_after_crash() {
         sequenced_acknowledged_writes(vec![AcknowledgedWrite::BridgeL1Input(
             crate::bridge::BridgeL1Input::WithdrawalEvent(event.clone()),
         )]);
-    let mut restored = BlockSequencer::restore(
-        restored_state,
-        Arc::new(AdminOracle::new()),
-        SequencerConfig::default(),
-    );
+    let mut restored = BlockSequencer::restore(restored_state, SequencerConfig::default());
     assert_eq!(restored.accounts.get(aid).unwrap().balance, 10_000_000);
     assert_eq!(
         restored
@@ -883,12 +868,10 @@ fn quarantined_deposit_is_auto_claimed_on_witnessed_key_registration_across_bloc
 #[test]
 fn atomic_onboarding_prevalidates_nonzero_balance_quarantine_claim() {
     let accounts = AccountStore::new();
-    let oracle = Arc::new(AdminOracle::new());
     let mut seq = BlockSequencer::with_default_solver(
         accounts,
         MarketSet::new(),
         vec![],
-        oracle,
         SequencerConfig::default(),
     );
     let account_id = AccountId(seq.accounts.next_id());
@@ -951,8 +934,7 @@ fn restore_resumes_deposit_frontier_fold_for_next_block() {
     let committed_root = seq.bridge_state().deposit_root;
 
     let state = restored_state_with_resting_orders(&seq, MarketSet::new(), vec![]);
-    let oracle = Arc::new(AdminOracle::new());
-    let mut restored = BlockSequencer::restore(state, oracle, SequencerConfig::default());
+    let mut restored = BlockSequencer::restore(state, SequencerConfig::default());
     assert_eq!(restored.bridge_state().deposit_cursor, 1);
     assert_eq!(restored.bridge_state().deposit_root, committed_root);
     assert_eq!(restored.bridge_state().deposit_frontier, committed_frontier);
@@ -1061,12 +1043,10 @@ fn non_one_hot_payoff_submission_does_not_clear_or_break_conservation() {
     let mut accounts = AccountStore::new();
     let custom_buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
     let no_buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-    let oracle = Arc::new(AdminOracle::new());
     let mut seq = BlockSequencer::with_default_solver(
         accounts,
         markets.clone(),
         vec![],
-        oracle,
         SequencerConfig::default(),
     );
     let initial_balance = total_balance(&seq);
@@ -1103,12 +1083,10 @@ fn multi_market_bundle_submission_does_not_clear_or_break_conservation() {
     let mut accounts = AccountStore::new();
     let bundle_buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
     let no_buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-    let oracle = Arc::new(AdminOracle::new());
     let mut seq = BlockSequencer::with_default_solver(
         accounts,
         markets.clone(),
         vec![],
-        oracle,
         SequencerConfig::default(),
     );
     let initial_balance = total_balance(&seq);
@@ -1164,14 +1142,8 @@ fn test_block_minting_uses_position_markets_outside_catalog() {
 
     let mut accounts = AccountStore::new();
     let holder = accounts.create_account(0);
-    let oracle = Arc::new(AdminOracle::new());
-    let mut seq = BlockSequencer::with_default_solver(
-        accounts,
-        markets,
-        vec![],
-        oracle,
-        SequencerConfig::default(),
-    );
+    let mut seq =
+        BlockSequencer::with_default_solver(accounts, markets, vec![], SequencerConfig::default());
     *seq.analytics.price_tracker_mut() = crate::price_tracker::PriceTracker::with_state(
         HashMap::from([(
             orphaned_market,
@@ -1211,12 +1183,10 @@ fn placed_order_stats_count_carried_resting_orders_each_batch() {
     let (markets, m0) = setup();
     let mut accounts = AccountStore::new();
     let buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-    let oracle = Arc::new(AdminOracle::new());
     let mut seq = BlockSequencer::with_default_solver(
         accounts,
         markets.clone(),
         vec![],
-        oracle,
         SequencerConfig::default(),
     );
 
@@ -1257,12 +1227,10 @@ fn placed_order_stats_count_mm_batch_orders() {
     let (markets, m0) = setup();
     let mut accounts = AccountStore::new();
     let mm = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-    let oracle = Arc::new(AdminOracle::new());
     let mut seq = BlockSequencer::with_default_solver(
         accounts,
         markets.clone(),
         vec![],
-        oracle,
         SequencerConfig::default(),
     );
 
@@ -1646,13 +1614,10 @@ fn test_resting_orders_survive_restart_and_match() {
         .unwrap()
         .positions
         .insert((m0, 1), 10);
-
-    let oracle: Arc<dyn Oracle> = Arc::new(AdminOracle::new());
     let mut seq_a = BlockSequencer::with_default_solver(
         accounts,
         markets.clone(),
         vec![],
-        oracle.clone(),
         SequencerConfig::default(),
     );
 
@@ -1703,7 +1668,7 @@ fn test_resting_orders_survive_restart_and_match() {
         },
     };
 
-    let mut seq_b = BlockSequencer::restore(state, oracle, SequencerConfig::default());
+    let mut seq_b = BlockSequencer::restore(state, SequencerConfig::default());
     assert_eq!(
         seq_b.order_book.len(),
         1,
@@ -1742,12 +1707,10 @@ fn restore_advances_next_order_id_past_replayed_admit_log_before_pending_bundles
     let (markets, m0) = setup();
     let mut accounts = AccountStore::new();
     let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-    let oracle: Arc<dyn Oracle> = Arc::new(AdminOracle::new());
     let mut committed = BlockSequencer::with_default_solver(
         accounts,
         markets.clone(),
         vec![],
-        oracle.clone(),
         SequencerConfig {
             min_resting_order_notional_nanos: 0,
             ..SequencerConfig::default()
@@ -1823,7 +1786,7 @@ fn restore_advances_next_order_id_past_replayed_admit_log_before_pending_bundles
         },
     };
 
-    let mut restored = BlockSequencer::restore(state, oracle, SequencerConfig::default());
+    let mut restored = BlockSequencer::restore(state, SequencerConfig::default());
     assert_eq!(
         restored.next_order_id(),
         4,
@@ -1855,12 +1818,10 @@ fn restored_pending_bundle_revalidates_against_replayed_admit_reservations() {
     let (markets, m0) = setup();
     let mut accounts = AccountStore::new();
     let aid = accounts.create_account(NANOS_PER_DOLLAR as i64);
-    let oracle: Arc<dyn Oracle> = Arc::new(AdminOracle::new());
     let mut committed = BlockSequencer::with_default_solver(
         accounts,
         markets.clone(),
         vec![],
-        oracle.clone(),
         SequencerConfig::default(),
     );
     committed.produce_block(Vec::new(), 1_000);
@@ -1928,7 +1889,7 @@ fn restored_pending_bundle_revalidates_against_replayed_admit_reservations() {
         },
     };
 
-    let mut restored = BlockSequencer::restore(state, oracle, SequencerConfig::default());
+    let mut restored = BlockSequencer::restore(state, SequencerConfig::default());
     assert_eq!(restored.order_book.reserved_balance(aid), 800_000_000);
 
     let bp = restored.produce_block(Vec::new(), 2_000);
@@ -1955,18 +1916,12 @@ fn restore_expires_stale_resting_orders_before_bridge_wal_replay() {
     let (markets, m0) = setup();
     let mut accounts = AccountStore::new();
     let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-    let oracle: Arc<dyn Oracle> = Arc::new(AdminOracle::new());
     let config = SequencerConfig {
         order_ttl_blocks: 10,
         ..SequencerConfig::default()
     };
-    let mut seq = BlockSequencer::with_default_solver(
-        accounts,
-        markets.clone(),
-        vec![],
-        oracle.clone(),
-        config.clone(),
-    );
+    let mut seq =
+        BlockSequencer::with_default_solver(accounts, markets.clone(), vec![], config.clone());
 
     let mut expiring_order = outcome_buy(&markets, 0, m0, 0, 800_000_000, q(100));
     expiring_order.expires_at_block = Some(2);
@@ -2016,7 +1971,7 @@ fn restore_expires_stale_resting_orders_before_bridge_wal_replay() {
             withdrawal_request,
         )]);
 
-    let restored = BlockSequencer::restore(state, oracle, config);
+    let restored = BlockSequencer::restore(state, config);
 
     assert!(restored.order_book.is_empty());
     assert_eq!(restored.order_book.reserved_balance(aid), 0);
@@ -2035,15 +1990,9 @@ fn restore_rejects_invalid_acknowledged_write_rows() {
     let (markets, _) = setup();
     let mut accounts = AccountStore::new();
     let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-    let oracle: Arc<dyn Oracle> = Arc::new(AdminOracle::new());
     let config = SequencerConfig::default();
-    let mut seq = BlockSequencer::with_default_solver(
-        accounts,
-        markets.clone(),
-        vec![],
-        oracle.clone(),
-        config.clone(),
-    );
+    let mut seq =
+        BlockSequencer::with_default_solver(accounts, markets.clone(), vec![], config.clone());
     seq.produce_block(Vec::new(), 1_000);
 
     let invalid_deposit = L1Deposit {
@@ -2074,7 +2023,7 @@ fn restore_rejects_invalid_acknowledged_write_rows() {
         AcknowledgedWrite::BridgeWithdrawal(invalid_withdrawal),
     ]);
 
-    let error = match BlockSequencer::try_restore(state, oracle, config) {
+    let error = match BlockSequencer::try_restore(state, config) {
         Ok(_) => panic!("invalid acknowledged write must fail closed"),
         Err(error) => error,
     };
@@ -2201,7 +2150,6 @@ fn test_matching_buy_and_sell_settles_correctly() {
         accounts,
         MarketSet::new(),
         vec![],
-        Arc::new(AdminOracle::new()),
         SequencerConfig::default(),
     );
 
@@ -2248,7 +2196,6 @@ fn test_fill_updates_only_participating_account_digests() {
         accounts,
         markets.clone(),
         vec![],
-        Arc::new(AdminOracle::new()),
         SequencerConfig::default(),
     );
 
@@ -2436,7 +2383,6 @@ fn platform_welfare_accumulates_across_blocks() {
         accounts,
         markets.clone(),
         vec![],
-        Arc::new(AdminOracle::new()),
         SequencerConfig::default(),
     );
 
@@ -2505,7 +2451,6 @@ fn complete_set_burning_reports_positive_welfare() {
         accounts,
         markets.clone(),
         vec![],
-        Arc::new(AdminOracle::new()),
         SequencerConfig::default(),
     );
     let production = seq.produce_block(
@@ -2562,7 +2507,6 @@ fn test_produce_block_returns_valid_header() {
         accounts,
         markets.clone(),
         vec![],
-        Arc::new(AdminOracle::new()),
         SequencerConfig::default(),
     );
 
@@ -2584,7 +2528,6 @@ fn test_block_chain_parent_hash() {
         accounts,
         markets.clone(),
         vec![],
-        Arc::new(AdminOracle::new()),
         SequencerConfig::default(),
     );
 
@@ -2604,7 +2547,6 @@ fn test_create_account_uses_post_system_state_for_orders() {
         accounts,
         markets.clone(),
         vec![],
-        Arc::new(AdminOracle::new()),
         SequencerConfig::default(),
     );
 
@@ -2648,7 +2590,6 @@ fn test_deposit_keeps_block_start_pre_state() {
         accounts,
         markets.clone(),
         vec![],
-        Arc::new(AdminOracle::new()),
         SequencerConfig::default(),
     );
 
@@ -2809,7 +2750,6 @@ fn test_state_root_in_block() {
         accounts,
         markets.clone(),
         vec![],
-        Arc::new(AdminOracle::new()),
         SequencerConfig::default(),
     );
 
@@ -2845,7 +2785,6 @@ fn test_resolution_followed_by_empty_block_still_verifies() {
         accounts,
         markets.clone(),
         vec![],
-        Arc::new(AdminOracle::new()),
         SequencerConfig::default(),
     );
 
@@ -2902,13 +2841,8 @@ fn test_witness_includes_untouched_accounts() {
     let mut accounts = AccountStore::new();
     accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
     accounts.create_account(200 * NANOS_PER_DOLLAR as i64);
-    let mut seq = BlockSequencer::with_default_solver(
-        accounts,
-        markets,
-        vec![],
-        Arc::new(AdminOracle::new()),
-        SequencerConfig::default(),
-    );
+    let mut seq =
+        BlockSequencer::with_default_solver(accounts, markets, vec![], SequencerConfig::default());
 
     let bp = seq.produce_block(vec![], 0);
 
@@ -2949,12 +2883,10 @@ fn admin_resolution_shrinks_three_market_group_and_survivors_stay_coherent() {
     let mut accounts = AccountStore::new();
     let buyer0 = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
     let buyer1 = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-    let oracle = Arc::new(AdminOracle::new());
     let mut seq = BlockSequencer::with_default_solver(
         accounts,
         markets.clone(),
         vec![group],
-        oracle,
         SequencerConfig::default(),
     );
 
@@ -3019,12 +2951,10 @@ fn attested_resolution_dissolves_two_market_group() {
 
     let mut accounts = AccountStore::new();
     accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-    let oracle = Arc::new(AdminOracle::new());
     let mut seq = BlockSequencer::with_default_solver(
         accounts,
         markets,
         vec![group],
-        oracle,
         SequencerConfig::default(),
     );
 
@@ -3085,12 +3015,10 @@ fn extending_market_group_is_idempotent_and_rejects_cross_group_member() {
     group1.add_market(m2);
 
     let accounts = AccountStore::new();
-    let oracle = Arc::new(AdminOracle::new());
     let mut seq = BlockSequencer::with_default_solver(
         accounts,
         markets,
         vec![group0, group1],
-        oracle,
         SequencerConfig::default(),
     );
 
@@ -3110,12 +3038,10 @@ fn market_group_extension_composes_with_h13_resolved_member_shrink() {
     let (markets, m0, m1, m2, group) = setup_group();
     let mut accounts = AccountStore::new();
     accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-    let oracle = Arc::new(AdminOracle::new());
     let mut seq = BlockSequencer::with_default_solver(
         accounts,
         markets,
         vec![group],
-        oracle,
         SequencerConfig::default(),
     );
 
@@ -3152,12 +3078,10 @@ fn group_extension_after_preexisting_group_minting_conserves_cash() {
     let buyer0 = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
     let buyer1 = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
     let initial_total_balance = accounts.total_balance();
-    let oracle = Arc::new(AdminOracle::new());
     let mut seq = BlockSequencer::with_default_solver(
         accounts,
         markets.clone(),
         vec![group],
-        oracle,
         SequencerConfig::default(),
     );
 
@@ -3211,12 +3135,10 @@ fn test_mm_complete_set_buyyes_rejected() {
     let (markets, m0, m1, m2, group) = setup_group();
     let mut accounts = AccountStore::new();
     let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-    let oracle = Arc::new(AdminOracle::new());
     let mut seq = BlockSequencer::with_default_solver(
         accounts,
         markets.clone(),
         vec![group],
-        oracle,
         SequencerConfig::default(),
     );
 
@@ -3250,7 +3172,6 @@ fn test_mm_non_crossing_complete_group_is_accepted_without_fills() {
         accounts,
         markets.clone(),
         vec![group],
-        Arc::new(AdminOracle::new()),
         SequencerConfig::default(),
     );
 
@@ -3278,12 +3199,10 @@ fn test_mm_partial_group_accepted() {
     let (markets, m0, m1, _m2, group) = setup_group();
     let mut accounts = AccountStore::new();
     let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-    let oracle = Arc::new(AdminOracle::new());
     let mut seq = BlockSequencer::with_default_solver(
         accounts,
         markets.clone(),
         vec![group],
-        oracle,
         SequencerConfig::default(),
     );
 
@@ -3368,7 +3287,6 @@ fn test_grouped_mm_complementary_bids_require_a_price_cross() {
             accounts,
             markets.clone(),
             vec![group],
-            Arc::new(AdminOracle::new()),
             SequencerConfig::default(),
         );
 
@@ -3397,12 +3315,10 @@ fn test_mm_buyno_coverage_without_a_cross_is_accepted() {
     let (markets, m0, m1, _m2, group) = setup_group();
     let mut accounts = AccountStore::new();
     let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-    let oracle = Arc::new(AdminOracle::new());
     let mut seq = BlockSequencer::with_default_solver(
         accounts,
         markets.clone(),
         vec![group],
-        oracle,
         SequencerConfig::default(),
     );
 
@@ -3433,12 +3349,10 @@ fn test_mm_budget_clamped_to_balance() {
     let mut accounts = AccountStore::new();
     let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
     let counter = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-    let oracle = Arc::new(AdminOracle::new());
     let mut seq = BlockSequencer::with_default_solver(
         accounts,
         markets.clone(),
         vec![],
-        oracle,
         SequencerConfig::default(),
     );
 
@@ -3479,12 +3393,10 @@ fn test_bankrupt_mm_skipped() {
     let (markets, m0) = setup();
     let mut accounts = AccountStore::new();
     let aid = accounts.create_account(0); // zero balance
-    let oracle = Arc::new(AdminOracle::new());
     let mut seq = BlockSequencer::with_default_solver(
         accounts,
         MarketSet::new(),
         vec![],
-        oracle,
         SequencerConfig::default(),
     );
 
@@ -3526,12 +3438,10 @@ fn test_group_minting_position_balance_multi_block() {
 
     let mut accounts = AccountStore::new();
     let buyer = accounts.create_account(1_000_000 * NANOS_PER_DOLLAR as i64);
-    let oracle = Arc::new(AdminOracle::new());
     let mut seq = BlockSequencer::with_default_solver(
         accounts,
         markets.clone(),
         vec![group.clone()],
-        oracle,
         SequencerConfig::default(),
     );
 
@@ -3591,12 +3501,10 @@ fn test_mm_balance_nonnegative_across_blocks() {
     let mut accounts = AccountStore::new();
     let mm_id = accounts.create_account(1000 * NANOS_PER_DOLLAR as i64);
     let counter_id = accounts.create_account(100_000 * NANOS_PER_DOLLAR as i64);
-    let oracle = Arc::new(AdminOracle::new());
     let mut seq = BlockSequencer::with_default_solver(
         accounts,
         markets.clone(),
         vec![],
-        oracle,
         SequencerConfig::default(),
     );
 
@@ -3647,12 +3555,10 @@ fn make_grouped_sequencer(
     group.add_market(m1);
     let mut accounts = AccountStore::new();
     let aid = accounts.create_account(balance);
-    let oracle = Arc::new(AdminOracle::new());
     let seq = BlockSequencer::with_default_solver(
         accounts,
         markets.clone(),
         vec![group],
-        oracle,
         SequencerConfig::default(),
     );
     (seq, aid, markets, m0, m1)
@@ -3675,12 +3581,10 @@ fn open_batch_unique_placers_filters_resting_orders_by_market() {
     let a0 = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
     let a1 = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
     let a2 = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-    let oracle = Arc::new(AdminOracle::new());
     let mut seq = BlockSequencer::with_default_solver(
         accounts,
         markets.clone(),
         vec![],
-        oracle,
         SequencerConfig::default(),
     );
 
@@ -3818,7 +3722,6 @@ fn stp_undo_preserves_other_accounts_same_block_expired_history_and_state_root()
         accounts,
         markets.clone(),
         vec![group],
-        Arc::new(AdminOracle::new()),
         SequencerConfig {
             debug_verify_full: true,
             ..SequencerConfig::default()
@@ -3980,12 +3883,10 @@ fn cross_block_stp_accepts_non_crossing_buyno_coverage() {
     let (markets, m0, m1, _m2, group) = setup_group();
     let mut accounts = AccountStore::new();
     let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-    let oracle = Arc::new(AdminOracle::new());
     let mut seq = BlockSequencer::with_default_solver(
         accounts,
         markets.clone(),
         vec![group],
-        oracle,
         SequencerConfig::default(),
     );
 
@@ -4080,12 +3981,10 @@ fn cross_block_stp_pending_bundle_contributes_to_admit_check() {
     let (markets, m0, m1, m2, group) = setup_group();
     let mut accounts = AccountStore::new();
     let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-    let oracle = Arc::new(AdminOracle::new());
     let mut seq = BlockSequencer::with_default_solver(
         accounts,
         markets.clone(),
         vec![group],
-        oracle,
         SequencerConfig::default(),
     );
 
@@ -4121,13 +4020,8 @@ fn first_deposit_records_once() {
     let (markets, _m0) = setup();
     let mut accounts = AccountStore::new();
     let aid = accounts.create_account(0);
-    let mut seq = BlockSequencer::with_default_solver(
-        accounts,
-        markets,
-        vec![],
-        Arc::new(AdminOracle::new()),
-        SequencerConfig::default(),
-    );
+    let mut seq =
+        BlockSequencer::with_default_solver(accounts, markets, vec![], SequencerConfig::default());
 
     assert!(seq.analytics().first_deposit_ms(aid).is_none());
 
@@ -4294,13 +4188,10 @@ fn portfolio_summary_values_positions_at_book_midpoint_mark() {
         .unwrap()
         .positions
         .insert((m0, 0), 50);
-
-    let oracle = Arc::new(AdminOracle::new());
     let mut seq = BlockSequencer::with_default_solver(
         accounts,
         markets.clone(),
         vec![],
-        oracle,
         SequencerConfig::default(),
     );
 

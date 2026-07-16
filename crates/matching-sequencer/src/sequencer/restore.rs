@@ -18,13 +18,12 @@ impl BlockSequencer {
         accounts: AccountStore,
         markets: MarketSet,
         market_groups: Vec<MarketGroup>,
-        oracle: Arc<dyn Oracle>,
         solver: Arc<dyn Solver>,
         config: SequencerConfig,
     ) -> Self {
         let order_book = OrderBook::new(config.order_ttl_blocks);
         let bridge = BridgeState::default();
-        let lifecycle = crate::market_lifecycle::MarketLifecycle::new(oracle);
+        let lifecycle = crate::market_lifecycle::MarketLifecycle::new();
         let last_clearing_prices = HashMap::new();
         let committed_state_sidecar = state_sidecar_snapshot(
             &bridge,
@@ -83,14 +82,12 @@ impl BlockSequencer {
         accounts: AccountStore,
         markets: MarketSet,
         market_groups: Vec<MarketGroup>,
-        oracle: Arc<dyn Oracle>,
         config: SequencerConfig,
     ) -> Self {
         Self::new(
             accounts,
             markets,
             market_groups,
-            oracle,
             Arc::new(matching_solver::RetainedCashSolver::new()),
             config,
         )
@@ -99,8 +96,8 @@ impl BlockSequencer {
     /// Restore from persisted state, panicking rather than starting from a
     /// partial acknowledged-write prefix. Production startup uses
     /// [`Self::try_restore`] to surface the same fail-closed error cleanly.
-    pub fn restore(state: RestoredState, oracle: Arc<dyn Oracle>, config: SequencerConfig) -> Self {
-        Self::try_restore(state, oracle, config)
+    pub fn restore(state: RestoredState, config: SequencerConfig) -> Self {
+        Self::try_restore(state, config)
             .expect("persisted sequencer state must replay without divergence")
     }
 
@@ -108,11 +105,10 @@ impl BlockSequencer {
     /// acknowledged-write interval in exact actor acceptance order.
     pub fn try_restore(
         state: RestoredState,
-        oracle: Arc<dyn Oracle>,
         config: SequencerConfig,
     ) -> Result<Self, SequencerRestoreError> {
         let solver: Arc<dyn Solver> = Arc::new(matching_solver::RetainedCashSolver::new());
-        let mut lifecycle = MarketLifecycle::new(oracle);
+        let mut lifecycle = MarketLifecycle::new();
         for (market_id, status) in state.market_statuses {
             lifecycle.set_market_status(market_id, status);
         }

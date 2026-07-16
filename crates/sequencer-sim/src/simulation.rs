@@ -1,11 +1,9 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 use matching_engine::{MarketGroup, MarketId, MarketSet, MmId, NANOS_PER_DOLLAR, Nanos};
 use rand::RngExt;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
-use sybil_oracle::AdminOracle;
 
 use crate::agent::informed::InformedTrader;
 use crate::agent::market_maker::MarketMakerAgent;
@@ -157,14 +155,12 @@ impl SimulationRunner {
             agent_info.push((name, account_id, scenario.initial_balance));
             agents.push(Box::new(agent));
         }
-
-        let oracle = Arc::new(AdminOracle::new());
         let config = SequencerConfig {
             debug_verify_full: true,
             ..SequencerConfig::default()
         };
         let sequencer =
-            BlockSequencer::with_default_solver(accounts, markets, market_groups, oracle, config);
+            BlockSequencer::with_default_solver(accounts, markets, market_groups, config);
 
         Self {
             sequencer,

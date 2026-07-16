@@ -1,10 +1,9 @@
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use clap::{Args, Subcommand};
 use matching_engine::MarketSet;
 use matching_sequencer::store::Store;
-use matching_sequencer::{AccountStore, AdminOracle, BlockSequencer, SequencerConfig};
+use matching_sequencer::{AccountStore, BlockSequencer, SequencerConfig};
 
 use crate::StateTransitionProofJobId;
 
@@ -138,13 +137,10 @@ async fn escape_smoke(args: EscapeSmokeArgs) -> Result<(), WitgenCliError> {
         .ok_or_else(|| WitgenCliError::EscapeSmoke("seller account missing".to_string()))?
         .positions
         .insert((market_id, 0), 1_000);
-
-    let oracle = Arc::new(AdminOracle::new());
     let mut sequencer = BlockSequencer::with_default_solver(
         accounts,
         markets.clone(),
         vec![],
-        oracle,
         SequencerConfig::default(),
     );
     let signing = SigningKey::from_slice(&[0x31; 32])
@@ -356,14 +352,8 @@ async fn smoke_job(args: SmokeJobArgs) -> Result<(), WitgenCliError> {
 
     let accounts = AccountStore::new();
     let markets = MarketSet::new();
-    let oracle = Arc::new(AdminOracle::new());
-    let mut sequencer = BlockSequencer::with_default_solver(
-        accounts,
-        markets,
-        vec![],
-        oracle,
-        SequencerConfig::default(),
-    );
+    let mut sequencer =
+        BlockSequencer::with_default_solver(accounts, markets, vec![], SequencerConfig::default());
     let production = sequencer.produce_block(vec![], args.timestamp_ms);
     store
         .save_block_with_witness(sequencer.snapshot(), &production.witness)

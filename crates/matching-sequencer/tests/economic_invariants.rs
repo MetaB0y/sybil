@@ -43,21 +43,18 @@
 //! (ADR-0004: integer truth), so each settlement event can lose < 1 nano —
 //! hence the explicit dust budget.
 
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-
 use matching_engine::{
     Fill, MarketId, MarketSet, NANOS_PER_DOLLAR, Nanos, Order, Qty, compute_fill_settlement,
     derive_minting, notional_nanos, outcome_buy, shares_to_qty,
 };
 use matching_sequencer::bridge::{account_key, append_deposit_frontier};
 use matching_sequencer::{
-    AccountId, AccountStore, AdminOracle, BlockSequencer, BridgeWithdrawalL1Event,
-    BridgeWithdrawalRequest, L1Deposit, L1WithdrawalStatus, OrderSubmission, SequencerConfig,
-    WithdrawalLeaf,
+    AccountId, AccountStore, BlockSequencer, BridgeWithdrawalL1Event, BridgeWithdrawalRequest,
+    L1Deposit, L1WithdrawalStatus, OrderSubmission, SequencerConfig, WithdrawalLeaf,
 };
 use proptest::prelude::*;
 use proptest::test_runner::TestCaseError;
+use std::collections::{HashMap, HashSet};
 use sybil_verifier::BlockWitness;
 
 const N_ACCOUNTS: u64 = 4;
@@ -87,15 +84,13 @@ fn make_sequencer() -> (BlockSequencer, MarketSet) {
         accounts.create_account(INITIAL_BALANCE);
     }
     let markets = make_markets();
-    let oracle = Arc::new(AdminOracle::new());
     // Generated cases deliberately include dust values to probe arithmetic;
     // admission-floor policy has focused tests in the sequencer crate.
     let config = SequencerConfig {
         min_resting_order_notional_nanos: 0,
         ..SequencerConfig::default()
     };
-    let seq =
-        BlockSequencer::with_default_solver(accounts, markets.clone(), vec![], oracle, config);
+    let seq = BlockSequencer::with_default_solver(accounts, markets.clone(), vec![], config);
     (seq, markets)
 }
 

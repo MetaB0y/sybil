@@ -18,14 +18,14 @@ use crate::snapshot_schema::{
 };
 use crate::types::{
     AccountReservationSnapshot, AccountSnapshot, BlockWitness, BridgeStateSnapshot,
-    ChallengeSnapshot, ClientActionWitness, DepositAccumulatorWitness, KeyOpAuth, KeyRecord,
-    L1DepositWitness, MarketGroupSnapshot, MarketSnapshot, MarketStatusSnapshot,
-    OracleSourceSnapshot, RejectionReason, ResolutionProposalSnapshot, ResolutionRecordSnapshot,
-    RestingOrderSnapshot, StateSidecarSnapshot, SystemEventWitness, WithdrawalRefundReasonWitness,
-    WithdrawalSnapshot, WitnessBlockHeader, WitnessOrder, WitnessRejection,
+    ClientActionWitness, DepositAccumulatorWitness, KeyOpAuth, KeyRecord, L1DepositWitness,
+    MarketGroupSnapshot, MarketSnapshot, MarketStatusSnapshot, OracleSourceSnapshot,
+    RejectionReason, ResolutionRecordSnapshot, RestingOrderSnapshot, StateSidecarSnapshot,
+    SystemEventWitness, WithdrawalRefundReasonWitness, WithdrawalSnapshot, WitnessBlockHeader,
+    WitnessOrder, WitnessRejection,
 };
 
-pub const WITNESS_FORMAT_VERSION: u8 = 10;
+pub const WITNESS_FORMAT_VERSION: u8 = 11;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum WitnessDecodeError {
@@ -244,18 +244,6 @@ impl<'a> WitnessReader<'a> {
         str::from_utf8(bytes)
             .map(|value| value.to_owned())
             .map_err(|_| WitnessDecodeError::InvalidUtf8 { field, offset })
-    }
-
-    fn read_option_string(
-        &mut self,
-        field: &'static str,
-    ) -> Result<Option<String>, WitnessDecodeError> {
-        let offset = self.offset;
-        match self.read_tag(field)? {
-            0 => Ok(None),
-            1 => self.read_string(field).map(Some),
-            tag => Err(WitnessDecodeError::InvalidTag { field, tag, offset }),
-        }
     }
 
     fn read_len(&mut self, field: &'static str) -> Result<usize, WitnessDecodeError> {
@@ -893,18 +881,9 @@ impl<'a> WitnessReader<'a> {
         let offset = self.offset;
         match self.read_tag("market.status")? {
             0 => Ok(MarketStatusSnapshot::Active),
-            1 => Ok(MarketStatusSnapshot::Proposed {
-                proposal: self.read_resolution_proposal()?,
-                challenge_deadline_ms: self.read_u64()?,
-            }),
-            2 => Ok(MarketStatusSnapshot::Challenged {
-                proposal: self.read_resolution_proposal()?,
-                challenge: self.read_challenge()?,
-            }),
-            3 => Ok(MarketStatusSnapshot::Resolved {
+            1 => Ok(MarketStatusSnapshot::Resolved {
                 record: self.read_resolution_record()?,
             }),
-            4 => Ok(MarketStatusSnapshot::Voided),
             tag => Err(WitnessDecodeError::InvalidTag {
                 field: "market.status",
                 tag,
@@ -913,57 +892,12 @@ impl<'a> WitnessReader<'a> {
         }
     }
 
-    fn read_resolution_proposal(
-        &mut self,
-    ) -> Result<ResolutionProposalSnapshot, WitnessDecodeError> {
-        Ok(ResolutionProposalSnapshot {
-            id: self.read_u64()?,
-            market_id: self.read_market_id()?,
-            payout_nanos: Nanos(self.read_u64()?),
-            source: self.read_oracle_source()?,
-            proposed_at_ms: self.read_u64()?,
-            reason: self.read_option_string("resolution_proposal.reason")?,
-        })
-    }
-
-    fn read_challenge(&mut self) -> Result<ChallengeSnapshot, WitnessDecodeError> {
-        Ok(ChallengeSnapshot {
-            id: self.read_u64()?,
-            challenger: self.read_u64()?,
-            proposal_id: self.read_u64()?,
-            bond_amount: Nanos(self.read_u64()?),
-            proposed_payout_nanos: Nanos(self.read_u64()?),
-            reason: self.read_string("challenge.reason")?,
-            challenged_at_ms: self.read_u64()?,
-        })
-    }
-
     fn read_resolution_record(&mut self) -> Result<ResolutionRecordSnapshot, WitnessDecodeError> {
         Ok(ResolutionRecordSnapshot {
-            market_id: self.read_market_id()?,
             payout_nanos: Nanos(self.read_u64()?),
             resolved_by: self.read_oracle_source()?,
             resolved_at_ms: self.read_u64()?,
-            proposal: self.read_option("resolution_record.proposal", |reader| {
-                reader.read_resolution_proposal()
-            })?,
-            challenge: self.read_option("resolution_record.challenge", |reader| {
-                reader.read_challenge()
-            })?,
         })
-    }
-
-    fn read_option<T>(
-        &mut self,
-        field: &'static str,
-        read_item: impl FnOnce(&mut Self) -> Result<T, WitnessDecodeError>,
-    ) -> Result<Option<T>, WitnessDecodeError> {
-        let offset = self.offset;
-        match self.read_tag(field)? {
-            0 => Ok(None),
-            1 => read_item(self).map(Some),
-            tag => Err(WitnessDecodeError::InvalidTag { field, tag, offset }),
-        }
     }
 
     fn read_oracle_source(&mut self) -> Result<OracleSourceSnapshot, WitnessDecodeError> {
@@ -971,7 +905,6 @@ impl<'a> WitnessReader<'a> {
         match self.read_tag("oracle_source")? {
             0 => Ok(OracleSourceSnapshot::Admin),
             1 => Ok(OracleSourceSnapshot::DataFeed(self.read_u64()?)),
-            2 => Ok(OracleSourceSnapshot::AutomatedL0),
             tag => Err(WitnessDecodeError::InvalidTag {
                 field: "oracle_source",
                 tag,
@@ -1589,12 +1522,9 @@ mod tests {
 
     fn state_sidecar(resting_order: Order, bridge: BridgeStateSnapshot) -> StateSidecarSnapshot {
         let record = ResolutionRecordSnapshot {
-            market_id: MarketId::new(9),
             payout_nanos: Nanos(1_000_000_000),
             resolved_by: OracleSourceSnapshot::Admin,
             resolved_at_ms: 1_700_000_000_300,
-            proposal: None,
-            challenge: None,
         };
         StateSidecarSnapshot {
             bridge,

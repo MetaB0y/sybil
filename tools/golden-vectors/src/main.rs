@@ -16,12 +16,11 @@ use sybil_l1_protocol::{
 use sybil_verifier::commitments::{event_schema, hash_header, state_schema, witness_schema};
 use sybil_verifier::{
     AccountKeyDigestRecord, AccountReservationSnapshot, AccountSnapshot, BlockWitness,
-    BridgeStateSnapshot, ChallengeSnapshot, ClientActionWitness, DepositAccumulatorWitness,
-    KeyOpAuth, KeyRecord, L1DepositWitness, MarketGroupSnapshot, MarketSnapshot,
-    MarketStatusSnapshot, OracleSourceSnapshot, RejectionReason, ResolutionProposalSnapshot,
-    ResolutionRecordSnapshot, RestingOrderSnapshot, StateSidecarSnapshot, SystemEventWitness,
-    WithdrawalSnapshot, WitnessBlockHeader, WitnessOrder, WitnessRejection, account_keys_digest,
-    empty_account_keys_digest,
+    BridgeStateSnapshot, ClientActionWitness, DepositAccumulatorWitness, KeyOpAuth, KeyRecord,
+    L1DepositWitness, MarketGroupSnapshot, MarketSnapshot, MarketStatusSnapshot,
+    OracleSourceSnapshot, RejectionReason, ResolutionRecordSnapshot, RestingOrderSnapshot,
+    StateSidecarSnapshot, SystemEventWitness, WithdrawalSnapshot, WitnessBlockHeader, WitnessOrder,
+    WitnessRejection, account_keys_digest, empty_account_keys_digest,
 };
 use sybil_zk::{
     EpochTransitionPublicInputs, StateTransitionPublicInputs, epoch_transition_public_input_hash,
@@ -952,24 +951,6 @@ fn account_snapshot(id: u64) -> AccountSnapshot {
 }
 
 fn state_sidecar(resting_order: Order) -> StateSidecarSnapshot {
-    let proposal = ResolutionProposalSnapshot {
-        id: 88,
-        market_id: MarketId::new(3),
-        payout_nanos: Nanos(700_000_000),
-        source: OracleSourceSnapshot::DataFeed(55),
-        proposed_at_ms: 1_700_000_000_100,
-        reason: Some("feed quorum".to_string()),
-    };
-    let challenge = ChallengeSnapshot {
-        id: 99,
-        challenger: 1002,
-        proposal_id: 88,
-        bond_amount: Nanos(50_000),
-        proposed_payout_nanos: Nanos(300_000_000),
-        reason: "disputed source".to_string(),
-        challenged_at_ms: 1_700_000_000_200,
-    };
-
     StateSidecarSnapshot {
         bridge: BridgeStateSnapshot {
             deposit_cursor: 14,
@@ -995,12 +976,9 @@ fn state_sidecar(resting_order: Order) -> StateSidecarSnapshot {
                 num_outcomes: 2,
                 status: MarketStatusSnapshot::Resolved {
                     record: ResolutionRecordSnapshot {
-                        market_id: MarketId::new(9),
                         payout_nanos: Nanos(1_000_000_000),
                         resolved_by: OracleSourceSnapshot::Admin,
                         resolved_at_ms: 1_700_000_000_300,
-                        proposal: Some(proposal.clone()),
-                        challenge: Some(challenge.clone()),
                     },
                 },
                 metadata_digest: [12u8; 32],
@@ -1011,10 +989,7 @@ fn state_sidecar(resting_order: Order) -> StateSidecarSnapshot {
                 market_id: MarketId::new(3),
                 name: "Wind over 20kt".to_string(),
                 num_outcomes: 2,
-                status: MarketStatusSnapshot::Challenged {
-                    proposal,
-                    challenge,
-                },
+                status: MarketStatusSnapshot::Active,
                 metadata_digest: [13u8; 32],
                 resolution_template: "data_feed".to_string(),
                 last_clearing_prices: vec![Nanos(610_000_000), Nanos(390_000_000)],

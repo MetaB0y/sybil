@@ -1,11 +1,8 @@
-use std::sync::Arc;
-
 use matching_engine::{MarketSet, MmConstraint, MmId, NANOS_PER_DOLLAR, outcome_buy};
 use redb::{Database, TableDefinition};
 
 use super::testutil::*;
 use super::*;
-use crate::AdminOracle;
 use crate::OrderSubmission;
 use crate::account::AccountStore;
 use crate::market_lifecycle::MarketLifecycle;
@@ -23,8 +20,7 @@ fn store_test_sequencer_config() -> crate::SequencerConfig {
 async fn witnessed_qmdb_state_root_matches_header_after_slot_reuse() {
     let path = temp_db_path("store-qmdb-root-reuse");
     let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let mut lifecycle = MarketLifecycle::new(oracle);
+    let mut lifecycle = MarketLifecycle::new();
     let mut markets = MarketSet::new();
     let accounts = AccountStore::new();
     let env = TestEnv::new();
@@ -71,8 +67,7 @@ async fn witnessed_qmdb_state_root_matches_header_after_slot_reuse() {
 async fn product_history_outbox_stats_are_atomic_and_backfill_on_reopen() {
     let path = temp_db_path("store-product-history-outbox-stats");
     let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
+    let lifecycle = MarketLifecycle::new();
     let markets = MarketSet::new();
     let accounts = AccountStore::new();
     let env = TestEnv::new();
@@ -207,8 +202,7 @@ async fn product_history_outbox_stats_are_atomic_and_backfill_on_reopen() {
 async fn canonical_archive_pruning_deletes_replay_blocks_and_da_with_metadata() {
     let path = temp_db_path("store-canonical-archive-retention");
     let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
+    let lifecycle = MarketLifecycle::new();
     let markets = MarketSet::new();
     let accounts = AccountStore::new();
     let env = TestEnv::new();
@@ -283,8 +277,7 @@ async fn canonical_archive_pruning_deletes_replay_blocks_and_da_with_metadata() 
 async fn canonical_archive_partial_budget_reports_oldest_remaining_replay_block() {
     let path = temp_db_path("store-canonical-archive-budget");
     let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
+    let lifecycle = MarketLifecycle::new();
     let markets = MarketSet::new();
     let accounts = AccountStore::new();
     let env = TestEnv::new();
@@ -331,8 +324,7 @@ async fn canonical_archive_partial_budget_reports_oldest_remaining_replay_block(
 async fn test_store_restores_latest_committed_accounts() {
     let path = temp_db_path("store-restore");
     let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
+    let lifecycle = MarketLifecycle::new();
     let markets = MarketSet::new();
     let env = TestEnv::new();
 
@@ -373,8 +365,7 @@ async fn test_store_restores_latest_committed_accounts() {
 #[tokio::test]
 async fn test_store_recovery_treats_redb_fence_as_commit_point() {
     let path = temp_db_path("store-redb-fence-commit-point");
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
+    let lifecycle = MarketLifecycle::new();
     let markets = MarketSet::new();
     let env = TestEnv::new();
 
@@ -484,8 +475,7 @@ async fn test_store_restores_product_event_sequence() {
 
     let path = temp_db_path("store-history-next-seq");
     let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
+    let lifecycle = MarketLifecycle::new();
     let markets = MarketSet::new();
     let env = TestEnv::new();
 
@@ -543,8 +533,7 @@ async fn test_store_restores_product_event_sequence() {
 async fn save_block_with_witness_persists_latest_witness() {
     let path = temp_db_path("store-witness");
     let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
+    let lifecycle = MarketLifecycle::new();
     let markets = MarketSet::new();
     let env = TestEnv::new();
     let mut accounts = AccountStore::new();
@@ -576,8 +565,7 @@ async fn save_block_with_witness_persists_latest_witness() {
 
 #[tokio::test]
 async fn da_artifact_from_witness_matches_commitment_chain() {
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
+    let lifecycle = MarketLifecycle::new();
     let markets = MarketSet::new();
     let env = TestEnv::new();
     let mut accounts = AccountStore::new();
@@ -630,8 +618,7 @@ async fn da_artifact_from_witness_matches_commitment_chain() {
 async fn da_manifest_cache_loads_without_reading_or_hashing_payload() {
     let path = temp_db_path("da-manifest-cache");
     let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
+    let lifecycle = MarketLifecycle::new();
     let markets = MarketSet::new();
     let env = TestEnv::new();
     let accounts = AccountStore::new();
@@ -664,8 +651,7 @@ async fn da_manifest_cache_loads_without_reading_or_hashing_payload() {
 async fn save_block_with_witness_prunes_historical_witnesses() {
     let path = temp_db_path("store-witness-prune");
     let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
+    let lifecycle = MarketLifecycle::new();
     let markets = MarketSet::new();
     let env = TestEnv::new();
     let mut accounts = AccountStore::new();
@@ -756,8 +742,7 @@ async fn save_block_with_witness_prunes_historical_witnesses() {
 async fn acknowledged_proof_job_pruning_is_bounded_and_preserves_unacknowledged_jobs() {
     let path = temp_db_path("store-proof-job-retention");
     let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
+    let lifecycle = MarketLifecycle::new();
     let markets = MarketSet::new();
     let env = TestEnv::new();
     let mut accounts = AccountStore::new();
@@ -833,8 +818,7 @@ async fn acknowledged_proof_job_pruning_is_bounded_and_preserves_unacknowledged_
 async fn acknowledged_proof_job_pruning_rotates_past_an_unacknowledged_prefix() {
     let path = temp_db_path("store-proof-job-retention-scan-cursor");
     let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
+    let lifecycle = MarketLifecycle::new();
     let markets = MarketSet::new();
     let env = TestEnv::new();
     let mut accounts = AccountStore::new();
@@ -902,8 +886,7 @@ async fn acknowledged_proof_job_pruning_rotates_past_an_unacknowledged_prefix() 
 async fn acknowledged_proof_job_pruning_fails_closed_on_digest_mismatch() {
     let path = temp_db_path("store-proof-job-retention-mismatch");
     let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
+    let lifecycle = MarketLifecycle::new();
     let markets = MarketSet::new();
     let env = TestEnv::new();
     let mut accounts = AccountStore::new();
@@ -957,8 +940,7 @@ async fn acknowledged_proof_job_pruning_fails_closed_on_digest_mismatch() {
 async fn save_block_with_witness_rejects_mismatched_header() {
     let path = temp_db_path("store-witness-mismatch");
     let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
+    let lifecycle = MarketLifecycle::new();
     let markets = MarketSet::new();
     let env = TestEnv::new();
     let accounts = AccountStore::new();
@@ -982,8 +964,7 @@ async fn save_block_with_witness_rejects_mismatched_header() {
 async fn save_block_without_witness_clears_stale_witness_for_height() {
     let path = temp_db_path("store-witness-clear");
     let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
+    let lifecycle = MarketLifecycle::new();
     let markets = MarketSet::new();
     let env = TestEnv::new();
     let accounts = AccountStore::new();
@@ -1011,8 +992,7 @@ async fn save_block_without_witness_clears_stale_witness_for_height() {
 async fn test_store_restores_pending_bridge_wals() {
     let path = temp_db_path("store-bridge-wal");
     let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
+    let lifecycle = MarketLifecycle::new();
     let markets = MarketSet::new();
     let env = TestEnv::new();
 
@@ -1082,8 +1062,7 @@ async fn test_store_restores_pending_bridge_wals() {
 async fn acknowledged_writes_preserve_one_cross_subsystem_sequence() {
     let path = temp_db_path("store-global-ack-sequence");
     let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
+    let lifecycle = MarketLifecycle::new();
     let mut markets = MarketSet::new();
     let market_id = markets.add_binary("global ack order");
     let env = TestEnv::new();
@@ -1214,8 +1193,7 @@ async fn acknowledged_write_requires_a_committed_replay_baseline() {
 async fn acknowledged_write_floor_detects_a_missing_first_row() {
     let path = temp_db_path("store-global-ack-floor-gap");
     let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
+    let lifecycle = MarketLifecycle::new();
     let markets = MarketSet::new();
     let env = TestEnv::new();
     let accounts = AccountStore::new();
@@ -1263,8 +1241,7 @@ async fn acknowledged_write_floor_detects_a_missing_first_row() {
 async fn acknowledged_write_sequence_remains_monotonic_across_block_fences() {
     let path = temp_db_path("store-global-ack-monotonic");
     let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
+    let lifecycle = MarketLifecycle::new();
     let markets = MarketSet::new();
     let env = TestEnv::new();
     let accounts = AccountStore::new();
@@ -1316,8 +1293,7 @@ async fn acknowledged_write_sequence_remains_monotonic_across_block_fences() {
 async fn test_store_restores_market_volumes() {
     let path = temp_db_path("store-market-volumes");
     let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
+    let lifecycle = MarketLifecycle::new();
     let mut markets = MarketSet::new();
     let market_id = markets.add_binary("Will it rain?");
     let env = TestEnv::new();
@@ -1351,8 +1327,7 @@ async fn test_store_restores_resting_orders() {
 
     let path = temp_db_path("store-resting-orders");
     let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
+    let lifecycle = MarketLifecycle::new();
     let env = TestEnv::new();
 
     let mut markets = MarketSet::new();
@@ -1406,7 +1381,7 @@ async fn store_restore_rejects_doctored_reserved_balance_high_and_low() {
     for (case, delta) in [("high", 1_i64), ("low", -1_i64), ("correct", 0_i64)] {
         let path = temp_db_path(&format!("store-reserved-balance-{case}"));
         let store = Store::open(&path).unwrap();
-        let lifecycle = MarketLifecycle::new(Arc::new(AdminOracle::new()));
+        let lifecycle = MarketLifecycle::new();
         let env = TestEnv::new();
         let mut markets = MarketSet::new();
         let market_id = markets.add_binary("reservation restore corruption");
@@ -1471,7 +1446,7 @@ async fn store_restore_accepts_matched_remainder_and_rejects_under_reservation()
     use matching_engine::{Fill, MarketSet, NANOS_PER_DOLLAR, Nanos, Qty, outcome_buy};
     use std::collections::HashSet;
 
-    let lifecycle = MarketLifecycle::new(Arc::new(AdminOracle::new()));
+    let lifecycle = MarketLifecycle::new();
     let env = TestEnv::new();
     let mut markets = MarketSet::new();
     let market_id = markets.add_binary("matched remainder restore");
@@ -1559,7 +1534,7 @@ async fn witness_import_rejects_doctored_reserved_balance_high_and_low_and_accep
     use matching_engine::{Fill, MarketSet, NANOS_PER_DOLLAR, Nanos, Qty, outcome_buy};
     use std::collections::HashSet;
 
-    let lifecycle = MarketLifecycle::new(Arc::new(AdminOracle::new()));
+    let lifecycle = MarketLifecycle::new();
     let env = TestEnv::new();
     let mut markets = MarketSet::new();
     let market_id = markets.add_binary("witness reservation corruption");
@@ -1677,8 +1652,7 @@ async fn test_store_clears_resting_orders_when_snapshot_empty() {
 
     let path = temp_db_path("store-resting-orders-empty");
     let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
+    let lifecycle = MarketLifecycle::new();
     let env = TestEnv::new();
 
     let mut markets = MarketSet::new();
@@ -1729,7 +1703,6 @@ async fn test_store_restores_fill_totals_without_hydrating_fill_history() {
 
     let path = temp_db_path("store-fill-recorder-snapshot");
     let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
 
     let mut markets = MarketSet::new();
     let market_id = markets.add_binary("Test");
@@ -1746,7 +1719,6 @@ async fn test_store_restores_fill_totals_without_hydrating_fill_history() {
         accounts,
         markets.clone(),
         vec![],
-        oracle.clone(),
         store_test_sequencer_config(),
     );
     seq.produce_block(
@@ -1771,7 +1743,7 @@ async fn test_store_restores_fill_totals_without_hydrating_fill_history() {
     store.save_block(seq.snapshot()).await.unwrap();
 
     let restored = store.load_state().await.unwrap().unwrap();
-    let restored_seq = BlockSequencer::restore(restored, oracle, store_test_sequencer_config());
+    let restored_seq = BlockSequencer::restore(restored, store_test_sequencer_config());
     assert_eq!(restored_seq.analytics().total_fills(buyer), 1);
     assert_eq!(restored_seq.analytics().total_fills(seller), 1);
     let ranked: Vec<_> = restored_seq
@@ -1791,7 +1763,6 @@ async fn import_witness_drill_restores_head_and_produces_children() {
     let source_path = temp_db_path("store-import-witness-source");
     let fresh_path = temp_db_path("store-import-witness-fresh");
     let source_store = Store::open(&source_path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
     let config = store_test_sequencer_config();
 
     let mut markets = MarketSet::new();
@@ -1822,13 +1793,8 @@ async fn import_witness_drill_restores_head_and_produces_children() {
     group.add_market(active_a);
     group.add_market(active_b);
 
-    let mut seq = BlockSequencer::with_default_solver(
-        accounts,
-        markets.clone(),
-        vec![group],
-        oracle.clone(),
-        config.clone(),
-    );
+    let mut seq =
+        BlockSequencer::with_default_solver(accounts, markets.clone(), vec![group], config.clone());
     let signing_key =
         <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
             &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
@@ -2076,8 +2042,7 @@ async fn import_witness_drill_restores_head_and_produces_children() {
         .collect::<HashMap<_, _>>();
     assert_eq!(restored.analytics.last_clearing_prices, imported_prices);
 
-    let signed_seq =
-        BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
+    let signed_seq = BlockSequencer::restore(restored, config.clone());
     assert_eq!(
         signed_seq.lookup_pubkey(&crate::crypto::PublicKey(*signing_key.verifying_key())),
         Some(fill_buyer),
@@ -2093,8 +2058,7 @@ async fn import_witness_drill_restores_head_and_produces_children() {
     signed_handle.submit_signed_order(signed).await.unwrap();
 
     let restored = fresh_store.load_state().await.unwrap().unwrap();
-    let mut restored_seq =
-        BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
+    let mut restored_seq = BlockSequencer::restore(restored, config.clone());
     let child = restored_seq.produce_block(Vec::new(), 3_000);
     assert_eq!(child.block.header.height, second.block.header.height + 1);
     assert_eq!(
@@ -2198,7 +2162,6 @@ async fn test_store_reopens_after_committed_trade_and_restores_qmdb_state() {
     use matching_engine::{NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
 
     let path = temp_db_path("store-reopen-smoke");
-    let oracle = Arc::new(AdminOracle::new());
 
     let mut markets = MarketSet::new();
     let market_id = markets.add_binary("Persistent restart");
@@ -2215,7 +2178,6 @@ async fn test_store_reopens_after_committed_trade_and_restores_qmdb_state() {
         accounts,
         markets.clone(),
         vec![],
-        oracle.clone(),
         store_test_sequencer_config(),
     );
     let production = seq.produce_block(
@@ -2295,7 +2257,7 @@ async fn test_store_reopens_after_committed_trade_and_restores_qmdb_state() {
             > 0
     );
 
-    let restored_seq = BlockSequencer::restore(restored, oracle, store_test_sequencer_config());
+    let restored_seq = BlockSequencer::restore(restored, store_test_sequencer_config());
     assert_eq!(restored_seq.analytics().total_fills(buyer), 1);
 }
 
@@ -2330,9 +2292,7 @@ async fn test_store_roundtrips_admit_log_and_replays_on_restore() {
 
     let mut markets = MarketSet::new();
     let market_id = markets.add_binary("Test");
-
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle.clone());
+    let lifecycle = MarketLifecycle::new();
     let mut accounts = AccountStore::new();
     let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
     let env = TestEnv::new();
@@ -2375,7 +2335,7 @@ async fn test_store_roundtrips_admit_log_and_replays_on_restore() {
     ));
     assert!(restored.resting_orders.is_empty());
 
-    let seq = BlockSequencer::restore(restored, oracle, store_test_sequencer_config());
+    let seq = BlockSequencer::restore(restored, store_test_sequencer_config());
     assert_eq!(
         seq.pending_orders_info(Some(aid)).len(),
         1,
@@ -2406,9 +2366,7 @@ async fn test_store_roundtrips_data_feeds() {
 
     let path = temp_db_path("store-data-feeds");
     let store = Store::open(&path).unwrap();
-
-    let oracle = Arc::new(AdminOracle::new());
-    let mut lifecycle = MarketLifecycle::new(oracle);
+    let mut lifecycle = MarketLifecycle::new();
     lifecycle.register_feed(FeedPubkey(vec![1u8; 33]), "admin".into(), 100);
     lifecycle.register_feed(FeedPubkey(vec![2u8; 33]), "polymarket_mirror".into(), 200);
     lifecycle.install_template(ResolutionTemplate {
@@ -2459,9 +2417,7 @@ async fn test_store_roundtrips_pending_bundles() {
 
     let mut markets = MarketSet::new();
     let market_id = markets.add_binary("Test");
-
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
+    let lifecycle = MarketLifecycle::new();
     let accounts = AccountStore::new();
     let env = TestEnv::new();
 

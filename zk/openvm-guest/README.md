@@ -68,8 +68,8 @@ untracked key files match the tracked `key_material` hashes (first measured
 across workspaces 2026-07-10). The 2026-07-10 upgrade to OpenVM v2.0.0 final
 moved both commitments because the final release replaces the beta proof
 system with SWIRL and changes the SHA-2 VM AIR. The committed `commit.json` +
-lock carry the current-source commitments. Witness v10 authorization plus the
-streamed epoch entrypoint moved `app_exe_commit` to `0x005418fc…`;
+lock carry the current-source commitments. Witness v11's executable two-state
+oracle lifecycle moved `app_exe_commit` to `0x007ed689…`;
 `app_vm_commit` remains `0x00618538…`. A fresh genesis
 and adapter redeploy must use these pins; older commitment compatibility is
 not supported.

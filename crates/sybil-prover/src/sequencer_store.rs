@@ -128,13 +128,11 @@ pub async fn build_state_transition_guest_input_from_store(
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use matching_engine::{MarketSet, NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
     use matching_sequencer::store::Store;
     use matching_sequencer::{AccountStore, BlockSequencer, OrderSubmission, SequencerConfig};
-    use sybil_oracle::AdminOracle;
 
     use super::*;
 
@@ -161,13 +159,10 @@ mod tests {
             .expect("seller exists")
             .positions
             .insert((market_id, 0), 10);
-
-        let oracle = Arc::new(AdminOracle::new());
         let mut sequencer = BlockSequencer::with_default_solver(
             accounts,
             markets.clone(),
             vec![],
-            oracle,
             SequencerConfig::default(),
         );
         let production = sequencer.produce_block(
@@ -261,13 +256,10 @@ mod tests {
             .expect("seller exists")
             .positions
             .insert((market_id, 0), 10);
-
-        let oracle = Arc::new(AdminOracle::new());
         let mut sequencer = BlockSequencer::with_default_solver(
             accounts,
             markets.clone(),
             vec![],
-            oracle,
             SequencerConfig::default(),
         );
         let production = sequencer.produce_block(
