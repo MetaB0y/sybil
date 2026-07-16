@@ -26,6 +26,16 @@ cannot contaminate the successor. Roles are closed to `competitor`, `load`, and
 `noise`; load/noise rows are ineligible for scoring at both the write and read
 boundaries.
 
+The Rust liquidity service has two distinct price-source policies. Mirrored
+Polymarket markets quote from their external token feed and stop publishing a
+reference when that feed becomes stale. Native Sybil markets have no external
+price source, so their MM midpoint remains the checked-in catalog seed, inside
+the configured quote range. Public block clearing prices are deliberately not
+fed back into that midpoint: the block stream does not identify whether a mark
+came from organic information, the MM itself, or synthetic load. Native markets
+can adopt a dynamic anchor only after that provenance and its update invariant
+are designed explicitly.
+
 ## Key Properties
 - `BaseAgent.on_block(block) -> list[OrderSpec]` — the core interface
 - Event-driven: bots react to blocks, not poll
@@ -33,6 +43,7 @@ boundaries.
 - `market_ids` filter for focused trading strategies
 - Competition runner for multi-bot simulations
 - Explicit, heartbeating live cohort separates scored competitors from load/noise
+- Native MM anchors do not learn recursively from provenance-free internal clears
 - Adding a bot: extend BaseAgent, implement on_block, export, configure
 
 ## Where This Lives
