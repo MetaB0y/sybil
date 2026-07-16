@@ -4,6 +4,7 @@ pub mod curated;
 pub mod error;
 pub mod feed;
 pub mod mapping;
+pub mod monitoring;
 pub mod polymarket;
 pub mod resolution;
 pub mod signer;

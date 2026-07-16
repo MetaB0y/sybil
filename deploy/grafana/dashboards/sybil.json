@@ -895,6 +895,95 @@
         "defaults": { "unit": "ops", "min": 0, "custom": { "drawStyle": "bars", "fillOpacity": 35 } },
         "overrides": []
       }
+    },
+    {
+      "title": "Polymarket Integration",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 151 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "title": "Polymarket Ready",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 152 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "sybil_polymarket_ready", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [
+          { "color": "red", "value": null },
+          { "color": "green", "value": 1 }
+        ] } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Polymarket Feed Tokens",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 152 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "sybil_polymarket_feed_tracked_tokens", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0 },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Polymarket MM Markets",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 152 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "sybil_polymarket_mm_tracked_markets", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0 },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Polymarket MM Failures",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 152 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "sybil_polymarket_mm_submissions_failed_total", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "red", "value": 1 }
+        ] } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Polymarket Actor Progress",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 156 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "time() - sybil_polymarket_sync_cycles_last_success_timestamp_seconds", "legendFormat": "sync age", "refId": "A" },
+        { "expr": "time() - sybil_polymarket_feed_last_update_timestamp_seconds", "legendFormat": "feed age", "refId": "B" },
+        { "expr": "time() - sybil_polymarket_mm_last_progress_timestamp_seconds", "legendFormat": "MM age", "refId": "C" },
+        { "expr": "time() - sybil_polymarket_resolution_ticks_last_success_timestamp_seconds", "legendFormat": "resolution age", "refId": "D" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Polymarket Actor Failures",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 156 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "rate(sybil_polymarket_sync_cycles_failed_total[5m])", "legendFormat": "sync", "refId": "A" },
+        { "expr": "rate(sybil_polymarket_feed_rest_refreshes_failed_total[5m])", "legendFormat": "feed REST", "refId": "B" },
+        { "expr": "rate(sybil_polymarket_mm_submissions_failed_total[5m])", "legendFormat": "MM", "refId": "C" },
+        { "expr": "rate(sybil_polymarket_resolution_ticks_failed_total[5m])", "legendFormat": "resolution", "refId": "D" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ops", "min": 0, "custom": { "drawStyle": "bars", "fillOpacity": 35 } },
+        "overrides": []
+      }
     }
   ],
   "schemaVersion": 39,

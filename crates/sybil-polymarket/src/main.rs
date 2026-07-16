@@ -13,6 +13,7 @@ use sybil_market_maker::{MmActor, MmMessage, MmProgress, PriceSnapshot, dollars_
 use sybil_polymarket::config::Config;
 use sybil_polymarket::feed::FeedActor;
 use sybil_polymarket::mapping::MappingStore;
+use sybil_polymarket::monitoring::{IntegrationProgress, MonitoringState, MonitoringWindows};
 use sybil_polymarket::polymarket::gamma::GammaClient;
 use sybil_polymarket::resolution::ResolutionActor;
 use sybil_polymarket::signer::ResolutionSigner;
@@ -300,6 +301,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Live-set channel: MM publishes how many markets it is actively quoting so
     // Sync recycles `mm_max_markets` slots as markets resolve/untrack (PM-8).
     let (mm_live_tx, mm_live_rx) = watch::channel(MmProgress::default());
+    let price_monitor_rx = price_rx.clone();
+    let mm_monitor_rx = mm_live_rx.clone();
+    let integration_progress = IntegrationProgress::default();
+    let resolution_enabled = !config.signer_key_path.is_empty();
+    let monitoring_windows = MonitoringWindows::for_cadences(
+        config.sync_interval_secs,
+        config.rest_poll_interval_secs,
+        config.mm_staleness_ms,
+        config.resolution_poll_interval_secs,
+    );
 
     // Bootstrap MM with existing markets from mapping
     if !existing_mm.is_empty() {
@@ -336,11 +347,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cancel_sync = cancel.clone();
     let cancel_feed = cancel.clone();
     let cancel_mm = cancel.clone();
+    let cancel_monitoring = cancel.clone();
+
+    let monitoring_listener = tokio::net::TcpListener::bind(config.monitoring_bind).await?;
+    info!(
+        address = %config.monitoring_bind,
+        "Polymarket integration monitoring listening"
+    );
+    let monitoring_state = MonitoringState::new(
+        integration_progress.clone(),
+        price_monitor_rx,
+        mm_monitor_rx,
+        monitoring_windows,
+        resolution_enabled,
+    );
+    let monitoring_handle = tasks.spawn(async move {
+        sybil_polymarket::monitoring::serve(
+            monitoring_listener,
+            monitoring_state,
+            cancel_monitoring,
+        )
+        .await
+    });
 
     // Spawn actors
     let config_sync = config.clone();
     let config_feed = config.clone();
     let mapping_for_sync = mapping.clone();
+    let sync_progress = integration_progress.clone();
     let sync_handle = tasks.spawn(async move {
         let actor = SyncActor::new(
             config_sync,
@@ -352,12 +386,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             mm_live_rx,
             curated_event_ids,
             curated_condition_ids,
-        );
+        )
+        .with_progress(sync_progress);
         actor.run(cancel_sync).await;
     });
 
+    let feed_progress = integration_progress.clone();
     let feed_handle = tasks.spawn(async move {
-        let actor = FeedActor::new(config_feed, gamma_client_feed, price_tx, feed_rx);
+        let actor = FeedActor::new(config_feed, gamma_client_feed, price_tx, feed_rx)
+            .with_progress(feed_progress);
         actor.run(cancel_feed).await;
     });
 
@@ -392,6 +429,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let config_res = config.clone();
         let cancel_res = cancel.clone();
         let mapping_for_res = mapping.clone();
+        let resolution_progress = integration_progress.clone();
         tasks.spawn(async move {
             let actor = ResolutionActor::new(
                 config_res,
@@ -399,7 +437,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 sybil_client_resolution,
                 mapping_for_res,
                 signer,
-            );
+            )
+            .with_progress(resolution_progress);
             actor.run(cancel_res).await;
         })
     };
@@ -429,6 +468,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 error!(error = %e, "ResolutionActor panicked");
             } else {
                 error!("ResolutionActor exited unexpectedly");
+            }
+        }
+        r = monitoring_handle => {
+            match r {
+                Ok(Ok(())) => error!("monitoring server exited unexpectedly"),
+                Ok(Err(error)) => error!(%error, "monitoring server failed"),
+                Err(error) => error!(%error, "monitoring server panicked"),
             }
         }
     }

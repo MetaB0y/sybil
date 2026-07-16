@@ -4,6 +4,7 @@ use tokio::sync::{mpsc, watch};
 use tracing::{info, warn};
 
 use crate::config::Config;
+use crate::monitoring::IntegrationProgress;
 use crate::polymarket::gamma::GammaClient;
 use crate::polymarket::ws;
 pub use sybil_market_maker::{PriceSnapshot, PriceUpdateSource as PriceSource};
@@ -24,6 +25,7 @@ pub struct FeedActor {
     feed_rx: mpsc::Receiver<FeedMessage>,
     /// All token IDs we should be subscribed to.
     token_ids: Vec<String>,
+    progress: IntegrationProgress,
 }
 
 impl FeedActor {
@@ -39,7 +41,13 @@ impl FeedActor {
             price_tx,
             feed_rx,
             token_ids: Vec::new(),
+            progress: IntegrationProgress::default(),
         }
+    }
+
+    pub fn with_progress(mut self, progress: IntegrationProgress) -> Self {
+        self.progress = progress;
+        self
     }
 
     pub async fn run(mut self, cancel: tokio_util::sync::CancellationToken) {
@@ -161,7 +169,8 @@ impl FeedActor {
     async fn poll_rest_once(&self) {
         match self.gamma_client.fetch_midpoints(&self.token_ids).await {
             Ok(prices) => {
-                if prices.is_empty() && !self.token_ids.is_empty() {
+                let received_prices = !prices.is_empty();
+                if !received_prices && !self.token_ids.is_empty() {
                     warn!(
                         tokens = self.token_ids.len(),
                         "REST midpoints returned no prices"
@@ -175,8 +184,10 @@ impl FeedActor {
                 snapshot.last_updated_ms = now;
                 snapshot.source = PriceSource::RestFallback;
                 let _ = self.price_tx.send(snapshot);
+                self.progress.record_feed_refresh(received_prices);
             }
             Err(e) => {
+                self.progress.record_feed_refresh(false);
                 warn!(error = %e, "REST midpoints fallback failed");
             }
         }

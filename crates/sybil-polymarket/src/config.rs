@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use clap::Parser;
 use sybil_market_maker::MmConfig;
 
@@ -142,6 +144,14 @@ pub struct Config {
     /// Resolution poll interval in seconds.
     #[arg(long, default_value = "120", env = "RESOLUTION_POLL_INTERVAL_SECS")]
     pub resolution_poll_interval_secs: u64,
+
+    /// Private liveness, readiness, and Prometheus listener.
+    #[arg(
+        long,
+        default_value = "0.0.0.0:9105",
+        env = "POLYMARKET_MONITORING_BIND"
+    )]
+    pub monitoring_bind: SocketAddr,
 }
 
 impl Config {

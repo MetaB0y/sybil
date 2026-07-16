@@ -164,6 +164,40 @@ grep -Fq 'targets: ["sybil-l1-indexer:9102"]' deploy/prometheus.yml \
     || fail "VictoriaMetrics does not scrape the L1 indexer metrics listener"
 pass "L1 indexer binary, durable cursor, healthcheck, and scrape target are wired"
 
+polymarket_service_block=$(
+    awk '
+        /^  sybil-polymarket:/ { in_service = 1; next }
+        in_service && /^  [[:alnum:]_-]+:/ { exit }
+        in_service { print }
+    ' docker-compose.yml
+)
+for expected in \
+    '"--monitoring-bind=0.0.0.0:9105"' \
+    'http://127.0.0.1:9105/readyz'; do
+    grep -Fq -- "$expected" <<<"$polymarket_service_block" \
+        || fail "Polymarket integration monitoring is missing $expected"
+done
+grep -Fq 'targets: ["sybil-polymarket:9105"]' deploy/prometheus.yml \
+    || fail "VictoriaMetrics does not scrape the Polymarket owner process"
+pass "Polymarket owner process exposes readiness and scraped actor progress"
+
+native_mm_service_block=$(
+    awk '
+        /^  sybil-native-mm:/ { in_service = 1; next }
+        in_service && /^  [[:alnum:]_-]+:/ { exit }
+        in_service { print }
+    ' docker-compose.yml
+)
+for expected in \
+    '"--monitoring-bind=0.0.0.0:9104"' \
+    'http://127.0.0.1:9104/readyz'; do
+    grep -Fq -- "$expected" <<<"$native_mm_service_block" \
+        || fail "native MM monitoring is missing $expected"
+done
+grep -Fq 'targets: ["sybil-native-mm:9104"]' deploy/prometheus.yml \
+    || fail "VictoriaMetrics does not scrape the native MM owner process"
+pass "native MM owner process exposes readiness and scraped quote progress"
+
 for compose_file in docker-compose.yml docker-compose.prod.yml; do
     grep -Fq -- '"--metrics-port=9101"' "$compose_file" \
         || fail "$compose_file does not enable the arena metrics exporter"

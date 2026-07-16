@@ -45,6 +45,9 @@ ResolutionActor ── signed resolved-source outcome ──► sybil-api
 - A source being signed makes it attributable, not objectively true.
 - Provider keys and signer material come from environment/files; never log or
   commit them.
+- Sync, feed, MM, and optional resolution actors publish write-only progress
+  to the owning process's private health/metrics boundary. The API retains
+  independent reference-price expiry but does not infer actor health.
 
 ## Curation
 

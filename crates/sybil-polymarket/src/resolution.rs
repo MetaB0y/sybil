@@ -22,6 +22,7 @@ use tracing::{debug, info, warn};
 use crate::config::Config;
 use crate::error::Error;
 use crate::mapping::MappingStore;
+use crate::monitoring::IntegrationProgress;
 use crate::polymarket::gamma::GammaClient;
 use crate::polymarket::types::{GammaEvent, GammaMarket};
 use crate::signer::ResolutionSigner;
@@ -48,6 +49,7 @@ pub struct ResolutionActor {
     /// exhaustive reconciliation bounded per tick while guaranteeing markets
     /// outside Gamma's top closed-events window are still revisited.
     condition_poll_cursor: Mutex<usize>,
+    progress: IntegrationProgress,
 }
 
 impl ResolutionActor {
@@ -66,7 +68,13 @@ impl ResolutionActor {
             signer,
             flagged_closed: Mutex::new(HashSet::new()),
             condition_poll_cursor: Mutex::new(0),
+            progress: IntegrationProgress::default(),
         }
+    }
+
+    pub fn with_progress(mut self, progress: IntegrationProgress) -> Self {
+        self.progress = progress;
+        self
     }
 
     pub async fn run(self, cancel: CancellationToken) {
@@ -78,8 +86,12 @@ impl ResolutionActor {
 
         let interval = Duration::from_secs(self.config.resolution_poll_interval_secs.max(1));
         loop {
-            if let Err(e) = self.tick().await {
-                warn!(error = %e, "resolution tick failed");
+            match self.tick().await {
+                Ok(()) => self.progress.record_resolution_tick(true),
+                Err(e) => {
+                    self.progress.record_resolution_tick(false);
+                    warn!(error = %e, "resolution tick failed");
+                }
             }
             tokio::select! {
                 _ = cancel.cancelled() => {
