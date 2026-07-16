@@ -1,0 +1,10 @@
+# Explicit validity deployment overlay. This changes chain identity and must
+# only be selected from fresh genesis; sybil-api refuses an in-place switch.
+services:
+  sybil-api:
+    environment:
+      SYBIL_RETAIN_VALIDITY_ARTIFACTS: "true"
+
+  victoriametrics:
+    volumes:
+      - ./deploy/prometheus-targets/sybil-prover.json:/etc/prometheus/targets/sybil-prover.json:ro

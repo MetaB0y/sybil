@@ -1,0 +1,6 @@
+# Explicit L1 lifecycle overlay. It activates only the optional indexer's
+# monitoring target; credentials and the l1-indexer profile remain separate.
+services:
+  victoriametrics:
+    volumes:
+      - ./deploy/prometheus-targets/sybil-l1-indexer.json:/etc/prometheus/targets/sybil-l1-indexer.json:ro

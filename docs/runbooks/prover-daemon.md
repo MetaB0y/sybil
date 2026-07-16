@@ -25,6 +25,13 @@ retained job stock exhausted its cgroup during a live soak (#137). Run bounded
 mock integration tests locally and STARK mode from a repository checkout on
 measured prover hardware.
 
+Artifact retention is chain identity. On the production host, the product
+overlay disables source proof jobs and DA payloads; adding only
+`--profile validity` to that running chain cannot create the missing historical
+sequence. `just deploy-prover-daemon CONFIRM` applies the validity overlay,
+clears all coupled state, and starts from fresh genesis. The API also persists
+the selected mode and refuses an in-place switch.
+
 ## Start locally
 
 The sequencer API must use persistent storage and expose its service-gated

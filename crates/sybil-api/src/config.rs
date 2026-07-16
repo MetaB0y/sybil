@@ -375,6 +375,12 @@ pub struct ApiConfig {
     )]
     pub acknowledged_proof_job_max_rows_per_pass: usize,
 
+    /// Retain portable proof jobs and DA artifacts for an attached validity
+    /// stack. Product-only deployments disable this explicitly; changing it
+    /// for a persistent store requires a fresh genesis.
+    #[arg(long, default_value = "true", env = "SYBIL_RETAIN_VALIDITY_ARTIFACTS")]
+    pub retain_validity_artifacts: bool,
+
     /// Sequencer actor queue depth that logs a warning.
     #[arg(long, default_value = "1000", env = "SYBIL_ACTOR_QUEUE_WARN_DEPTH")]
     pub actor_queue_warn_depth: usize,
@@ -501,6 +507,7 @@ impl Default for ApiConfig {
             acknowledged_proof_job_retention_blocks: 0,
             acknowledged_proof_job_maintenance_interval_blocks: 1_000,
             acknowledged_proof_job_max_rows_per_pass: 10_000,
+            retain_validity_artifacts: true,
             actor_queue_warn_depth: 1_000,
             actor_queue_error_depth: 5_000,
             liquidity_band_nanos: 50_000_000,

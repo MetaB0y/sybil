@@ -16,6 +16,46 @@ fn store_test_sequencer_config() -> crate::SequencerConfig {
     }
 }
 
+#[test]
+fn validity_artifact_retention_is_bound_before_genesis() {
+    let path = temp_db_path("store-validity-artifact-mode");
+    let store = Store::open(&path).unwrap();
+
+    store.bind_validity_artifact_retention(false).unwrap();
+    store.bind_validity_artifact_retention(false).unwrap();
+    assert!(matches!(
+        store.bind_validity_artifact_retention(true),
+        Err(StoreError::ValidityArtifactRetention(message))
+            if message.contains("fresh genesis")
+    ));
+
+    drop(store);
+    let reopened = Store::open(&path).unwrap();
+    reopened.bind_validity_artifact_retention(false).unwrap();
+}
+
+#[tokio::test]
+async fn legacy_nonempty_store_cannot_acquire_validity_mode_retroactively() {
+    let path = temp_db_path("store-unbound-validity-artifact-mode");
+    let store = Store::open(&path).unwrap();
+    let lifecycle = MarketLifecycle::new();
+    let markets = MarketSet::new();
+    let accounts = AccountStore::new();
+    let env = TestEnv::new();
+    let (header, _) =
+        coherent_header_and_witness(1, &accounts, &markets, &lifecycle, &env.bridge_state);
+    store
+        .save_block(env.snapshot(&accounts, &markets, &lifecycle, &header, 1, None, vec![]))
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        store.bind_validity_artifact_retention(false),
+        Err(StoreError::ValidityArtifactRetention(message))
+            if message.contains("existing chain") && message.contains("fresh genesis")
+    ));
+}
+
 #[tokio::test]
 async fn witnessed_qmdb_state_root_matches_header_after_slot_reuse() {
     let path = temp_db_path("store-qmdb-root-reuse");
@@ -217,6 +257,7 @@ async fn canonical_archive_pruning_deletes_replay_blocks_and_da_with_metadata() 
                 env.snapshot(&accounts, &markets, &lifecycle, &header, 1, None, vec![]),
                 &witness,
                 &block,
+                true,
             )
             .await
             .unwrap();
@@ -292,6 +333,7 @@ async fn canonical_archive_partial_budget_reports_oldest_remaining_replay_block(
                 env.snapshot(&accounts, &markets, &lifecycle, &header, 1, None, vec![]),
                 &witness,
                 &block,
+                true,
             )
             .await
             .unwrap();
@@ -1865,6 +1907,7 @@ async fn import_witness_drill_restores_head_and_produces_children() {
             seq.snapshot(),
             &first.witness,
             &first.sealed_block(),
+            true,
         )
         .await
         .unwrap();
@@ -1934,7 +1977,12 @@ async fn import_witness_drill_restores_head_and_produces_children() {
     }));
 
     source_store
-        .save_block_with_witness_and_replay_block(seq.snapshot(), witness, &second.sealed_block())
+        .save_block_with_witness_and_replay_block(
+            seq.snapshot(),
+            witness,
+            &second.sealed_block(),
+            true,
+        )
         .await
         .unwrap();
     source_store

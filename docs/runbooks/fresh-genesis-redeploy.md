@@ -121,6 +121,11 @@ those images are the intended target revision. Otherwise stop the stack, remove
 the named volumes listed by that recipe, deploy the target images, and start the
 stack once. Do not let an old binary create the new genesis.
 
+To start the explicit validity topology instead, use
+`just deploy-prover-daemon CONFIRM`; it performs the coupled reset while
+selecting the validity chain-mode and monitoring overlays. The store refuses to
+switch `SYBIL_RETAIN_VALIDITY_ARTIFACTS` on an existing chain.
+
 ## 4. Deploy one revision
 
 Use the normal deployment recipes from the same checkout:

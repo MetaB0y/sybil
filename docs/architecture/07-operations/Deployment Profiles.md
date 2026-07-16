@@ -43,9 +43,19 @@ above. The unprofiled default is the core: `sybil-api`, `sybil-history`, and
 
 `just docker-up-all` selects the first three on a workstation. The 2 GB product
 devnet deploy recipes select `integrations` and `ops`; both `validity` and
-`l1-indexer` remain independent opt-ins. Validity stays off because the release
-does not claim ZK/TEE/L1 security and the current mock daemon's retained job
-stock is not bounded on that host ([#137](https://github.com/MetaB0y/sybil/issues/137)).
+`l1-indexer` remain independent opt-ins. Product Compose sets
+`SYBIL_RETAIN_VALIDITY_ARTIFACTS=false`, so it keeps native verification,
+recovery state, replay blocks, and product history without building portable
+proof jobs or DA serving payloads that have no consumer. Validity stays off
+because the release does not claim ZK/TEE/L1 security and the current mock
+daemon's retained job stock is not bounded on that host
+([#137](https://github.com/MetaB0y/sybil/issues/137)).
+
+`docker-compose.validity.yml` is a chain-mode overlay, not a process toggle: it
+sets artifact retention back to `true` and exposes the prover scrape target.
+The store binds that choice before block 1 and refuses an in-place change or an
+unbound older chain. `just deploy-prover-daemon CONFIRM` therefore clears all
+coupled state and starts the validity topology from fresh genesis.
 
 ## Profile matrix
 
@@ -77,6 +87,7 @@ reflects base `docker-compose.yml`; "prod" reflects base + `docker-compose.prod.
 | `SYBIL_EVENT_SNAPSHOT_DIR` | unset | `/data/event_snapshots` | `/data/event_snapshots` | no |
 | `SYBIL_HISTORY_DATA_DIR` | `/history-data` in Compose | `/history-data` | `/history-data` | enforced by history process |
 | `SYBIL_HISTORY_MAX_QUERY_CONCURRENCY` | `16` | `16` | `16` | no |
+| `SYBIL_RETAIN_VALIDITY_ARTIFACTS` | `true` | `true` | `false` for product / `true` with validity overlay | chain identity; fresh genesis required |
 
 ### Cache / history caps
 
@@ -135,6 +146,11 @@ The explicit `validity` Compose profile runs one restart-safe `sybil-prover
 daemon`, with separate redb and artifact volumes and authenticated pull/ack
 against the API outbox. Its Compose configuration selects the typed mock
 backend for bounded integration tests; the repository daemon default is STARK.
+The `docker-compose.validity.yml` overlay also enables source proof-job/DA
+retention and swaps VictoriaMetrics' empty prover discovery file for the exact
+daemon target. It must be selected from block 1; use
+`just deploy-prover-daemon CONFIRM`, never add the profile to a running product
+chain.
 It is not part of the 2 GB product devnet. A live soak reached 303 MiB anonymous
 RSS and its 384 MiB cgroup ceiling after only 140 retained jobs, so the profile
 uses bounded restart attempts and remains opt-in while #137 defines and
@@ -238,7 +254,7 @@ live contract wiring before sending a transaction.
   It has no outbox row; its first locally produced child resumes mandatory job
   capture.
 - DA/custody artifacts are separate from `block_witnesses`: when a store is
-  configured, each committed block schedules a best-effort write to
+  configured with `SYBIL_RETAIN_VALIDITY_ARTIFACTS=true`, each committed block schedules a best-effort write to
   `da_artifacts` containing the canonical witness payload bytes and a paired
   small `da_manifests` metadata row. The public manifest endpoint reads only
   the cached metadata; the service-gated payload endpoint reads and integrity-
@@ -248,12 +264,13 @@ live contract wiring before sending a transaction.
   `SYBIL_CANONICAL_ARCHIVE_MAX_ROWS_PER_PASS`). With `SYBIL_DATA_DIR` unset, no DA artifacts
   are retained. With block-history pruning disabled, rows remain until the
   store is reset. DA writes happen after block commit and log on failure; they
-  do not roll back block production.
+  do not roll back block production. Product-only mode retains the latest
+  recovery witness but writes neither DA rows nor portable proof-job rows.
 
-The production overlay gives canonical full blocks and their paired local DA
-artifacts an explicit seven-day target. At the inherited 10-second interval
-that is 60,480 heights. Product prices/candles are not part of this job; they
-live in `sybil-history`.
+The production overlay gives canonical full blocks an explicit seven-day
+target. In a validity deployment the same floor also bounds paired local DA
+artifacts. At the inherited 10-second interval that is 60,480 heights. Product
+prices/candles are not part of this job; they live in `sybil-history`.
 
 Base Compose keeps one day of acknowledged source jobs and examines at most
 1,000 old rows every 60 blocks. Production keeps seven days and raises the

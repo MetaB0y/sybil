@@ -9,10 +9,16 @@ last_verified: 2026-07-16
 # Block Witness Format
 
 `BlockWitness` v11 is the canonical private audit package for a Sybil block. The
-sequencer persists it, native verification replays it, and the OpenVM epoch
+sequencer persists the latest witness for recovery in every chain mode, native
+verification replays it, and the OpenVM epoch
 guest receives one witness per streamed `StateTransitionGuestInput`. Each
 per-block hash binds the witness by recomputing `witness_root`; the epoch proof
 then folds those hashes in order.
+
+Only a validity-enabled chain additionally serializes every witness transition
+into the durable portable proof-job outbox and DA serving archive. A product-only
+chain deliberately omits those two historical artifact streams while retaining
+the same canonical witness schema, state roots, and native verification.
 
 The witness proves value-relevant state: order validity, fills, settlement,
 post-state qMDB membership, event-root reconstruction, sidecar transition, and

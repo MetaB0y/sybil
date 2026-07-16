@@ -262,7 +262,12 @@ impl Harness {
         let genesis = seq.try_produce_block(Vec::new(), 1).unwrap();
         let sealed = genesis.sealed_block();
         store
-            .save_block_with_witness_and_replay_block(seq.snapshot(), &genesis.witness, &sealed)
+            .save_block_with_witness_and_replay_block(
+                seq.snapshot(),
+                &genesis.witness,
+                &sealed,
+                true,
+            )
             .await
             .unwrap();
 

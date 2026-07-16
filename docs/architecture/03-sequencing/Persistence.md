@@ -219,13 +219,23 @@ Other sequencer-owned durable serving rows are:
   small publish-time metadata in `da_manifests`, keyed by height. The paired
   rows are written atomically after block commit and pruned together with the
   canonical-archive retention floor. They are availability artifacts, not part of
-  the redb commit fence.
+  the redb commit fence. They exist only when the chain is bound to
+  `retain_validity_artifacts=true`.
 - **Proof-job outbox**: portable transition jobs in `proof_job_outbox` remain
   sequencer-owned until the standalone prover durably stores the exact bytes
   and writes their digest acknowledgement. Old matching job/ack pairs are
   deleted atomically after a safety window. A durable rotating maintenance
   cursor bounds rows examined per pass while moving past unacknowledged jobs;
-  a digest mismatch aborts the whole transaction.
+  a digest mismatch aborts the whole transaction. Product-only chains do not
+  create these rows.
+
+Validity-artifact retention is bound in durable store metadata before the first
+block. The API refuses to change the value later and refuses to assign a value
+retroactively to a non-empty legacy store. This makes the proof sequence a
+chain-level invariant: moving between product-only and validity-enabled modes
+requires fresh genesis. Both modes still persist the latest `block_witnesses`
+row for recovery and native inspection, plus qMDB state, canonical replay, and
+the product-history outbox.
 
 The sequencer holds fill, price, event, and equity facts only until the next
 fenced block snapshot has copied them into the product-history outbox. It does

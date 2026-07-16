@@ -50,10 +50,43 @@ compose() {
     $COMPOSE_CMD "${COMPOSE_FILES[@]}" "$@"
 }
 
+compose_validity() {
+    # shellcheck disable=SC2086
+    $COMPOSE_CMD "${COMPOSE_FILES[@]}" -f docker-compose.validity.yml "$@"
+}
+
+compose_l1() {
+    # shellcheck disable=SC2086
+    $COMPOSE_CMD "${COMPOSE_FILES[@]}" -f docker-compose.l1.yml "$@"
+}
+
 contains_service() {
     local services=$1
     local service=$2
     grep -Fxq "$service" <<<"$services"
+}
+
+artifact_profile_contract() {
+    python3 -c '
+import os
+import sys
+import yaml
+
+config = yaml.safe_load(sys.stdin)
+mode = config["services"]["sybil-api"]["environment"]["SYBIL_RETAIN_VALIDITY_ARTIFACTS"]
+volumes = {}
+for volume in config["services"]["victoriametrics"]["volumes"]:
+    if isinstance(volume, str):
+        source, target, *_ = volume.split(":")
+    else:
+        source, target = volume["source"], volume["target"]
+    volumes[target] = os.path.basename(source)
+print("|".join([
+    str(mode).lower(),
+    volumes["/etc/prometheus/targets/sybil-prover.json"],
+    volumes["/etc/prometheus/targets/sybil-l1-indexer.json"],
+]))
+'
 }
 
 profile_contract=$(
@@ -99,12 +132,12 @@ for profile in integrations validity ops l1-indexer; do
         || fail "Compose profile $profile is not declared"
 done
 
-for profile in integrations validity ops; do
+for profile in integrations ops; do
     compose --profile "$profile" config --quiet \
         || fail "$profile profile does not compose cleanly"
 done
-compose --profile integrations --profile validity --profile ops config --quiet \
-    || fail "full ordinary profile set does not compose cleanly"
+compose_validity --profile integrations --profile validity --profile ops config --quiet \
+    || fail "explicit validity profile set does not compose cleanly"
 pass "integration, validity, and ops profiles are isolated and compose cleanly"
 
 for variable in COMPOSE_PROD COMPOSE_TELEGRAM; do
@@ -122,9 +155,20 @@ for profile in integrations ops validity; do
     grep -Fq -- "--profile $profile" <<<"$validity_definition" \
         || fail "COMPOSE_PROD_VALIDITY does not explicitly select the $profile profile"
 done
+grep -Fq -- '-f docker-compose.validity.yml' <<<"$validity_definition" \
+    || fail "COMPOSE_PROD_VALIDITY does not select the validity chain overlay"
+l1_definition=$(grep -E '^COMPOSE_PROD_L1 :=' justfile)
+grep -Fq -- '-f docker-compose.l1.yml' <<<"$l1_definition" \
+    || fail "COMPOSE_PROD_L1 does not select the L1 monitoring overlay"
+[[ "$(compose config | artifact_profile_contract)" == "false|disabled.json|disabled.json" ]] \
+    || fail "product topology retains validity artifacts or exposes an absent optional target"
+[[ "$(compose_validity config | artifact_profile_contract)" == "true|sybil-prover.json|disabled.json" ]] \
+    || fail "validity overlay does not bind both artifact retention and prover monitoring"
+[[ "$(compose_l1 config | artifact_profile_contract)" == "false|disabled.json|sybil-l1-indexer.json" ]] \
+    || fail "L1 overlay does not activate exactly the indexer monitoring target"
 pass "product and explicit-validity production topologies are separate"
 
-compose --profile l1-indexer config --quiet \
+compose_l1 --profile l1-indexer config --quiet \
     || fail "l1-indexer profile does not compose cleanly"
 pass "L1 indexer is explicit opt-in deployment state"
 
@@ -198,10 +242,26 @@ for expected in \
 done
 grep -Fq '/app/bin/sybil-l1-indexer' Dockerfile \
     || fail "server image does not package sybil-l1-indexer"
-if grep -Eq 'job_name: sybil-(prover|l1-indexer)' deploy/prometheus.yml; then
-    fail "product monitoring statically couples to an absent optional profile"
-fi
-pass "L1 indexer binary and durable health boundary are wired without fake product targets"
+for optional_job in sybil-prover sybil-l1-indexer; do
+    grep -Fq "job_name: $optional_job" deploy/prometheus.yml \
+        || fail "VictoriaMetrics is missing optional $optional_job job"
+    grep -Fq "/etc/prometheus/targets/$optional_job.json" deploy/prometheus.yml \
+        || fail "optional $optional_job job does not use profile-selected file discovery"
+done
+python3 - <<'PY' || fail "optional monitoring target files have invalid profile semantics"
+import json
+from pathlib import Path
+
+root = Path("deploy/prometheus-targets")
+assert json.loads((root / "disabled.json").read_text()) == []
+assert json.loads((root / "sybil-prover.json").read_text()) == [
+    {"targets": ["sybil-prover:3002"]}
+]
+assert json.loads((root / "sybil-l1-indexer.json").read_text()) == [
+    {"targets": ["sybil-l1-indexer:9102"]}
+]
+PY
+pass "optional owner processes are discovered only when their profile overlay is selected"
 
 polymarket_service_block=$(
     awk '

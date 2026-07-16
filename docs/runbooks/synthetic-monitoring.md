@@ -86,11 +86,13 @@ does not duplicate delivery or deduplication logic.
 
 ### L1 indexer alert path
 
-The product VictoriaMetrics config deliberately omits the absent `l1-indexer`
-and `validity` targets: static targets create false `up=0` state, while DNS
-discovery logs an error for every absent name. GitHub #146 owns an explicit
-profile-selected target file/config without Docker-socket access. When the
-opt-in `l1-indexer` profile is enabled together with that scrape target, a fatal
+VictoriaMetrics declares optional `l1-indexer` and `validity` jobs through
+file-based discovery. Product Compose mounts `disabled.json` (an empty target
+list) for each, so absent profiles create neither false `up=0` series nor DNS
+errors. `docker-compose.l1.yml` and `docker-compose.validity.yml` replace only
+their respective file mount with one exact enabled target; no Docker socket or
+duplicated scrape config is involved. When the opt-in `l1-indexer` profile is
+enabled, a fatal
 integrity error leaves its listener alive, returns 503 from `/healthz`, and
 pages through `L1IndexerFatalFailure` on the first nonzero sample. `L1IndexerNotReady`,
 `L1IndexerRpcFailureBurst`, and `L1IndexerConfirmedLagHigh` cover sustained

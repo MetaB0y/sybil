@@ -57,6 +57,14 @@ pub struct SequencerConfig {
     pub acknowledged_proof_job_maintenance_interval_blocks: u64,
     /// Maximum old proof-job rows examined in one maintenance pass.
     pub acknowledged_proof_job_max_rows_per_pass: usize,
+    /// Retain portable proof jobs and DA serving artifacts for an attached
+    /// validity stack. Disable this for a product-only chain that makes no
+    /// ZK/DA validity claim. Native verification, the latest recovery witness,
+    /// canonical replay blocks, and product history remain enabled.
+    ///
+    /// This is chain identity, not a live tuning knob: persistent API stores
+    /// bind the value before the first block and refuse later changes.
+    pub retain_validity_artifacts: bool,
     /// Queue depth where actor mailbox pressure should be logged as a warning.
     /// Set to 0 to disable warning logs.
     pub actor_queue_warn_depth: usize,
@@ -98,6 +106,7 @@ impl Default for SequencerConfig {
             acknowledged_proof_job_retention_blocks: 0,
             acknowledged_proof_job_maintenance_interval_blocks: 1_000,
             acknowledged_proof_job_max_rows_per_pass: 10_000,
+            retain_validity_artifacts: true,
             actor_queue_warn_depth: 1_000,
             actor_queue_error_depth: 5_000,
             liquidity_band_nanos: 50_000_000,

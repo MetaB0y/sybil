@@ -654,8 +654,10 @@ polymarket-dev port="3001" max_events="10":
 
 SERVER := "root@172.104.31.54"
 COMPOSE_PROD := "docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile integrations --profile ops"
-COMPOSE_PROD_VALIDITY := "docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile integrations --profile ops --profile validity"
+COMPOSE_PROD_VALIDITY := "docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.validity.yml --profile integrations --profile ops --profile validity"
+COMPOSE_PROD_L1 := "docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.l1.yml --profile integrations --profile ops --profile l1-indexer"
 COMPOSE_TELEGRAM := "docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.telegram.yml --profile integrations --profile ops"
+COMPOSE_TELEGRAM_VALIDITY := "docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.validity.yml -f docker-compose.telegram.yml --profile integrations --profile ops --profile validity"
 
 # Post-deploy verification gates (SYB-248) run against the LIVE stack as the
 # final step of application deploy recipes. API/all-stack promotions run the
@@ -670,7 +672,7 @@ COMPOSE_TELEGRAM := "docker compose -f docker-compose.yml -f docker-compose.prod
 # Sync compose configs + deploy/ directory to server
 deploy-sync:
     ssh {{SERVER}} 'mkdir -p /opt/sybil/scripts/lib /opt/sybil/crates/sybil-polymarket /opt/sybil/crates/sybil-native && touch /opt/sybil/arena.env'
-    scp docker-compose.yml docker-compose.prod.yml docker-compose.telegram.yml {{SERVER}}:/opt/sybil/
+    scp docker-compose.yml docker-compose.prod.yml docker-compose.validity.yml docker-compose.l1.yml docker-compose.telegram.yml {{SERVER}}:/opt/sybil/
     scp -r deploy {{SERVER}}:/opt/sybil/
     scp crates/sybil-polymarket/curated_markets.json {{SERVER}}:/opt/sybil/crates/sybil-polymarket/
     scp crates/sybil-native/native_markets.json {{SERVER}}:/opt/sybil/crates/sybil-native/
@@ -697,11 +699,16 @@ deploy-api: deploy-sync deploy-prod-env-check && deploy-verify
     docker save sybil-api:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-api sybil-native-admin sybil-native-mm sybil-polymarket'
 
-# Explicit mock-validity integration deployment. This is not part of the
-# product devnet: issue #137 owns bounded prover retention before it can soak
-# indefinitely, and real STARK mode requires measured prover hardware.
-deploy-prover-daemon: deploy-sync deploy-prod-env-check && deploy-verify-validity
-    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD_VALIDITY}} up -d sybil-prover'
+# Explicit mock-validity integration deployment. Validity artifact retention is
+# chain identity, so this always starts from fresh genesis and requires an
+# explicit destructive confirmation. This is not part of the product devnet:
+# issue #137 owns bounded prover retention before it can soak indefinitely, and
+# real STARK mode requires measured prover hardware.
+deploy-prover-daemon confirm: deploy-sync deploy-prod-env-check && deploy-verify-validity
+    @test "{{confirm}}" = "CONFIRM" || (echo 'Refusing to reset into validity mode. Run: just deploy-prover-daemon CONFIRM' >&2; exit 2)
+    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} --profile validity --profile l1-indexer down; else {{COMPOSE_PROD}} --profile validity --profile l1-indexer down; fi'
+    ssh {{SERVER}} 'docker volume rm sybil-data history-data polymarket-data native-data arena-data prover-data prover-artifacts prover-jobs sybil_prover-jobs sybil_prover-artifacts l1-indexer-data vmdata || true'
+    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM_VALIDITY}} up -d --remove-orphans; else {{COMPOSE_PROD_VALIDITY}} up -d --remove-orphans; fi'
 
 # Destructively reset production app state, then restart services.
 # This removes old markets, projected history, mirror mappings, Arena bot DB,

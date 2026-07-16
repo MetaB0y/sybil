@@ -85,6 +85,9 @@ struct RedbBlockCommit {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProofJobCapture {
     Required,
+    /// Product-only chain: retain the latest recovery witness but do not
+    /// serialize a portable proving job.
+    Disabled,
     /// A disaster-recovery checkpoint has no local pre-state qMDB slot, so
     /// its incoming transition cannot be reconstructed. Children of the
     /// checkpoint return to required capture immediately.
@@ -647,6 +650,56 @@ where
 }
 
 impl Store {
+    /// Bind validity-artifact retention to this chain before its first block.
+    ///
+    /// A chain cannot move between product-only and validity-enabled modes in
+    /// place: the latter requires a complete proof-job sequence from genesis.
+    /// Refusing an unbound non-empty store also prevents an older database from
+    /// being assigned semantics retroactively after an upgrade.
+    pub fn bind_validity_artifact_retention(&self, enabled: bool) -> Result<(), StoreError> {
+        let configured = u64::from(enabled);
+        let txn = self.db.begin_write()?;
+        let stored = {
+            let counters = txn.open_table(COUNTERS)?;
+            counters
+                .get(KEY_VALIDITY_ARTIFACT_RETENTION)?
+                .map(|value| value.value())
+        };
+
+        match stored {
+            Some(value) if value == configured => {}
+            Some(value @ 0..=1) => {
+                return Err(StoreError::ValidityArtifactRetention(format!(
+                    "chain is bound to {}, but configuration requests {}; start from fresh genesis to change modes",
+                    validity_artifact_mode_name(value != 0),
+                    validity_artifact_mode_name(enabled),
+                )));
+            }
+            Some(value) => {
+                return Err(StoreError::CorruptLayout(format!(
+                    "invalid validity artifact retention value {value}"
+                )));
+            }
+            None => {
+                let has_blocks = {
+                    let headers = txn.open_table(BLOCK_HEADERS)?;
+                    !headers.is_empty()?
+                };
+                if has_blocks {
+                    return Err(StoreError::ValidityArtifactRetention(
+                        "existing chain has no validity artifact retention binding; start from fresh genesis"
+                            .to_string(),
+                    ));
+                }
+                let mut counters = txn.open_table(COUNTERS)?;
+                counters.insert(KEY_VALIDITY_ARTIFACT_RETENTION, configured)?;
+            }
+        }
+
+        txn.commit()?;
+        Ok(())
+    }
+
     /// Open (or create) a store at the given path.
     pub fn open(path: &Path) -> Result<Self, StoreError> {
         let mut db = Database::create(path)?;
@@ -745,6 +798,7 @@ impl Store {
         snapshot: SequencerSnapshot<'_>,
         witness: &BlockWitness,
     ) -> Result<(), StoreError> {
+        self.bind_validity_artifact_retention(true)?;
         self.save_block_inner(snapshot, Some(witness), None, ProofJobCapture::Required)
             .await
     }
@@ -757,12 +811,18 @@ impl Store {
         snapshot: SequencerSnapshot<'_>,
         witness: &BlockWitness,
         block: &SealedBlock,
+        retain_validity_artifacts: bool,
     ) -> Result<(), StoreError> {
+        self.bind_validity_artifact_retention(retain_validity_artifacts)?;
         self.save_block_inner(
             snapshot,
             Some(witness),
             Some(block),
-            ProofJobCapture::Required,
+            if retain_validity_artifacts {
+                ProofJobCapture::Required
+            } else {
+                ProofJobCapture::Disabled
+            },
         )
         .await
     }
@@ -848,7 +908,10 @@ impl Store {
                 self.build_proof_job_bytes(witness, next_slot, current_fence)
                     .await?,
             ),
-            (None, _) | (Some(_), ProofJobCapture::SkipImportedCheckpoint) => None,
+            (None, _)
+            | (Some(_), ProofJobCapture::Disabled | ProofJobCapture::SkipImportedCheckpoint) => {
+                None
+            }
         };
 
         let commit =
@@ -982,6 +1045,14 @@ impl Store {
     }
 }
 
+fn validity_artifact_mode_name(enabled: bool) -> &'static str {
+    if enabled {
+        "validity-enabled"
+    } else {
+        "product-only"
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Error
 // ---------------------------------------------------------------------------
@@ -1020,6 +1091,8 @@ pub enum StoreError {
     WitnessImport(String),
     #[error("proof-job capture failed: {0}")]
     ProofJob(String),
+    #[error("validity artifact retention mismatch: {0}")]
+    ValidityArtifactRetention(String),
     #[error("cannot acknowledge a write before the first committed block snapshot")]
     AcknowledgedWriteBeforeSnapshot,
     #[cfg(test)]
