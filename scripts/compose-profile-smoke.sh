@@ -138,7 +138,35 @@ grep -Fq 'SYBIL_PROVER_SOURCE_URL' <<<"$prover_service_block" \
     || fail "sybil-prover is not wired to the authenticated source outbox"
 grep -Fq 'SYBIL_PROVER_PROOF_KIND' <<<"$prover_service_block" \
     || fail "sybil-prover has no explicit typed backend"
-pass "durable prover daemon, source, backend, and volumes are explicit"
+grep -Fq 'mem_limit: "384m"' <<<"$prover_service_block" \
+    || fail "sybil-prover memory limit regressed below its measured live RSS"
+grep -Fq 'memswap_limit: "512m"' <<<"$prover_service_block" \
+    || fail "sybil-prover has no bounded transient-memory cushion"
+pass "durable prover daemon, source, backend, volumes, and memory budget are explicit"
+
+# The restore drill must be usable without the base file. Merging Compose
+# volume lists would append the globally named sybil-data mount and make
+# throwaway `down -v` cleanup capable of deleting stopped application state.
+# shellcheck disable=SC2086
+restore_drill_config=$(COMPOSE_PROJECT_NAME=sybil-restore-contract \
+    $COMPOSE_CMD -f docker-compose.itest.yml config)
+restore_drill_api_block=$(
+    awk '
+        /^  sybil-api:/ { in_service = 1; next }
+        in_service && /^  [[:alnum:]_-]+:/ { exit }
+        in_service { print }
+    ' <<<"$restore_drill_config"
+)
+grep -Fq 'itest-data:/itest-data' <<<"$restore_drill_api_block" \
+    || fail "standalone restore drill does not mount its unique itest-data volume"
+if grep -Fq 'sybil-data:/data' <<<"$restore_drill_api_block"; then
+    fail "standalone restore drill references the global sybil-data volume"
+fi
+grep -Fq -- '--allow-live-host' scripts/store-restore-drill.sh \
+    || fail "restore drill has no explicit live-host resource override"
+grep -Fq "trap 'cleanup 129' HUP" scripts/store-restore-drill.sh \
+    || fail "restore drill does not clean up after an SSH hangup"
+pass "restore drills isolate volumes, reject implicit live-host sharing, and trap hangups"
 
 l1_indexer_service_block=$(
     awk '

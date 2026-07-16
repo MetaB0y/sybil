@@ -1,6 +1,7 @@
-# SYB-243: isolated, throwaway sybil-api integration-test overlay.
-# Always combine with docker-compose.yml; the harness supplies a unique project
-# name and removes both named volumes with `down -v`.
+# SYB-243: isolated, throwaway sybil-api integration-test definition.
+# The money-path harness combines it with docker-compose.yml. The store restore
+# drill deliberately uses this file alone so globally named application
+# volumes from the base file cannot enter its project or `down -v` cleanup.
 services:
   sybil-api:
     # Test-scoped tag: never clobber the deployable sybil-api:latest on the

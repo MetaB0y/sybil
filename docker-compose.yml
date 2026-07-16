@@ -242,8 +242,13 @@ services:
   sybil-prover:
     profiles: ["validity"]
     image: sybil-api:latest
-    mem_limit: "256m"
-    memswap_limit: "256m"
+    # The mock daemon's measured steady-state RSS is about 261 MiB once the
+    # server image contains the full validity stack. A 256 MiB hard ceiling
+    # therefore creates an exit-137 restart loop even when the host has free
+    # memory. Keep the daemon bounded, with enough RAM and swap headroom for
+    # artifact scans and epoch assembly on the small devnet host.
+    mem_limit: "384m"
+    memswap_limit: "512m"
     entrypoint: ["sybil-prover"]
     command:
       - "daemon"
