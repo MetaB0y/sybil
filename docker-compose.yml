@@ -212,6 +212,7 @@ services:
       - "--deployment-path=/native-data/deployment.json"
       - "--state-path=/native-data/mm-state.json"
       - "--max-orders-per-block=512"
+      - "--monitoring-bind=0.0.0.0:9104"
     environment:
       SYBIL_SERVICE_TOKEN: "${SYBIL_SERVICE_TOKEN:-sybil-local-service}"
       RUST_LOG: "sybil_native=info,sybil_market_maker=info"
@@ -221,6 +222,12 @@ services:
       sybil-native-admin:
         condition: service_completed_successfully
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9104/readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
     logging: *default-logging
 
   sybil-prover:

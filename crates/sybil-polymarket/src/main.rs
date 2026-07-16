@@ -9,7 +9,7 @@ use tokio_util::task::TaskTracker;
 use tracing::{error, info, warn};
 
 use sybil_client::SybilClient;
-use sybil_market_maker::{MmActor, MmMessage, PriceSnapshot, dollars_to_nanos};
+use sybil_market_maker::{MmActor, MmMessage, MmProgress, PriceSnapshot, dollars_to_nanos};
 use sybil_polymarket::config::Config;
 use sybil_polymarket::feed::FeedActor;
 use sybil_polymarket::mapping::MappingStore;
@@ -299,7 +299,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (price_tx, price_rx) = watch::channel(PriceSnapshot::default());
     // Live-set channel: MM publishes how many markets it is actively quoting so
     // Sync recycles `mm_max_markets` slots as markets resolve/untrack (PM-8).
-    let (mm_live_tx, mm_live_rx) = watch::channel(0usize);
+    let (mm_live_tx, mm_live_rx) = watch::channel(MmProgress::default());
 
     // Bootstrap MM with existing markets from mapping
     if !existing_mm.is_empty() {

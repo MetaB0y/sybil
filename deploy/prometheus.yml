@@ -20,6 +20,13 @@ scrape_configs:
     static_configs:
       - targets: ["sybil-arena:9101"]
 
+  - job_name: sybil-native-mm
+    scrape_interval: 10s
+    scrape_timeout: 3s
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["sybil-native-mm:9104"]
+
   # The service is opt-in under the Compose `l1-indexer` profile. An absent
   # target is expected until a vault/RPC deployment is explicitly configured.
   - job_name: sybil-l1-indexer

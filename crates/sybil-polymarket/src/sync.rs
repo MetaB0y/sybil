@@ -15,7 +15,7 @@ use crate::polymarket::gamma::GammaClient;
 use crate::polymarket::types::{GammaEvent, GammaMarket};
 use sybil_api_types::*;
 use sybil_client::SybilClient;
-use sybil_market_maker::MmMessage;
+use sybil_market_maker::{MmMessage, MmProgress};
 
 mod planning;
 
@@ -33,7 +33,7 @@ pub struct SyncActor {
     /// Live count of markets the MM is actively quoting (PM-8). Admission to MM
     /// is gated on this, not the monotonic mapped-market count, so slots freed
     /// by resolved/untracked markets are recycled for fresh events.
-    mm_live_rx: watch::Receiver<usize>,
+    mm_live_rx: watch::Receiver<MmProgress>,
     /// Re-push off-block metadata for all mapped markets on the first cycle
     /// after start, so schema additions backfill onto existing markets
     /// without wiping `market_ref_data.json`.
@@ -63,7 +63,7 @@ impl SyncActor {
         mapping: Arc<RwLock<MappingStore>>,
         feed_tx: mpsc::Sender<FeedMessage>,
         mm_tx: mpsc::Sender<MmMessage>,
-        mm_live_rx: watch::Receiver<usize>,
+        mm_live_rx: watch::Receiver<MmProgress>,
         curated_event_ids: Vec<String>,
         curated_condition_ids: Vec<String>,
     ) -> Self {
@@ -106,7 +106,7 @@ impl SyncActor {
     }
 
     async fn sync_once(&mut self) -> Result<(), crate::error::Error> {
-        let mut mm_live = *self.mm_live_rx.borrow();
+        let mut mm_live = self.mm_live_rx.borrow().tracked_markets;
 
         // Curated mode (SYB-150): mirror exactly the allowlisted events by id.
         // Otherwise fall back to the volume-ranked category scan.

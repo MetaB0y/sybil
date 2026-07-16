@@ -809,6 +809,92 @@
         "defaults": { "unit": "none", "min": 0, "custom": { "drawStyle": "bars", "fillOpacity": 35 } },
         "overrides": []
       }
+    },
+    {
+      "title": "Native Market Maker",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 138 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "title": "Native MM Ready",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 139 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "sybil_native_mm_ready", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [
+          { "color": "red", "value": null },
+          { "color": "green", "value": 1 }
+        ] } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Native Markets Tracked",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 139 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "sybil_native_mm_tracked_markets", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0 },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Native MM Last Quote Block",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 139 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "sybil_native_mm_last_completed_quote_block", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0 },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Native MM Submission Failures",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 139 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "sybil_native_mm_submissions_failed_total", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "red", "value": 1 }
+        ] } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Native MM Block Progress",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 143 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "sybil_native_mm_last_observed_block", "legendFormat": "observed", "refId": "A" },
+        { "expr": "sybil_native_mm_last_completed_quote_block", "legendFormat": "quote complete", "refId": "B" },
+        { "expr": "sybil_native_mm_last_successful_submission_block", "legendFormat": "submission accepted", "refId": "C" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Native MM Submission Outcomes",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 143 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "rate(sybil_native_mm_submissions_success_total[5m])", "legendFormat": "accepted", "refId": "A" },
+        { "expr": "rate(sybil_native_mm_submissions_failed_total[5m])", "legendFormat": "failed", "refId": "B" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ops", "min": 0, "custom": { "drawStyle": "bars", "fillOpacity": 35 } },
+        "overrides": []
+      }
     }
   ],
   "schemaVersion": 39,

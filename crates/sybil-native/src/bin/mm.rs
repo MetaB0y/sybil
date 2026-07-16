@@ -1,10 +1,15 @@
+#[path = "mm/monitoring.rs"]
+mod monitoring;
+
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use sybil_client::SybilClient;
 use sybil_market_maker::{
-    MmActor, MmConfig, MmMessage, PriceSnapshot, QuoteRange, dollars_to_nanos,
+    MmActor, MmConfig, MmMessage, MmProgress, PriceSnapshot, QuoteRange, dollars_to_nanos,
 };
 use sybil_native::{Error, NativeDeployment};
 use tokio::sync::{mpsc, watch};
@@ -42,6 +47,19 @@ struct Config {
     max_orders_per_block: usize,
     #[arg(long, default_value = "50000", env = "NATIVE_MM_MAX_EXPOSURE_DOLLARS")]
     max_exposure_dollars: f64,
+    #[arg(
+        long,
+        default_value = "0.0.0.0:9104",
+        env = "NATIVE_MM_MONITORING_BIND"
+    )]
+    monitoring_bind: SocketAddr,
+    #[arg(
+        long,
+        default_value = "60",
+        env = "NATIVE_MM_HEALTH_STALE_AFTER_SECS",
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    health_stale_after_secs: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -130,18 +148,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map_err(|error| Error::Deployment(error.to_string()))?;
     }
     let (_price_tx, price_rx) = watch::channel(PriceSnapshot::default());
-    let (live_tx, _live_rx) = watch::channel(0usize);
-    let actor = MmActor::new(mm_config, client, account_id, price_rx, mm_rx, live_tx);
+    let (progress_tx, progress_rx) = watch::channel(MmProgress::default());
+    let actor = MmActor::new(mm_config, client, account_id, price_rx, mm_rx, progress_tx);
     let cancel = CancellationToken::new();
+    let monitoring_listener = tokio::net::TcpListener::bind(config.monitoring_bind).await?;
+    tracing::info!(
+        address = %config.monitoring_bind,
+        "native MM monitoring listening"
+    );
+    let monitoring_state = monitoring::MonitoringState::new(
+        progress_rx,
+        Duration::from_secs(config.health_stale_after_secs),
+    );
+    let monitoring_cancel = cancel.clone();
+    let mut monitoring_handle = tokio::spawn(async move {
+        monitoring::serve(monitoring_listener, monitoring_state, monitoring_cancel).await
+    });
     let actor_cancel = cancel.clone();
     let mut actor_handle = tokio::spawn(async move { actor.run(actor_cancel).await });
     tokio::select! {
         result = tokio::signal::ctrl_c() => result?,
         result = &mut actor_handle => result?,
+        result = &mut monitoring_handle => result??,
     }
     cancel.cancel();
     if !actor_handle.is_finished() {
         actor_handle.await?;
+    }
+    if !monitoring_handle.is_finished() {
+        monitoring_handle.await??;
     }
     tracing::info!("native MM shutdown complete");
     Ok(())
