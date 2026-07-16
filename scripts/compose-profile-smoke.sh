@@ -63,6 +63,11 @@ for service in sybil-api sybil-polymarket sybil-prover; do
 done
 pass "default compose config includes core devnet services"
 
+if ! SYBIL_L1_RPC_URLS= SYBIL_L1_RPC_IDS= compose config --services >/dev/null; then
+    fail "inactive L1 indexer credentials block the default private-devnet stack"
+fi
+pass "inactive L1 credentials do not block private-devnet deploys"
+
 available_profiles=$(compose config --profiles)
 contains_service "$available_profiles" "l1-indexer" \
     || fail "L1 indexer is not isolated behind its explicit Compose profile"
