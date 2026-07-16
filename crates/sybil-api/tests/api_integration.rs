@@ -201,7 +201,7 @@ async fn http_order_rate_limit_returns_429_before_handler_work() {
     });
 
     let (status, _) = post_json(app.clone(), "/v1/orders", payload.clone()).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(status, StatusCode::NOT_FOUND);
 
     let (status, headers, body) = post_json_with_headers(app, "/v1/orders", payload).await;
     assert_eq!(
@@ -948,12 +948,9 @@ async fn resolved_market_rejects_new_orders() {
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
     let resp = parse_json(&body);
-    assert!(
-        resp["error"]
-            .as_str()
-            .unwrap()
-            .contains("Invalid market state")
-    );
+    assert_eq!(resp["code"], json!("MARKET_NOT_TRADEABLE"));
+    assert_eq!(resp["details"]["market_id"], json!(market_id));
+    assert_eq!(resp["details"]["market_status"], json!("resolved"));
 }
 
 #[tokio::test]
@@ -1639,7 +1636,7 @@ async fn history_service_candles_are_independent_of_sequencer_recent_cache() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn submit_order_invalid_market_400() {
+async fn submit_order_invalid_market_returns_structured_identity() {
     let (app, _) = test_app(true).await;
 
     // Create account but no market
@@ -1650,7 +1647,7 @@ async fn submit_order_invalid_market_400() {
     )
     .await;
 
-    let (status, _) = post_json(
+    let (status, body) = post_json(
         app,
         "/v1/orders",
         json!({
@@ -1664,7 +1661,10 @@ async fn submit_order_invalid_market_400() {
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let response = parse_json(&body);
+    assert_eq!(response["code"], json!("MARKET_NOT_FOUND"));
+    assert_eq!(response["details"]["market_id"], json!(999));
 }
 
 #[tokio::test]

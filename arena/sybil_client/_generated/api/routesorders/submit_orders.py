@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.order_accepted_response import OrderAcceptedResponse
 from ...models.submit_order_request import SubmitOrderRequest
 from typing import cast
@@ -40,7 +41,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | OrderAcceptedResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> ApiErrorResponse | OrderAcceptedResponse | None:
     if response.status_code == 200:
         response_200 = OrderAcceptedResponse.from_dict(response.json())
 
@@ -49,12 +50,25 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return response_200
 
     if response.status_code == 400:
-        response_400 = cast(Any, None)
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
         return response_400
 
     if response.status_code == 404:
-        response_404 = cast(Any, None)
+        response_404 = ApiErrorResponse.from_dict(response.json())
+
+
+
         return response_404
+
+    if response.status_code == 409:
+        response_409 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_409
 
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
@@ -62,7 +76,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | OrderAcceptedResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[ApiErrorResponse | OrderAcceptedResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -76,7 +90,7 @@ def sync_detailed(
     client: AuthenticatedClient | Client,
     body: SubmitOrderRequest,
 
-) -> Response[Any | OrderAcceptedResponse]:
+) -> Response[ApiErrorResponse | OrderAcceptedResponse]:
     """ POST /v1/orders
 
     Args:
@@ -87,7 +101,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | OrderAcceptedResponse]
+        Response[ApiErrorResponse | OrderAcceptedResponse]
      """
 
 
@@ -107,7 +121,7 @@ def sync(
     client: AuthenticatedClient | Client,
     body: SubmitOrderRequest,
 
-) -> Any | OrderAcceptedResponse | None:
+) -> ApiErrorResponse | OrderAcceptedResponse | None:
     """ POST /v1/orders
 
     Args:
@@ -118,7 +132,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | OrderAcceptedResponse
+        ApiErrorResponse | OrderAcceptedResponse
      """
 
 
@@ -133,7 +147,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient | Client,
     body: SubmitOrderRequest,
 
-) -> Response[Any | OrderAcceptedResponse]:
+) -> Response[ApiErrorResponse | OrderAcceptedResponse]:
     """ POST /v1/orders
 
     Args:
@@ -144,7 +158,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | OrderAcceptedResponse]
+        Response[ApiErrorResponse | OrderAcceptedResponse]
      """
 
 
@@ -164,7 +178,7 @@ async def asyncio(
     client: AuthenticatedClient | Client,
     body: SubmitOrderRequest,
 
-) -> Any | OrderAcceptedResponse | None:
+) -> ApiErrorResponse | OrderAcceptedResponse | None:
     """ POST /v1/orders
 
     Args:
@@ -175,7 +189,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | OrderAcceptedResponse
+        ApiErrorResponse | OrderAcceptedResponse
      """
 
 

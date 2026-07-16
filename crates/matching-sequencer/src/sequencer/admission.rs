@@ -208,15 +208,14 @@ impl BlockSequencer {
             }
             for market_id in order.active_markets() {
                 if self.markets.get(market_id).is_none() {
-                    return AdmitOutcome::Rejected(SequencerError::MarketNotFound);
+                    return AdmitOutcome::Rejected(SequencerError::MarketNotFound { market_id });
                 }
                 let status = self.market_status(market_id);
                 if !status.is_tradeable() {
-                    return AdmitOutcome::Rejected(SequencerError::InvalidMarketState(format!(
-                        "market {} is {}",
-                        market_id.0,
-                        status.as_str()
-                    )));
+                    return AdmitOutcome::Rejected(SequencerError::MarketNotTradeable {
+                        market_id,
+                        status: status.as_str().to_string(),
+                    });
                 }
             }
         }

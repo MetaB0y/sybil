@@ -52,3 +52,33 @@ pub enum Error {
         head_height: u64,
     },
 }
+
+impl Error {
+    /// Decode the server's stable error envelope while preserving the raw body
+    /// on [`Error::Api`] for diagnostics and forward compatibility.
+    pub fn api_error_response(&self) -> Option<sybil_api_types::ApiErrorResponse> {
+        let Self::Api { body, .. } = self else {
+            return None;
+        };
+        serde_json::from_str(body).ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decodes_structured_market_error_without_parsing_prose() {
+        let error = Error::Api {
+            status: 409,
+            body: r#"{"error":"Market 42 is not tradeable (resolved)","code":"MARKET_NOT_TRADEABLE","details":{"market_id":42,"market_status":"resolved"}}"#.to_string(),
+        };
+
+        let response = error.api_error_response().unwrap();
+        assert_eq!(response.code, sybil_api_types::MARKET_NOT_TRADEABLE_CODE);
+        let details = response.details.unwrap();
+        assert_eq!(details.market_id, Some(42));
+        assert_eq!(details.market_status.as_deref(), Some("resolved"));
+    }
+}

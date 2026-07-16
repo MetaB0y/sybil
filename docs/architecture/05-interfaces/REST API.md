@@ -3,7 +3,7 @@ tags: [infrastructure, crate]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-15
+last_verified: 2026-07-16
 ---
 
 The REST API is the external interface to the exchange. Built with Axum, it
@@ -133,6 +133,14 @@ Order quantity fields (`quantity`, `max_fill`, `fill_qty`,
 1 full YES/NO share; the minimum increment is `1` unit = 0.001 share. Client
 layers may expose ordinary decimal shares, but signed/canonical API payloads
 use integer units.
+
+Atomic order submission reports market lifecycle rejection through the shared
+error envelope, not through prose conventions. An unknown market returns `404
+MARKET_NOT_FOUND` with `details.market_id`; a market that exists but is no
+longer tradeable returns `409 MARKET_NOT_TRADEABLE` with `details.market_id`
+and `details.market_status`. Bots and SDKs use those stable fields to remove
+only the rejected market from a batch. The human-readable `error` remains a
+diagnostic and is not a machine interface.
 
 Market raw price history is served through
 `GET /v1/markets/{id}/prices/history`, backed by the private history projector.

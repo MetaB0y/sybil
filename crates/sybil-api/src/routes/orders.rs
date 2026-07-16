@@ -20,7 +20,9 @@ use crate::types::request::{
     AuthScheme, CancelSignedOrderRequest, OrderSpec, SubmitOrderRequest, SubmitSignedOrderRequest,
     TimeInForce,
 };
-use crate::types::response::{CancelOrderResponse, OrderAcceptedResponse, PendingOrderResponse};
+use crate::types::response::{
+    ApiErrorResponse, CancelOrderResponse, OrderAcceptedResponse, PendingOrderResponse,
+};
 use crate::webauthn;
 
 /// Derive the MmSide from an OrderSpec for capital calculation.
@@ -97,8 +99,9 @@ async fn ensure_registered_scheme(
     request_body = SubmitOrderRequest,
     responses(
         (status = 200, description = "Orders accepted", body = OrderAcceptedResponse),
-        (status = 400, description = "Invalid order"),
-        (status = 404, description = "Account not found")
+        (status = 400, description = "Invalid order", body = ApiErrorResponse),
+        (status = 404, description = "Account or market not found", body = ApiErrorResponse),
+        (status = 409, description = "Market is not tradeable", body = ApiErrorResponse)
     )
 )]
 pub async fn submit_orders(
@@ -116,7 +119,14 @@ pub async fn submit_orders(
 
     let mut orders = Vec::with_capacity(req.orders.len());
     for spec in &req.orders {
-        let mut order = order_spec_to_order(spec, &markets).map_err(AppError::bad_request)?;
+        let mut order = order_spec_to_order(spec, &markets).map_err(|error| match error {
+            crate::convert::OrderSpecConversionError::MarketNotFound(market_id) => {
+                AppError::market_not_found(market_id.0)
+            }
+            crate::convert::OrderSpecConversionError::Invalid(error) => {
+                AppError::bad_request(error)
+            }
+        })?;
         if !is_ioc {
             apply_time_in_force(&mut order, req.time_in_force, req.expires_at_block, None)
                 .map_err(AppError::bad_request)?;

@@ -516,7 +516,10 @@ pub fn prices_to_response(prices: &HashMap<MarketId, Vec<Nanos>>) -> MarketPrice
 }
 
 /// Convert an OrderSpec from the API into an internal Order.
-pub fn order_spec_to_order(spec: &OrderSpec, markets: &MarketSet) -> Result<Order, String> {
+pub fn order_spec_to_order(
+    spec: &OrderSpec,
+    markets: &MarketSet,
+) -> Result<Order, OrderSpecConversionError> {
     let order = match spec {
         OrderSpec::BuyYes {
             market_id,
@@ -561,6 +564,27 @@ pub fn order_spec_to_order(spec: &OrderSpec, markets: &MarketSet) -> Result<Orde
     };
     validate_public_order_shape(&order)?;
     Ok(order)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OrderSpecConversionError {
+    MarketNotFound(MarketId),
+    Invalid(String),
+}
+
+impl From<String> for OrderSpecConversionError {
+    fn from(error: String) -> Self {
+        Self::Invalid(error)
+    }
+}
+
+impl std::fmt::Display for OrderSpecConversionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MarketNotFound(market_id) => write!(f, "Market {} not found", market_id.0),
+            Self::Invalid(error) => f.write_str(error),
+        }
+    }
 }
 
 /// Convert a SignedOrderData to an internal Order.
@@ -617,9 +641,9 @@ pub fn apply_time_in_force(
     Ok(())
 }
 
-fn validate_market(mid: MarketId, markets: &MarketSet) -> Result<(), String> {
+fn validate_market(mid: MarketId, markets: &MarketSet) -> Result<(), OrderSpecConversionError> {
     if markets.get(mid).is_none() {
-        return Err(format!("Market {} not found", mid.0));
+        return Err(OrderSpecConversionError::MarketNotFound(mid));
     }
     Ok(())
 }
