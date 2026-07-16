@@ -6876,6 +6876,7 @@ dependencies = [
  "serde_json",
  "sybil-api-types",
  "sybil-client",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-util",
  "tracing",

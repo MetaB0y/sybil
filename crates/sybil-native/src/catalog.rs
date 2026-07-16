@@ -51,8 +51,6 @@ pub struct NativeMarketTemplate {
     pub source_url: String,
     /// Single display category for native markets.
     pub category: String,
-    /// Candidate resolution adapter, scoped now but not implemented yet.
-    pub resolution_source: ResolutionSourceConfig,
     /// Binary-market quote range. Categorical templates use per-outcome ranges.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quote_range: Option<NativeQuoteRange>,
@@ -146,36 +144,6 @@ pub struct NativeQuoteRange {
     pub initial: f64,
 }
 
-/// Native resolution-source config.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ResolutionSourceConfig {
-    /// Manual resolution is an operator workflow: humans inspect the listed
-    /// source and submit an admin/signed resolution through Sybil. This ticket
-    /// only records the intended source and display instructions.
-    Manual { instructions: String },
-    /// API polling is the future automated adapter shape: a source-specific
-    /// poller would fetch a deterministic endpoint, map its response into a
-    /// payout, and submit a resolution. No HTTP adapter is implemented here.
-    ApiPoll {
-        endpoint: String,
-        #[serde(default)]
-        method: Option<String>,
-        notes: String,
-    },
-}
-
-/// Skeleton for future native resolution adapters.
-///
-/// Implementations are intentionally out of scope for SYB-151 mechanism work:
-/// an API-poll adapter would read a configured endpoint and produce a payout,
-/// while a manual adapter would expose operator instructions and wait for an
-/// explicit resolution submission.
-pub trait ResolutionSource {
-    fn config(&self) -> &ResolutionSourceConfig;
-    fn source_url(&self) -> &str;
-}
-
 /// Expanded child market ready for Sybil creation and MM bootstrap.
 #[derive(Debug, Clone)]
 pub struct NativeMarketSpec {
@@ -192,26 +160,12 @@ pub struct NativeMarketSpec {
     resolution_criteria: String,
     source_url: String,
     event_title: String,
-    /// Resolution adapter config, copied from the parent template. Drives the
-    /// SYB-48 auto-resolution poller (`api_poll` is fetched + LLM-evaluated;
-    /// `manual` is left entirely to operators).
-    resolution_source: ResolutionSourceConfig,
     /// Event/group image, copied from the parent template (shared by siblings).
     event_image_url: Option<String>,
     /// Event/group icon fallback, copied from the parent template.
     event_icon_url: Option<String>,
     /// Per-child market image (categorical outcome / threshold rung logo).
     market_image_url: Option<String>,
-    /// Structured threshold semantics. Display titles are not trusted as the
-    /// resolution predicate.
-    threshold_question: Option<NativeThresholdQuestion>,
-}
-
-#[derive(Debug, Clone)]
-struct NativeThresholdQuestion {
-    direction: NativeThresholdDirection,
-    unit: String,
-    threshold: f64,
 }
 
 impl NativeMarketCatalog {
@@ -313,28 +267,6 @@ impl NativeMarketTemplate {
             return Err(Error::NativeCatalog(format!(
                 "{context} end_time must be after the Unix epoch"
             )));
-        }
-
-        match &self.resolution_source {
-            ResolutionSourceConfig::Manual { instructions } => {
-                validate_nonempty("resolution_source.instructions", instructions, context)?;
-            }
-            ResolutionSourceConfig::ApiPoll {
-                endpoint,
-                method,
-                notes,
-            } => {
-                validate_url("resolution_source.endpoint", endpoint, context)?;
-                if let Some(method) = method {
-                    let method = method.trim();
-                    if method != "GET" && method != "POST" {
-                        return Err(Error::NativeCatalog(format!(
-                            "{context} resolution_source.method must be GET or POST"
-                        )));
-                    }
-                }
-                validate_nonempty("resolution_source.notes", notes, context)?;
-            }
         }
 
         match &self.outcome_set {
@@ -530,11 +462,9 @@ impl NativeMarketTemplate {
                     resolution_criteria: self.resolution_criteria.clone(),
                     source_url: self.source_url.clone(),
                     event_title: self.title.clone(),
-                    resolution_source: self.resolution_source.clone(),
                     event_image_url: self.event_image_url.clone(),
                     event_icon_url: self.event_icon_url.clone(),
                     market_image_url: self.event_image_url.clone(),
-                    threshold_question: None,
                 }]
             }
             NativeOutcomeSet::Categorical { outcomes } => {
@@ -560,19 +490,13 @@ impl NativeMarketTemplate {
                         resolution_criteria: self.resolution_criteria.clone(),
                         source_url: self.source_url.clone(),
                         event_title: self.title.clone(),
-                        resolution_source: self.resolution_source.clone(),
                         event_image_url: self.event_image_url.clone(),
                         event_icon_url: self.event_icon_url.clone(),
                         market_image_url: outcome.image_url.clone(),
-                        threshold_question: None,
                     })
                     .collect()
             }
-            NativeOutcomeSet::Threshold {
-                direction,
-                unit,
-                outcomes,
-            } => {
+            NativeOutcomeSet::Threshold { outcomes, .. } => {
                 let enabled: Vec<_> = outcomes.iter().filter(|rung| rung.enabled).collect();
                 enabled
                     .into_iter()
@@ -593,15 +517,9 @@ impl NativeMarketTemplate {
                         resolution_criteria: self.resolution_criteria.clone(),
                         source_url: self.source_url.clone(),
                         event_title: self.title.clone(),
-                        resolution_source: self.resolution_source.clone(),
                         event_image_url: self.event_image_url.clone(),
                         event_icon_url: self.event_icon_url.clone(),
                         market_image_url: rung.image_url.clone(),
-                        threshold_question: Some(NativeThresholdQuestion {
-                            direction: *direction,
-                            unit: unit.clone(),
-                            threshold: rung.threshold,
-                        }),
                     })
                     .collect()
             }
@@ -633,46 +551,6 @@ impl NativeQuoteRange {
 impl NativeMarketSpec {
     pub fn group_name(&self) -> &str {
         &self.event_title
-    }
-
-    /// Resolution adapter config inherited from the parent template.
-    pub fn resolution_source(&self) -> &ResolutionSourceConfig {
-        &self.resolution_source
-    }
-
-    /// Full, verbatim resolution criteria shown to operators and the LLM.
-    pub fn resolution_criteria(&self) -> &str {
-        &self.resolution_criteria
-    }
-
-    /// Primary source URL for this market's resolution.
-    pub fn source_url(&self) -> &str {
-        &self.source_url
-    }
-
-    /// The specific YES/NO question this child market settles. For a binary
-    /// template this is just the market name; for a categorical child it is
-    /// phrased as "did this outcome win?" so a single scalar payout in [0,1]
-    /// (YES probability) is always well defined.
-    pub fn resolution_question(&self) -> String {
-        if let Some(question) = &self.threshold_question {
-            let comparison = match question.direction {
-                NativeThresholdDirection::Above => "greater than or equal to",
-                NativeThresholdDirection::Below => "less than or equal to",
-            };
-            return format!(
-                "For the event \"{}\": resolve YES if and only if the observed value is {comparison} {} {}, otherwise NO.",
-                self.event_title, question.threshold, question.unit
-            );
-        }
-        match &self.outcome_title {
-            Some(outcome) => format!(
-                "For the event \"{}\": resolve YES if the outcome \"{}\" is the winning \
-                 outcome, otherwise NO.",
-                self.event_title, outcome
-            ),
-            None => self.name.clone(),
-        }
     }
 
     pub fn create_request(&self) -> CreateMarketRequest {
@@ -971,7 +849,6 @@ mod tests {
                 "resolution_criteria": "Resolve YES if the test passes.",
                 "source_url": "https://example.com/test",
                 "category": "Testing",
-                "resolution_source": { "type": "manual", "instructions": "Read the test log." },
                 "quote_range": { "min": 0.40, "max": 0.60, "initial": 0.50 }
             }]
         }"#;
@@ -1011,8 +888,7 @@ mod tests {
                 "end_time": "2026-12-31T23:59:00Z",
                 "resolution_criteria": "Resolve to the winning option.",
                 "source_url": "https://example.com/test",
-                "category": "Testing",
-                "resolution_source": { "type": "manual", "instructions": "Read the result." }
+                "category": "Testing"
             }]
         }"#;
         let specs = NativeMarketCatalog::parse_json(json)
@@ -1051,8 +927,7 @@ mod tests {
                 "end_time": "2026-12-31T23:59:00Z",
                 "resolution_criteria": "Resolve to the winning option.",
                 "source_url": "https://example.com/test",
-                "category": "Testing",
-                "resolution_source": { "type": "manual", "instructions": "Read the result." }
+                "category": "Testing"
             }]
         }"#;
         NativeMarketCatalog::parse_json(json).unwrap();
@@ -1132,8 +1007,7 @@ mod tests {
                 "resolution_criteria": "Each rung resolves YES if X is at least the threshold.",
                 "source_url": "https://example.com/x",
                 "category": "AI",
-                "event_image_url": "https://example.com/logo.png",
-                "resolution_source": { "type": "manual", "instructions": "Read the tracker." }
+                "event_image_url": "https://example.com/logo.png"
             }]
         }"#;
         let catalog = NativeMarketCatalog::parse_json(json).unwrap();
@@ -1144,10 +1018,6 @@ mod tests {
         assert!(specs.iter().all(|spec| spec.group_size == 0));
         assert_eq!(specs[0].market_key, "native_ladder:ge_2m");
         assert_eq!(specs[0].name, "Will X be at least 2M tokens?");
-        assert_eq!(
-            specs[0].resolution_question(),
-            "For the event \"How large will X be?\": resolve YES if and only if the observed value is greater than or equal to 2000000 tokens, otherwise NO."
-        );
         let metadata = specs[0].metadata_request();
         assert_eq!(metadata.group_item_title.as_deref(), Some("\u{2265} 2M"));
         // Template image flows to every child's event image.
@@ -1170,7 +1040,7 @@ mod tests {
                     ] },
                 "units": "USD/MTok", "end_time": "2026-12-31T23:59:00Z",
                 "resolution_criteria": "Rungs on price.", "source_url": "https://example.com/p",
-                "category": "AI", "resolution_source": { "type": "manual", "instructions": "Read price." }
+                "category": "AI"
             }]
         }"#;
         assert_eq!(
@@ -1197,8 +1067,7 @@ mod tests {
                     ] },
                 "units": "x", "end_time": "2026-12-31T23:59:00Z",
                 "resolution_criteria": "Compare the observed value.",
-                "source_url": "https://example.com/x", "category": "AI",
-                "resolution_source": { "type": "manual", "instructions": "Read x." }
+                "source_url": "https://example.com/x", "category": "AI"
             }]
         }"#;
         NativeMarketCatalog::parse_json(json).unwrap();
@@ -1229,7 +1098,6 @@ mod tests {
                     "resolution_criteria": "Criteria",
                     "source_url": "https://example.com/a",
                     "category": "Testing",
-                    "resolution_source": { "type": "manual", "instructions": "Manual" },
                     "quote_range": { "min": 0.40, "max": 0.60, "initial": 0.50 }
                 },
                 {
@@ -1242,7 +1110,6 @@ mod tests {
                     "resolution_criteria": "Criteria",
                     "source_url": "https://example.com/b",
                     "category": "Testing",
-                    "resolution_source": { "type": "manual", "instructions": "Manual" },
                     "quote_range": { "min": 0.40, "max": 0.60, "initial": 0.50 }
                 }
             ]
@@ -1264,7 +1131,6 @@ mod tests {
                 "resolution_criteria": "Criteria",
                 "source_url": "https://example.com/bad",
                 "category": "Testing",
-                "resolution_source": { "type": "manual", "instructions": "Manual" },
                 "quote_range": { "min": 0.60, "max": 0.40, "initial": 0.50 }
             }]
         }"#;

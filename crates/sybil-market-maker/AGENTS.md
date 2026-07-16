@@ -16,6 +16,8 @@ submits one atomic IOC MM bundle per live block.
 - Mirrored and native processes own their price sources and feed typed messages.
 - Quotes remain one-shot and use one shared MM budget per submitted bundle.
 - Replay repairs lifecycle/inventory state but never emits historical quotes.
+- Both owning processes must construct `ValidatedMmConfig` before creating an
+  account or actor; unchecked floats must not reach integer protocol inputs.
 
 ```bash
 cargo test -p sybil-market-maker

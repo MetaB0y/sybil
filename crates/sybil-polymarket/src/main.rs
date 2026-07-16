@@ -8,9 +8,8 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::{error, info, warn};
 
-use sybil_api_types::NANOS_PER_DOLLAR;
 use sybil_client::SybilClient;
-use sybil_market_maker::{MmActor, MmMessage, PriceSnapshot};
+use sybil_market_maker::{MmActor, MmMessage, PriceSnapshot, dollars_to_nanos};
 use sybil_polymarket::config::Config;
 use sybil_polymarket::feed::FeedActor;
 use sybil_polymarket::mapping::MappingStore;
@@ -76,6 +75,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let config = Config::parse();
+    let config_mm = config.market_maker_config().validate()?;
+    let mm_initial_balance_nanos = dollars_to_nanos(
+        "mm_initial_balance_dollars",
+        config.mm_initial_balance_dollars,
+    )?;
     info!(?config, "starting sybil-polymarket");
 
     // Curated seed set (SYB-150). Parent event ids are fetch keys; exact child
@@ -106,20 +110,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let http = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()?;
-
-    // Load or create mapping store
-    let mapping_store = if config.mapping_store_path.is_empty() {
-        MappingStore::new(None)
-    } else {
-        let path = PathBuf::from(&config.mapping_store_path);
-        MappingStore::load(&path)?
-    };
-    info!(
-        events = mapping_store.event_count(),
-        markets = mapping_store.market_count(),
-        "loaded mapping store"
-    );
-    let mapping = Arc::new(RwLock::new(mapping_store));
 
     // Clients
     let gamma_client = GammaClient::new(
@@ -152,9 +142,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Wait for Sybil to be healthy
     info!(url = &config.sybil_url, "waiting for Sybil API...");
-    loop {
+    let health = loop {
         match sybil_client_sync.health().await {
-            Ok(h) if h.status == "ok" => break,
+            Ok(h) if h.status == "ok" => break h,
             Ok(h) => {
                 info!(status = h.status, "Sybil not ready, retrying...");
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
@@ -164,41 +154,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             }
         }
-    }
+    };
     info!("Sybil API is healthy");
+    let genesis_hash = health
+        .genesis_hash
+        .ok_or_else(|| std::io::Error::other("healthy Sybil API returned no genesis hash"))?;
 
-    // A persisted Polymarket mapping is only valid for the Sybil chain that
-    // created it. If the API starts from a fresh store, stale IDs would make the
-    // mirror submit orders to markets that do not exist. Clear the mapping and
-    // let the sync actor rebuild it from Polymarket.
-    {
-        let mapped_markets = mapping.read().await.all_sybil_market_ids();
-        if !mapped_markets.is_empty() {
-            let sybil_markets = sybil_client_sync.list_market_summaries().await?;
-            let sybil_ids: HashSet<u32> = sybil_markets.iter().map(|m| m.market_id).collect();
-            let missing = mapped_markets
-                .iter()
-                .filter(|market_id| !sybil_ids.contains(market_id))
-                .count();
-
-            if missing > 0 {
-                let mut mapping = mapping.write().await;
-                warn!(
-                    mapped = mapped_markets.len(),
-                    missing,
-                    sybil_markets = sybil_ids.len(),
-                    "clearing stale mapping store; Sybil API no longer has mapped markets"
-                );
-                mapping.clear();
-                mapping.save()?;
-            }
-        }
-    }
+    // Mapping identity is explicit: a file is valid for exactly one canonical
+    // Sybil chain and never inferred from whichever market ids happen to exist.
+    let mapping_store = if config.mapping_store_path.is_empty() {
+        MappingStore::new(None, &genesis_hash)
+    } else {
+        let path = PathBuf::from(&config.mapping_store_path);
+        MappingStore::load(&path, &genesis_hash)?
+    };
+    info!(
+        events = mapping_store.event_count(),
+        markets = mapping_store.market_count(),
+        %genesis_hash,
+        "loaded genesis-bound mapping store"
+    );
+    let mapping = Arc::new(RwLock::new(mapping_store));
 
     // Resolve the MM account: reattach to the persisted one when the server
     // still knows it, otherwise mint and persist a fresh account (PM-7).
-    let balance_nanos = (config.mm_initial_balance_dollars * NANOS_PER_DOLLAR as f64) as u64;
-    let mm_account_id = resolve_mm_account(&sybil_client_sync, &mapping, balance_nanos).await?;
+    let mm_account_id =
+        resolve_mm_account(&sybil_client_sync, &mapping, mm_initial_balance_nanos).await?;
     info!(
         account_id = mm_account_id,
         balance_dollars = config.mm_initial_balance_dollars,
@@ -359,8 +340,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Spawn actors
     let config_sync = config.clone();
     let config_feed = config.clone();
-    let config_mm = config.market_maker_config();
-
     let mapping_for_sync = mapping.clone();
     let sync_handle = tasks.spawn(async move {
         let actor = SyncActor::new(

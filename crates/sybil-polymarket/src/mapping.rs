@@ -5,9 +5,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
 
+const MAPPING_SCHEMA_VERSION: u32 = 1;
+
 /// Bidirectional mapping between Polymarket and Sybil identifiers.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MappingStore {
+    schema_version: u32,
+    genesis_hash: String,
     /// polymarket condition_id -> sybil market_id
     condition_to_sybil: HashMap<String, u32>,
     /// sybil market_id -> polymarket condition_id
@@ -39,30 +43,55 @@ pub struct GroupInfo {
 }
 
 impl MappingStore {
-    pub fn new(persist_path: Option<PathBuf>) -> Self {
+    pub fn new(persist_path: Option<PathBuf>, genesis_hash: impl Into<String>) -> Self {
         Self {
+            schema_version: MAPPING_SCHEMA_VERSION,
+            genesis_hash: genesis_hash.into().trim().to_ascii_lowercase(),
+            condition_to_sybil: HashMap::new(),
+            sybil_to_condition: HashMap::new(),
+            token_to_sybil: HashMap::new(),
+            event_to_group: HashMap::new(),
+            synced_events: HashSet::new(),
+            mm_account_id: None,
             persist_path,
-            ..Default::default()
         }
     }
 
     /// Load from a JSON file, or create empty if the file doesn't exist.
-    pub fn load(path: &Path) -> Result<Self, Error> {
+    pub fn load(path: &Path, genesis_hash: &str) -> Result<Self, Error> {
+        let genesis_hash = genesis_hash.trim().to_ascii_lowercase();
         if path.exists() {
             let data = std::fs::read_to_string(path)?;
             let mut store: Self = serde_json::from_str(&data)?;
+            if store.schema_version != MAPPING_SCHEMA_VERSION {
+                return Err(Error::Mapping(format!(
+                    "unsupported mapping schema {}; expected {MAPPING_SCHEMA_VERSION}",
+                    store.schema_version
+                )));
+            }
+            if store.genesis_hash != genesis_hash {
+                return Err(Error::Mapping(format!(
+                    "mapping belongs to genesis {}, current genesis is {}; clear polymarket-data before restart",
+                    store.genesis_hash, genesis_hash
+                )));
+            }
             store.persist_path = Some(path.to_path_buf());
             Ok(store)
         } else {
-            Ok(Self::new(Some(path.to_path_buf())))
+            Ok(Self::new(Some(path.to_path_buf()), genesis_hash))
         }
     }
 
     /// Save to disk if a persistence path is configured.
     pub fn save(&self) -> Result<(), Error> {
         if let Some(ref path) = self.persist_path {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
             let data = serde_json::to_string_pretty(self)?;
-            std::fs::write(path, data)?;
+            let temp = path.with_extension("json.tmp");
+            std::fs::write(&temp, data)?;
+            std::fs::rename(temp, path)?;
         }
         Ok(())
     }
@@ -253,7 +282,7 @@ mod tests {
 
     #[test]
     fn register_and_lookup() {
-        let mut store = MappingStore::new(None);
+        let mut store = MappingStore::new(None, "test-genesis");
 
         store.register_market(
             "0xabc".into(),
@@ -269,7 +298,7 @@ mod tests {
 
     #[test]
     fn event_sync_tracking() {
-        let mut store = MappingStore::new(None);
+        let mut store = MappingStore::new(None, "test-genesis");
         assert!(!store.is_event_synced("event1"));
 
         store.mark_event_synced("event1");
@@ -278,7 +307,7 @@ mod tests {
 
     #[test]
     fn extend_event_group_is_idempotent() {
-        let mut store = MappingStore::new(None);
+        let mut store = MappingStore::new(None, "test-genesis");
         store.register_event(
             "event1".into(),
             GroupInfo {
@@ -296,7 +325,7 @@ mod tests {
 
     #[test]
     fn serialize_roundtrip() {
-        let mut store = MappingStore::new(None);
+        let mut store = MappingStore::new(None, "test-genesis");
         store.register_market("cond1".into(), vec!["t1".into(), "t2".into()], 0);
         store.register_event(
             "ev1".into(),
@@ -316,7 +345,7 @@ mod tests {
 
     #[test]
     fn mm_account_id_roundtrips_and_clears() {
-        let mut store = MappingStore::new(None);
+        let mut store = MappingStore::new(None, "test-genesis");
         assert_eq!(store.mm_account_id(), None);
 
         store.set_mm_account_id(777);
@@ -333,16 +362,22 @@ mod tests {
     }
 
     #[test]
-    fn mm_account_id_defaults_when_absent_from_json() {
-        // Older on-disk stores predate the field; they must load cleanly.
-        let json = r#"{
-            "condition_to_sybil": {},
-            "sybil_to_condition": {},
-            "token_to_sybil": {},
-            "event_to_group": {},
-            "synced_events": []
-        }"#;
-        let store: MappingStore = serde_json::from_str(json).unwrap();
-        assert_eq!(store.mm_account_id(), None);
+    fn persisted_mapping_is_atomic_versioned_and_genesis_bound() {
+        let path = std::env::temp_dir().join(format!(
+            "sybil-polymarket-mapping-{}-{}.json",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let mut store = MappingStore::new(Some(path.clone()), "abc123");
+        store.register_market("cond".into(), vec!["yes".into(), "no".into()], 9);
+        store.save().unwrap();
+
+        let loaded = MappingStore::load(&path, "ABC123").unwrap();
+        assert_eq!(loaded.sybil_market_id("cond"), Some(9));
+        assert!(!path.with_extension("json.tmp").exists());
+
+        let error = MappingStore::load(&path, "different").unwrap_err();
+        assert!(error.to_string().contains("belongs to genesis"), "{error}");
+        let _ = std::fs::remove_file(path);
     }
 }
