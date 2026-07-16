@@ -2477,11 +2477,13 @@ dependencies = [
  "sybil-history-types",
  "sybil-l1-protocol",
  "sybil-oracle",
+ "sybil-proof-protocol",
  "sybil-signing",
  "sybil-verifier",
  "sybil-zk",
  "thiserror",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 
@@ -4403,6 +4405,7 @@ dependencies = [
  "clap",
  "getrandom 0.4.3",
  "hex",
+ "ipnet",
  "matching-engine",
  "matching-sequencer",
  "metrics",
@@ -4427,6 +4430,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "tower-http 0.7.0",
  "tracing",
  "tracing-opentelemetry 0.33.0",
@@ -4498,6 +4502,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sybil-proof-protocol"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "serde",
+ "sha3",
+ "sybil-verifier",
+ "sybil-zk",
+ "thiserror",
+]
+
+[[package]]
 name = "sybil-signing"
 version = "0.1.0"
 dependencies = [
@@ -4521,6 +4537,7 @@ dependencies = [
  "serde",
  "sha2 0.11.0",
  "sybil-l1-protocol",
+ "sybil-signing",
  "thiserror",
 ]
 
@@ -4770,6 +4787,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]
