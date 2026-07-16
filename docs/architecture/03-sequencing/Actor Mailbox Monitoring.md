@@ -3,17 +3,24 @@ tags: [infrastructure, observability]
 layer: sequencer
 crate: matching-sequencer
 status: current
-last_verified: 2026-07-15
+last_verified: 2026-07-16
 ---
 
 The API communicates with the exchange through the `SequencerActor` mailbox. Ractor 0.15 does not expose an exact public mailbox length, so Sybil tracks a conservative queue-depth gauge at the enqueue/dequeue boundary we control:
 
 - `SequencerHandle` increments `sybil_actor_queue_depth{actor="sequencer"}` before each RPC message is sent.
-- The block-tick loop increments before sending `Tick`.
+- The block-tick loop increments before sending a non-coalesced `Tick`.
 - `SequencerActor::handle` decrements as soon as it starts processing a message.
 - The supervisor resets the gauge when replacing a failed child actor.
 
-This measures backlog waiting behind the actor, excluding the message currently executing. It preserves actor semantics: no bounding, dropping, priority, timeout, or reorder behavior is introduced by the monitor.
+This measures backlog waiting behind the actor, excluding the message currently
+executing. User and control-plane messages are never dropped, reordered, or
+deprioritized by the monitor. Timer-driven block ticks are separately
+coalesced: while one scheduled tick is queued, later cadence events increment
+`sybil_scheduled_block_ticks_coalesced_total` instead of stacking stale work.
+The actor clears the gate when it starts the queued tick, so one successor may
+wait behind the in-flight block and sustained block throughput is preserved.
+Manual `ProduceBlock` RPCs do not use this gate.
 
 Committed-block replay is intentionally outside this mailbox. After the commit
 fence, the actor publishes each `SealedBlock` into a shared read-only recent

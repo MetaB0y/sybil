@@ -28,6 +28,7 @@ impl Actor for SequencerActor {
             mailbox_monitor: args.mailbox_monitor,
             indicative_cache: HashMap::new(),
             indicative_solve_gate: IndicativeSolveGate::default(),
+            scheduled_tick_gate: ScheduledTickGate::default(),
             background_tasks: TaskTracker::new(),
             background_cancel: CancellationToken::new(),
             #[cfg(test)]
@@ -43,6 +44,7 @@ impl Actor for SequencerActor {
         let actor = myself.clone();
         let block_interval = state.sequencer.config.block_interval;
         let mailbox_monitor = state.mailbox_monitor.clone();
+        let scheduled_tick_gate = state.scheduled_tick_gate.clone();
         let cancel = state.background_cancel.child_token();
         state.background_tasks.spawn(async move {
             let mut ticker = interval_at(Instant::now() + block_interval, block_interval);
@@ -51,8 +53,13 @@ impl Actor for SequencerActor {
                     _ = cancel.cancelled() => return,
                     _ = ticker.tick() => {}
                 }
+                if !scheduled_tick_gate.try_queue() {
+                    metrics::counter!("sybil_scheduled_block_ticks_coalesced_total").increment(1);
+                    continue;
+                }
                 mailbox_monitor.queued();
                 if actor.send_message(SequencerMsg::Tick).is_err() {
+                    scheduled_tick_gate.started();
                     mailbox_monitor.send_failed();
                     break;
                 }
@@ -110,6 +117,7 @@ impl Actor for SequencerActor {
         };
         match message {
             SequencerMsg::Tick => {
+                state.scheduled_tick_gate.started();
                 let _ = state.on_tick().await?;
             }
             #[cfg(test)]

@@ -1566,6 +1566,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn scheduled_ticks_do_not_stack_while_actor_is_busy() {
+        let config = SequencerConfig {
+            block_interval: Duration::from_millis(20),
+            ..SequencerConfig::default()
+        };
+        let (seq, _) = make_test_sequencer_with_config(config);
+        let handle = SequencerHandle::spawn(seq);
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        handle
+            .hold_next_tick_for_test(SequencerTestTickHold {
+                started: started_tx,
+                release: release_rx,
+            })
+            .await
+            .unwrap();
+
+        started_rx.await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            handle.inner.mailbox_monitor.depth(),
+            1,
+            "timer should retain only one scheduled tick while the actor is busy"
+        );
+
+        release_tx.send(()).unwrap();
+        assert!(handle.stop_and_wait(TEST_ACTOR_TIMEOUT).await);
+    }
+
+    #[tokio::test]
     async fn test_block_chain_via_actor() {
         let (seq, _) = make_test_sequencer();
         let handle = SequencerHandle::spawn(seq);

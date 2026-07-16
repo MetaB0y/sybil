@@ -57,7 +57,7 @@ mod production;
 mod queries;
 mod supervisor;
 
-use self::infra::{IndicativeSolveGate, MailboxMonitor, rate_limiter};
+use self::infra::{IndicativeSolveGate, MailboxMonitor, ScheduledTickGate, rate_limiter};
 #[cfg(not(test))]
 use self::messages::SequencerTestCrashpoint;
 use self::messages::{SequencerActor, SequencerActorArgs, SequencerActorState};

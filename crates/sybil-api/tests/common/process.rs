@@ -154,12 +154,12 @@ pub async fn spawn_api_with_env(
         .arg(admin_key_path)
         .arg("--block-interval-ms")
         .arg(block_interval_ms.to_string())
-        .env("RUST_LOG", "warn")
+        .env("RUST_LOG", "error")
         .env("SYBIL_HISTORY_URL", history_url)
         .env("SYBIL_HISTORY_POLL_MS", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(Stdio::inherit());
     for (key, value) in extra_env {
         command.env(key, value);
     }

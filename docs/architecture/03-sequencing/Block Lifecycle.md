@@ -11,6 +11,12 @@ last_verified: 2026-07-16
 > [!summary] In one paragraph
 > On each configurable interval, the sequencer clones its state, applies queued system/key/bridge events, revalidates the resting book, atomically admits deferred supported submissions, solves and settles the batch, builds a block and witness, and persists the candidate. Only after qMDB/root checks and the redb fence commit does it replace live state and publish.
 
+The timer keeps at most one scheduled tick queued behind the actor. If block
+work exceeds the cadence, additional timer events are coalesced rather than
+building an obsolete mailbox burst; one successor can still wait behind the
+in-flight block, preserving maximum sustained throughput. Explicit
+`ProduceBlock` requests remain independent.
+
 ```mermaid
 flowchart LR
     EVENTS["1. System · key · bridge events"] --> BOOK["2. Expire/revalidate book"]
