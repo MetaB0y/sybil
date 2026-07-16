@@ -15,7 +15,6 @@ import { PlaceOrderModal } from "@/components/market-rail/place-order-modal";
 import { MarketThumb } from "@/components/market-thumb";
 import { OutcomeLegend } from "@/components/outcome-legend";
 import { PriceChart, PriceHistoryNotice } from "@/components/price-chart";
-import { useSoonTooltip } from "@/components/soon-tooltip";
 import {
   formatAge,
   formatCompactDollars,
@@ -751,47 +750,7 @@ function DescriptionBlock({
           </span>
         )}
       </div>
-      <ProposeResolution />
     </section>
-  );
-}
-
-/** Visible placeholder for the future proposal flow. */
-function ProposeResolution() {
-  const { hovered, handlers, tooltip } = useSoonTooltip();
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "var(--space-3)",
-        paddingTop: "var(--space-3)",
-        borderTop: "1px solid var(--border-1)",
-      }}
-    >
-      <button
-        type="button"
-        aria-disabled
-        tabIndex={-1}
-        {...handlers}
-        style={{
-          flexShrink: 0,
-          padding: "10px 16px",
-          borderRadius: "var(--radius-md)",
-          border: "1px solid var(--border-2)",
-          background: "var(--surface-2)",
-          color: hovered ? "var(--fg-2)" : "var(--fg-3)",
-          fontFamily: "var(--font-sans)",
-          fontSize: "var(--fs-13)",
-          fontWeight: 600,
-          cursor: "default",
-          transition: "color var(--dur-fast) var(--ease-standard)",
-        }}
-      >
-        Propose resolution
-      </button>
-      {tooltip}
-    </div>
   );
 }
 
