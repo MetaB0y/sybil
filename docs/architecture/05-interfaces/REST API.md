@@ -284,7 +284,7 @@ row. In-memory API instances return 503 because they have no durable outbox.
 - `GET /v1/attestation` is an unverified shape stub mounted only in dev mode; production returns 404 until real Nitro verification exists
 
 ## Where This Lives
-> `crates/sybil-api/src/app.rs` — router creation, OpenAPI schema
+> `crates/sybil-api/src/app.rs` — declarative trust-tier route registries, router creation, OpenAPI schema
 > `crates/sybil-api/src/routes/` — endpoint handlers
 > `crates/sybil-api/src/state.rs` — `AppState` with `SequencerHandle`
 
