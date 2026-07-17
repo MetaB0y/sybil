@@ -192,10 +192,96 @@ Decision:
   direct dual only as a shadow certificate and advance the pacing bundle to a
   frozen held-out comparison.
 
+## Experiment PPD-005 — marginal-face integer recovery
+
+- Date: 2026-07-17
+- Status: conditional selector retained for the research reference; direct
+  route still rejected as a production candidate
+- Hypothesis: Clarabel's hinge-row multipliers identify only one point on a
+  degenerate optimal face. Classifying orders by direct-dual surplus and
+  reopening all zero-surplus caps lets the supporting LP select a more
+  integer-friendly point.
+- Source: jj change `zsunwsvk`.
+- Data: the PPD-004 24-row smoke and complete 236-row development protocol;
+  no held-out seeds.
+
+### PPD-005a — unconditional expanded KKT face
+
+For projected direct prices and pacing factors, orders with surplus above
+`$0.000001` were strict-full, those within the tolerance were marginal, and
+strict-negative or zero-budget-MM orders remained capped at zero. The
+supporting LP received full caps for strict-full and marginal orders rather
+than Clarabel's recovered quantities.
+
+Decision: reject blind expansion. On the six-case smoke, direct availability
+fell from 5/6 to 4/6, a formerly successful market-like book failed its
+supporting-price gate by `$3.27`, and retained landing loss worsened on
+numerical and multi-MM cases. The larger face contained a better flash
+candidate, but it also exposed arbitrary worse bases.
+
+### PPD-005b — conditional two-face selection
+
+The retained variant:
+
+1. lands the original restricted hinge-dual target first;
+2. retries the expanded KKT face only when Clarabel reports exact `Solved` and
+   restricted landing either fails or loses more than one basis point of the
+   continuous objective;
+3. compares verifier-ready candidates by the actual retained-cash objective
+   and never replaces a successful restricted result with a worse expanded
+   result;
+4. does not retry `AlmostSolved` cones, where development showed extra work
+   without a meaningful quality win.
+
+Commands:
+
+```bash
+cargo run --release -p matching-sim --all-features \
+  --bin solver-experiments -- \
+  --protocol benchmarks/solver/protocol-price-pacing-development.json \
+  --source-revision zsunwsvk-hybrid-face-final \
+  --output-dir /tmp/price-pacing-hybrid-face-final-development --overwrite
+python3 scripts/benchmarks/analyze_solver_experiments.py \
+  /tmp/price-pacing-hybrid-face-final-development
+```
+
+Compared with PPD-004:
+
+| Direct price-side cone metric | PPD-004 | PPD-005b |
+|---|---:|---:|
+| Successful cases | 53/59 | 55/59 |
+| Median runtime | 167.9 ms | 219.4 ms |
+| Retained gap mean / P95 / max | 0.0172% / 0.0640% / 0.4808% | 0.0140% / 0.0427% / 0.4259% |
+| Landing loss P95 / max | $4.497885 / $2043.433470 | $4.517481 / $35.068550 |
+| Relative landing loss P95 / max | 0.063974% / 0.480789% | 0.042945% / 0.425929% |
+| Allocation L1 P95 / max | 0.583757% / 1.448394% | 0.753394% / 2.900202% |
+
+Five of 55 successful cases selected the expanded face; 50 retained the
+original target. Numerical seed `19302` at `0.25x` reduced landing loss from
+`$2043.433470` to `$26.128686`, and flash seed `19200` at `0.1x` reduced it
+from `$0.545805` to zero. Expanded recovery also turned numerical seed `19303`
+and flash seed `19201` at `0.1x` from explicit failures into verifier-valid
+candidates, although the latter retained a `0.425929%` loss.
+
+The four remaining failures are flash seed `19200` at `0.5x` at the
+supporting-price gate and all three one-MM scaling seeds `19400..19402` at
+Clarabel `InsufficientProgress`.
+
+Decision: retain the conditional selector because it strictly guards candidate
+quality and removes the catastrophic landing-dollar tail. It does not justify
+a held-out production comparison: availability remains below pacing bundle,
+latency is higher than RC-FW, the worst relative tail remains material, and
+allocation movement worsened. Conclude the direct cone line as a
+certificate/reference and move production-candidate evaluation to pacing
+bundle.
+
 ## Sequence status
 
 1. Exact fixed-pacing value oracle: **accepted** (PPD-001).
 2. Exact cyclic price/`alpha` minimization: **rejected** (PPD-002).
 3. Smoothed first/second-order search: **rejected and removed** (PPD-003).
 4. Exact price-side cone with primal recovery: **reference only** (PPD-004).
-5. Integer-friendly marginal-face recovery: **next experiment**.
+5. Blind marginal-face recovery: **rejected** (PPD-005a).
+6. Conditional two-face recovery: **reference improvement only** (PPD-005b).
+7. Direct cone as production candidate: **stopped**; freeze pacing bundle for
+   the next held-out comparison.

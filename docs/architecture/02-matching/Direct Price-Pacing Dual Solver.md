@@ -44,19 +44,26 @@ continuous upper bound.
 The dual multiplier of an order's hinge row lies between zero and its quantity
 cap and is a feasible continuous primal fill. This is mathematically sufficient
 for a lower bound, but it does not select a unique point on a degenerate optimal
-face. The shared supporting-price/nearest-face landing still owns all integer
+face. Landing first tries that restricted target. After an exact Clarabel
+`Solved` status, a failed or greater-than-one-basis-point landing triggers a
+second supporting solve whose caps include every direct-dual zero-surplus
+order. The solver compares the two verifier-ready retained-cash objectives and
+never substitutes a worse expanded-face candidate. `AlmostSolved` cones do not
+retry. The shared supporting-price/nearest-face boundary still owns all integer
 protocol output and can fail explicitly when no candidate satisfies its
 minting-price residual gate.
 
 ## Evidence boundary
 
 The 17 July development matrix covered market-like flow, tight shared-capital
-flash ladders, numerical range, and MM dimension. The direct cone produced very
-tight continuous certificates, but it succeeded on only 53/59 cases and its
-worst integer landing lost `0.480789%` despite a `$0.016182` continuous gap.
-This isolates marginal-face selection and integer landing as the next research
-problem. Complete settings, failures, counterexamples, and comparison metrics
-are kept in `design/solver-experiments/price-pacing-dual.md`.
+flash ladders, numerical range, and MM dimension. The original direct cone
+produced very tight continuous certificates but succeeded on only 53/59 cases,
+with a `$2043.433470` worst landing. Conditional marginal-face recovery improved
+availability to 55/59 and reduced that dollar tail to `$35.068550`, at a median
+runtime of `219.4 ms`; worst relative retained loss remained `0.425929%`.
+This is a useful reference hardening, not a production-candidate result.
+Complete settings, failures, counterexamples, and comparison metrics are kept
+in `design/solver-experiments/price-pacing-dual.md`.
 
 Do not infer held-out performance from that development matrix. Do not replace
 an explicit Clarabel or post-processing failure with another solver. The

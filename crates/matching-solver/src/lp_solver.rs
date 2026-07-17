@@ -1208,14 +1208,41 @@ pub(crate) fn support_and_finalize_target_with_objective(
     projection_obj: &[f64],
     start: Instant,
 ) -> PipelineResult {
+    support_and_finalize_target_on_face(allocation, allocation, problem, ctx, projection_obj, start)
+}
+
+/// Land `allocation` while allowing the supporting LP to select anywhere
+/// inside independently supplied per-order `face_caps`.
+///
+/// Most retained-cash solvers know only one certified primal point, so their
+/// target also defines the safe caps. A price-side KKT solution additionally
+/// identifies every zero-surplus order on its optimal face; opening those caps
+/// prevents one arbitrary conic dual solution from excluding an equivalent,
+/// more integer-friendly fill vector.
+pub(crate) fn support_and_finalize_target_on_face(
+    allocation: &[f64],
+    face_caps: &[f64],
+    problem: &Problem,
+    ctx: &SolverContext,
+    projection_obj: &[f64],
+    start: Instant,
+) -> PipelineResult {
     let orders = &problem.orders;
+    if allocation.len() != orders.len() || face_caps.len() != orders.len() {
+        return PipelineResult::failure(
+            "target-support-lp",
+            TerminationStatus::PostProcessingFailure,
+            "target or face-cap dimensions do not match the supported order book",
+            start.elapsed().as_secs_f64(),
+        );
+    }
     let order_map: HashMap<u64, &Order> = orders.iter().map(|order| (order.id, order)).collect();
     let mut capped_orders = orders.to_vec();
     for (index, order) in capped_orders.iter_mut().enumerate() {
-        let target_cap = if allocation[index] <= 1e-9 {
+        let target_cap = if face_caps[index] <= 1e-9 {
             0
         } else {
-            allocation[index].ceil() as u64
+            face_caps[index].ceil() as u64
         };
         order.max_fill = Qty(target_cap.min(orders[index].max_fill.0));
     }

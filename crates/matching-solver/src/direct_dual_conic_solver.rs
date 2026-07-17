@@ -14,7 +14,10 @@ use clarabel::solver::*;
 
 use matching_engine::{NANOS_PER_DOLLAR, Problem, SHARE_SCALE};
 
-use crate::lp_solver::{build_solver_context, support_and_finalize_target_with_objective};
+use crate::lp_solver::{
+    build_solver_context, support_and_finalize_target_on_face,
+    support_and_finalize_target_with_objective,
+};
 use crate::price_pacing_dual::PriceDualOracle;
 use crate::result::{PipelineResult, SolverDiagnostics, TerminationStatus};
 use crate::retained_cash_solver::ObjectiveModel;
@@ -317,15 +320,101 @@ impl DirectDualConicSolver {
         let primal_objective = model.objective_from_components(&utilities, linear);
         let certified_gap = (objective_upper - primal_objective).max(0.0);
 
+        // First retain the original hinge-dual target and its exact tangent.
+        // Opening the full KKT face can find a dramatically better integer
+        // point, but it can also expose a worse degenerate basis. Retry only
+        // after a failed or materially lossy restricted landing, then compare
+        // the actual retained objective of both verifier-ready candidates.
         let final_alpha = model.pacing_factors(&utilities);
-        let projection_objective = model.oracle_coefficients_from_alpha(&final_alpha);
-        let mut result = support_and_finalize_target_with_objective(
+        let restricted_objective = model.oracle_coefficients_from_alpha(&final_alpha);
+        let restricted = support_and_finalize_target_with_objective(
             &q_values,
             problem,
             &ctx,
-            &projection_objective,
+            &restricted_objective,
             start,
         );
+        let landed_objective = |candidate: &PipelineResult| {
+            (candidate.diagnostics.status != TerminationStatus::PostProcessingFailure).then(|| {
+                let landed_q = crate::retained_cash_solver::landed_quantities(problem, candidate);
+                model.objective_for_landed_fills(&landed_q, &candidate.result.fills)
+            })
+        };
+        let restricted_landed = landed_objective(&restricted);
+        // A second supporting solve is worthwhile only for a genuine landing
+        // tail. Below one basis point of the continuous objective, development
+        // runs showed no meaningful quality win but paid the full LP cost.
+        const FACE_RETRY_RELATIVE_LOSS: f64 = 1e-4;
+        let retry_face = status == SolverStatus::Solved
+            && restricted_landed.is_none_or(|landed| {
+                (primal_objective - landed).max(0.0) / primal_objective.abs().max(1.0)
+                    > FACE_RETRY_RELATIVE_LOSS
+            });
+
+        let mut selector = "restricted";
+        let mut face_summary = String::new();
+        let mut result = if retry_face {
+            let face_objective = model.oracle_coefficients_from_alpha(&alpha);
+            let surplus_tolerance_nanos = (100.0 * self.config.tol * nanos).max(1.0);
+            let mut strict_full = 0;
+            let mut marginal = 0;
+            let mut strict_zero = 0;
+            let face_caps: Vec<_> = orders
+                .iter()
+                .enumerate()
+                .map(|(index, order)| {
+                    if model
+                        .mm_index(index)
+                        .is_some_and(|mm_index| model.budgets()[mm_index] <= 0.0)
+                    {
+                        strict_zero += 1;
+                        return 0.0;
+                    }
+                    let market = market_index[&order.markets[0]];
+                    let yes = yes_prices[market];
+                    let no = 1.0 - yes;
+                    let payoff_price =
+                        nanos * (order.payoffs[0] as f64 * yes + order.payoffs[1] as f64 * no);
+                    let surplus = face_objective[index] - payoff_price;
+                    if surplus > surplus_tolerance_nanos {
+                        strict_full += 1;
+                        order.max_fill.0 as f64
+                    } else if surplus >= -surplus_tolerance_nanos {
+                        marginal += 1;
+                        order.max_fill.0 as f64
+                    } else {
+                        strict_zero += 1;
+                        0.0
+                    }
+                })
+                .collect();
+            face_summary = format!(
+                "KKT face strict_full={strict_full}, marginal={marginal}, strict_zero={strict_zero}, surplus_tolerance_nanos={surplus_tolerance_nanos}"
+            );
+            let expanded = support_and_finalize_target_on_face(
+                &q_values,
+                &face_caps,
+                problem,
+                &ctx,
+                &face_objective,
+                start,
+            );
+            let expanded_landed = landed_objective(&expanded);
+            if expanded_landed
+                .zip(restricted_landed)
+                .is_some_and(|(expanded, restricted)| expanded > restricted)
+                || (restricted_landed.is_none() && expanded_landed.is_some())
+            {
+                selector = "expanded-kkt-face";
+                expanded
+            } else {
+                restricted
+            }
+        } else {
+            restricted
+        };
+        result.total_time_secs = start.elapsed().as_secs_f64();
+        result.phase_times.price_discovery_secs = result.total_time_secs;
         if result.diagnostics.status != TerminationStatus::PostProcessingFailure {
             let integer_landing_budget_trimmed = result.diagnostics.integer_landing_budget_trimmed;
             let landed_q = crate::retained_cash_solver::landed_quantities(problem, &result);
@@ -345,7 +434,7 @@ impl DirectDualConicSolver {
                 primal_residual: primal_residual.is_finite().then_some(primal_residual),
                 dual_residual: dual_residual.is_finite().then_some(dual_residual),
                 message: Some(format!(
-                    "Clarabel status: {status:?}; exact projected dual upper={objective_upper}"
+                    "Clarabel status: {status:?}; exact projected dual upper={objective_upper}; landing_selector={selector}; face_retry={retry_face}; {face_summary}"
                 )),
                 ..Default::default()
             };
