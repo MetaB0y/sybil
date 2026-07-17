@@ -28,3 +28,5 @@ protocol and source revision frozen before untouched seeds are evaluated.
   benchmark calibration
 - [Full tangent-face integer landing](integer-face-landing-retry.md) —
   conditional integer-friendly retry on a certified retained-cash tangent
+- [Direct scalar pacing dual](scalar-pacing-dual.md) — rejected certified
+  one-MM bisection and safeguarded semismooth variants
