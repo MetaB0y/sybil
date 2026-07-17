@@ -23,6 +23,7 @@ model harder variants.
 | `DirectDualConicSolver` | Price-side Clarabel retained-cash certificate and marginal-face research reference |
 | `MilpSolver` | Feature-gated SCIP exact/reference route with timeout |
 | `DecomposedSolver<S>` | Per-group mirror-descent coordination experiment |
+| `ExactComponentSolver<S>` | Exact economic-connectivity decomposition with balanced-book routing |
 
 ## Invariants
 
@@ -41,8 +42,8 @@ model harder variants.
 - Preserve uniform-price, quantity/limit, group, MM-budget, rounding, and
   integer-landing behavior across solvers.
 
-Main files are `solver.rs`, `result.rs`, each `*_solver.rs`, `milp.rs`, and
-`decomposed.rs`; `viz.rs` is reporting support.
+Main files are `solver.rs`, `result.rs`, each `*_solver.rs`, `milp.rs`,
+`decomposed.rs`, and `exact_components.rs`; `viz.rs` is reporting support.
 
 ```bash
 cargo test -p matching-solver --features retained-cash

@@ -4,6 +4,7 @@
 //! - **LP** (`lp_solver`): Linear program via HiGHS with MM budget shading
 //! - **Retained cash** (`retained_cash_solver`): certified generalized Frank--Wolfe
 //! - **Pacing bundle** (`pacing_bundle_solver`): fully corrective research solver
+//! - **Exact components** (`exact_components`): connectivity-aware solver router
 //! - **Conic** (`conic_solver`): Conic EG via Clarabel
 //! - **Direct dual** (`direct_dual_conic_solver`): price-side Clarabel reference
 //! - **MILP** (`milp`): Mixed-integer via SCIP (exact with timeout)
@@ -36,6 +37,9 @@ pub mod pacing_bundle_solver;
 
 #[cfg(feature = "lp")]
 pub mod decomposed;
+
+#[cfg(feature = "lp")]
+pub mod exact_components;
 
 #[cfg(all(test, feature = "retained-cash"))]
 pub(crate) mod test_fixtures;
@@ -79,6 +83,9 @@ pub use direct_dual_conic_solver::{DirectDualConicConfig, DirectDualConicSolver}
 
 #[cfg(feature = "lp")]
 pub use decomposed::DecomposedSolver;
+
+#[cfg(feature = "lp")]
+pub use exact_components::{ExactComponentSolver, ExactComponentStats, exact_component_stats};
 
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};

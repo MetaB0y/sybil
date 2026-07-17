@@ -80,6 +80,7 @@ The solver implementations share the `Solver` interface:
 | `ConicSolver` | Independent Clarabel retained-cash reference and no-cash ablation |
 | `MilpSolver` | Feature-gated SCIP exact/reference route with timeout |
 | `DecomposedSolver<S>` | Per-group mirror-descent coordination experiment |
+| `ExactComponentSolver<S>` | Exact economic-connectivity decomposition and balanced-book routing |
 
 All solvers report one net-of-minting welfare convention and cross an integer
 fill/price boundary before settlement. Retained-cash projections must reach a

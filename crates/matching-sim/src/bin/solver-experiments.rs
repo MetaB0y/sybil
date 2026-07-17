@@ -23,10 +23,11 @@ use matching_scenarios::{
 };
 use matching_solver::{
     ConicConfig, ConicSolver, DecomposedSolver, DirectDualConicConfig, DirectDualConicSolver,
-    LinearOracleBackend, LpConfig, LpSolver, MilpConfig, MilpSolver, MmBudgetMode, ObjectiveMode,
-    PacingBundleConfig, PacingBundleSolver, PipelineResult, RetainedCashConfig, RetainedCashSolver,
-    SolveStatus, TerminationStatus, retained_cash_objective_for_fills,
-    retained_cash_welfare_gap_bound_for_fills, zero_temperature_minting_cost_for_fills,
+    ExactComponentSolver, LinearOracleBackend, LpConfig, LpSolver, MilpConfig, MilpSolver,
+    MmBudgetMode, ObjectiveMode, PacingBundleConfig, PacingBundleSolver, PipelineResult,
+    RetainedCashConfig, RetainedCashSolver, SolveStatus, TerminationStatus, exact_component_stats,
+    retained_cash_objective_for_fills, retained_cash_welfare_gap_bound_for_fills,
+    zero_temperature_minting_cost_for_fills,
 };
 use serde::{Deserialize, Serialize};
 use sybil_verifier::verify_match;
@@ -162,6 +163,10 @@ struct ProblemMetrics {
     mm_orders: usize,
     market_groups: usize,
     grouped_markets: usize,
+    exact_components: usize,
+    largest_component_markets: usize,
+    largest_component_orders: usize,
+    largest_component_mms: usize,
     total_max_fill: u64,
     total_mm_budget_nanos: u64,
 }
@@ -1087,6 +1092,26 @@ fn execute_solver(solver: &SolverSpec, problem: &Problem) -> SolveOutput {
             .solve(problem),
             problem,
         ),
+        "exact-components-pacing-bundle" | "exact-components-pacing-bundle-structural" => {
+            pipeline_output(
+                ExactComponentSolver::new(PacingBundleSolver::with_config(PacingBundleConfig {
+                    linear_oracle: if solver.kind == "exact-components-pacing-bundle-structural" {
+                        LinearOracleBackend::StructuralPriceSweep
+                    } else {
+                        LinearOracleBackend::Highs
+                    },
+                    max_iterations: required_usize(solver, "max_iterations"),
+                    max_master_iterations: required_usize(solver, "max_master_iterations"),
+                    gap_rel: required_f64(solver, "tolerance"),
+                    gap_abs_nanos: required_f64(solver, "absolute_tolerance"),
+                    master_gap_rel: required_f64(solver, "master_tolerance"),
+                    master_gap_abs_nanos: required_f64(solver, "master_absolute_tolerance"),
+                    line_search_steps: required_usize(solver, "line_search_steps"),
+                }))
+                .solve(problem),
+                problem,
+            )
+        }
         "conic-quasi" => pipeline_output(
             conic_solver(solver, ObjectiveMode::QuasiFisher).solve(problem),
             problem,
@@ -1375,6 +1400,7 @@ fn problem_metrics(problem: &Problem, declared_retail_orders: usize) -> ProblemM
         .iter()
         .flat_map(|mm| mm.order_ids.iter().copied())
         .collect();
+    let components = exact_component_stats(problem);
     ProblemMetrics {
         markets: problem.markets.len(),
         market_makers: problem.mm_constraints.len(),
@@ -1397,6 +1423,10 @@ fn problem_metrics(problem: &Problem, declared_retail_orders: usize) -> ProblemM
             .iter()
             .map(|group| group.markets.len())
             .sum(),
+        exact_components: components.components,
+        largest_component_markets: components.largest_markets,
+        largest_component_orders: components.largest_orders,
+        largest_component_mms: components.largest_mms,
         total_max_fill: problem.orders.iter().map(|order| order.max_fill.0).sum(),
         total_mm_budget_nanos: problem
             .mm_constraints

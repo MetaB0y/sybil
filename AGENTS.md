@@ -154,6 +154,7 @@ All solvers take a `Problem` and return a `PipelineResult` (fills, clearing pric
 | **DirectDualConicSolver** | `direct_dual_conic_solver.rs` | `conic` | Experimental price-side retained-cash certificate; integer landing remains research. |
 | **MilpSolver** | `milp.rs` | `milp` | SCIP MIQCQP. Exact optimal with timeout. |
 | **DecomposedSolver** | `decomposed.rs` | `lp` | Per-market-group decomposition with mirror descent budget coordination. |
+| **ExactComponentSolver** | `exact_components.rs` | `lp` | Exact economic-connectivity decomposition around another solver. |
 
 ### Key Design Decisions
 
@@ -180,7 +181,7 @@ An Obsidian vault at `docs/architecture/` is the canonical architectural spec. I
 | Topic | Notes |
 |-------|-------|
 | Core model | Payoff Vectors, Binary Markets and Market Groups, Nanos and Integer Arithmetic, Order Types |
-| Solvers | Solver Landscape, Retained Cash Solver, LP Solver, Conic Solver, MILP Solver, Decomposed Solver, The LP Core |
+| Solvers | Solver Landscape, Retained Cash Solver, LP Solver, Conic Solver, MILP Solver, Decomposed Solver, Exact Component Solver, The LP Core |
 | Sequencer | Block Lifecycle, Order Admission, Settlement, Pending Orders and TTL |
 | API | REST API, WebSocket Block Stream, P256 Authentication |
 | Oracle | Market Resolution |

@@ -929,7 +929,10 @@ fn check_convergence(
 /// welfare. Per-component LP budget enforcement is imperfect (linearized +
 /// rounded), so small overruns compound across components and must be trimmed
 /// against the real global budget here.
-fn assemble_final(problem: &Problem, component_results: Vec<PipelineResult>) -> PipelineResult {
+pub(crate) fn assemble_final(
+    problem: &Problem,
+    component_results: Vec<PipelineResult>,
+) -> PipelineResult {
     let mut result = aggregate_results(component_results);
 
     let mm_order_info = crate::lp_solver::build_mm_order_info(problem);

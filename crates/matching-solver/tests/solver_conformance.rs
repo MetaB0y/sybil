@@ -1032,6 +1032,19 @@ mod conformance {
         run_solver_conformance(&solver, AvailabilityPolicy::AllowExplicitResearchFailure);
     }
 
+    #[cfg(feature = "lp")]
+    #[test]
+    fn exact_component_pacing_bundle_conformance() {
+        let inner =
+            matching_solver::PacingBundleSolver::with_config(matching_solver::PacingBundleConfig {
+                gap_abs_nanos: 0.0,
+                gap_rel: 0.0,
+                ..Default::default()
+            });
+        let solver = matching_solver::ExactComponentSolver::new(inner);
+        run_solver_conformance(&solver, AvailabilityPolicy::RequireCandidate);
+    }
+
     #[cfg(feature = "milp")]
     #[test]
     fn milp_solver_conformance() {

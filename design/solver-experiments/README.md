@@ -21,3 +21,5 @@ protocol and source revision frozen before untouched seeds are evaluated.
   [#173](https://github.com/MetaB0y/sybil/issues/173)
 - [Structural price-sweep matching oracle](structural-price-sweep-oracle.md) —
   exact fixed-pacing primal/dual oracle and marginal-face recovery variants
+- [Exact economic-connectivity decomposition](exact-component-decomposition.md)
+  — successful balanced-component router and replay topology audit

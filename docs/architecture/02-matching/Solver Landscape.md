@@ -9,7 +9,7 @@ last_verified: 2026-07-17
 # Solver landscape
 
 > [!summary] In one paragraph
-> Solver implementations share one interface and integer trust boundary. The supported matching core is a fast LP; shared MM capital introduces endogenous price×quantity coupling. [[Retained Cash Solver|`RetainedCashSolver`]] remains the production default. Its repeated fixed-pacing matching oracle can use reusable HiGHS or an experimental exact structural price sweep, while all production-default and integer-landing paths retain HiGHS. The experimental [[Pacing Bundle Solver|`PacingBundleSolver`]] solves the same convex retained-cash program through a lower-dimensional pacing dual and a fully corrective primal bundle. [[Direct Price-Pacing Dual Solver|`DirectDualConicSolver`]] is an independent price-side certificate/reference whose continuous fill recovery is not yet robust enough for production integer landing.
+> Solver implementations share one interface and integer trust boundary. The supported matching core is a fast LP; shared MM capital introduces endogenous price×quantity coupling. [[Retained Cash Solver|`RetainedCashSolver`]] remains the production default. Its repeated fixed-pacing matching oracle can use reusable HiGHS or an experimental exact structural price sweep, while all production-default and integer-landing paths retain HiGHS. The experimental [[Pacing Bundle Solver|`PacingBundleSolver`]] solves the same convex retained-cash program through a lower-dimensional pacing dual and a fully corrective primal bundle. [[Exact Component Solver|`ExactComponentSolver<S>`]] routes balanced, economically disconnected books through independent instances of any inner solver. [[Direct Price-Pacing Dual Solver|`DirectDualConicSolver`]] is an independent price-side certificate/reference whose continuous fill recovery is not yet robust enough for production integer landing.
 
 | Solver | Feature | MM-budget approach | Role |
 |---|---|---|---|
@@ -20,6 +20,7 @@ last_verified: 2026-07-17
 | [[Direct Price-Pacing Dual Solver|`DirectDualConicSolver`]] | `conic` | Price/pacing hinge dual; fill quantities from hinge-row multipliers | Certificate and marginal-face research reference |
 | [[MILP Solver|`MilpSolver`]] | `milp` | SCIP MIQCQP or McCormick mode with timeout | Exact/reference route when optimal |
 | [[Decomposed Solver|`DecomposedSolver<S>`]] | `lp` | Component solves with proportional-response MM budget coordination | Scaling experiment |
+| [[Exact Component Solver|`ExactComponentSolver<S>`]] | `lp` | Exact split on groups, spanning/conditional orders, and shared MM budgets | Scaling router |
 
 The removed IterLP damped fixed point and forced-step EG implementation did not
 have the claimed convergence semantics. Their public types and CLI variants
@@ -54,7 +55,7 @@ and projection failure are not interchangeable. `matching-sim` compares
 results; `sybil-verifier` decides validity.
 
 The production sequencer enables only `retained-cash`. The `lp` feature adds
-the public LP baseline, pacing-bundle solver, and decomposition experiment;
+the public LP baseline, pacing-bundle solver, and decomposition experiments;
 `conic` includes that research surface because its reference implementation
 reuses the same LP projection utilities. This build boundary keeps production
 coupled to the certified solver it actually invokes without deleting research
@@ -83,5 +84,6 @@ implementations.
 
 - [[The LP Core]]
 - [[MM Budget Constraint]]
+- [[Exact Component Solver]]
 - [[Direct Price-Pacing Dual Solver]]
 - [[Four-Layer Verification]]
