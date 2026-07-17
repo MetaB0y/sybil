@@ -74,7 +74,7 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
 dry-run: resolve running sybil-api container ${CONTAINER:-from compose project '$PROJECT'}
 dry-run: verify $DATA_DIR/sybil.redb and $DATA_DIR/sybil.qmdb exist in the source
 dry-run: docker pause <source>; docker cp <source>:$DATA_DIR/. <timestamped-backup>/store/; docker unpause <source>
-dry-run: hash every copied file and boot the source image against a throwaway second copy
+dry-run: hash every copied file and boot the source image with its exact validity-retention mode against a throwaway second copy
 dry-run: record exact restored height, committed/replayed state roots, and account ${ACCOUNT_ID:-auto (leaderboard, then account 0)} in <timestamped-backup>/manifest.json
 dry-run: destination root $DEST; the production sybil-data volume is never mounted or modified
 EOF
@@ -116,6 +116,26 @@ SOURCE_IMAGE_ID="$(docker inspect --format '{{.Image}}' "$CONTAINER")"
     || { echo "error: source container has no immutable image ID" >&2; exit 2; }
 docker image inspect "$SOURCE_IMAGE_ID" >/dev/null \
     || { echo "error: running source image $SOURCE_IMAGE_ID is not available locally" >&2; exit 2; }
+SOURCE_RETAIN_VALIDITY_ARTIFACTS="$(
+    docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER" \
+        | awk -F= '
+            $1 == "SYBIL_RETAIN_VALIDITY_ARTIFACTS" {
+                print substr($0, index($0, "=") + 1)
+                found = 1
+                exit
+            }
+            END {
+                if (!found) print "true"
+            }
+        '
+)"
+case "${SOURCE_RETAIN_VALIDITY_ARTIFACTS,,}" in
+    true|false) ;;
+    *)
+        echo "error: running source has invalid SYBIL_RETAIN_VALIDITY_ARTIFACTS=$SOURCE_RETAIN_VALIDITY_ARTIFACTS" >&2
+        exit 2
+        ;;
+esac
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 OUT="$DEST/sybil-store-$STAMP-$$"
 INSPECT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/store-backup-inspect.XXXXXX")"
@@ -166,6 +186,7 @@ docker run -d --name "$INSPECT_CONTAINER" --network none \
     -e SYBIL_DATA_DIR=/data \
     -e SYBIL_PORT=3000 \
     -e SYBIL_BLOCK_INTERVAL_MS=86400000 \
+    -e SYBIL_RETAIN_VALIDITY_ARTIFACTS="$SOURCE_RETAIN_VALIDITY_ARTIFACTS" \
     -e SYBIL_ARENA_READ_URL= \
     -e SYBIL_EVENT_SNAPSHOT_DIR= \
     -e SYBIL_MARKET_REF_DATA_PATH= \

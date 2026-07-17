@@ -25,6 +25,14 @@ require(
     '--entrypoint sybil-api "$SOURCE_IMAGE_ID"',
     "isolation validation does not boot the immutable runtime image",
 )
+require(
+    'SOURCE_RETAIN_VALIDITY_ARTIFACTS="$(',
+    "backup does not capture the running chain validity-retention mode",
+)
+require(
+    '-e SYBIL_RETAIN_VALIDITY_ARTIFACTS="$SOURCE_RETAIN_VALIDITY_ARTIFACTS"',
+    "isolation validation can boot with a chain-incompatible validity mode",
+)
 if '--entrypoint sybil-api "$SOURCE_IMAGE"' in SCRIPT:
     raise SystemExit("FAIL: isolation validation still follows the mutable image tag")
 require('--image "$SOURCE_IMAGE"', "manifest lost the configured image reference")

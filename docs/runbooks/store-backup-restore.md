@@ -51,7 +51,9 @@ is not stopped or recreated.
 
 After resuming the source, the script boots the source container's immutable
 runtime image ID (not its mutable configured tag) against a second,
-throwaway copy with a 24-hour block interval. It records the state that actually
+throwaway copy with a 24-hour block interval. It also inherits the source
+container's exact `SYBIL_RETAIN_VALIDITY_ARTIFACTS` chain mode rather than
+guessing from the process default. It records the state that actually
 restores—not a racy API sample taken before the freeze—in `manifest.json`.
 The manifest records two roots because acknowledged WAL rows replay on startup:
 `committed_state_root` is the root in `/v1/blocks/latest`, while
