@@ -285,3 +285,77 @@ bundle.
 6. Conditional two-face recovery: **reference improvement only** (PPD-005b).
 7. Direct cone as production candidate: **stopped**; freeze pacing bundle for
    the next held-out comparison.
+8. Clarabel setting and linear-solver isolation: **rejected and removed**
+   (PPD-006).
+
+## Experiment PPD-006 — Clarabel failure-layer isolation
+
+- Date: 2026-07-17
+- Status: all setting/backend variants rejected; no code retained
+- Hypothesis: the three one-MM `InsufficientProgress` failures from PPD-004/5
+  are caused by a replaceable numerical subsystem or exposed stability
+  setting, making a small Clarabel fork or configuration change worthwhile.
+- Source: transient jj change `trvrsnzx`; every implementation change was
+  removed after measurement.
+- Target: protocol-price-pacing development seeds `19400..19402`, budget
+  `0.25x`. All three baseline runs fail.
+
+The repository already uses Clarabel `0.11.1`, which was still the latest
+release on the experiment date. Its Apache-2.0 source is forkable, but the
+local crate contains about 29,000 lines across cone algebra, homogeneous
+embedding, equilibration, regularization, iterative refinement, and sparse
+factorization. The official settings expose each numerical layer tested here.
+
+Commands used process-substitution transforms of the existing checked-in
+protocol, so the frozen order generation was unchanged. For example:
+
+```bash
+cargo run --release -p matching-sim --all-features \
+  --bin solver-experiments -- \
+  --protocol <(jq '<select mms-01 and replace solver matrix>' \
+    benchmarks/solver/protocol-price-pacing-development.json) \
+  --source-revision trvrsnzx-stability-target \
+  --output-dir /tmp/clarabel-stability-target --overwrite
+```
+
+| Variant | Success | Iterations | Primal residual | Dual residual | Decision |
+|---|---:|---:|---:|---:|---|
+| Existing QDLDL, max step `0.8` | 0/3 | 5 | 0.772–0.795 | 1.022–1.025 | baseline failure |
+| Ruiz equilibration disabled | 0/3 | 5 | identical to baseline | identical | reject |
+| Static regularization disabled | 0/3 | 5 | equal within `3e-14` | equal within `6e-15` | reject |
+| Dynamic regularization disabled | 0/3 | 5 | identical to baseline | identical | reject |
+| Max step raised to `0.99` | 0/3 | 4 | 0.829–0.832 | 1.027 | reject; worse |
+| Faer sparse LDL | 0/3 | 5 | equal within `7e-14` | equal within `3e-15` | reject |
+
+Faer also expanded the lockfile by 37 packages, so even a numerical tie would
+not have passed the dependency/complexity metric.
+
+A verbose trace separated warmup behavior from the real failure. The warmup
+with two exponential cones solved in 27 iterations. Seed `19400` with one
+exponential cone took three useful iterations, then Clarabel's asymmetric-cone
+line search returned a zero step twice and terminated. Residuals remained
+around one. Because QDLDL and Faer produce effectively the same trajectory and
+equilibration/regularization toggles do not move it, this is not a sparse
+factorization or ordinary scaling failure. It lies in the exponential-cone
+search/scaling path or in how this formulation presents that cone.
+
+Decision:
+
+- do not fork Clarabel merely to tune exposed settings or replace its linear
+  solver;
+- do not write a general conic solver for Sybil. Reimplementing and validating
+  the approximately 29k-line numerical stack would be a multi-person,
+  multi-month project with a larger correctness surface than the matching
+  engine;
+- continue using Clarabel as an independent research reference, where explicit
+  numerical failure is useful evidence rather than an availability risk;
+- prefer domain-specific solvers where the market structure collapses the
+  problem. The structural price-sweep oracle is the successful example: a
+  sorting/interval algorithm replaces the repeated generic LP, while HiGHS
+  retains the narrower general landing jobs.
+
+Revisit a Clarabel fork only after producing a minimal standalone cone program
+for seed `19400`, confirming the failure with upstream, and identifying a
+small, reviewable asymmetric-cone change that improves a broad conic corpus.
+Before that, reformulating this single cone block or eliminating it through
+market-specific dual structure has much better expected value.
