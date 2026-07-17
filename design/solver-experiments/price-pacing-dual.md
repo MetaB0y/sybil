@@ -362,6 +362,33 @@ small, reviewable asymmetric-cone change that improves a broad conic corpus.
 Before that, reformulating this single cone block or eliminating it through
 market-specific dual structure has much better expected value.
 
+### PPD-006b — fill-side maximum-step probe
+
+The later frozen public-depth corpus added a different fill-side Clarabel
+failure: the connected 50-market portfolio at loose budget stopped after 32
+iterations with primal residual `1.377e-8`, dual residual `3.999e-13`, and an
+`$0.872486` absolute cone gap. Raising `max_step_fraction` from Sybil's
+conservative `0.8` to Clarabel's documented `0.99` default solved that single
+case in 34 iterations, with primal residual `1.032e-14` and a
+`$0.000000663` gap.
+
+The single-case result was rejected after a 200-row fill-side sweep:
+
+| Matrix | `0.8` success | `0.99` success | Result |
+|---|---:|---:|---|
+| Frozen public depth | 14/15 | 14/15 | Portfolio repaired, economics event newly failed |
+| Pacing development | 124/126 | 109/126 | 15 new failures |
+| Price-pacing development | 56/59 | 52/59 | Two recovered and six newly failed |
+| **Total** | **194/200** | **175/200** | **Reject** |
+
+Every successful candidate remained verifier-valid. Successful `0.99` rows
+often used fewer iterations and had smaller residuals and runtime, but the 19
+net availability regressions violate the hard gate. This confirms that the
+exponential-cone path is highly instance-sensitive: a global step setting can
+make attractive residual and speed aggregates while merely moving failures
+between books. Restore `0.8`; do not add instance-dependent setting retries
+without an independently checkable acceptance certificate.
+
 ## Experiment PPD-007 — exact nonsmooth pacing cuts
 
 - Date: 2026-07-17
