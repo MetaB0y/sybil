@@ -9,7 +9,7 @@ last_verified: 2026-07-17
 # Pacing bundle solver
 
 > [!summary] In one paragraph
-> `PacingBundleSolver` is the fully corrective core of the production retained-cash clearer and solves the same zero-temperature program as [[Retained Cash Solver|`RetainedCashSolver`]]. It uses the variational pacing representation to work in one effective dimension per market maker, retains matching-LP optima as primal atoms, and fully corrects their convex weights. A HiGHS dual bound gives a genuine continuous retained-cash certificate. `ProductionSolver` wraps it in exact economic-connectivity routing.
+> `PacingBundleSolver` is the monolithic production retained-cash clearer and solves the same zero-temperature program as [[Retained Cash Solver|`RetainedCashSolver`]]. It uses the variational pacing representation to work in one effective dimension per market maker, retains matching-LP optima as primal atoms, and fully corrects their convex weights. A HiGHS dual bound gives a genuine continuous retained-cash certificate. `ProductionSolver` names this unchanged whole-book security baseline; exact routing is opt-in.
 
 For budget `B > 0` and MM weighted fill `U`, the shifted retained-cash utility
 satisfies
@@ -118,6 +118,17 @@ tied 19, and regressed in none; iteration caps fell from 22 to 2 and P99
 latency from 2,317 ms to 477 ms. The immutable result is
 `benchmarks/solver/results/2026-07-17-bundle-promotion-v1/`; the full decision
 record is `design/solver-experiments/exact-component-decomposition.md`.
+
+The subsequent frozen adversarial-connectivity audit forced every 10,000- and
+50,000-order case into one component using admission-sized MM constraints. The
+bundle remained 20/20 converged and verifier-valid and beat RC-FW's landed
+retained objective in every pair, but its 50,000-order P50/max latency was
+`82.28/85.97s`, missing the deployed ten-second block interval. Exact routing
+was economically identical and cheap on those books, but could provide no
+protection once connected. Therefore `ProductionSolver` names the monolithic
+bundle directly and exposes the actual security baseline. The immutable result
+is
+`benchmarks/solver/results/2026-07-17-adversarial-connectivity-v1/`.
 
 ## Where this lives
 

@@ -31,14 +31,18 @@ budgeted MMs use affine-to-log retained-cash utility; outcome shares are the
 goods; and the program's **dual variables are the clearing prices**. Coherence
 across composed markets is not imposed by side-constraints — it *emerges* from
 solving one joint program. The production clearer is `ProductionSolver`
-(`matching-solver`, `features=["retained-cash"]`): exact economic-connectivity
-routing around a fully corrective pacing bundle for the quasilinear
-retained-cash program, with a certified continuous gap. The independent
-`RetainedCashSolver` generalized Frank--Wolfe implementation remains a
-reference and injectable alternative. LP-SLP is the low-latency risk-neutral
-baseline; Conic QuasiFisher is the independent convex reference. The production
-algorithm selection is backed by the frozen
-`solver-bundle-promotion-evaluation-v1` artifact. The former `EgSolver` and
+(`matching-solver`, `features=["retained-cash"]`): a monolithic fully
+corrective pacing bundle for the quasilinear retained-cash program, with a
+certified continuous gap. Exact economic-connectivity decomposition remains an
+explicit opt-in accelerator; it is not the production security baseline
+because an admission-sized shared MM bundle can connect the whole book. The
+independent `RetainedCashSolver` generalized Frank--Wolfe implementation
+remains a reference and injectable alternative. LP-SLP is the low-latency
+risk-neutral baseline; Conic QuasiFisher is the independent convex reference.
+The production algorithm selection is backed by the frozen
+`solver-bundle-promotion-evaluation-v1` artifact; its monolithic security
+baseline and removal of default routing are backed by
+`solver-adversarial-connectivity-evaluation-v1`. The former `EgSolver` and
 `IterLpSolver` names were removed because they obscured which algorithm
 actually ran.
 

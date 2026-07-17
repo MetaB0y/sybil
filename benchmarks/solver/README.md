@@ -250,6 +250,35 @@ untouched range. These generated profiles only test generalization within the
 declared scenario families; public-flow and sequencer replay remain separate
 development evidence.
 
+## Frozen adversarial-connectivity evaluation
+
+`protocol-adversarial-connectivity-v1.json` tests the production candidate when
+decomposition is unavailable by construction. Its 20 book/budget cases use 64
+markets and either 10,000 or 50,000 accumulated retail orders. One attack uses
+a single 384-order global MM constraint. The other uses sixteen local
+24-order constraints plus one economically active 64-order global bridge.
+Every MM constraint fits the production 512-order submission limit, and every
+scored problem must report exactly one component.
+
+The protocol, generator, and decision rule were frozen at
+`f82e2455c1c355e2d09bf25ab86323b10c5d7c66` before the untouched
+`72000..72301` ranges were consumed. The checked-in result at
+`results/2026-07-17-adversarial-connectivity-v1/` is complete: 60/60 rows, no
+fingerprint mismatch, and 20/20 converged verifier-valid results for both
+bundle paths. The monolithic bundle beat RC-FW's landed retained objective in
+all 20 pairs. The exact wrapper was economically identical and its P95 added
+wall time stayed within the frozen overhead gate.
+
+The core latency gate failed. Monolithic bundle P50/max was `2.034/3.522s` at
+10,000 orders and `82.279/85.968s` at 50,000, versus frozen targets of three
+and ten seconds. Per the preregistered rule, `ProductionSolver` now exposes the
+monolithic pacing bundle directly; exact components remain an opt-in
+accelerator, not a denial-of-service assumption.
+
+This protocol is consumed provenance, not a reusable benchmark. Do not rerun,
+retune, or add rows to v1. A connected-book improvement requires a new
+versioned protocol and untouched seeds.
+
 ## Public CLOB-depth development protocol
 
 `protocol-public-depth-development.json` complements generated and

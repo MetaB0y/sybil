@@ -9,7 +9,7 @@ last_verified: 2026-07-17
 # Exact component solver
 
 > [!summary] In one paragraph
-> `ExactComponentSolver<S>` finds economically independent liquidity clusters and solves each with the same inner solver. Markets are joined by a market group, a spanning or conditional order, or an MM budget shared by orders on both markets. The retained-cash objective and all matching constraints are additive after this coarsening, so the split changes neither the mathematical problem nor any budget. `ProductionSolver` composes it with [[Pacing Bundle Solver|`PacingBundleSolver`]]; connected and strongly unbalanced books delegate directly to avoid setup and landing overhead.
+> `ExactComponentSolver<S>` finds economically independent liquidity clusters and solves each with the same inner solver. Markets are joined by a market group, a spanning or conditional order, or an MM budget shared by orders on both markets. The retained-cash objective and all matching constraints are additive after this coarsening, so the split changes neither the mathematical problem nor any budget. It is an explicit opt-in accelerator and topology benchmark; [[Pacing Bundle Solver|the monolithic pacing bundle]] is the production security baseline.
 
 The component graph is built with union-find over markets. It adds one
 hyperedge for each:
@@ -38,6 +38,20 @@ The experiment harness records component count and the largest component's
 market, order, and MM shares. These are coverage metrics, not solver quality
 metrics: a corpus dominated by connected books cannot validate fragmented-book
 scaling.
+
+The frozen adversarial-connectivity audit then exercised the opposite extreme:
+one 384-order global maker or one 64-order bridge made every 10,000- and
+50,000-order book connected. Wrapped and monolithic bundle results were
+identical on all recorded economic, landing, and MM metrics. Router P95
+overhead was only 2.81% at 10,000 orders and 0.48% at 50,000, so the router
+itself was not the bottleneck. However, the monolith's 50,000-order P50/max was
+`82.28/85.97s`, versus the deployed ten-second block interval.
+
+Because an admitted bridge can disable decomposition at will, the frozen rule
+removed this optional layer from `ProductionSolver`. The generic exact solver
+remains useful when a caller explicitly accepts topology-dependent
+acceleration, and its balanced-component evidence remains valid; neither is a
+capacity or denial-of-service guarantee.
 
 ## Where this lives
 

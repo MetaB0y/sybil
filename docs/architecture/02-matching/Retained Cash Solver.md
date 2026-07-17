@@ -9,7 +9,7 @@ last_verified: 2026-07-17
 # Retained cash solver
 
 > [!summary] In one paragraph
-> `RetainedCashSolver` is the independent generalized Frank--Wolfe implementation of the paper's exact affine-to-log retained-cash objective. It uses the [[The LP Core|matching LP]] as its linear oracle, reports a continuous objective and certified upper gap, then crosses the same pacing-supported integer landing boundary as production. The production [[Solver Landscape|`ProductionSolver`]] now uses the fully corrective [[Pacing Bundle Solver|pacing bundle]] behind exact connectivity routing; RC-FW remains a reference and injectable operational alternative.
+> `RetainedCashSolver` is the independent generalized Frank--Wolfe implementation of the paper's exact affine-to-log retained-cash objective. It uses the [[The LP Core|matching LP]] as its linear oracle, reports a continuous objective and certified upper gap, then crosses the same pacing-supported integer landing boundary as production. The production [[Solver Landscape|`ProductionSolver`]] uses the monolithic fully corrective [[Pacing Bundle Solver|pacing bundle]]; RC-FW remains a reference and injectable operational alternative.
 
 For MM `k`, let `U_k` be its non-negative weighted fill after the
 buy/sell reduction and `B_k` its budget. Ignoring an allocation-independent

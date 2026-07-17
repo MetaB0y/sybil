@@ -74,14 +74,14 @@ The solver implementations share the `Solver` interface:
 
 | Solver | Role |
 |---|---|
-| `ProductionSolver` | Production facade: exact-connectivity routing around the fully corrective retained-cash bundle |
+| `ProductionSolver` | Production facade: monolithic fully corrective retained-cash bundle |
 | `RetainedCashSolver` | Independent certified generalized Frank--Wolfe retained-cash reference |
 | `PacingBundleSolver` | Fully corrective core for the same retained-cash objective |
 | `LpSolver` | Low-latency risk-neutral baseline; HiGHS plus budget-linearized re-solve |
 | `ConicSolver` | Independent Clarabel retained-cash reference and no-cash ablation |
 | `MilpSolver` | Feature-gated SCIP exact/reference route with timeout |
 | `DecomposedSolver<S>` | Per-group mirror-descent coordination experiment |
-| `ExactComponentSolver<S>` | Exact economic-connectivity decomposition and production balanced-book routing |
+| `ExactComponentSolver<S>` | Opt-in exact economic-connectivity decomposition and topology benchmark |
 
 All solvers report one net-of-minting welfare convention and cross an integer
 fill/price boundary before settlement. Retained-cash projections must reach a

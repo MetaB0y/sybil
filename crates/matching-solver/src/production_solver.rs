@@ -1,26 +1,26 @@
 //! Named production retained-cash clearing policy.
 //!
-//! The concrete composition stays here so production callers depend on a
-//! stable intent-level type instead of assembling research building blocks.
+//! The concrete policy stays here so production callers depend on a stable
+//! intent-level type instead of selecting research building blocks.
 
 use matching_engine::Problem;
 
-use crate::{ExactComponentSolver, PacingBundleSolver, PipelineResult, Solver};
+use crate::{PacingBundleSolver, PipelineResult, Solver};
 
-/// Production retained-cash solver selected by the frozen promotion protocol.
+/// Production retained-cash solver selected by the frozen promotion and
+/// adversarial-connectivity protocols.
 ///
-/// Balanced economically independent components are solved separately; all
-/// connected and strongly unbalanced books use the same pacing-bundle solver
-/// monolithically. Both routes optimize the same retained-cash objective and
-/// cross the same integer landing and verifier boundary.
+/// The pacing bundle always solves the complete book. Exact component routing
+/// remains an explicit opt-in accelerator, but is not part of the security
+/// baseline: an admission-sized MM bundle can cheaply connect the whole book.
 pub struct ProductionSolver {
-    inner: ExactComponentSolver<PacingBundleSolver>,
+    inner: PacingBundleSolver,
 }
 
 impl ProductionSolver {
     pub fn new() -> Self {
         Self {
-            inner: ExactComponentSolver::new(PacingBundleSolver::new()),
+            inner: PacingBundleSolver::new(),
         }
     }
 
@@ -52,28 +52,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn facade_uses_the_promoted_retained_cash_path() {
+    fn facade_uses_the_monolithic_promoted_retained_cash_path() {
         let mut problem = Problem::new("production-facade");
-        let market = problem.markets.add_binary("market");
-        problem.orders.push(simple_yes_buy(
-            &problem.markets,
-            1,
-            market,
-            600_000_000,
-            1_000,
-        ));
-        problem.orders.push(simple_no_buy(
-            &problem.markets,
-            2,
-            market,
-            500_000_000,
-            1_000,
-        ));
+        let markets = [
+            problem.markets.add_binary("market-a"),
+            problem.markets.add_binary("market-b"),
+        ];
+        let mut order_id = 1;
+        for market in markets {
+            problem.orders.push(simple_yes_buy(
+                &problem.markets,
+                order_id,
+                market,
+                600_000_000,
+                1_000,
+            ));
+            order_id += 1;
+            problem.orders.push(simple_no_buy(
+                &problem.markets,
+                order_id,
+                market,
+                500_000_000,
+                1_000,
+            ));
+            order_id += 1;
+        }
 
         let solver = ProductionSolver::new();
         let result = solver.solve(&problem);
 
         assert_eq!(solver.name(), "ProductionRetainedCash");
+        // Two balanced independent markets would trigger the exact router.
         assert_eq!(result.diagnostics.algorithm, "pacing-bundle");
         assert!(!result.result.fills.is_empty());
     }

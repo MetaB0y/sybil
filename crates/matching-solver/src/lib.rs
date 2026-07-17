@@ -2,7 +2,7 @@
 //!
 //! Solves the welfare-maximizing order matching problem via convex programs:
 //! - **LP** (`lp_solver`): Linear program via HiGHS with MM budget shading
-//! - **Production** (`production_solver`): exact-component fully corrective retained cash
+//! - **Production** (`production_solver`): monolithic fully corrective retained cash
 //! - **RC-FW** (`retained_cash_solver`): independent certified reference
 //! - **Pacing bundle** (`pacing_bundle_solver`): fully corrective retained-cash core
 //! - **Exact components** (`exact_components`): exact connectivity-aware router

@@ -1,0 +1,216 @@
+{
+  "schema_version": 2,
+  "protocol_id": "solver-adversarial-connectivity-evaluation-v1",
+  "title": "Frozen one-component production-solver stress protocol",
+  "analysis_policy": {
+    "evidence_status": "untouched generated seeds, attack generators, solver settings, and decision rules frozen on main before evaluation",
+    "threat_model": "an admitted broad MM bundle or a tiny economically active MM bridge may deliberately join an accumulated resting book into one exact optimization component",
+    "workloads": "64 markets; 10000 and 50000 accumulated retail orders; either one 384-order global MM constraint with LP-calibrated budget pressure or sixteen 24-order local constraints plus one positive-budget 64-order global bridge; every individual MM constraint fits the production 512-order submission limit",
+    "primary_unit": "one generated order book, calibrated budget ratio, and solver",
+    "hard_gates": "complete fingerprint-consistent matrix; exactly one economic component in every scored row; no panic, backend failure, timeout, empty result, verifier-invalid result, or MM-budget violation",
+    "quality_gate": "monolithic pacing bundle may not lose materially to RC-FW on landed retained-cash objective; material means more than max(1000 nanodollars, 1e-8 of the RC-FW objective)",
+    "identity_gate": "the exact-component wrapper and monolithic pacing bundle must produce identical termination, landed allocation, welfare, and retained-cash objective on every one-component pair",
+    "latency_gate": "monolithic pacing bundle maximum wall time must be below 3 seconds at 10000 declared retail orders and below the deployed 10-second block interval at 50000",
+    "router_rule": "retain exact decomposition in the production facade only if the monolithic security baseline passes and wrapper scan/routing overhead at each scale is no more than max(5 percent at paired P95, 50 milliseconds absolute); otherwise make monolithic pacing bundle the production default",
+    "failure_policy": "retain every panic, empty result, backend error, timeout, iteration cap, and verifier-invalid allocation",
+    "seed_policy": "seeds 72000 through 72301 were not used by solver development and must be evaluated once against the frozen source revision; smoke maps them to disjoint 42000-series development seeds"
+  },
+  "warmup": {
+    "profile": "global-mm",
+    "scale": "warmup",
+    "seed": 17,
+    "budget_scale": 1.0
+  },
+  "solvers": {
+    "retained-cash-fw": {
+      "kind": "retained-cash-fw",
+      "label": "Certified retained-cash generalized Frank-Wolfe",
+      "max_iterations": 100,
+      "tolerance": 0.00001,
+      "absolute_tolerance": 1000000.0,
+      "line_search_steps": 48,
+      "fallback_to_lp": false
+    },
+    "pacing-bundle": {
+      "kind": "pacing-bundle",
+      "label": "Monolithic certified pacing bundle",
+      "max_iterations": 100,
+      "max_master_iterations": 1000,
+      "tolerance": 1E-8,
+      "absolute_tolerance": 100000.0,
+      "master_tolerance": 1E-9,
+      "master_absolute_tolerance": 1000.0,
+      "line_search_steps": 48,
+      "fallback_to_lp": false
+    },
+    "exact-components-pacing-bundle": {
+      "kind": "exact-components-pacing-bundle",
+      "label": "Exact connectivity router around certified pacing bundle",
+      "max_iterations": 100,
+      "max_master_iterations": 1000,
+      "tolerance": 1E-8,
+      "absolute_tolerance": 100000.0,
+      "master_tolerance": 1E-9,
+      "master_absolute_tolerance": 1000.0,
+      "line_search_steps": 48,
+      "fallback_to_lp": false
+    }
+  },
+  "scales": {
+    "warmup": {
+      "num_markets": 16,
+      "num_orders": 1000,
+      "num_mms": 1,
+      "order_size_min": 1,
+      "order_size_max": 250,
+      "mm_budget_min_dollars": 25000,
+      "mm_budget_max_dollars": 25001
+    },
+    "global-10000": {
+      "num_markets": 64,
+      "num_orders": 10000,
+      "num_mms": 1,
+      "order_size_min": 1,
+      "order_size_max": 250,
+      "mm_budget_min_dollars": 25000,
+      "mm_budget_max_dollars": 25001
+    },
+    "global-50000": {
+      "num_markets": 64,
+      "num_orders": 50000,
+      "num_mms": 1,
+      "order_size_min": 1,
+      "order_size_max": 250,
+      "mm_budget_min_dollars": 25000,
+      "mm_budget_max_dollars": 25001
+    },
+    "bridge-10000": {
+      "num_markets": 64,
+      "num_orders": 10000,
+      "num_mms": 16,
+      "order_size_min": 1,
+      "order_size_max": 250,
+      "mm_budget_min_dollars": 25000,
+      "mm_budget_max_dollars": 25001
+    },
+    "bridge-50000": {
+      "num_markets": 64,
+      "num_orders": 50000,
+      "num_mms": 16,
+      "order_size_min": 1,
+      "order_size_max": 250,
+      "mm_budget_min_dollars": 25000,
+      "mm_budget_max_dollars": 25001
+    }
+  },
+  "profiles": {
+    "global-mm": {
+      "generator": "random",
+      "market_group_probability": 0.0,
+      "order_size_power": 2.8,
+      "retail_buy_probability": 0.65,
+      "liquidity_scarcity": 0.4,
+      "hot_market_fraction": 0.0,
+      "hot_order_probability": 0.0,
+      "market_activity_power": 1.15,
+      "liquidity_depth_levels": 5,
+      "liquidity_dispersion": 0.9,
+      "mm_spread_bps": 400,
+      "mm_capacity_multiplier": 6,
+      "mm_market_coverage_fraction": 1.0,
+      "mm_market_coverage_max": 64,
+      "mm_quote_style": "ladder"
+    },
+    "tiny-mm-bridge": {
+      "generator": "random_tiny_mm_bridge",
+      "market_group_probability": 0.0,
+      "order_size_power": 2.8,
+      "retail_buy_probability": 0.65,
+      "liquidity_scarcity": 0.4,
+      "hot_market_fraction": 0.0,
+      "hot_order_probability": 0.0,
+      "market_activity_power": 1.15,
+      "liquidity_depth_levels": 5,
+      "liquidity_dispersion": 0.9,
+      "mm_spread_bps": 400,
+      "mm_capacity_multiplier": 6,
+      "mm_market_coverage_fraction": 0.0625,
+      "mm_market_coverage_max": 4,
+      "mm_quote_style": "ladder"
+    }
+  },
+  "experiments": [
+    {
+      "id": "global-mm-10000",
+      "suite": "adversarial_connectivity",
+      "profile": "global-mm",
+      "scale": "global-10000",
+      "seed_start": 72000,
+      "seed_count": 3,
+      "budget_scales": [
+        0.1,
+        0.25
+      ],
+      "budget_basis": "lp_limit_value",
+      "solvers": [
+        "retained-cash-fw",
+        "pacing-bundle",
+        "exact-components-pacing-bundle"
+      ]
+    },
+    {
+      "id": "global-mm-50000",
+      "suite": "adversarial_connectivity",
+      "profile": "global-mm",
+      "scale": "global-50000",
+      "seed_start": 72100,
+      "seed_count": 2,
+      "budget_scales": [
+        0.1,
+        0.25
+      ],
+      "budget_basis": "lp_limit_value",
+      "solvers": [
+        "retained-cash-fw",
+        "pacing-bundle",
+        "exact-components-pacing-bundle"
+      ]
+    },
+    {
+      "id": "tiny-mm-bridge-10000",
+      "suite": "adversarial_connectivity",
+      "profile": "tiny-mm-bridge",
+      "scale": "bridge-10000",
+      "seed_start": 72200,
+      "seed_count": 3,
+      "budget_scales": [
+        0.1,
+        0.25
+      ],
+      "budget_basis": "generated",
+      "solvers": [
+        "retained-cash-fw",
+        "pacing-bundle",
+        "exact-components-pacing-bundle"
+      ]
+    },
+    {
+      "id": "tiny-mm-bridge-50000",
+      "suite": "adversarial_connectivity",
+      "profile": "tiny-mm-bridge",
+      "scale": "bridge-50000",
+      "seed_start": 72300,
+      "seed_count": 2,
+      "budget_scales": [
+        0.1,
+        0.25
+      ],
+      "budget_basis": "generated",
+      "solvers": [
+        "retained-cash-fw",
+        "pacing-bundle",
+        "exact-components-pacing-bundle"
+      ]
+    }
+  ]
+}

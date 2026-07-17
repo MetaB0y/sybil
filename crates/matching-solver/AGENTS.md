@@ -16,7 +16,7 @@ model harder variants.
 
 | Type | Backend / role |
 |---|---|
-| `ProductionSolver` | Production facade: exact-connectivity routing around the pacing bundle |
+| `ProductionSolver` | Production facade: monolithic pacing bundle security baseline |
 | `RetainedCashSolver` | Independent certified generalized Frank–Wolfe reference with a HiGHS oracle |
 | `PacingBundleSolver` | Fully corrective retained-cash core with a HiGHS oracle |
 | `LpSolver` | Low-latency risk-neutral baseline plus budget-linearized re-solve |
@@ -24,7 +24,7 @@ model harder variants.
 | `DirectDualConicSolver` | Price-side Clarabel retained-cash certificate and marginal-face research reference |
 | `MilpSolver` | Feature-gated SCIP exact/reference route with timeout |
 | `DecomposedSolver<S>` | Per-group mirror-descent coordination experiment |
-| `ExactComponentSolver<S>` | Exact economic-connectivity decomposition with production balanced-book routing |
+| `ExactComponentSolver<S>` | Opt-in exact economic-connectivity decomposition and benchmark instrumentation |
 
 ## Invariants
 

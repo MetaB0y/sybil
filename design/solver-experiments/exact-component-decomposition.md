@@ -257,7 +257,7 @@ the monolith on a connected book.
 ### Frozen threat model and protocol
 
 `benchmarks/solver/protocol-adversarial-connectivity-v1.json` declares 20
-scored books and 60 solver rows before evaluation:
+scored book/budget cases and 60 solver rows before evaluation:
 
 - 64 markets with either 10,000 or 50,000 accumulated retail orders;
 - one broad maker connecting every market through 384 orders, which fits one
@@ -299,3 +299,59 @@ Otherwise make the monolithic pacing bundle the production default.
 This section, the attack generator, and the protocol must be pushed before any
 72,000-series seed is generated. Record the immutable freeze revision and the
 single evaluation below after the run; do not retune this protocol.
+
+### Frozen evaluation result
+
+The attack generator, protocol, and decision rule were frozen and pushed to
+`origin/main` at
+`f82e2455c1c355e2d09bf25ab86323b10c5d7c66` before any evaluation seed was
+generated. The one full run is retained at
+`benchmarks/solver/results/2026-07-17-adversarial-connectivity-v1/`.
+
+The artifact is complete: 60/60 declared rows, 20/20 book/budget groups, no
+duplicates, no cross-solver fingerprint mismatch, and exactly one component in
+every row. The monolithic and wrapped bundles both converged and passed the
+verifier on all 20 cases. RC-FW produced 19 benchmark-successful rows, with two
+iteration caps and one explicit numerical failure.
+
+The monolithic bundle improved landed retained-cash objective over RC-FW in
+20/20 pairs, tied none, lost none, and had no material regression under the
+frozen tolerance. The smallest improvement was 14,593 nanodollars and the
+largest was 4,023,940,614 nanodollars. Thus the core algorithm's quality and
+availability gates pass independently of decomposition.
+
+The wrapper and monolith had identical termination, retained objective, net
+and gross welfare, fill count, total filled quantity, landing diagnostics, and
+per-MM utilization in every pair. The artifact does not persist a full fill
+vector hash, but the connected branch in `ExactComponentSolver::solve`
+directly returns `self.inner.solve(problem)` without assembly, so no
+allocation-transforming wrapper path runs. Their timing was:
+
+| Declared retail orders | Monolith P50 / max | Wrapper P50 / max | Paired wrapper-overhead P95 | Ratio P95 |
+|---:|---:|---:|---:|---:|
+| 10,000 | 2.034 / 3.522s | 2.024 / 3.557s | 53.3ms | 1.0281× |
+| 50,000 | 82.279 / 85.968s | 82.669 / 85.594s | 394.6ms | 1.0048× |
+
+The router-overhead gate passes: the allowed P95 bounds were 175.8ms and
+4,289.7ms respectively. The security-baseline latency gate fails at both
+scales. The 10,000-order maximum exceeded its three-second target by 17%; the
+50,000-order maximum exceeded the deployed ten-second block interval by 8.6×.
+The cheap 64-order bridge was sufficient to force the same whole-book path;
+the failure is therefore in core connected-book scaling, not graph analysis.
+
+### Decision and production follow-through
+
+Apply the preregistered rule: make `ProductionSolver` a named facade over
+monolithic `PacingBundleSolver`. Retain `ExactComponentSolver<S>` as an
+explicit opt-in exact accelerator and as benchmark topology instrumentation,
+but do not treat it as part of the production security architecture.
+
+This is a complexity and threat-model decision, not a latency fix. The
+monolithic bundle remains economically stronger and more available than RC-FW,
+but a 50,000-order connected batch is not safe for the current ten-second
+cadence. The next production-capacity work must target the monolithic oracle /
+landing path or enforce a measured resource boundary; fragmented-book
+speedups cannot satisfy that requirement.
+
+Do not rerun or retune ECD-004. Any proposed connected-book solver improvement
+needs a new versioned protocol and untouched seeds.
