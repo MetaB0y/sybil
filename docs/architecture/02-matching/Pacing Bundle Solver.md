@@ -75,11 +75,15 @@ directly. Deliberately wide billion-unit books instead use a `1e-8` relative
 near-face band: HiGHS can report an exact auxiliary optimum there while the
 face row is materially infeasible. Before budget projection, the implementation
 compares the nearest-face, primary-basis, and certified-target integer
-candidates under the primary prices and keeps the one with the smallest
-minting-duality residual. It fails explicitly if that support residual exceeds
-$0.05. This gate does not call another solver or replace the primary price
-system. Auxiliary utility bands were tested and rejected because their shadow
-prices can invalidate the published market duals.
+candidates under the primary prices. It first finds the smallest
+minting-duality residual, excludes candidates more than one microdollar above
+that value, and maximizes retained-cash objective inside the resulting
+support-equivalence band. It fails explicitly if even the best support residual
+exceeds $0.05. This gate does not call another solver or replace the primary
+price system. Auxiliary utility bands were tested and rejected because their
+shadow prices can invalidate the published market duals. The policy comparison
+is recorded in
+`design/solver-experiments/objective-aware-landing-selection.md`.
 
 After rounding, the projection re-linearizes any violated hard-budget rows and
 resolves to a budget-consistent fixed point. Exhaustion is an explicit

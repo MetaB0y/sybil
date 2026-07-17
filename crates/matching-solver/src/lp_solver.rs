@@ -29,6 +29,32 @@ use crate::result::{
 };
 use crate::solver::order_sign;
 
+const MAX_NEAREST_FACE_MINTING_GAP_NANOS: f64 = 50_000_000.0;
+const EQUIVALENT_MINTING_GAP_NANOS: f64 = 1_000.0;
+
+/// Choose the highest retained-cash objective among candidates whose minting
+/// support is numerically equivalent to the best available support.
+///
+/// Scores are `(minting_gap_nanos, retained_objective_nanos)`. Exact objective
+/// ties prefer the smaller support residual, then the earlier candidate so
+/// degenerate LP bases remain deterministic.
+fn select_objective_aware_landing_candidate(scores: &[(f64, f64)]) -> Option<usize> {
+    let min_gap = scores.iter().map(|(gap, _)| *gap).min_by(f64::total_cmp)?;
+    let support_ceiling =
+        (min_gap + EQUIVALENT_MINTING_GAP_NANOS).min(MAX_NEAREST_FACE_MINTING_GAP_NANOS);
+    scores
+        .iter()
+        .enumerate()
+        .filter(|(_, (gap, _))| *gap <= support_ceiling)
+        .max_by(|(left_index, left), (right_index, right)| {
+            left.1
+                .total_cmp(&right.1)
+                .then_with(|| right.0.total_cmp(&left.0))
+                .then_with(|| right_index.cmp(left_index))
+        })
+        .map(|(index, _)| index)
+}
+
 /// Configuration for the LP solver.
 #[derive(Clone, Debug)]
 pub struct LpConfig {
@@ -1380,18 +1406,20 @@ pub(crate) fn support_and_finalize_target_on_face(
         // Ill-scaled faces can make either the L1 selector or the primary basis
         // a poor integer representative of the same continuous price system.
         // Evaluate the three in-solver candidates already available: nearest
-        // face, primary basis, and certified target. Select by the economic
-        // minting-duality residual before checking hard budgets. No other
-        // solver is called, and target movement remains measured.
+        // face, primary basis, and certified target. Minting duality remains a
+        // hard eligibility condition, but differences below one microdollar
+        // are numerical ties; select the best retained-cash objective inside
+        // that support band. No other solver is called, and target movement
+        // remains measured.
         let candidate_allocations = [
             round_at_primary_prices(&nearest_allocation),
             round_at_primary_prices(&primary_allocation),
             round_at_primary_prices(allocation),
         ];
-        const MAX_NEAREST_FACE_MINTING_GAP_NANOS: f64 = 50_000_000.0;
-        let mut best_candidate = None;
+        let mut candidates = Vec::with_capacity(candidate_allocations.len());
         let mut candidate_gaps = Vec::with_capacity(candidate_allocations.len());
         let mut raw_candidate_gaps = Vec::with_capacity(candidate_allocations.len());
+        let mut candidate_objectives = Vec::with_capacity(candidate_allocations.len());
         for candidate in candidate_allocations {
             price_solution.q_values = candidate;
             // Test price support before hard-budget projection. Calling the
@@ -1420,34 +1448,44 @@ pub(crate) fn support_and_finalize_target_on_face(
                     &preview.fills,
                 );
             let gap = (zero_temperature - preview.minting_cost as f64).abs();
+            let retained_objective = crate::retained_cash_solver::retained_cash_objective_for_fills(
+                problem,
+                &preview.fills,
+            );
             candidate_gaps.push(gap / NANOS_PER_DOLLAR as f64);
-            if best_candidate
-                .as_ref()
-                .is_none_or(|(_, best_gap, _, _)| gap < *best_gap)
-            {
-                best_candidate = Some((
-                    price_solution.q_values.clone(),
-                    gap,
-                    zero_temperature,
-                    preview.minting_cost,
-                ));
-            }
+            candidate_objectives.push(retained_objective / NANOS_PER_DOLLAR as f64);
+            candidates.push((
+                price_solution.q_values.clone(),
+                gap,
+                retained_objective,
+                zero_temperature,
+                preview.minting_cost,
+            ));
         }
-        let (candidate, minting_gap, zero_temperature, settlement_minting) =
-            best_candidate.expect("three landing candidates");
-        if minting_gap > MAX_NEAREST_FACE_MINTING_GAP_NANOS {
+        let (_, min_gap, _, zero_temperature, settlement_minting) = candidates
+            .iter()
+            .min_by(|left, right| left.1.total_cmp(&right.1))
+            .expect("three landing candidates");
+        if *min_gap > MAX_NEAREST_FACE_MINTING_GAP_NANOS {
             return PipelineResult::failure(
                 "target-support-lp",
                 TerminationStatus::PostProcessingFailure,
                 format!(
-                    "no integer candidate was supported by primary minting prices at budget step {iteration}: best gap=${:.9}, C0=${:.9}, price cash=${:.9}, raw gaps=${raw_candidate_gaps:?}, cleaned gaps=${candidate_gaps:?}",
-                    minting_gap / NANOS_PER_DOLLAR as f64,
+                    "no integer candidate was supported by primary minting prices at budget step {iteration}: best gap=${:.9}, C0=${:.9}, price cash=${:.9}, raw gaps=${raw_candidate_gaps:?}, cleaned gaps=${candidate_gaps:?}, retained objectives=${candidate_objectives:?}",
+                    min_gap / NANOS_PER_DOLLAR as f64,
                     zero_temperature / NANOS_PER_DOLLAR as f64,
-                    settlement_minting as f64 / NANOS_PER_DOLLAR as f64,
+                    *settlement_minting as f64 / NANOS_PER_DOLLAR as f64,
                 ),
                 start.elapsed().as_secs_f64(),
             );
         }
+        let scores = candidates
+            .iter()
+            .map(|(_, gap, objective, _, _)| (*gap, *objective))
+            .collect::<Vec<_>>();
+        let selected_index = select_objective_aware_landing_candidate(&scores)
+            .expect("minimum-gap candidate is inside its own support band");
+        let (candidate, _, _, _, _) = candidates.swap_remove(selected_index);
         price_solution.q_values = candidate;
 
         if !has_mm_budget_violations(
@@ -1502,6 +1540,30 @@ mod tests {
     use crate::test_fixtures::{
         group_minting_problem, minting_problem, no_profitable_trades_problem, single_market_problem,
     };
+
+    #[test]
+    fn landing_selector_optimizes_objective_only_within_support_tolerance() {
+        let scores = [(7.0, 100.0), (8.0, 110.0), (1_008.0, 1_000.0), (7.0, 90.0)];
+        assert_eq!(
+            select_objective_aware_landing_candidate(&scores),
+            Some(1),
+            "a one-nanodollar support difference is numerical noise"
+        );
+
+        let outside_band = [(7.0, 100.0), (1_007.1, 1_000.0)];
+        assert_eq!(
+            select_objective_aware_landing_candidate(&outside_band),
+            Some(0),
+            "objective must not buy materially worse price support"
+        );
+
+        let exact_tie = [(9.0, 100.0), (8.0, 100.0), (8.0, 100.0)];
+        assert_eq!(
+            select_objective_aware_landing_candidate(&exact_tie),
+            Some(1),
+            "ties prefer lower support gap and stable candidate order"
+        );
+    }
 
     #[test]
     fn reusable_oracle_matches_cold_objective_after_cost_updates() {

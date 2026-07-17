@@ -6,6 +6,12 @@ last_verified: 2026-07-14
 
 # Pacing bundle and integer-landing tail study
 
+> Follow-up (2026-07-17): the exact minimum-residual candidate policy described
+> below was superseded by a one-microdollar support-equivalence band followed
+> by retained-objective selection. The controlled comparison is recorded in
+> `design/solver-experiments/objective-aware-landing-selection.md`; this file
+> retains the original dated result.
+
 ## Decision
 
 Keep [[Retained Cash Solver|`RetainedCashSolver`]] as the production default and

@@ -71,10 +71,13 @@ original matching rows. Normally scaled books use an explicitly checked exact
 face; deliberately wide billion-unit books use a `1e-8` relative near-face band
 directly because HiGHS can otherwise report a materially infeasible exact face
 row. Landing then compares the nearest-face, primary-basis, and certified-target
-integer candidates under the primary prices and chooses the smallest
-minting-duality residual, failing explicitly above $0.05. This is an economic
-support gate within the same solver and price system, not a cross-solver
-fallback.
+integer candidates under the primary prices. Candidates more than one
+microdollar above the best minting-duality residual are excluded; among the
+support-equivalent remainder, landing maximizes the actual retained-cash
+objective and uses residual plus stable candidate order only as tie-breakers.
+It fails explicitly when even the best residual exceeds $0.05. This is an
+economic support gate within the same solver and price system, not a
+cross-solver fallback.
 
 If rounded quantities exceed an MM budget at the resulting prices, the
 projection adds price-linearized budget rows and resolves. It finalizes only
