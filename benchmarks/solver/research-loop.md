@@ -52,9 +52,10 @@ latency cost is a review decision, not an automatic discard.
 
 ## Current signal boundary
 
-The current mix is suitable for autonomous bursts, not an unbounded unattended
-search. Generated stress cases cover scale and numerical extremes; the first
-replay corpus adds correlated multi-batch resting-book shapes. It is still one
-agent simulation with originally slack maker budgets. Before long runs become
-authoritative, add multiple independently seeded lifecycle corpora and
-privacy-reviewed redacted captures from the deployed solver boundary.
+The current mix is suitable for bounded autonomous campaigns, not an unbounded
+unattended search. Generated stress cases cover scale and numerical extremes;
+four replay regimes add correlated resting books, grouped outcomes, news,
+mid-simulation resolution, and dense flow. The replay is still synthetic, has
+only one seed per regime, and needs counterfactual tight maker budgets. Before
+long runs become authoritative, add held-out seeds for each lifecycle regime
+and privacy-reviewed redacted captures from the deployed solver boundary.

@@ -506,6 +506,48 @@ def worst_cases(records: list[dict[str, Any]], limit: int = 12) -> dict[str, lis
     }
 
 
+def replay_coverage(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Summarize unique replay cases without counting solver/budget repeats."""
+    unique: dict[tuple[str, str], dict[str, Any]] = {}
+    tight_budgets: dict[str, float] = {}
+    for row in records:
+        if row["suite"] != "replay" or row.get("case_id") is None:
+            continue
+        experiment_id = row["experiment_id"]
+        unique.setdefault((experiment_id, row["case_id"]), row)
+        budget = float(row["budget_scale"])
+        tight_budgets[experiment_id] = min(tight_budgets.get(experiment_id, budget), budget)
+
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for (experiment_id, _), row in unique.items():
+        grouped[experiment_id].append(row)
+
+    coverage = []
+    for experiment_id, rows in sorted(grouped.items()):
+        problems = [row["problem"] for row in rows]
+        coverage.append(
+            {
+                "experiment_id": experiment_id,
+                "cases": len(rows),
+                "markets_min": min(problem["markets"] for problem in problems),
+                "markets_max": max(problem["markets"] for problem in problems),
+                "orders_min": min(problem["orders"] for problem in problems),
+                "orders_median": median(problem["orders"] for problem in problems),
+                "orders_max": max(problem["orders"] for problem in problems),
+                "retail_orders_median": median(
+                    problem["declared_retail_orders"] for problem in problems
+                ),
+                "mm_orders_median": median(problem["mm_orders"] for problem in problems),
+                "market_makers_min": min(problem["market_makers"] for problem in problems),
+                "market_makers_max": max(problem["market_makers"] for problem in problems),
+                "market_groups_min": min(problem["market_groups"] for problem in problems),
+                "market_groups_max": max(problem["market_groups"] for problem in problems),
+                "tight_budget_scale": tight_budgets[experiment_id],
+            }
+        )
+    return coverage
+
+
 def make_summary(
     protocol: dict[str, Any], metadata: dict[str, Any], records: list[dict[str, Any]], integrity: dict[str, Any]
 ) -> dict[str, Any]:
@@ -536,6 +578,10 @@ def make_summary(
         "order_scaling": aggregate(order_scaling, ("scale", "solver_id")),
         "mm_scaling": aggregate(mm_scaling, ("scale", "solver_id")),
         "replay": aggregate(replay, ("budget_scale", "solver_id")),
+        "replay_regimes": aggregate(
+            replay, ("experiment_id", "budget_scale", "solver_id")
+        ),
+        "replay_coverage": replay_coverage(replay),
         "experiments": aggregate(records, ("experiment_id", "solver_id")),
         "worst_cases": worst_cases(records),
     }
@@ -835,7 +881,97 @@ def write_markdown_v2(summary: dict[str, Any], output: Path) -> None:
     )
 
     if summary["replay"]:
-        lines.extend(["", "## Sequencer-boundary replay", ""])
+        lines.extend(["", "## Sequencer-boundary replay coverage", ""])
+        rows = []
+        for row in summary["replay_coverage"]:
+            market_range = (
+                str(row["markets_min"])
+                if row["markets_min"] == row["markets_max"]
+                else f"{row['markets_min']}–{row['markets_max']}"
+            )
+            mm_range = (
+                str(row["market_makers_min"])
+                if row["market_makers_min"] == row["market_makers_max"]
+                else f"{row['market_makers_min']}–{row['market_makers_max']}"
+            )
+            group_range = (
+                str(row["market_groups_min"])
+                if row["market_groups_min"] == row["market_groups_max"]
+                else f"{row['market_groups_min']}–{row['market_groups_max']}"
+            )
+            rows.append(
+                [
+                    row["experiment_id"],
+                    str(row["cases"]),
+                    market_range,
+                    (
+                        f"{row['orders_min']}/"
+                        f"{format_number(row['orders_median'], 0)}/"
+                        f"{row['orders_max']}"
+                    ),
+                    (
+                        f"{format_number(row['retail_orders_median'], 0)}/"
+                        f"{format_number(row['mm_orders_median'], 0)}"
+                    ),
+                    mm_range,
+                    group_range,
+                    f"{row['tight_budget_scale']:g}×",
+                ]
+            )
+        lines.append(
+            markdown_table(
+                [
+                    "Regime",
+                    "Cases",
+                    "Markets",
+                    "Orders min/P50/max",
+                    "Retail/MM P50",
+                    "MMs",
+                    "Groups",
+                    "Tight",
+                ],
+                rows,
+            )
+        )
+
+        lines.extend(["", "## Replay quality by regime at its tight budget", ""])
+        tight_by_experiment = {
+            row["experiment_id"]: row["tight_budget_scale"]
+            for row in summary["replay_coverage"]
+        }
+        rows = []
+        for row in summary["replay_regimes"]:
+            if row["budget_scale"] != tight_by_experiment[row["experiment_id"]]:
+                continue
+            rows.append(
+                [
+                    row["experiment_id"],
+                    SHORT_LABELS.get(row["solver_id"], row["solver_id"]),
+                    f"{row['successful']}/{row['declared']}",
+                    str(row["termination_counts"].get("iteration_limit", 0)),
+                    format_number(row["retained_gap_p95_percent"], 4),
+                    format_number(row["retained_gap_max_percent"], 4),
+                    format_number(row["integer_landing_relative_p95_percent"], 4),
+                    format_number(row["max_mm_utilization_max"], 3),
+                ]
+            )
+        lines.append(
+            markdown_table(
+                [
+                    "Regime",
+                    "Solver",
+                    "Success",
+                    "At cap",
+                    "Retained P95 %",
+                    "Retained max %",
+                    "Landing P95 %",
+                    "Max B use",
+                ],
+                rows,
+            )
+        )
+
+        lines.extend(["", "## Replay aggregate", ""])
         rows = []
         for row in summary["replay"]:
             rows.append(
@@ -1143,6 +1279,7 @@ def write_csv(summary: dict[str, Any], output: Path) -> None:
         "order_scaling",
         "mm_scaling",
         "replay",
+        "replay_regimes",
         "experiments",
     ):
         for row in summary[section]:

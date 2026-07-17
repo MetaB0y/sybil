@@ -123,19 +123,80 @@ tail, and requires only a clearer default tolerance rather than a new
 heuristic. The remaining non-monotone integer-face behavior stays visible as a
 future landing target.
 
+## Experiment SRC-004 — multi-regime replay
+
+The single standard trajectory was too narrow for an extended research loop.
+Protocol v2 retains it and adds three compact, deterministic sequencer
+trajectories:
+
+| Regime | Capture command suffix | Cases | Size | BLAKE3 |
+|---|---|---:|---:|---|
+| Standard flow | `--scenario standard --seed 27182` | 20 | 1.3 MiB | `9aa3fd354b88876addb206859babf88769e74791c1e07ba7d62afade86bc124f` |
+| Grouped news | `--scenario election --seed 31415` | 20 | 336 KiB | `6852eaec4c04e06139abf7dc13e2ae3ce243827db642ede0b74292ff6dcc131d` |
+| Mid-resolution | `--scenario two_events_with_leak --seed 16180` | 20 | 420 KiB | `fa6105778d3fd67b379ece92e5c3da7377ed866dc7f298edf1f3ba4b5414e59c` |
+| Dense stress | `--scenario stress --seed 27183 --batches 12` | 12 | 3.1 MiB | `90f6ca24eb335a3b06a79c6052358f11bb2865f64d508b2e3f849ccc5bb4fbd5` |
+
+The common command prefix was:
+
+```bash
+target/release/sybil-sim \
+  --solver-corpus-output /tmp/<corpus>.msgpack
+```
+
+Together the 72 cases cover the following sequencer-boundary shapes:
+
+| Regime | Markets | Orders min / P50 / max | Retail / MM P50 | MMs | Groups |
+|---|---:|---:|---:|---:|---:|
+| Standard flow | 10 | 256 / 798 / 1,330 | 718 / 80 | 2 | 0 |
+| Grouped news | 3 | 66 / 243 / 404 | 219 / 24 | 2 | 1 |
+| Mid-resolution | 4 | 93 / 313 / 461 | 285 / 28 | 2 | 1 |
+| Dense stress | 30 | 1,547 / 3,936 / 5,748 | 3,576 / 360 | 3 | 0 |
+
+An initial calibration gave every regime the standard `0.0001` tight-budget
+multiplier. It was rejected for grouped news and mid-resolution because their
+maximum MM utilization remained below `0.56`, providing a weak pacing signal.
+Their tight multiplier is now `0.00005`; standard and dense stress remain at
+`0.0001`. The captured `1.0` control remains in every regime. These tight
+points are explicitly labeled counterfactuals.
+
+The final protocol produced 576/576 structurally valid records. All landed
+results except two Clarabel rows passed the protocol verifier:
+
+- Mid-resolution blocks `b006` and `b007` at `0.00005` were reported
+  `Solved`/converged by Clarabel, but integer landing exceeded five order
+  limits and was retained as `verifier_invalid`.
+- Dense stress was materially discriminating: LP-SLP hit its iteration cap in
+  10/12 tight cases and RC structural in 4/12. Tight retained-objective
+  P95/max gaps were `0.6674%/0.7465%` for LP-SLP,
+  `0.3913%/0.3913%` for RC structural, `0.9721%/1.7013%` for bundle
+  structural, and `2.6774%/5.9498%` for Clarabel.
+- Mid-resolution exposed an integer-landing tail under tight budgets:
+  retained P95/max were `0.2262%/4.5225%` for RC structural and
+  `0.1400%/2.7991%` for bundle structural. LP-SLP remained at zero retained
+  gap but hit one iteration cap.
+- Grouped news reached maximum utilization `0.915` for LP-SLP and `0.825` for
+  retained-cash solvers while preserving zero retained gap, so it contributes
+  group and price-support coverage without manufacturing a quality gap.
+- Standard-flow bundle retained P95/max stayed at `0.1174%/0.2851%`, preserving
+  the SRC-003 regression signal.
+
+This validates the multi-metric approach: no single scalar captures verifier
+availability, iteration caps, continuous quality, integer landing, budget
+stress, and latency. The analyzer therefore reports coverage and quality per
+regime as well as the aggregate, and keeps failures in each denominator.
+
 ## Interpretation
 
-The replay is already a useful discriminator: it found a large
-fully-corrective-bundle stopping/landing tail and an LP supporting-price
-residual that the aggregate synthetic headline did not make obvious. The gap
-sweep reduced the former without hiding its broad-suite trade-off. It also
-shows why one scalar is unsafe: Clarabel has the best tight-budget retained
-tail in SRC-002 despite its known availability failures on separate
-exponential-cone stress cases.
+Replay is already a useful discriminator. It found a large
+fully-corrective-bundle stopping/landing tail, an LP supporting-price residual,
+and verifier-invalid Clarabel landings that aggregate synthetic headlines did
+not make obvious. The added regimes now cover grouped outcomes, lifecycle
+resolution, and dense books as distinct scorecard slices.
 
-The corpus is not yet a sufficient long-horizon optimization target. Blocks are
-correlated, one synthetic policy produced them, quantities are small, and tight
-budgets are counterfactual. Next corpus work should add independent seeds,
-multi-outcome lifecycle traffic, and privacy-reviewed redacted deployed
+The corpus is still not a sufficient long-horizon optimization target. Blocks
+are correlated within trajectories, each regime has one synthetic seed, maker
+budgets need counterfactual tightening, and the account/MM inventory limitation
+prevents calling the captures full-account-valid evidence. Next corpus work
+should add held-out seeds per regime and privacy-reviewed redacted deployed
 captures. Until then, use replay beside the numerical, flash, scale, and exact
 reference suites, never instead of them.

@@ -177,17 +177,21 @@ and current development result are recorded in
 
 ## Sequencer-boundary replay development protocol
 
-`protocol-replay-development.json` replays 20 consecutive solver inputs from a
-deterministic run of the real multi-batch sequencer. Unlike the independent
+`protocol-replay-development.json` replays 72 solver inputs from four
+deterministic runs of the real multi-batch sequencer: standard binary flow, a
+three-outcome election with news, mixed binary/grouped markets with a
+mid-simulation resolution, and dense stress flow. Unlike the independent
 scenario generator, these books contain the accepted order sequence after
-admission plus carried resting liquidity. The MessagePack corpus is a
+admission plus carried resting liquidity. Each MessagePack corpus is a
 solver-only projection: it omits accounts, signatures, balances, market names,
-and solver output; the protocol pins its BLAKE3 digest.
+and solver output; the protocol pins every BLAKE3 digest.
 
-The corpus is still synthetic and its blocks are correlated. It is useful for
-catching lifecycle-shaped and landing regressions, not for estimating live
-traffic distributions. The protocol runs both captured MM budgets and a tight
-budget counterfactual because the simulated maker budgets are otherwise slack.
+The corpora are still synthetic, with one seed per regime and correlated blocks
+within each trajectory. They are useful for catching lifecycle-shaped,
+market-group, resolution, scaling, and landing regressions, not for estimating
+live traffic distributions. Each regime runs both captured MM budgets and a
+calibrated tight-budget counterfactual because the simulated maker budgets are
+otherwise slack.
 
 ```bash
 cargo run --release -p matching-sim --all-features \
@@ -199,7 +203,8 @@ python3 scripts/benchmarks/analyze_solver_experiments.py \
   /tmp/solver-replay-development
 ```
 
-The corpus design, capture limitation, and first 160-row result are recorded in
+The corpus design, capture limitation, calibration history, and current
+576-row result are recorded in
 `design/solver-experiments/sequencer-replay-corpus.md`. The guarded autonomous
 iteration policy is in `benchmarks/solver/research-loop.md`.
 

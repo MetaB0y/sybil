@@ -1,14 +1,14 @@
 {
   "schema_version": 3,
-  "protocol_id": "solver-sequencer-replay-development-v1",
-  "title": "Development-only lifecycle-shaped solver replay",
+  "protocol_id": "solver-sequencer-replay-development-v2",
+  "title": "Development-only multi-regime lifecycle solver replay",
   "analysis_policy": {
     "evidence_status": "development-only sequencer simulation; not real order flow or held-out evidence",
     "primary_unit": "one solver-boundary replay case, budget ratio, and solver",
     "hard_gates": "no panic, solver failure, timeout, or verifier-invalid landed result",
     "soft_metrics": "wall-time median and tails; retained-cash objective and welfare gaps; certificate and landing tails; allocation and price distance; MM utilization",
     "selection_policy": "prefer Pareto improvements; do not collapse quality, robustness, latency, and simplicity into one score",
-    "corpus_policy": "cases preserve accepted-order sequence across a real multi-batch sequencer lifecycle while omitting accounts, signatures, balances, names, and solver output"
+    "corpus_policy": "cases preserve accepted-order sequence across standard, grouped-news, mid-resolution, and dense multi-batch sequencer lifecycles while omitting accounts, signatures, balances, names, and solver output"
   },
   "warmup": {
     "corpus": "sequencer-sim-standard-s27182-v1",
@@ -55,20 +55,68 @@
   "scales": {},
   "profiles": {},
   "corpora": {
+    "sequencer-sim-election-s31415-v1": {
+      "path": "corpora/sequencer-sim-election-s31415-v1.msgpack",
+      "blake3": "6852eaec4c04e06139abf7dc13e2ae3ce243827db642ede0b74292ff6dcc131d"
+    },
     "sequencer-sim-standard-s27182-v1": {
       "path": "corpora/sequencer-sim-standard-s27182-v1.msgpack",
       "blake3": "9aa3fd354b88876addb206859babf88769e74791c1e07ba7d62afade86bc124f"
+    },
+    "sequencer-sim-stress-s27183-v1": {
+      "path": "corpora/sequencer-sim-stress-s27183-v1.msgpack",
+      "blake3": "90f6ca24eb335a3b06a79c6052358f11bb2865f64d508b2e3f849ccc5bb4fbd5"
+    },
+    "sequencer-sim-two_events_with_leak-s16180-v1": {
+      "path": "corpora/sequencer-sim-two_events_with_leak-s16180-v1.msgpack",
+      "blake3": "fa6105778d3fd67b379ece92e5c3da7377ed866dc7f298edf1f3ba4b5414e59c"
     }
   },
   "experiments": [
     {
-      "id": "sequencer-lifecycle",
+      "id": "standard-flow",
       "suite": "replay",
       "profile": "agent-flow",
       "scale": "growing-resting-book",
       "corpus": "sequencer-sim-standard-s27182-v1",
       "seed_start": 0,
       "seed_count": 20,
+      "budget_scales": [0.0001, 1.0],
+      "budget_basis": "generated",
+      "solvers": ["lp", "rc-structural", "bundle-structural", "conic-quasi"]
+    },
+    {
+      "id": "grouped-news",
+      "suite": "replay",
+      "profile": "grouped-news",
+      "scale": "three-outcome-event",
+      "corpus": "sequencer-sim-election-s31415-v1",
+      "seed_start": 0,
+      "seed_count": 20,
+      "budget_scales": [0.00005, 1.0],
+      "budget_basis": "generated",
+      "solvers": ["lp", "rc-structural", "bundle-structural", "conic-quasi"]
+    },
+    {
+      "id": "mid-resolution",
+      "suite": "replay",
+      "profile": "news-and-resolution",
+      "scale": "mixed-binary-group",
+      "corpus": "sequencer-sim-two_events_with_leak-s16180-v1",
+      "seed_start": 0,
+      "seed_count": 20,
+      "budget_scales": [0.00005, 1.0],
+      "budget_basis": "generated",
+      "solvers": ["lp", "rc-structural", "bundle-structural", "conic-quasi"]
+    },
+    {
+      "id": "dense-stress",
+      "suite": "replay",
+      "profile": "dense-agent-flow",
+      "scale": "thirty-market-resting-book",
+      "corpus": "sequencer-sim-stress-s27183-v1",
+      "seed_start": 0,
+      "seed_count": 12,
       "budget_scales": [0.0001, 1.0],
       "budget_basis": "generated",
       "solvers": ["lp", "rc-structural", "bundle-structural", "conic-quasi"]
