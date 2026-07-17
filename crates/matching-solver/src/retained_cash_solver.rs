@@ -547,6 +547,7 @@ impl<'a> ObjectiveModel<'a> {
         mm + linear
     }
 
+    #[cfg(feature = "lp")]
     pub(crate) fn allocation_components(&self, q: &[f64]) -> (Vec<f64>, f64) {
         let summary = self.allocation_summary(q);
         let linear = summary.linear_component(self);
