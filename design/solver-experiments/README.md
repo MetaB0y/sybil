@@ -24,6 +24,7 @@ protocol and source revision frozen before untouched seeds are evaluated.
 - [Exact economic-connectivity decomposition](exact-component-decomposition.md)
   — successful balanced-component router and replay topology audit
 - [Public CLOB-depth corpus](public-clob-depth-corpus.md) — frozen external
-  resting depth, explicit batch-flow synthesis, and benchmark calibration
+  resting depth, observed taker-flow windows, explicit synthetic controls, and
+  benchmark calibration
 - [Full tangent-face integer landing](integer-face-landing-retry.md) —
   conditional integer-friendly retry on a certified retained-cash tangent

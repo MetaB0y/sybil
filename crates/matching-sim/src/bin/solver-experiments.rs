@@ -1604,6 +1604,36 @@ fn unix_seconds() -> u64 {
 mod tests {
     use super::*;
 
+    fn assert_checked_in_corpus_protocol(
+        bytes: &[u8],
+        filename: &str,
+        corpus_id: &str,
+        expected_cases: usize,
+        expected_records: usize,
+    ) {
+        let protocol: Protocol = serde_json::from_slice(bytes).expect("parse protocol");
+        validate_protocol(&protocol).expect("valid protocol");
+        let protocol_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../benchmarks/solver")
+            .join(filename);
+        let corpora = load_corpora(&protocol, &protocol_path).expect("load pinned corpus");
+        validate_corpus_ranges(&protocol, &corpora).expect("valid corpus ranges");
+        assert_eq!(protocol.schema_version, 3);
+        assert_eq!(corpora[corpus_id].cases.len(), expected_cases);
+        assert_eq!(
+            protocol
+                .experiments
+                .iter()
+                .map(|experiment| {
+                    experiment.seed_count
+                        * experiment.budget_scales.len()
+                        * experiment.solvers.len()
+                })
+                .sum::<usize>(),
+            expected_records
+        );
+    }
+
     #[test]
     fn allocation_distance_is_symmetric_and_normalized() {
         let a = BTreeMap::from([(1, 10), (2, 5)]);
@@ -1707,25 +1737,25 @@ mod tests {
     fn checked_in_public_depth_development_protocol_is_valid() {
         let bytes =
             include_bytes!("../../../../benchmarks/solver/protocol-public-depth-development.json");
-        let protocol: Protocol = serde_json::from_slice(bytes).expect("parse protocol");
-        validate_protocol(&protocol).expect("valid protocol");
-        let protocol_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../benchmarks/solver/protocol-public-depth-development.json");
-        let corpora = load_corpora(&protocol, &protocol_path).expect("load pinned corpus");
-        validate_corpus_ranges(&protocol, &corpora).expect("valid public-depth ranges");
-        assert_eq!(protocol.schema_version, 3);
-        assert_eq!(corpora["polymarket-clob-depth-20260717-v1"].cases.len(), 8);
-        assert_eq!(
-            protocol
-                .experiments
-                .iter()
-                .map(|experiment| {
-                    experiment.seed_count
-                        * experiment.budget_scales.len()
-                        * experiment.solvers.len()
-                })
-                .sum::<usize>(),
-            60
+        assert_checked_in_corpus_protocol(
+            bytes,
+            "protocol-public-depth-development.json",
+            "polymarket-clob-depth-20260717-v1",
+            8,
+            60,
+        );
+    }
+
+    #[test]
+    fn checked_in_public_flow_development_protocol_is_valid() {
+        let bytes =
+            include_bytes!("../../../../benchmarks/solver/protocol-public-flow-development.json");
+        assert_checked_in_corpus_protocol(
+            bytes,
+            "protocol-public-flow-development.json",
+            "polymarket-clob-flow-20260717-v1",
+            8,
+            60,
         );
     }
 

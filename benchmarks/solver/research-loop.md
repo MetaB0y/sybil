@@ -57,8 +57,12 @@ unattended search. Generated stress cases cover scale and numerical extremes;
 four replay regimes add correlated resting books, grouped outcomes, news,
 mid-simulation resolution, and dense flow. A frozen public CLOB snapshot now
 adds externally observed price, quantity, depth, category, and group shapes,
-including a 27-component portfolio. Its batch arrivals, maker identities, and
-maker budgets remain synthetic, and it is only one point in time.
+including a 27-component portfolio. A second frozen corpus replaces the
+synthetic event shocks with 99 public taker executions from six dense
+one-second windows. This improves price/size/side and short-window flow
+geometry, but it remains one capture: the public timestamps are only
+second-resolution, depth and flow are not contemporaneous, maker identities
+and budgets are synthetic, and its cross-event portfolio timing is composed.
 
 The sequencer replay is also synthetic, has only one seed per regime, and needs
 counterfactual tight maker budgets. It is overwhelmingly one connected
@@ -66,5 +70,5 @@ optimization cluster: only 10 of 72 books fragment, and those have a median
 94.3% of orders in the largest component. Always report economic-connectivity
 coverage and keep balanced-component synthetic slices in decomposition
 campaigns. Before long runs become authoritative, add held-out seeds for each
-lifecycle regime, multiple independently captured public-depth times, and
+lifecycle regime, independently captured public depth-and-flow times, and
 privacy-reviewed redacted captures from the deployed solver boundary.

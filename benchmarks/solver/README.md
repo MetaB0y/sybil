@@ -259,6 +259,48 @@ APIs without credentials. Its calibration history, exact source event IDs,
 limitations, and initial result are recorded in
 `design/solver-experiments/public-clob-depth-corpus.md`.
 
+## Public CLOB observed-flow development protocol
+
+`protocol-public-flow-development.json` keeps the same six-category public
+depth sample but replaces the synthetic event shocks with observed public
+taker executions. Each event case uses the densest aligned one-second window
+in the preceding 24 hours. The capture immediately projects source rows to
+market, token outcome, side, price, size, and timestamp; it does not retain
+wallet or profile fields. The raw portfolio remains untouched.
+
+The fixed matrix uses `0.05×` and `1×` synthetic maker-capital points:
+
+```bash
+cargo run --release -p matching-sim --all-features \
+  --bin solver-experiments -- \
+  --protocol benchmarks/solver/protocol-public-flow-development.json \
+  --source-revision <working-or-frozen-revision> \
+  --output-dir /tmp/solver-public-flow --overwrite
+python3 scripts/benchmarks/analyze_solver_experiments.py \
+  /tmp/solver-public-flow
+```
+
+To create a separately versioned capture:
+
+```bash
+uv run scripts/benchmarks/capture_polymarket_depth.py \
+  --arrival-source observed-trades \
+  --output benchmarks/solver/corpora/<corpus-id>.msgpack \
+  --manifest benchmarks/solver/corpora/<corpus-id>.manifest.json \
+  --corpus-id <corpus-id>
+```
+
+The public execution fields come from Polymarket's
+[Data API trades endpoint](https://docs.polymarket.com/api-reference/core/get-trades-for-a-user-or-markets).
+Its timestamps have one-second resolution, while Sybil batches need not; the
+selected trades and resting-depth snapshot are not contemporaneous. Event-local
+windows are observed, but the shared maker identities and capital are
+synthetic, and the 50-market budgeted portfolio explicitly composes six
+asynchronous windows. Treat this as development geometry and flow evidence,
+not a calibrated production arrival model. The frozen window statistics,
+budget calibration, and baseline are recorded in
+`design/solver-experiments/public-clob-depth-corpus.md`.
+
 ## Protocol v2 suite structure
 
 - **Random quality:** neutral slack/tight controls and concentrated tight books,

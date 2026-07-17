@@ -1,0 +1,1760 @@
+{
+  "captured_at_utc": "2026-07-17T14:37:06+00:00",
+  "case_count": 8,
+  "cases": [
+    {
+      "case_id": "polymarket-clob-flow-20260717-v1-politics",
+      "market_group_sizes": [
+        8
+      ],
+      "market_makers": 2,
+      "markets": 8,
+      "orders": 481,
+      "traits": [
+        "public-clob-depth",
+        "aggregated-anonymous-levels",
+        "event-local",
+        "category-politics",
+        "synthetic-mm-overlay",
+        "public-taker-trade-arrivals",
+        "second-resolution-flow-window",
+        "market-groups"
+      ]
+    },
+    {
+      "case_id": "polymarket-clob-flow-20260717-v1-sports",
+      "market_group_sizes": [],
+      "market_makers": 2,
+      "markets": 12,
+      "orders": 480,
+      "traits": [
+        "public-clob-depth",
+        "aggregated-anonymous-levels",
+        "event-local",
+        "category-sports",
+        "synthetic-mm-overlay",
+        "public-taker-trade-arrivals",
+        "second-resolution-flow-window"
+      ]
+    },
+    {
+      "case_id": "polymarket-clob-flow-20260717-v1-crypto",
+      "market_group_sizes": [],
+      "market_makers": 2,
+      "markets": 11,
+      "orders": 553,
+      "traits": [
+        "public-clob-depth",
+        "aggregated-anonymous-levels",
+        "event-local",
+        "category-crypto",
+        "synthetic-mm-overlay",
+        "public-taker-trade-arrivals",
+        "second-resolution-flow-window"
+      ]
+    },
+    {
+      "case_id": "polymarket-clob-flow-20260717-v1-economics",
+      "market_group_sizes": [
+        5
+      ],
+      "market_makers": 2,
+      "markets": 5,
+      "orders": 352,
+      "traits": [
+        "public-clob-depth",
+        "aggregated-anonymous-levels",
+        "event-local",
+        "category-economics",
+        "synthetic-mm-overlay",
+        "public-taker-trade-arrivals",
+        "second-resolution-flow-window",
+        "market-groups"
+      ]
+    },
+    {
+      "case_id": "polymarket-clob-flow-20260717-v1-technology",
+      "market_group_sizes": [
+        8
+      ],
+      "market_makers": 2,
+      "markets": 8,
+      "orders": 483,
+      "traits": [
+        "public-clob-depth",
+        "aggregated-anonymous-levels",
+        "event-local",
+        "category-technology",
+        "synthetic-mm-overlay",
+        "public-taker-trade-arrivals",
+        "second-resolution-flow-window",
+        "market-groups"
+      ]
+    },
+    {
+      "case_id": "polymarket-clob-flow-20260717-v1-culture",
+      "market_group_sizes": [
+        6
+      ],
+      "market_makers": 2,
+      "markets": 6,
+      "orders": 442,
+      "traits": [
+        "public-clob-depth",
+        "aggregated-anonymous-levels",
+        "event-local",
+        "category-culture",
+        "synthetic-mm-overlay",
+        "public-taker-trade-arrivals",
+        "second-resolution-flow-window",
+        "market-groups"
+      ]
+    },
+    {
+      "case_id": "polymarket-clob-flow-20260717-v1-portfolio-raw",
+      "market_group_sizes": [
+        8,
+        5,
+        8,
+        6
+      ],
+      "market_makers": 0,
+      "markets": 50,
+      "orders": 2384,
+      "traits": [
+        "public-clob-depth",
+        "aggregated-anonymous-levels",
+        "cross-event-portfolio",
+        "no-mm-budget",
+        "market-groups"
+      ]
+    },
+    {
+      "case_id": "polymarket-clob-flow-20260717-v1-portfolio-budgeted",
+      "market_group_sizes": [
+        8,
+        5,
+        8,
+        6
+      ],
+      "market_makers": 2,
+      "markets": 50,
+      "orders": 2791,
+      "traits": [
+        "public-clob-depth",
+        "aggregated-anonymous-levels",
+        "cross-event-portfolio",
+        "shared-mm-budgets",
+        "synthetic-mm-overlay",
+        "public-taker-trade-arrivals",
+        "second-resolution-flow-window",
+        "synthetic-cross-event-window-composition",
+        "market-groups"
+      ]
+    }
+  ],
+  "corpus_blake3": "8d2e113c70f8c70b2e2d39d4abb5635a56c220d478c027a3bd561555a954fc59",
+  "corpus_id": "polymarket-clob-flow-20260717-v1",
+  "events": [
+    {
+      "bucket": "politics",
+      "event_id": "411239",
+      "markets": [
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 66,
+              "bid_levels_retained": 2,
+              "bid_levels_source": 2,
+              "book_hash": "521a1780025f7c758fd5e07060d0a98976cdc39e",
+              "book_timestamp": "1784299026563",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "85367286745806857961178482075931972831841231758328346969840810630055458089640"
+            },
+            {
+              "ask_levels_retained": 2,
+              "ask_levels_source": 2,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 66,
+              "book_hash": "73d8312690359df1cceecba3ef356f63a208d2b7",
+              "book_timestamp": "1784299026563",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "40069008842150598748086988698459627032664680273804858199848489101623205239948"
+            }
+          ],
+          "condition_id": "0x7c97f7315ac9a2e0eabe9b2b9caa8369feff95180483b5168a5274b69762690c",
+          "volume_24h": "4669391.261"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 64,
+              "bid_levels_retained": 2,
+              "bid_levels_source": 2,
+              "book_hash": "159f698b37c969b523ed9373ceb027714df4509c",
+              "book_timestamp": "1784299026681",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "2782564244692790193407832532237218722544517902619602647018377360625351910716"
+            },
+            {
+              "ask_levels_retained": 2,
+              "ask_levels_source": 2,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 64,
+              "book_hash": "28c0deafcb2290fc2488b78aa2753ed6487fcf2e",
+              "book_timestamp": "1784299026681",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "100810872307019720237998809617641705524940094430787348748697558959574587826450"
+            }
+          ],
+          "condition_id": "0xf5ee4b6bd7d585c0e12e530074d0324493c302b82e127c832d15c89a610c0453",
+          "volume_24h": "2695625.3795"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 70,
+              "bid_levels_retained": 2,
+              "bid_levels_source": 2,
+              "book_hash": "9c10bdba60802099f83afb0b3c2e2ae52ec28cf0",
+              "book_timestamp": "1784299026834",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "26485245961222313575373928818655498088613748810606082451526412785977121014592"
+            },
+            {
+              "ask_levels_retained": 2,
+              "ask_levels_source": 2,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 70,
+              "book_hash": "586ad23a98cd27038e72d101d706aa42be918064",
+              "book_timestamp": "1784299026834",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "88478075820276880294718721941038251506706678823987773177467218098225985186038"
+            }
+          ],
+          "condition_id": "0xb6d6f15a1b5d08753653f1867ccd6126badfbe182a75159a330dc7b15336b309",
+          "volume_24h": "2126994.00943"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 69,
+              "bid_levels_retained": 3,
+              "bid_levels_source": 3,
+              "book_hash": "b0a6b7ce1dff953cc6fe7afdc76963a9e0d5d907",
+              "book_timestamp": "1784299025304",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "27146956652877944551877724690365745048289675287536243265951843487691050802191"
+            },
+            {
+              "ask_levels_retained": 3,
+              "ask_levels_source": 3,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 69,
+              "book_hash": "7fb1d6eb79b36d83942afe61fab17269cbfcede5",
+              "book_timestamp": "1784299025304",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "33216695217861742195941369663873573949679634432452142092545486849801915283392"
+            }
+          ],
+          "condition_id": "0x7d0aaf81bbd3fd73b6a1651cce08a452c0cbf9c0cbb4520ce0f981065b639d88",
+          "volume_24h": "1886525.9795"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 55,
+              "bid_levels_retained": 3,
+              "bid_levels_source": 3,
+              "book_hash": "3f91730b4433623f424c956b345f9341750d79d9",
+              "book_timestamp": "1784299025292",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "80737749707623321656569294238127946200924575060067022053313951954399729244690"
+            },
+            {
+              "ask_levels_retained": 3,
+              "ask_levels_source": 3,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 55,
+              "book_hash": "406792859fa06e327e8db956b6193309c68b0d89",
+              "book_timestamp": "1784299025292",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "49867572102615009847714675678027343310000329465549330577240824807327092645545"
+            }
+          ],
+          "condition_id": "0x4e9460ea6d2a4f26fbb8bd8d30f8b825e6b8016e4a645f407cf38497e19ba523",
+          "volume_24h": "1684.097999"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 26,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 32,
+              "book_hash": "f317e88269558056f545097ecfb340dc21612754",
+              "book_timestamp": "1784299023862",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "94134253597648057047877517813082069606962886792971715730299111686696678669356"
+            },
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 32,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 26,
+              "book_hash": "af0acabcf400dd89e5a0a2979fcf5ec79f8a3ef8",
+              "book_timestamp": "1784299023862",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "111837462577887619861245480063847994135633408660698174988518194419381642361349"
+            }
+          ],
+          "condition_id": "0x16d89dc6276b2c65dbaa6644600b4e1984257dac7c98e2348ccf9ccc8ce46e67",
+          "volume_24h": "1403.972608"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 57,
+              "bid_levels_retained": 3,
+              "bid_levels_source": 3,
+              "book_hash": "f8261d312ddd5d298ae5b0f9342a285618e1dd72",
+              "book_timestamp": "1784299015924",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "9700525976462326306802795530553376348116310383328382626789994562350229436531"
+            },
+            {
+              "ask_levels_retained": 3,
+              "ask_levels_source": 3,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 57,
+              "book_hash": "137c9b32c4de9cd8ef39f8a7025ad1c912bb95a5",
+              "book_timestamp": "1784299015924",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "9684129004308889646536044141330168144866101175836994432446145127310478131443"
+            }
+          ],
+          "condition_id": "0x72af7d77091bd2209f78a45a13876beefc734768177dbc0c8171f515ba1a52a7",
+          "volume_24h": "523.662332"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 59,
+              "bid_levels_retained": 2,
+              "bid_levels_source": 2,
+              "book_hash": "aa20146c83ff2551442c1e2ae2d723d51c4a9f84",
+              "book_timestamp": "1784299026814",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "4489049127093187435445530909063903861654656526363504166478270583011546818111"
+            },
+            {
+              "ask_levels_retained": 2,
+              "ask_levels_source": 2,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 59,
+              "book_hash": "d0d532e21d52d2d47cf4c111c0a94bfb6098549b",
+              "book_timestamp": "1784299026814",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "25722831118938263747933513466544465949348258789327262382514030421129575874093"
+            }
+          ],
+          "condition_id": "0xf426c69674c6637f2b458c76d9920faa814d4daa8c308e0b8ba554dda509cb8b",
+          "volume_24h": "126.2995"
+        }
+      ],
+      "neg_risk": true,
+      "public_trade_window": {
+        "buy_trades": 23,
+        "distinct_markets": 6,
+        "projected_trades_blake3": "8898e412b6e811177255b330056db713682e18f72dd390c049e47977069816c6",
+        "retained_lookback_trades": 1870,
+        "selected_arrival_trades": 23,
+        "sell_trades": 0,
+        "total_quantity_units": 1164092,
+        "window_seconds": 1,
+        "window_start_unix": 1784260590
+      },
+      "tags": [
+        "elections",
+        "ethiopia",
+        "global-elections",
+        "main-election",
+        "politics"
+      ],
+      "title": "Next Prime Minister of Ethiopia?",
+      "volume_24h": "11403274.661869"
+    },
+    {
+      "bucket": "sports",
+      "event_id": "710524",
+      "markets": [
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 84,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "a007fd17f0ea38d7200bfccc5368f080a903f333",
+              "book_timestamp": "1784298999430",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "47715962402265440714755652645718719806923009173395575701850119253619113066304"
+            },
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 84,
+              "book_hash": "034d57f442fc245aa9c2d83f9303c58a9e953590",
+              "book_timestamp": "1784298999430",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "16778100628379680580885428871090699605835089261257008979059927741991651341529"
+            }
+          ],
+          "condition_id": "0x7526f46b98feedea0c2497666aead4cb6b9a2949384f8e3e451c0e9f0f57468c",
+          "volume_24h": "2110925.2969339998"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 69,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "e5f81d363394af7ece14e03a7f9d51651092c509",
+              "book_timestamp": "1784298883441",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "96950124081618618921481886565893597118962484567379764630538216424318356050283"
+            },
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 69,
+              "book_hash": "526c3fd4e817d9e6494e0dc132f714d787fd03d7",
+              "book_timestamp": "1784298883441",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "93592585901682748197787334540457563848273421441235074761579173538786459790399"
+            }
+          ],
+          "condition_id": "0x0c3e2d9d4be7868fa16e2bd452fec2c84cc576a5deeccea2278b1b80e07b0021",
+          "volume_24h": "1225316.5128699988"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 45,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "ed00d5405eb9ea0f749214e14c1602f00b4eb16f",
+              "book_timestamp": "1784298799011",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "48973368432000256697675312367857525128291967408598336389448059470146591268528"
+            },
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 45,
+              "book_hash": "51cb9808797acbe14399342bdc15dbf6f4fb6f09",
+              "book_timestamp": "1784298799011",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "35477883857936602915636830209211936020114394798089052350976522364849916569769"
+            }
+          ],
+          "condition_id": "0x9a7cc2161f863bc2f95445973a7fd939bec056285b749a283431ad37a572c8ff",
+          "volume_24h": "243609.966133"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 45,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "c47bc3f085807a9df631042547d095701e8977c5",
+              "book_timestamp": "1784298408446",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "102940803298382877225954117433300730664604931113806489828114742495323728799829"
+            },
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 45,
+              "book_hash": "7dac7c00ba443041654febf8e8d33cbaeb3923c2",
+              "book_timestamp": "1784298408446",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "48976344100171836292143470973233381254636508001966108330596010312798384783124"
+            }
+          ],
+          "condition_id": "0x24fecc1b93f41fb6e515b518eba3f7c174430536335fcbfac941f6c59e0ddc9a",
+          "volume_24h": "34119.825240000006"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 47,
+              "book_hash": "af3f4203645f3da42816ea26c8c83dbde72d814a",
+              "book_timestamp": "1784298012666",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "43141167231490776942647322842447625047042170652612652071452589459332825366513"
+            },
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 47,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "82f13a8f3ad6206ff8c570c6ef5cb396c448e1a9",
+              "book_timestamp": "1784298012666",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "81787071404485238708630608470680760667068562211929802841110141192334352291203"
+            }
+          ],
+          "condition_id": "0x998a7196f2a841bd7c777c6e9d77ade7b49974ab39e611699c3f57e24732e214",
+          "volume_24h": "3133.616502"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 25,
+              "book_hash": "5fe3d9be22240edba100206e276929b113e8a85f",
+              "book_timestamp": "1784298016200",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "23076928007658621575709488300596541431661043343002170959289391263217987742232"
+            },
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 25,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "9549a6dd60e0719ab5099816b29e17cc4822bc0c",
+              "book_timestamp": "1784298016200",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "62575845858180292958829148663147394803256769561671315653105895104883962821133"
+            }
+          ],
+          "condition_id": "0x3edd311e45a6d28b50d14fcd15fbedb572b442fd6e2e529c76c649b1f554acfd",
+          "volume_24h": "1126.589411"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 24,
+              "book_hash": "256efdfe8d10609b1dea813f6a6975ff1216dc7c",
+              "book_timestamp": "1784298016270",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "69527285159341224870284215016709298531608954035268548456471457719555621546075"
+            },
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 24,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "690b9ad6cf5a291dac43d43d240b59064f4dbe4e",
+              "book_timestamp": "1784298016270",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "89555401210966858045567050286393015341154408114294186235208573337829722301018"
+            }
+          ],
+          "condition_id": "0x3bb16e6376681cd0ddfb2cd0d67f9f1725d624d6398bb9d6ceba8b5451791bb2",
+          "volume_24h": "796.4315849999999"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 21,
+              "book_hash": "c2c019967d3f741a16b981fa732244099928f8fc",
+              "book_timestamp": "1784299020529",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "111856729616936513971627963767192984085262443983859200509732007446379175018361"
+            },
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 21,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "8fa965cbed433f48dcc476c6c0c2ce9f4f258589",
+              "book_timestamp": "1784299020529",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "52681819201469036866996868324814242030021974178904178301680571359606792189139"
+            }
+          ],
+          "condition_id": "0x96d39724b0592cd06445daff35aad184df6b04915f3c740544fc29204226ba96",
+          "volume_24h": "614.78828"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 6,
+              "ask_levels_source": 6,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "362ae3e72c5eb6ff8cfb6c1753dae3cc826710c9",
+              "book_timestamp": "1784296382016",
+              "outcome_index": 0,
+              "tick_size": "0.01",
+              "token_id": "48729879097963614917106784637660998187430530118564675083586177589552176131783"
+            },
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 6,
+              "bid_levels_source": 6,
+              "book_hash": "93e2ccd865d23eadf2998552469554922bee8c8f",
+              "book_timestamp": "1784296382016",
+              "outcome_index": 1,
+              "tick_size": "0.01",
+              "token_id": "98720602747201398924795787920729835319427758008820222246020563398463850215412"
+            }
+          ],
+          "condition_id": "0xbd347e967d9b260ed993448824e04deaa8e0da1e246cfa8d23c73050a47b26ef",
+          "volume_24h": "355.016064"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 24,
+              "book_hash": "44109dbe3bc7c45248d69ed95a03895a37308fb7",
+              "book_timestamp": "1784298022648",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "40933088032418974907979510466506857936515023311004516888965871206708517765196"
+            },
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 24,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "ee889e0be2f76343dcdacd81f87b9cfe480ec7f1",
+              "book_timestamp": "1784298022648",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "35923144704228170588429071881201349724445164520757669424242096786196321814467"
+            }
+          ],
+          "condition_id": "0xcafc464a7b5a77c5e037609df374ebe05240979788833e451b6c7351ec30953c",
+          "volume_24h": "127.578883"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 29,
+              "book_hash": "6a47d394eba02db3d518581df6f43933ac87c082",
+              "book_timestamp": "1784299021510",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "108708833852655138189541909601823386784884403561454636552810286863322731933917"
+            },
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 29,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "e93dbf1ddfb534f63c81b2e756013ded0891ec57",
+              "book_timestamp": "1784299021510",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "93693209851139681490096932851651750624439036033603947532149698559237643002893"
+            }
+          ],
+          "condition_id": "0xae660069f7847483e7cb4feb720e027b9f1731c39087dab612adc059b978a90e",
+          "volume_24h": "115.35956"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 1,
+              "ask_levels_source": 1,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "7bef0955aed891cfee287ce3ddcc262a7d125e0c",
+              "book_timestamp": "1784298542455",
+              "outcome_index": 0,
+              "tick_size": "0.01",
+              "token_id": "85599429608260777263506845141761026377374677886619285693434223974746495533934"
+            },
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 1,
+              "bid_levels_source": 1,
+              "book_hash": "647fd880afaafb7c598f9756b9d3ddb35744f56e",
+              "book_timestamp": "1784298542455",
+              "outcome_index": 1,
+              "tick_size": "0.01",
+              "token_id": "80086231302633914449165542718026997021367248489763483952795279503698927637593"
+            }
+          ],
+          "condition_id": "0xf1fe4a66b1c60c40c3b0949665bc9020fa784f57faf6a06e192fe81820d30e37",
+          "volume_24h": "48.5816"
+        }
+      ],
+      "neg_risk": false,
+      "public_trade_window": {
+        "buy_trades": 17,
+        "distinct_markets": 2,
+        "projected_trades_blake3": "4fbdd5c305d27f718f80f9baead50c9ea100f60192da455232c9d82d31a36497",
+        "retained_lookback_trades": 1786,
+        "selected_arrival_trades": 18,
+        "sell_trades": 1,
+        "total_quantity_units": 1424012,
+        "window_seconds": 1,
+        "window_start_unix": 1784292396
+      },
+      "tags": [
+        "esports",
+        "games",
+        "league-of-legends",
+        "sports"
+      ],
+      "title": "LoL: Hanwha Life Esports vs T1 (BO3) - Esports World Cup Playoffs",
+      "volume_24h": "4891474.105072999"
+    },
+    {
+      "bucket": "crypto",
+      "event_id": "688327",
+      "markets": [
+        {
+          "books": [
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 56,
+              "book_hash": "885cce48a2d42e3364df23d06bf36f6c4c94b9c1",
+              "book_timestamp": "1784298931454",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "88792925544230469296921742698280696553562699996053357755770797197709496871422"
+            },
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 56,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "56a68929be2786e5f955d9bfe9bddacc23e31aa8",
+              "book_timestamp": "1784298931454",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "19162342171636048847694011732549046497718376078715970196118665013964454106730"
+            }
+          ],
+          "condition_id": "0xc0322eab2ed42ea21ae2dddd43f29c02ad662a80a13a93ee0c14398179ab911f",
+          "volume_24h": "463785.9482009999"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 64,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "81faf973039e7548086052f7967315c47d491fd6",
+              "book_timestamp": "1784298990978",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "9841839652299578927417132941439264970992911414054519699356763963420202808758"
+            },
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 64,
+              "book_hash": "8a9aa95c90edf938a4db225625ea6244b9f8156d",
+              "book_timestamp": "1784298990978",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "87889337271848913634413128847953071268433192909193458187128419673278266754572"
+            }
+          ],
+          "condition_id": "0x550d48d611a074c662965aa4a796c73cd59cd7715f1d19daeb8e2868ef2d59a4",
+          "volume_24h": "286858.30325699976"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 5,
+              "ask_levels_source": 5,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 82,
+              "book_hash": "619dcb7827294f43972749ae5bd8328c6bc64709",
+              "book_timestamp": "1784299024638",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "25951067433211544241573753683668807088034318670308149690698848599516479101391"
+            },
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 82,
+              "bid_levels_retained": 5,
+              "bid_levels_source": 5,
+              "book_hash": "3e287a352230d6de4a1048c77af92522a8c80707",
+              "book_timestamp": "1784299024638",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "79539766846061200606382450542188683148483099095876971771772119516127421911095"
+            }
+          ],
+          "condition_id": "0x500393a76a35b88f4169188c03253b8200cfa33756ae1aabf2a355529e904a7e",
+          "volume_24h": "232764.4047760001"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 59,
+              "bid_levels_retained": 19,
+              "bid_levels_source": 19,
+              "book_hash": "259b2ab74db51d0e462831550ca9ad4441fd7677",
+              "book_timestamp": "1784299026851",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "114688240646766114509996004546175065289083532722341392431556187434581020305239"
+            },
+            {
+              "ask_levels_retained": 19,
+              "ask_levels_source": 19,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 59,
+              "book_hash": "7ae568f413e388d8497d4cdbc698d5330b6f69a3",
+              "book_timestamp": "1784299026851",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "83748614016864055844788318333217395097133671881910534730761398600522650485971"
+            }
+          ],
+          "condition_id": "0x9852b69a3a641b38e72d3c1f667fdece249c9c12a5d1909ef5012f61910da404",
+          "volume_24h": "196865.51674699996"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 57,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "4b890696919d63c1960421651a1bebdcfb7b4147",
+              "book_timestamp": "1784299024005",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "31480567383936372566883574597798150737936336243814563707088290773030193029359"
+            },
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 57,
+              "book_hash": "433af5e0864077a9ac533edd49523a540d5b0a69",
+              "book_timestamp": "1784299024005",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "98102701759639099986016500368547056471505333579519178429819390206323953778753"
+            }
+          ],
+          "condition_id": "0x9d35aa0be6de4ac6feac0a19bcb8c55344bbc68ffe13dadfeeab44759c247efe",
+          "volume_24h": "174492.978964"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 40,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "f6caad48c0a52d2edf0202edc910f9997b68b542",
+              "book_timestamp": "1784299026134",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "113103670124203009474065620053647054058262120916000001626595758729016244355450"
+            },
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 40,
+              "book_hash": "b750e70af5215e2d66c6578b8cf7583982c6123a",
+              "book_timestamp": "1784299026134",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "40151801134479637377035921412078324316640974557417285121781493865755687116703"
+            }
+          ],
+          "condition_id": "0x30348179221a0b98d1465c9977e9b93924f59813ba921464851a70a8753a5fb8",
+          "volume_24h": "49126.192701"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 30,
+              "book_hash": "e460505b835a8981930714bdf847c7f9a19096c9",
+              "book_timestamp": "1784298463798",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "94101772923351959253560141569477290660611645335871658886756210639869141133963"
+            },
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 30,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "9d74d14810b840f6c670ca232d7991cfd2fd8e9f",
+              "book_timestamp": "1784298463798",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "59229490471271747262819501051303491754256831007291816766746000660574806519525"
+            }
+          ],
+          "condition_id": "0x7c0d6c8cc1c6de7f1d28771033b2091878026702b89ef7e8969be9beb0f1955c",
+          "volume_24h": "33500"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 33,
+              "book_hash": "94fa8f86eba79456033a8d9eeac85335e5b918f9",
+              "book_timestamp": "1784298386359",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "58078532694243896307584086280749499442574262025240028718026527846659247911818"
+            },
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 33,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "612ef4c3933d1266f6d16abc4ba1ca4dfc1b9cd6",
+              "book_timestamp": "1784298386359",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "53619477658349989219430375262225672815160266150449445353024672085887385398243"
+            }
+          ],
+          "condition_id": "0xb8fc1237db353ab0598937712787f2ae422289c2eef5ca7276d0195057f30edc",
+          "volume_24h": "20205.4"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 40,
+              "book_hash": "b56f8616b813285d61990e36a80d7858a5f6c9e6",
+              "book_timestamp": "1784298959303",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "77606494918066018393389064921954455198457765626645341132331899043167152378105"
+            },
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 40,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "46664657e081320197fddd205b92fa29d9ea1b78",
+              "book_timestamp": "1784298959303",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "46575233488523502144162674694547890586619419776442561876415267097476644744181"
+            }
+          ],
+          "condition_id": "0x5903a464470a72b586f28fbe84b2fa81f49123f61676f7820d9d6773c8a0dadc",
+          "volume_24h": "8051.05"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 34,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "6f0cf41c67730c9d40eabf4bc064157caf5f9f1f",
+              "book_timestamp": "1784299023035",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "96394351147683583479930657598283677367985101343539296687290420734097196803965"
+            },
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 34,
+              "book_hash": "f9aaec1fdc6043c535f9ac9046dca4199db7ea8f",
+              "book_timestamp": "1784299023035",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "3860410674130136461728896296513319706241418686916902671124119008618213591305"
+            }
+          ],
+          "condition_id": "0x2fa125fabcf805b00c51a3d9f5d2693ac742dd609ce759d78c74bde66e66c03c",
+          "volume_24h": "1000"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 37,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "b10c052c27600dfeee70e8b3dfa2c69c2c703412",
+              "book_timestamp": "1784299023348",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "80077050972261729991619821767850281587064731001722803713982978137187725732857"
+            },
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 37,
+              "book_hash": "68384e62bd73487a8ed92b604715cc88f676371d",
+              "book_timestamp": "1784299023348",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "10260565732872448837008308415809673847917243539086241693962582980161746460756"
+            }
+          ],
+          "condition_id": "0x3a77938d1636e805ce61f6b412ba45b6cd2b10d0ec0dabc1544dd394cacba671",
+          "volume_24h": "1000"
+        }
+      ],
+      "neg_risk": false,
+      "public_trade_window": {
+        "buy_trades": 2,
+        "distinct_markets": 2,
+        "projected_trades_blake3": "4cd30aa52332628f52d4690b3448edb2f50721552107cf45471c82e9c81e7ddf",
+        "retained_lookback_trades": 2309,
+        "selected_arrival_trades": 13,
+        "sell_trades": 11,
+        "total_quantity_units": 7070820,
+        "window_seconds": 1,
+        "window_start_unix": 1784296927
+      },
+      "tags": [
+        "bitcoin",
+        "crypto",
+        "crypto-prices",
+        "hide-from-new",
+        "multi-strikes",
+        "recurring",
+        "weekly"
+      ],
+      "title": "Bitcoin above ___ on July 17?",
+      "volume_24h": "1469594.6498269998"
+    },
+    {
+      "bucket": "economics",
+      "event_id": "287395",
+      "markets": [
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 129,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 37,
+              "book_hash": "7b5546477434a0441a5f127b26e3dad1747d33c0",
+              "book_timestamp": "1784299022077",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "10547381015916960267379463101229159185405356924982461726471550099674011526491"
+            },
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 37,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 129,
+              "book_hash": "55bec6545a1b8dcd328ae4e400d02f94a2254608",
+              "book_timestamp": "1784299022077",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "102979714187432523726496609637889951679226430871494531752837414533106422105296"
+            }
+          ],
+          "condition_id": "0xb5c0abeecb5502e6e8d83155c27819174d8317af3c425c3afc5a8c45257a3793",
+          "volume_24h": "431156.533702"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 34,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 90,
+              "book_hash": "58855719da0844e548a819b18f785997f43e5b6d",
+              "book_timestamp": "1784299019778",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "111604417349377875799825956621596386269673370070912696668140891647145772186047"
+            },
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 90,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 34,
+              "book_hash": "24c9c28871051b72aeb0c4df048371d5abd59377",
+              "book_timestamp": "1784299019778",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "36015050921127306245266044699797268780268172446856063291868548314968920497494"
+            }
+          ],
+          "condition_id": "0x8bf1c1536ecb1c08fe13c6b71e8ab1f58bf3461c4cb79f5f1679f869a06aef86",
+          "volume_24h": "400897.2903900002"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 107,
+              "bid_levels_retained": 3,
+              "bid_levels_source": 3,
+              "book_hash": "38630e1d513a0b25cf985b1da2fe734b098c7373",
+              "book_timestamp": "1784299019897",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "55547507942649396203839937021705347989082320770224485499197798791654376614809"
+            },
+            {
+              "ask_levels_retained": 3,
+              "ask_levels_source": 3,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 107,
+              "book_hash": "52b8e7c6917e42918d3a7ed29daeaac0fac4728e",
+              "book_timestamp": "1784299019897",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "82752177927542167404038816431416174971863195141383694610771473564093425601859"
+            }
+          ],
+          "condition_id": "0x2a28cc33492516116690a20d290f9922acbe0ed367ff52a6082154474c7f2971",
+          "volume_24h": "358026.69107099995"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 107,
+              "bid_levels_retained": 3,
+              "bid_levels_source": 3,
+              "book_hash": "43bfc1471638fc6669ca1af331f9ae4885cd6d2e",
+              "book_timestamp": "1784299025736",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "107111506004559425167535337910569809007100298896139468418632748246491535011700"
+            },
+            {
+              "ask_levels_retained": 3,
+              "ask_levels_source": 3,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 107,
+              "book_hash": "79ddb17f7fac0cb30ade8529bc99a7498d6b17b4",
+              "book_timestamp": "1784299025736",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "90713175285238837229141362456380660699457701142142655731293716395090014512187"
+            }
+          ],
+          "condition_id": "0x4ede078cae84a5877ac32d7fb48811e5c23549a1904b7df06ff7935c6d79d831",
+          "volume_24h": "323195.72199399996"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 100,
+              "bid_levels_retained": 1,
+              "bid_levels_source": 1,
+              "book_hash": "b9d639612ef95fc86b2bfbce2cc04c83ff375469",
+              "book_timestamp": "1784299018071",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "34352156398446436078106018571351437965469399998092625112032289774684767742814"
+            },
+            {
+              "ask_levels_retained": 1,
+              "ask_levels_source": 1,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 100,
+              "book_hash": "f6f197eb3ae60bc02fa476b11b23a597488ebe70",
+              "book_timestamp": "1784299018071",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "81718924566344342339932153243056822500865643754622838691875214933560980686588"
+            }
+          ],
+          "condition_id": "0x3d675f1c88099a57c12abca632cf926be1bf430125168321de06234e9930fe1a",
+          "volume_24h": "141566.686"
+        }
+      ],
+      "neg_risk": true,
+      "public_trade_window": {
+        "buy_trades": 20,
+        "distinct_markets": 5,
+        "projected_trades_blake3": "428da561c4d85c10e25b4def7b7ef406c6aa1db9248064b17d8356e4ce938be6",
+        "retained_lookback_trades": 1841,
+        "selected_arrival_trades": 20,
+        "sell_trades": 0,
+        "total_quantity_units": 103562326,
+        "window_seconds": 1,
+        "window_start_unix": 1784218295
+      },
+      "tags": [
+        "cpi-release",
+        "economic-policy",
+        "economy",
+        "fed",
+        "fed-rates",
+        "fomc",
+        "jerome-powell",
+        "politics"
+      ],
+      "title": "Fed Decision in July?",
+      "volume_24h": "1565706.4818250001"
+    },
+    {
+      "bucket": "technology",
+      "event_id": "630845",
+      "markets": [
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 38,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 52,
+              "book_hash": "e7cd99b7c5b81c8c10d75eba34e46ebd66ae8452",
+              "book_timestamp": "1784299026127",
+              "outcome_index": 0,
+              "tick_size": "0.01",
+              "token_id": "11728583497514710574356365513249856989304427730091039531942765980605070477300"
+            },
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 52,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 38,
+              "book_hash": "6474d6a38a94bdeb60e8150d1feb060224b9a645",
+              "book_timestamp": "1784299026127",
+              "outcome_index": 1,
+              "tick_size": "0.01",
+              "token_id": "75848210276979954337354349909329862141109563590210566057575338891512846216329"
+            }
+          ],
+          "condition_id": "0xa38f0aba5b78cfc9894826c431dc6c8b16e1dff8bb1f4ff3b9ab51d35e12cd55",
+          "volume_24h": "91918.97751399998"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 99,
+              "bid_levels_retained": 13,
+              "bid_levels_source": 13,
+              "book_hash": "743c57cddeb1c5813af69715c7bb24a4cf51b88e",
+              "book_timestamp": "1784299023524",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "46584362414049299081102864761073270023695613262912078060282755871576741137444"
+            },
+            {
+              "ask_levels_retained": 13,
+              "ask_levels_source": 13,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 99,
+              "book_hash": "44e37ca2e832f348001a09181bb3fd34c19047f2",
+              "book_timestamp": "1784299023524",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "17275754600908351086268644037188773764043163588835669360978961593672223338690"
+            }
+          ],
+          "condition_id": "0x8495b57385dc69a16afc77d2a18f05d36bbbd7713462d8286b3fe94f385d2f6b",
+          "volume_24h": "35252.296177000004"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 76,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 57,
+              "book_hash": "4f1400e3c046cde542448d54108195bb1b49b178",
+              "book_timestamp": "1784299026023",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "5823805802875099304203116182652199693089526522530469365767529374822548212673"
+            },
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 57,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 76,
+              "book_hash": "510c7d0d4d7b51269d370e2ab1357b77b8a8be51",
+              "book_timestamp": "1784299026023",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "44485368873643784531862401772918820589721230664189835980509638753050855169710"
+            }
+          ],
+          "condition_id": "0x5f0f80c1d904c0348409832375a6d36580f9a552295ae3dba2595adfcea84a97",
+          "volume_24h": "34653.105981"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 51,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "d47e2c1709dfcd6947b293637be26ebd6e869cb6",
+              "book_timestamp": "1784299025637",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "1441228903485920712151479596725946887161242048032190097916510688626665163853"
+            },
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 51,
+              "book_hash": "abb6412b41decabe340e479ae8b53ba425ee51bb",
+              "book_timestamp": "1784299025637",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "39476659019049126126805528113027696040055022033388187470154426497038707491827"
+            }
+          ],
+          "condition_id": "0xbab5d3674c7cb4a1336caba025745de57f2f3f9ec184b5632688d5f92ce46927",
+          "volume_24h": "3927.0799999999995"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 52,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "4b2b35f5f1d1bc711b3e5c10992065d25692288d",
+              "book_timestamp": "1784299021185",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "37565797086264667225394747617917821202920340483950961231405376845383891770446"
+            },
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 52,
+              "book_hash": "cccbfc392fdfd7b931d85dc0d4cadc154e314add",
+              "book_timestamp": "1784299021185",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "475920674429511704171770757006708454541362659175958791798482253301963931894"
+            }
+          ],
+          "condition_id": "0x62c0a75de1238cfebbe73d43ed9365a83329879643909c108a87e401f9d3aecc",
+          "volume_24h": "951.1199999999999"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 54,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "4ed5f9c8c45b6f2754715f1b0e0b8b54c110ed46",
+              "book_timestamp": "1784299026365",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "110369498265062016820251239100016356984114678897918474918996455047198849953447"
+            },
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 54,
+              "book_hash": "241067bd3c274d55e973ead32496d6b8bed5ae3c",
+              "book_timestamp": "1784299026365",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "66262927184796561603184196540500337839519016595264869412046665224140029060114"
+            }
+          ],
+          "condition_id": "0x38df03b5dba65b6b7e20bc11a92650535b12b8d96e267ec5e65478d74d24ba78",
+          "volume_24h": "937.0899999999999"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 54,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "74fec4226ba1da20f78a4c6235eb8adb8d5105d3",
+              "book_timestamp": "1784299021185",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "78963030528454339216772435409768100324088386511503879377911886576556782601312"
+            },
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 54,
+              "book_hash": "f7e4528a0561bbbef41d3ea78b432fcc1ac58e0e",
+              "book_timestamp": "1784299021185",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "106858529350378657909452206443125718901262348302178643588262710394762029014306"
+            }
+          ],
+          "condition_id": "0x51cdeae08e21f2ebb18c67c4fb06bd5446fcec3f32393800428a670cfbf780bc",
+          "volume_24h": "927.0799999999999"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 56,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "448219bfa967cfa1fa2e03d4875d8e1fc11ab879",
+              "book_timestamp": "1784299021185",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "31990375243802544996067342709688222182373357644503687246509153515884097628437"
+            },
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 56,
+              "book_hash": "ea4f04ce4e2bb7ecaef79426f3149a2bd763e39d",
+              "book_timestamp": "1784299021185",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "43550155933572123720698505278416749642144335486905132872011990989879234299028"
+            }
+          ],
+          "condition_id": "0x6b559c5320dd8d282d2dbefe17d0a03510d1300f584a787ca1a2f51ef658d978",
+          "volume_24h": "927.0799999999999"
+        }
+      ],
+      "neg_risk": true,
+      "public_trade_window": {
+        "buy_trades": 13,
+        "distinct_markets": 3,
+        "projected_trades_blake3": "c0195911b97b6b0c38e98b54486b5f6411c92a9388f1d358dc296dffc09bdd8a",
+        "retained_lookback_trades": 1204,
+        "selected_arrival_trades": 13,
+        "sell_trades": 0,
+        "total_quantity_units": 2669526,
+        "window_seconds": 1,
+        "window_start_unix": 1784274325
+      },
+      "tags": [
+        "big-tech",
+        "business",
+        "economy",
+        "finance",
+        "tech"
+      ],
+      "title": "Largest Company end of July?",
+      "volume_24h": "169419.977398"
+    },
+    {
+      "bucket": "culture",
+      "event_id": "626857",
+      "markets": [
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 38,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 30,
+              "book_hash": "e5a78a6560fd02f5bce9f5dbffbf0f0962a8348c",
+              "book_timestamp": "1784299024298",
+              "outcome_index": 0,
+              "tick_size": "0.01",
+              "token_id": "35358889366059131445607416132477521541386270328042995107702816540034073998102"
+            },
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 30,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 38,
+              "book_hash": "7f86e54adc8b84e5e34d5c0e7421c4433e1f1ec9",
+              "book_timestamp": "1784299024298",
+              "outcome_index": 1,
+              "tick_size": "0.01",
+              "token_id": "36572361863292743525172722296256449344593421343195350786366455281513675169221"
+            }
+          ],
+          "condition_id": "0xd2a97dd956e70c9c4abda30d2864588ece0c7213013eb3fa664b88509ff829b1",
+          "volume_24h": "116062.21519900001"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 56,
+              "bid_levels_retained": 0,
+              "bid_levels_source": 0,
+              "book_hash": "7b7caf3b3a597dd12d7af4cfbc3f1c154b7c09b7",
+              "book_timestamp": "1784299025441",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "104014428633814050675806569854081826249353347741548661221162283191716206775462"
+            },
+            {
+              "ask_levels_retained": 0,
+              "ask_levels_source": 0,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 56,
+              "book_hash": "cb3ccb8b59cf1191e03bf486b631dbf4c0c0f62d",
+              "book_timestamp": "1784299025441",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "53504782042530511573654365531511020334124488839778303333240380243188072273088"
+            }
+          ],
+          "condition_id": "0xfaea1a1bf894943be142a67208cef16bc1f17d8e2812f75407ff1b4ea3de9052",
+          "volume_24h": "72080.990659"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 57,
+              "bid_levels_retained": 1,
+              "bid_levels_source": 1,
+              "book_hash": "17fd7f0296cc5a13807ea6e8e44b3a549ee0109d",
+              "book_timestamp": "1784299024215",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "51872688213902718591489699459529330104229430818729734029956444862907889791716"
+            },
+            {
+              "ask_levels_retained": 1,
+              "ask_levels_source": 1,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 57,
+              "book_hash": "d3945afb29628859f47217c0ee9fc6397dd8ae96",
+              "book_timestamp": "1784299024215",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "20509669395611413603454440240352841474074387717976173088630295459195602203845"
+            }
+          ],
+          "condition_id": "0x46620017a5d0b53af811d41d17e972d9ba5bb5daf524f75dca406c2987318ceb",
+          "volume_24h": "46269.497338"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 35,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 35,
+              "book_hash": "40274ff3e96f208a7e4db22da4ed72cd8ef54db9",
+              "book_timestamp": "1784299024281",
+              "outcome_index": 0,
+              "tick_size": "0.01",
+              "token_id": "102956099609661555583305635634975713098233031673743459800405845791914667715170"
+            },
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 35,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 35,
+              "book_hash": "e664cd668e28c3d6877e9e04c21575b2ddd883b0",
+              "book_timestamp": "1784299024281",
+              "outcome_index": 1,
+              "tick_size": "0.01",
+              "token_id": "91046618657789230249626083330146823139545166225033171345097817650477720773555"
+            }
+          ],
+          "condition_id": "0x193527bfb9953be4560caec92060146de431ddf4e7715c1c229ab160905b70e9",
+          "volume_24h": "35613.026024"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 79,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 21,
+              "book_hash": "445a79c8cd25a0bb914a250d65e9247b4e703fec",
+              "book_timestamp": "1784299024265",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "13219189965308679727030452903371043904176938463117618936317527797862941681029"
+            },
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 21,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 79,
+              "book_hash": "ee31c8446ee07eb26828139148d00a8d386bf9e1",
+              "book_timestamp": "1784299024265",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "9005194700558674054935787386174260324620109821642357663399275178937814339665"
+            }
+          ],
+          "condition_id": "0x1953a89faf278a95cdecb968ed9941f7cf3e9fd3c27eb4f57efa2cc533cfdf36",
+          "volume_24h": "34591.596898"
+        },
+        {
+          "books": [
+            {
+              "ask_levels_retained": 20,
+              "ask_levels_source": 71,
+              "bid_levels_retained": 3,
+              "bid_levels_source": 3,
+              "book_hash": "974c4b996044cc11c0d65e0e22a7d410e6422d79",
+              "book_timestamp": "1784299025154",
+              "outcome_index": 0,
+              "tick_size": "0.001",
+              "token_id": "41220632789088466809811142660994722242165119270409796862933698752959038284934"
+            },
+            {
+              "ask_levels_retained": 3,
+              "ask_levels_source": 3,
+              "bid_levels_retained": 20,
+              "bid_levels_source": 71,
+              "book_hash": "ef9a00d59e375f1614d93806e02e488fe0cf6e94",
+              "book_timestamp": "1784299025154",
+              "outcome_index": 1,
+              "tick_size": "0.001",
+              "token_id": "40782135160635554401768989488690175093684466208953756808785397435936356325227"
+            }
+          ],
+          "condition_id": "0xdbb604bc03f837d31cc7d476c5e7477fa241f8e311e42a805141cabb28ffcf64",
+          "volume_24h": "30083.00034"
+        }
+      ],
+      "neg_risk": true,
+      "public_trade_window": {
+        "buy_trades": 29,
+        "distinct_markets": 6,
+        "projected_trades_blake3": "8ae65b724f51da2541eca17bffe4f70732f0fc5d693eefd5e45f5d7667ceaaa5",
+        "retained_lookback_trades": 1080,
+        "selected_arrival_trades": 32,
+        "sell_trades": 3,
+        "total_quantity_units": 6115407,
+        "window_seconds": 1,
+        "window_start_unix": 1784263870
+      },
+      "tags": [
+        "box-office",
+        "movies",
+        "pop-culture"
+      ],
+      "title": "\"The Odyssey\" Opening Weekend Box Office",
+      "volume_24h": "334745.166458"
+    }
+  ],
+  "evidence_status": "public anonymous aggregated CLOB levels and public taker-trade price/size/side/timestamps; not Sybil order flow; public timestamps have one-second resolution; MM identities and budgets are synthetic",
+  "schema_version": 2,
+  "selection": {
+    "arrival_source": "observed-trades",
+    "buckets": [
+      "politics",
+      "sports",
+      "crypto",
+      "economics",
+      "technology",
+      "culture"
+    ],
+    "complete_neg_risk_events_only": true,
+    "data_trades_taker_only": true,
+    "event_page_limit": 500,
+    "event_window_selection": "maximum trade count, then distinct markets, total quantity, and recency",
+    "gamma_order": "volume24hr descending",
+    "max_levels_per_side": 20,
+    "max_markets_per_event": 12,
+    "max_trades_per_market": 500,
+    "trade_lookback_seconds": 86400,
+    "trade_window_seconds": 1
+  },
+  "sources": {
+    "clob_books": "https://clob.polymarket.com/books",
+    "data_trades": "https://data-api.polymarket.com/trades",
+    "gamma_events": "https://gamma-api.polymarket.com/events"
+  },
+  "transformation": {
+    "cases": "one observed-flow budgeted case per category event, one untouched raw fragmented portfolio, and one budgeted portfolio that composes the six event-local public windows",
+    "observed_batch_arrivals": "each event uses its densest retained aligned public trade window; asset token selects YES/NO, taker BUY/SELL selects order side, and observed execution price and size become limit and quantity; the portfolio composes the six event-local windows",
+    "price": "decimal token price rounded to nearest nanodollar",
+    "public_depth": "YES/NO token bids and asks become anonymous one-hot buy/sell orders",
+    "quantity": "decimal shares floored to 0.001-share protocol units",
+    "synthetic_mm_overlay": "two shared-budget MMs quote each retained token at the public touch and one tick wider; base budget is total worst-case quote capital"
+  }
+}

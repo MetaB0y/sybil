@@ -2,8 +2,8 @@
 
 Date: 2026-07-17
 
-Status: accepted development benchmark; external resting-depth evidence with
-explicitly synthetic batch arrivals and maker capital.
+Status: accepted development benchmarks; external resting-depth and
+second-resolution taker-flow evidence with explicitly synthetic maker capital.
 
 ## Experiment PDC-001 — raw snapshots as batch workloads
 
@@ -125,3 +125,109 @@ One time snapshot is vulnerable to event selection and time-of-day effects.
 Use this corpus for development regression and geometry, not traffic-frequency
 claims. Revisit with separately versioned captures at multiple times and with
 privacy-reviewed solver-boundary replays; never overwrite this frozen artifact.
+
+## Experiment PDC-003 — observed public taker-flow windows
+
+### Hypothesis
+
+Replacing the depth-conditioned synthetic event shocks with compact public
+taker-flow windows should improve real-world price, size, side, and short-burst
+geometry without making the corpus large or retaining trader identities.
+
+### Capture and projection
+
+Source during development: working change `potkwwom`, parent
+`9c8e85607d5c`.
+
+```bash
+uv run scripts/benchmarks/capture_polymarket_depth.py \
+  --arrival-source observed-trades \
+  --output benchmarks/solver/corpora/polymarket-clob-flow-20260717-v1.msgpack \
+  --manifest benchmarks/solver/corpora/polymarket-clob-flow-20260717-v1.manifest.json \
+  --corpus-id polymarket-clob-flow-20260717-v1
+```
+
+The artifact was captured at `2026-07-17T14:37:06+00:00`, is 599,688
+bytes, and has BLAKE3
+`8d2e113c70f8c70b2e2d39d4abb5635a56c220d478c027a3bd561555a954fc59`.
+It retains the same 50 markets and eight-case shape as PDC-002. The Data API
+rows are immediately projected to condition, outcome token, taker side, price,
+size, and second-resolution timestamp. Wallet and profile fields are neither
+represented in the in-memory projection nor written to the manifest or corpus.
+A transaction hash is used only as an in-memory deterministic sort tie-breaker.
+
+For each event, the transform chooses the aligned one-second bucket with the
+most trades in a 24-hour lookback, breaking ties by distinct markets, total
+quantity, and recency:
+
+| Category | Trades | Markets | Buy / sell | Shares |
+|---|---:|---:|---:|---:|
+| Politics | 23 | 6 | 23 / 0 | 1,164.092 |
+| Sports | 18 | 2 | 17 / 1 | 1,424.012 |
+| Crypto | 13 | 2 | 2 / 11 | 7,070.820 |
+| Economics | 20 | 5 | 20 / 0 | 103,562.326 |
+| Technology | 13 | 3 | 13 / 0 | 2,669.526 |
+| Culture | 32 | 6 | 29 / 3 | 6,115.407 |
+
+The six event cases preserve those observed windows. The raw portfolio still
+has no arrivals or MMs. The budgeted portfolio is an explicitly synthetic
+cross-event composition of the six asynchronous windows. Both the maker
+identities and maker capital remain synthetic.
+
+### Budget calibration
+
+A 70-row retained-solver sweep evaluated `0.01×`, `0.025×`, `0.05×`, `0.1×`,
+and `1×` maker budgets across all seven budgeted cases. All rows landed and
+verified.
+
+| Budget | Median max utilization | Max retained gap | Decision |
+|---|---:|---:|---|
+| `0.01×` | 97.63% | 31.3854% | reject; two RC iteration caps |
+| `0.025×` | 83.60% | 0.0954% | reject; culture RC iteration cap |
+| `0.05×` | 83.79% | 0.001052% | accept; all retained solvers converge |
+| `0.1×` | 41.89% | 0.000082% | reject as a redundant mild point |
+| `1×` | 4.19% | 0.000000% | accept as the slack control |
+
+Thus the fixed protocol uses `0.05×` and `1×`. This was selected before the
+final four-solver matrix rather than after comparing solver winners.
+
+### Baseline result
+
+```bash
+cargo run --release -p matching-sim --all-features \
+  --bin solver-experiments -- \
+  --protocol benchmarks/solver/protocol-public-flow-development.json \
+  --source-revision public-observed-flow-final-working-copy \
+  --output-dir /tmp/public-flow-final --overwrite
+python3 scripts/benchmarks/analyze_solver_experiments.py \
+  /tmp/public-flow-final
+```
+
+The matrix was complete and fingerprint-consistent. All 60 rows succeeded and
+every landed result was verifier-valid.
+
+| Solver | P50 / max latency | Median / max retained gap | Notable tail |
+|---|---:|---:|---|
+| LP-SLP | 2.84 / 49.76 ms | 0 / 0.1096% | 2/15 reached the SLP cap |
+| RC structural | 6.71 / 84.77 ms | 0 / 0.001052% | 3.925% landing movement on tight culture |
+| Exact bundle structural | 5.99 / 83.99 ms | 0 / effectively 0 | 0.499% maximum landing movement |
+| Clarabel Quasi | 8.06 / 55.61 ms | 0 / 0.0103% | 15/15 available |
+
+The tight culture window is a useful multi-metric discriminator. RC structural
+lands `$62.0906` net welfare with a 0.001052% retained gap and 3.925% target
+movement; the exact bundle and Clarabel land `$62.0916`, with the bundle moving
+0.499%. LP has zero welfare gap against the landed welfare reference but a
+0.1096% retained-cash gap. No single scalar captures those trade-offs.
+
+### Decision and evidence boundary
+
+Accept the corpus and protocol as compact development signal. It found a
+retained-cash convergence/landing tail that the synthetic public-depth shock
+did not isolate, while preserving the raw 27-component topology control.
+
+Do not call it Sybil traffic or a live batch replay. Public timestamps are only
+one second, the retained book snapshot was captured later than the selected
+historical windows, and the densest-window rule deliberately over-samples burst
+activity. One capture is vulnerable to event and time-of-day selection.
+Revisit with independently frozen times and privacy-reviewed solver-boundary
+replays; never overwrite this artifact.

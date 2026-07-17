@@ -9,10 +9,11 @@
 """Capture a compact, public Polymarket CLOB-depth solver corpus.
 
 The source books contain anonymous aggregated levels, so they cannot recover
-maker identities, capital, or already-matched batch arrivals. Each selected
-event therefore combines real resting depth with clearly labelled synthetic,
-depth-calibrated arrivals and a synthetic two-MM overlay. A raw portfolio case
-preserves the untouched resting-depth control.
+maker identities or capital. By default each selected event combines real
+resting depth with clearly labelled synthetic, depth-calibrated arrivals.
+The observed-trades mode instead uses a dense one-second window of public
+taker-only executions. Both modes retain a synthetic two-MM overlay, while a
+raw portfolio case preserves untouched resting depth.
 
 The MessagePack layout mirrors Rust's rmp-serde tuple encoding for
 SolverReplayCorpusV1. The checked-in benchmark runner is the authoritative
@@ -40,11 +41,13 @@ import msgpack
 
 GAMMA_EVENTS_URL = "https://gamma-api.polymarket.com/events"
 CLOB_BOOKS_URL = "https://clob.polymarket.com/books"
+DATA_TRADES_URL = "https://data-api.polymarket.com/trades"
 NANOS_PER_DOLLAR = 1_000_000_000
 SHARE_SCALE = 1_000
 MARKET_ID_NONE = 2**32 - 1
 MAX_ORDER_QTY = 1_000_000 * SHARE_SCALE
 MAX_PRICE = NANOS_PER_DOLLAR
+MAX_CAPTURE_TRADES_PER_MARKET = 500
 
 BUCKETS: tuple[tuple[str, frozenset[str]], ...] = (
     ("politics", frozenset({"politics", "elections", "geopolitics"})),
@@ -78,6 +81,18 @@ class CapturedMarket:
     books: tuple[dict[str, Any], dict[str, Any]]
 
 
+@dataclass(frozen=True)
+class ObservedTrade:
+    condition_id: str
+    asset_id: str
+    outcome: int
+    sell: bool
+    price: int
+    quantity: int
+    timestamp: int
+    transaction_hash: str
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Capture public CLOB depth as a validated Sybil solver corpus"
@@ -88,6 +103,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--event-page-limit", type=int, default=500)
     parser.add_argument("--max-markets-per-event", type=int, default=12)
     parser.add_argument("--max-levels-per-side", type=int, default=20)
+    parser.add_argument(
+        "--arrival-source",
+        choices=("synthetic", "observed-trades"),
+        default="synthetic",
+    )
+    parser.add_argument("--trade-lookback-seconds", type=int, default=24 * 60 * 60)
+    parser.add_argument("--trade-window-seconds", type=int, default=1)
+    parser.add_argument("--max-trades-per-market", type=int, default=500)
     parser.add_argument("--timeout-seconds", type=float, default=30.0)
     return parser.parse_args()
 
@@ -272,6 +295,128 @@ def capture_markets(
     return captured
 
 
+def fetch_observed_trades(
+    captured: list[CapturedMarket],
+    *,
+    capture_timestamp: int,
+    lookback_seconds: int,
+    max_trades_per_market: int,
+    timeout: float,
+) -> list[ObservedTrade]:
+    """Fetch and immediately project public taker trades to non-identity fields."""
+    trades = []
+    for item in captured:
+        condition_id = str(item.market["conditionId"]).lower()
+        query = urllib.parse.urlencode(
+            {
+                "market": condition_id,
+                "limit": max_trades_per_market,
+                "takerOnly": "true",
+            }
+        )
+        response = request_json(
+            f"{DATA_TRADES_URL}?{query}",
+            timeout=timeout,
+        )
+        if not isinstance(response, list):
+            raise RuntimeError(
+                f"Data /trades did not return an array for {condition_id}"
+            )
+        token_to_outcome = {
+            token_id: outcome for outcome, token_id in enumerate(item.token_ids)
+        }
+        for source in response:
+            try:
+                source_condition = str(source["conditionId"]).lower()
+                asset_id = str(source["asset"])
+                outcome = token_to_outcome[asset_id]
+                side = str(source["side"]).upper()
+                price = price_nanos(source["price"])
+                quantity = quantity_units(source["size"])
+                timestamp = int(source["timestamp"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if source_condition != condition_id or side not in {"BUY", "SELL"}:
+                continue
+            age = capture_timestamp - timestamp
+            if quantity == 0 or not 0 <= age <= lookback_seconds:
+                continue
+            trades.append(
+                ObservedTrade(
+                    condition_id=condition_id,
+                    asset_id=asset_id,
+                    outcome=outcome,
+                    sell=side == "SELL",
+                    price=price,
+                    quantity=quantity,
+                    timestamp=timestamp,
+                    transaction_hash=str(source.get("transactionHash", "")),
+                )
+            )
+    return trades
+
+
+def select_observed_event_windows(
+    selected: list[SelectedEvent],
+    trades: list[ObservedTrade],
+    window_seconds: int,
+) -> dict[str, tuple[ObservedTrade, ...]]:
+    """Select one dense aligned public-flow window per event.
+
+    Count is the primary signal. Ties prefer wider market coverage, then
+    quantity, then the more recent window. The public feed has one-second
+    timestamps, so sub-second ordering is deliberately not inferred.
+    """
+    event_by_condition = {
+        str(market["conditionId"]).lower(): event.event_id
+        for event in selected
+        for market in event.markets
+    }
+    by_event_and_window: dict[tuple[str, int], list[ObservedTrade]] = {}
+    for trade in trades:
+        event_id = event_by_condition.get(trade.condition_id)
+        if event_id is None:
+            continue
+        window = trade.timestamp // window_seconds
+        by_event_and_window.setdefault((event_id, window), []).append(trade)
+
+    result = {}
+    for event in selected:
+        candidates = [
+            (window, rows)
+            for (event_id, window), rows in by_event_and_window.items()
+            if event_id == event.event_id
+        ]
+        if not candidates:
+            raise RuntimeError(
+                f"selected event {event.event_id} has no public trades in the lookback"
+            )
+        _, rows = max(
+            candidates,
+            key=lambda candidate: (
+                len(candidate[1]),
+                len({trade.condition_id for trade in candidate[1]}),
+                sum(trade.quantity for trade in candidate[1]),
+                candidate[0],
+            ),
+        )
+        result[event.event_id] = tuple(
+            sorted(
+                rows,
+                key=lambda trade: (
+                    trade.timestamp,
+                    trade.condition_id,
+                    trade.asset_id,
+                    trade.sell,
+                    trade.price,
+                    trade.quantity,
+                    trade.transaction_hash,
+                ),
+            )
+        )
+    return result
+
+
 def decimal_units(value: Any, scale: int, *, rounding: str) -> int:
     try:
         decimal = Decimal(str(value))
@@ -433,6 +578,33 @@ def synthetic_batch_arrivals(
     return orders, order_id
 
 
+def observed_batch_arrivals(
+    market_ids: dict[str, int],
+    trades: Iterable[ObservedTrade],
+    next_order_id: int,
+) -> tuple[list[list[Any]], int]:
+    orders = []
+    order_id = next_order_id
+    for trade in trades:
+        market_id = market_ids.get(trade.condition_id)
+        if market_id is None:
+            continue
+        orders.append(
+            replay_order(
+                order_id,
+                market_id,
+                trade.outcome,
+                sell=trade.sell,
+                price=trade.price,
+                quantity=trade.quantity,
+            )
+        )
+        order_id += 1
+    if not orders:
+        raise RuntimeError("observed batch window produced no usable orders")
+    return orders, order_id
+
+
 def synthetic_mm_overlay(
     markets: list[CapturedMarket],
     market_ids: dict[str, int],
@@ -515,20 +687,29 @@ def build_case(
     events: list[SelectedEvent],
     markets: list[CapturedMarket],
     *,
-    arrivals: bool,
+    arrival_source: str,
+    observed_trades: Iterable[ObservedTrade] = (),
     overlay: bool,
     max_levels: int,
+    cross_event_window_composition: bool = False,
 ) -> list[Any]:
     market_ids = {
         str(captured.market["conditionId"]).lower(): index
         for index, captured in enumerate(markets)
     }
     orders, next_order_id = public_orders(markets, market_ids, max_levels)
-    if arrivals:
+    if arrival_source == "synthetic":
         arrival_orders, next_order_id = synthetic_batch_arrivals(
             markets, market_ids, max_levels, next_order_id
         )
         orders.extend(arrival_orders)
+    elif arrival_source == "observed-trades":
+        arrival_orders, next_order_id = observed_batch_arrivals(
+            market_ids, observed_trades, next_order_id
+        )
+        orders.extend(arrival_orders)
+    elif arrival_source != "none":
+        raise ValueError(f"unknown arrival source {arrival_source!r}")
     mm_constraints: list[list[Any]] = []
     if overlay:
         mm_orders, mm_constraints = synthetic_mm_overlay(
@@ -543,8 +724,14 @@ def build_case(
     ]
     if overlay:
         case_traits.append("synthetic-mm-overlay")
-    if arrivals:
+    if arrival_source == "synthetic":
         case_traits.append("synthetic-depth-calibrated-batch-arrivals")
+    elif arrival_source == "observed-trades":
+        case_traits.extend(
+            ["public-taker-trade-arrivals", "second-resolution-flow-window"]
+        )
+    if cross_event_window_composition:
+        case_traits.append("synthetic-cross-event-window-composition")
     if market_groups:
         case_traits.append("market-groups")
     return [
@@ -569,6 +756,8 @@ def build_corpus(
     selected: list[SelectedEvent],
     captured: list[CapturedMarket],
     max_levels: int,
+    arrival_source: str,
+    observed_windows: dict[str, tuple[ObservedTrade, ...]],
 ) -> list[Any]:
     cases = []
     for event in selected:
@@ -579,7 +768,8 @@ def build_corpus(
                 ["event-local", f"category-{event.bucket}"],
                 [event],
                 markets,
-                arrivals=True,
+                arrival_source=arrival_source,
+                observed_trades=observed_windows.get(event.event_id, ()),
                 overlay=True,
                 max_levels=max_levels,
             )
@@ -590,10 +780,15 @@ def build_corpus(
             ["cross-event-portfolio", "no-mm-budget"],
             selected,
             captured,
-            arrivals=False,
+            arrival_source="none",
             overlay=False,
             max_levels=max_levels,
         )
+    )
+    portfolio_trades = tuple(
+        trade
+        for event in selected
+        for trade in observed_windows.get(event.event_id, ())
     )
     cases.append(
         build_case(
@@ -601,18 +796,28 @@ def build_corpus(
             ["cross-event-portfolio", "shared-mm-budgets"],
             selected,
             captured,
-            arrivals=True,
+            arrival_source=arrival_source,
+            observed_trades=portfolio_trades,
             overlay=True,
             max_levels=max_levels,
+            cross_event_window_composition=arrival_source == "observed-trades",
         )
     )
-    return [1, corpus_id, "public-polymarket-clob-plus-synthetic-batch", cases]
+    description = (
+        "public-polymarket-clob-plus-observed-flow"
+        if arrival_source == "observed-trades"
+        else "public-polymarket-clob-plus-synthetic-batch"
+    )
+    return [1, corpus_id, description, cases]
 
 
 def manifest_event(
     event: SelectedEvent,
     captured: list[CapturedMarket],
     max_levels: int,
+    retained_trades: list[ObservedTrade],
+    selected_window: tuple[ObservedTrade, ...],
+    trade_window_seconds: int,
 ) -> dict[str, Any]:
     markets = []
     for item in event_markets(captured, event.event_id):
@@ -642,7 +847,7 @@ def manifest_event(
                 "books": books,
             }
         )
-    return {
+    result = {
         "bucket": event.bucket,
         "event_id": event.event_id,
         "title": event.title,
@@ -651,6 +856,36 @@ def manifest_event(
         "tags": list(event.tags),
         "markets": markets,
     }
+    if selected_window:
+        projected = [
+            {
+                "asset_id": trade.asset_id,
+                "condition_id": trade.condition_id,
+                "outcome": trade.outcome,
+                "price_nanos": trade.price,
+                "quantity_units": trade.quantity,
+                "sell": trade.sell,
+                "timestamp": trade.timestamp,
+            }
+            for trade in selected_window
+        ]
+        projected_bytes = json.dumps(
+            projected, sort_keys=True, separators=(",", ":")
+        ).encode()
+        window_start = selected_window[0].timestamp // trade_window_seconds
+        window_start *= trade_window_seconds
+        result["public_trade_window"] = {
+            "window_start_unix": window_start,
+            "window_seconds": trade_window_seconds,
+            "retained_lookback_trades": len(retained_trades),
+            "selected_arrival_trades": len(selected_window),
+            "distinct_markets": len({trade.condition_id for trade in selected_window}),
+            "buy_trades": sum(not trade.sell for trade in selected_window),
+            "sell_trades": sum(trade.sell for trade in selected_window),
+            "total_quantity_units": sum(trade.quantity for trade in selected_window),
+            "projected_trades_blake3": blake3.blake3(projected_bytes).hexdigest(),
+        }
+    return result
 
 
 def write_atomic(path: Path, data: bytes) -> None:
@@ -668,6 +903,14 @@ def main() -> None:
         raise ValueError("--max-markets-per-event must be at least two")
     if args.max_levels_per_side < 1:
         raise ValueError("--max-levels-per-side must be positive")
+    if args.trade_lookback_seconds < 1:
+        raise ValueError("--trade-lookback-seconds must be positive")
+    if args.trade_window_seconds < 1:
+        raise ValueError("--trade-window-seconds must be positive")
+    if not 1 <= args.max_trades_per_market <= MAX_CAPTURE_TRADES_PER_MARKET:
+        raise ValueError(
+            f"--max-trades-per-market must be in 1..={MAX_CAPTURE_TRADES_PER_MARKET}"
+        )
 
     query = urllib.parse.urlencode(
         {
@@ -687,28 +930,70 @@ def main() -> None:
     selected = select_events(events, args.max_markets_per_event)
     books = fetch_books(selected, args.timeout_seconds)
     captured = capture_markets(selected, books)
+    capture_timestamp = int(time.time())
+    observed_trades: list[ObservedTrade] = []
+    observed_windows: dict[str, tuple[ObservedTrade, ...]] = {}
+    if args.arrival_source == "observed-trades":
+        observed_trades = fetch_observed_trades(
+            captured,
+            capture_timestamp=capture_timestamp,
+            lookback_seconds=args.trade_lookback_seconds,
+            max_trades_per_market=args.max_trades_per_market,
+            timeout=args.timeout_seconds,
+        )
+        observed_windows = select_observed_event_windows(
+            selected,
+            observed_trades,
+            args.trade_window_seconds,
+        )
     corpus = build_corpus(
         args.corpus_id,
         selected,
         captured,
         args.max_levels_per_side,
+        args.arrival_source,
+        observed_windows,
     )
     corpus_bytes = msgpack.packb(corpus, use_bin_type=True)
     corpus_hash = blake3.blake3(corpus_bytes).hexdigest()
 
-    captured_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    captured_at = (
+        datetime.fromtimestamp(capture_timestamp, timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+    )
+    observed_flow = args.arrival_source == "observed-trades"
+    event_conditions = {
+        event.event_id: {
+            str(item.market["conditionId"]).lower()
+            for item in captured
+            if item.event.event_id == event.event_id
+        }
+        for event in selected
+    }
+    observed_trades_by_event = {
+        event_id: [
+            trade for trade in observed_trades if trade.condition_id in condition_ids
+        ]
+        for event_id, condition_ids in event_conditions.items()
+    }
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2 if observed_flow else 1,
         "corpus_id": args.corpus_id,
         "corpus_blake3": corpus_hash,
         "captured_at_utc": captured_at,
         "evidence_status": (
-            "public anonymous aggregated CLOB levels; not Sybil order flow; "
+            "public anonymous aggregated CLOB levels and public taker-trade "
+            "price/size/side/timestamps; not Sybil order flow; public timestamps "
+            "have one-second resolution; MM identities and budgets are synthetic"
+            if observed_flow
+            else "public anonymous aggregated CLOB levels; not Sybil order flow; "
             "batch arrivals, MM identities, and MM budgets are synthetic"
         ),
         "sources": {
             "gamma_events": GAMMA_EVENTS_URL,
             "clob_books": CLOB_BOOKS_URL,
+            **({"data_trades": DATA_TRADES_URL} if observed_flow else {}),
         },
         "selection": {
             "gamma_order": "volume24hr descending",
@@ -717,6 +1002,21 @@ def main() -> None:
             "max_markets_per_event": args.max_markets_per_event,
             "complete_neg_risk_events_only": True,
             "max_levels_per_side": args.max_levels_per_side,
+            "arrival_source": args.arrival_source,
+            **(
+                {
+                    "data_trades_taker_only": True,
+                    "trade_lookback_seconds": args.trade_lookback_seconds,
+                    "trade_window_seconds": args.trade_window_seconds,
+                    "max_trades_per_market": args.max_trades_per_market,
+                    "event_window_selection": (
+                        "maximum trade count, then distinct markets, total "
+                        "quantity, and recency"
+                    ),
+                }
+                if observed_flow
+                else {}
+            ),
         },
         "transformation": {
             "price": "decimal token price rounded to nearest nanodollar",
@@ -728,14 +1028,28 @@ def main() -> None:
                 "one directional BuyYes/SellNo or SellYes/BuyNo pair per market "
                 "alternates by market and sweeps up to three observed levels plus "
                 "half the touch quantity"
-            ),
+            )
+            if not observed_flow
+            else None,
+            "observed_batch_arrivals": (
+                "each event uses its densest retained aligned public trade window; "
+                "asset token selects YES/NO, taker BUY/SELL selects order side, and "
+                "observed execution price and size become limit and quantity; the "
+                "portfolio composes the six event-local windows"
+            )
+            if observed_flow
+            else None,
             "synthetic_mm_overlay": (
                 "two shared-budget MMs quote each retained token at the public touch "
                 "and one tick wider; base budget is total worst-case quote capital"
             ),
             "cases": (
-                "one shocked budgeted case per category event, one untouched raw "
-                "fragmented portfolio, and one shocked budgeted connected portfolio"
+                "one observed-flow budgeted case per category event, one untouched "
+                "raw fragmented portfolio, and one budgeted portfolio that composes "
+                "the six event-local public windows"
+                if observed_flow
+                else "one shocked budgeted case per category event, one untouched "
+                "raw fragmented portfolio, and one shocked budgeted connected portfolio"
             ),
         },
         "case_count": len(corpus[3]),
@@ -751,9 +1065,21 @@ def main() -> None:
             for case in corpus[3]
         ],
         "events": [
-            manifest_event(event, captured, args.max_levels_per_side)
+            manifest_event(
+                event,
+                captured,
+                args.max_levels_per_side,
+                observed_trades_by_event[event.event_id],
+                observed_windows.get(event.event_id, ()),
+                args.trade_window_seconds,
+            )
             for event in selected
         ],
+    }
+    manifest["transformation"] = {
+        key: value
+        for key, value in manifest["transformation"].items()
+        if value is not None
     }
     manifest_bytes = (
         json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
