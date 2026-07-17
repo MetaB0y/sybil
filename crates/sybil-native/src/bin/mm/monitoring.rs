@@ -22,6 +22,10 @@ struct ReadinessResponse {
     status: &'static str,
     ready: bool,
     tracked_markets: usize,
+    eligible_quote_markets: usize,
+    quoted_markets: usize,
+    quote_orders: usize,
+    quote_capacity_limited: bool,
     last_observed_block: Option<u64>,
     last_completed_quote_block: Option<u64>,
     last_successful_submission_block: Option<u64>,
@@ -57,6 +61,10 @@ impl MonitoringState {
             status,
             ready: status == "ok",
             tracked_markets: progress.tracked_markets,
+            eligible_quote_markets: progress.last_eligible_quote_markets,
+            quoted_markets: progress.last_quoted_markets,
+            quote_orders: progress.last_quote_orders,
+            quote_capacity_limited: progress.quote_capacity_limited,
             last_observed_block: progress.last_observed_block,
             last_completed_quote_block: progress.last_completed_quote_block,
             last_successful_submission_block: progress.last_successful_submission_block,
@@ -82,6 +90,39 @@ impl MonitoringState {
             "sybil_native_mm_tracked_markets",
             "Number of native markets currently tracked by the MM actor.",
             progress.tracked_markets.try_into().unwrap_or(u64::MAX),
+        );
+        gauge(
+            &mut out,
+            "sybil_native_mm_eligible_quote_markets",
+            "Markets eligible for quotes in the latest completed native MM cycle.",
+            progress
+                .last_eligible_quote_markets
+                .try_into()
+                .unwrap_or(u64::MAX),
+        );
+        gauge(
+            &mut out,
+            "sybil_native_mm_quoted_markets",
+            "Distinct markets included in the latest native MM quote set.",
+            progress.last_quoted_markets.try_into().unwrap_or(u64::MAX),
+        );
+        gauge(
+            &mut out,
+            "sybil_native_mm_quote_orders",
+            "Orders included in the latest native MM quote set.",
+            progress.last_quote_orders.try_into().unwrap_or(u64::MAX),
+        );
+        gauge(
+            &mut out,
+            "sybil_native_mm_quote_capacity_limited",
+            "Whether the latest native MM cycle omitted eligible markets after reaching its order cap.",
+            u64::from(progress.quote_capacity_limited),
+        );
+        counter(
+            &mut out,
+            "sybil_native_mm_quote_capacity_limited_cycles_total",
+            "Native MM quote cycles that rotated partial coverage after reaching the order cap.",
+            progress.capacity_limited_quote_cycles,
         );
         gauge(
             &mut out,
@@ -237,6 +278,7 @@ mod tests {
             successful_submissions: 1,
             failed_submissions: 0,
             last_progress_timestamp_ms: 2_000,
+            ..MmProgress::default()
         })
         .unwrap();
         assert_eq!(state.readiness_at(61_999).status, "ok");
@@ -256,6 +298,11 @@ mod tests {
     fn prometheus_output_exposes_actor_progress_and_outcomes() {
         let (_tx, rx) = watch::channel(MmProgress {
             tracked_markets: 4,
+            last_eligible_quote_markets: 4,
+            last_quoted_markets: 3,
+            last_quote_orders: 6,
+            quote_capacity_limited: true,
+            capacity_limited_quote_cycles: 2,
             last_observed_block: Some(12),
             last_completed_quote_block: Some(11),
             last_successful_submission_block: Some(11),
@@ -266,6 +313,11 @@ mod tests {
         let metrics = MonitoringState::new(rx, Duration::from_secs(60)).render();
         assert!(metrics.contains("sybil_native_mm_tracked_markets 4"));
         assert!(metrics.contains("sybil_native_mm_last_completed_quote_block 11"));
+        assert!(metrics.contains("sybil_native_mm_eligible_quote_markets 4"));
+        assert!(metrics.contains("sybil_native_mm_quoted_markets 3"));
+        assert!(metrics.contains("sybil_native_mm_quote_orders 6"));
+        assert!(metrics.contains("sybil_native_mm_quote_capacity_limited 1"));
+        assert!(metrics.contains("sybil_native_mm_quote_capacity_limited_cycles_total 2"));
         assert!(metrics.contains("sybil_native_mm_submissions_success_total 9"));
         assert!(metrics.contains("sybil_native_mm_submissions_failed_total 2"));
     }

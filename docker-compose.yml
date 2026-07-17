@@ -169,7 +169,9 @@ services:
       - "--mm-budget-dollars=5000"
       - "--mm-initial-balance-dollars=1000000"
       - "--mm-max-markets=0"
-      - "--mm-max-orders-per-block=64"
+      # Keep every current mirror outcome quoted in the same batch. The API's
+      # 512-order admission bound remains the fail-safe if the catalog grows.
+      - "--mm-max-orders-per-block=512"
       - "--mapping-store-path=/data/polymarket_mapping.json"
       - "--curated-markets-path=/etc/sybil/curated_markets.json"
       - "--monitoring-bind=0.0.0.0:9105"
