@@ -17,7 +17,7 @@ use matching_engine::{NANOS_PER_DOLLAR, Problem, SHARE_SCALE};
 
 use crate::lp_solver::{
     LinearOracleBackend, MatchingLpOracle, SolverContext, build_solver_context,
-    project_and_finalize, support_and_finalize_target_with_objective, welfare_weights,
+    project_and_finalize, support_and_finalize_target_with_face_retry, welfare_weights,
 };
 use crate::result::{PipelineResult, SolverDiagnostics, TerminationStatus};
 
@@ -234,7 +234,7 @@ impl RetainedCashSolver {
         let mut result = if converged && !oracle_failed {
             let final_alpha = model.pacing_factors(&summary.utilities);
             let projection_objective = model.oracle_coefficients_from_alpha(&final_alpha);
-            support_and_finalize_target_with_objective(
+            support_and_finalize_target_with_face_retry(
                 &q,
                 problem,
                 &ctx,
@@ -1205,6 +1205,27 @@ mod tests {
                 duality_gap / NANOS_PER_DOLLAR as f64,
             );
         }
+    }
+
+    #[test]
+    #[cfg(feature = "lp")]
+    fn full_face_retry_recovers_default_bundle_wide_range_landing() {
+        let problem = wide_range_problem(16_203);
+        let result = crate::PacingBundleSolver::new().solve(&problem);
+
+        assert_eq!(
+            result.diagnostics.status,
+            TerminationStatus::Converged,
+            "{:?}",
+            result.diagnostics,
+        );
+        let objective = result.diagnostics.objective_value.unwrap();
+        let landing_loss = result.diagnostics.integer_landing_loss.unwrap();
+        assert!(
+            landing_loss <= objective.abs() * 1e-4,
+            "full-face retry left a {}% landing loss",
+            landing_loss / objective.abs() * 100.0,
+        );
     }
 
     #[test]

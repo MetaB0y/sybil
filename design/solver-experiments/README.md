@@ -25,3 +25,5 @@ protocol and source revision frozen before untouched seeds are evaluated.
   — successful balanced-component router and replay topology audit
 - [Public CLOB-depth corpus](public-clob-depth-corpus.md) — frozen external
   resting depth, explicit batch-flow synthesis, and benchmark calibration
+- [Full tangent-face integer landing](integer-face-landing-retry.md) —
+  conditional integer-friendly retry on a certified retained-cash tangent

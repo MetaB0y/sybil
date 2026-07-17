@@ -18,7 +18,7 @@ use matching_engine::{NANOS_PER_DOLLAR, Problem, SHARE_SCALE};
 
 use crate::lp_solver::{
     LinearOracleBackend, MatchingLpOracle, build_solver_context, project_and_finalize,
-    support_and_finalize_target_with_objective,
+    support_and_finalize_target_with_face_retry,
 };
 use crate::result::{PipelineResult, SolverDiagnostics, TerminationStatus};
 use crate::retained_cash_solver::{ObjectiveModel, landed_quantities, landing_l1_ratio};
@@ -212,7 +212,7 @@ impl PacingBundleSolver {
         let mut result = if converged && numerical_failure.is_none() {
             let final_alpha = model.pacing_factors(&master.utilities);
             let projection_objective = model.oracle_coefficients_from_alpha(&final_alpha);
-            support_and_finalize_target_with_objective(
+            support_and_finalize_target_with_face_retry(
                 &q,
                 problem,
                 &ctx,

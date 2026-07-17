@@ -85,6 +85,15 @@ shadow prices can invalidate the published market duals. The policy comparison
 is recorded in
 `design/solver-experiments/objective-aware-landing-selection.md`.
 
+The localized landing normally caps each order at the ceiling of its recovered
+continuous fill. When that result fails or loses more than one basis point of
+retained objective, the solver retries the same final tangent face with the
+original order bounds, while leaving zero-budget MM orders closed. The expanded
+candidate is retained only if its actual verifier-ready retained objective is
+higher. This conditional retry can choose an integer-friendly representative
+of a degenerate certified face without adding another core solver, changing
+published prices, or weakening the support and hard-budget gates.
+
 After rounding, the projection re-linearizes any violated hard-budget rows and
 resolves to a budget-consistent fixed point. Exhaustion is an explicit
 `PostProcessingFailure`; no different core solver is substituted. The benchmark

@@ -1431,6 +1431,78 @@ pub(crate) fn support_and_finalize_target_with_objective(
     support_and_finalize_target_on_face(allocation, allocation, problem, ctx, projection_obj, start)
 }
 
+/// Retry a materially lossy restricted landing on the full supporting LP face.
+///
+/// A nonlinear retained-cash optimum can sit on a large face of its final
+/// tangent LP. Restricting every order to `ceil(allocation[i])` avoids
+/// inventing fills, but it can also exclude an integer-friendly point that the
+/// same tangent supports. The unrestricted retry still optimizes that exact
+/// tangent; it is accepted only when its verifier-ready retained-cash
+/// objective improves on the restricted result.
+pub(crate) fn support_and_finalize_target_with_face_retry(
+    allocation: &[f64],
+    problem: &Problem,
+    ctx: &SolverContext,
+    projection_obj: &[f64],
+    start: Instant,
+) -> PipelineResult {
+    let restricted =
+        support_and_finalize_target_with_objective(allocation, problem, ctx, projection_obj, start);
+    let model = crate::retained_cash_solver::ObjectiveModel::new(problem, ctx);
+    let (utilities, linear) = model.allocation_components(allocation);
+    let continuous_objective = model.objective_from_components(&utilities, linear);
+    let landed_objective = |candidate: &PipelineResult| {
+        (candidate.diagnostics.status != TerminationStatus::PostProcessingFailure).then(|| {
+            let landed = crate::retained_cash_solver::landed_quantities(problem, candidate);
+            model.objective_for_landed_fills(&landed, &candidate.result.fills)
+        })
+    };
+    let restricted_objective = landed_objective(&restricted);
+
+    const FACE_RETRY_RELATIVE_LOSS: f64 = 1e-4;
+    let retry = restricted_objective.is_none_or(|landed| {
+        (continuous_objective - landed).max(0.0) / continuous_objective.abs().max(1.0)
+            > FACE_RETRY_RELATIVE_LOSS
+    });
+    if !retry {
+        return restricted;
+    }
+
+    let face_caps = problem
+        .orders
+        .iter()
+        .enumerate()
+        .map(|(index, order)| {
+            if model
+                .mm_index(index)
+                .is_some_and(|mm_index| model.budgets()[mm_index] <= 0.0)
+            {
+                0.0
+            } else {
+                order.max_fill.0 as f64
+            }
+        })
+        .collect::<Vec<_>>();
+    let expanded = support_and_finalize_target_on_face(
+        allocation,
+        &face_caps,
+        problem,
+        ctx,
+        projection_obj,
+        start,
+    );
+    let expanded_objective = landed_objective(&expanded);
+    if expanded_objective
+        .zip(restricted_objective)
+        .is_some_and(|(expanded, restricted)| expanded > restricted)
+        || (restricted_objective.is_none() && expanded_objective.is_some())
+    {
+        expanded
+    } else {
+        restricted
+    }
+}
+
 /// Land `allocation` while allowing the supporting LP to select anywhere
 /// inside independently supplied per-order `face_caps`.
 ///

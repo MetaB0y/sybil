@@ -79,6 +79,16 @@ It fails explicitly when even the best residual exceeds $0.05. This is an
 economic support gate within the same solver and price system, not a
 cross-solver fallback.
 
+The ordinary landing caps each order at the ceiling of its continuous fill.
+That localizes integer recovery, but it can exclude a much better integer point
+on a large degenerate tangent face. If the localized result fails or loses more
+than one basis point of continuous retained objective, the solver conditionally
+repeats the same supporting-face landing with the original order bounds
+(keeping zero-budget MM orders closed). It accepts the expanded-face result
+only when its verifier-ready retained objective is strictly better. The retry
+does not change the certified tangent, prices, support gates, or hard-budget
+checks; it selects a more integer-friendly representative of that face.
+
 If rounded quantities exceed an MM budget at the resulting prices, the
 projection adds price-linearized budget rows and resolves. It finalizes only
 after the prices and quantities form a budget-consistent fixed point; exhaustion
