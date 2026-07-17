@@ -18,6 +18,12 @@ def test_synthetic_capital_is_fixed_across_actor_counts():
     assert twenty * 20 == one
 
 
+def test_crossing_noise_is_always_ioc():
+    assert runner._noise_order_time_in_force(True, "GTC") == "IOC"
+    assert runner._noise_order_time_in_force(True, "GTD") == "IOC"
+    assert runner._noise_order_time_in_force(False, "GTC") == "GTC"
+
+
 def _trader(name: str, account_id: int, *, pnl: float = 0.0):
     trader = MagicMock()
     trader.name = name
@@ -52,7 +58,9 @@ async def test_one_shot_snapshot_records_every_account_baseline():
         "Stage1 (Flat)",
     ]
     assert [call.kwargs["account_id"] for call in db.log_snapshot.call_args_list] == [11, 12]
-    assert all(call.kwargs["positions"] == {"7": {"YES": 3}} for call in db.log_snapshot.call_args_list)
+    assert all(
+        call.kwargs["positions"] == {"7": {"YES": 3}} for call in db.log_snapshot.call_args_list
+    )
     assert all(call.kwargs["total_fills"] == 1 for call in db.log_snapshot.call_args_list)
     assert all(call.kwargs["total_orders"] == 2 for call in db.log_snapshot.call_args_list)
 

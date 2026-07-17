@@ -650,6 +650,19 @@ groups:
           summary: "Arena synthetic flow covers too little of the live market universe"
           description: "The selected synthetic cohort is below 90% of active outcome rows for 15m. A stale selection cap, lifecycle filter, or missing market provenance may be leaving most product markets inert."
 
+      - alert: ArenaSyntheticNoiseStalled
+        expr: |
+          max(sybil_arena_synthetic_markets) > 0
+          and
+          sum(increase(sybil_bot_total_orders{trader=~"Noise-.+"}[10m])) < 1
+        for: 15m
+        labels:
+          severity: warning
+          component: arena
+        annotations:
+          summary: "Arena synthetic noise stopped submitting orders"
+          description: "Arena selected a synthetic market cohort but noise-trader order totals have not increased for 15m. Check actor tasks, pending order lifetime, balances, and block-stream progress; selection coverage alone does not prove live flow."
+
       - alert: NewsFeedStale
         expr: |
           max(sybil_news_feed_latest_poll_success_timestamp_seconds) > 0

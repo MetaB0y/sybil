@@ -102,3 +102,34 @@ tests:
       - eval_time: 20m
         alertname: ArenaSyntheticCoverageLow
         exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'sybil_arena_synthetic_markets{job="sybil-arena"}'
+        values: "206+0x20"
+      - series: 'sybil_bot_total_orders{job="sybil-arena",trader="Noise-0"}'
+        values: "40+0x20"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: ArenaSyntheticNoiseStalled
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: ArenaSyntheticNoiseStalled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: arena
+            exp_annotations:
+              summary: "Arena synthetic noise stopped submitting orders"
+              description: "Arena selected a synthetic market cohort but noise-trader order totals have not increased for 15m. Check actor tasks, pending order lifetime, balances, and block-stream progress; selection coverage alone does not prove live flow."
+
+  - interval: 1m
+    input_series:
+      - series: 'sybil_arena_synthetic_markets{job="sybil-arena"}'
+        values: "206+0x20"
+      - series: 'sybil_bot_total_orders{job="sybil-arena",trader="Noise-0"}'
+        values: "0+4x20"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ArenaSyntheticNoiseStalled
+        exp_alerts: []
