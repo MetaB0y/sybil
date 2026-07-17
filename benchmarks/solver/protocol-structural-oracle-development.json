@@ -1,0 +1,242 @@
+{
+  "schema_version": 2,
+  "protocol_id": "solver-structural-oracle-development-v1",
+  "title": "Development-only structural price-sweep oracle comparison",
+  "analysis_policy": {
+    "evidence_status": "development-only; implementation and protocol may change after observing every result",
+    "primary_unit": "one declared order book, budget ratio, and solver",
+    "primary_objective": "shifted retained-cash objective in nanodollars on landed fills",
+    "primary_certificate": "continuous upper bound minus feasible continuous primal objective",
+    "failure_policy": "retain every panic, oracle recovery failure, cap, landing failure, and verifier-invalid result",
+    "selection_policy": "compare identical retained-cash algorithms with HiGHS and structural price-sweep oracles on every declared market-like, flash, numerical-range, and MM-dimension case",
+    "tuning_policy": "all seeds are development-only and below 30000; no result from this protocol is held-out evidence",
+    "scaling_policy": "separate market/order-shape stress from MM-dimension stress"
+  },
+  "warmup": {
+    "profile": "flash-ladder",
+    "scale": "flash-medium",
+    "seed": 20999,
+    "budget_scale": 1.0
+  },
+  "solvers": {
+    "rc-highs": {
+      "kind": "retained-cash-fw",
+      "label": "Retained-cash FW with HiGHS oracle",
+      "max_iterations": 100,
+      "tolerance": 0.00001,
+      "absolute_tolerance": 1000000.0,
+      "line_search_steps": 48,
+      "fallback_to_lp": false
+    },
+    "rc-structural": {
+      "kind": "retained-cash-structural",
+      "label": "Retained-cash FW with structural price-sweep oracle",
+      "max_iterations": 100,
+      "tolerance": 0.00001,
+      "absolute_tolerance": 1000000.0,
+      "line_search_steps": 48,
+      "fallback_to_lp": false
+    },
+    "bundle-highs": {
+      "kind": "pacing-bundle",
+      "label": "Pacing bundle with HiGHS oracle",
+      "max_iterations": 100,
+      "max_master_iterations": 1000,
+      "tolerance": 0.00000001,
+      "absolute_tolerance": 1000000.0,
+      "master_tolerance": 0.000000001,
+      "master_absolute_tolerance": 1000.0,
+      "line_search_steps": 48,
+      "fallback_to_lp": false
+    },
+    "bundle-structural": {
+      "kind": "pacing-bundle-structural",
+      "label": "Pacing bundle with structural price-sweep oracle",
+      "max_iterations": 100,
+      "max_master_iterations": 1000,
+      "tolerance": 0.00000001,
+      "absolute_tolerance": 1000000.0,
+      "master_tolerance": 0.000000001,
+      "master_absolute_tolerance": 1000.0,
+      "line_search_steps": 48,
+      "fallback_to_lp": false
+    }
+  },
+  "scales": {
+    "market-like": {
+      "num_markets": 32,
+      "num_orders": 2500,
+      "num_mms": 1,
+      "order_size_min": 1,
+      "order_size_max": 250,
+      "mm_budget_min_dollars": 1000,
+      "mm_budget_max_dollars": 1001
+    },
+    "flash-medium": {
+      "num_markets": 20,
+      "num_orders": 400,
+      "num_mms": 2,
+      "order_size_min": 10,
+      "order_size_max": 100,
+      "mm_budget_min_dollars": 1,
+      "mm_budget_max_dollars": 5000
+    },
+    "numerical": {
+      "num_markets": 30,
+      "num_orders": 3000,
+      "num_mms": 2,
+      "order_size_min": 1,
+      "order_size_max": 10000,
+      "mm_budget_min_dollars": 100,
+      "mm_budget_max_dollars": 100000
+    },
+    "mms-01": {
+      "num_markets": 40,
+      "num_orders": 2000,
+      "num_mms": 1,
+      "order_size_min": 5,
+      "order_size_max": 250,
+      "mm_budget_min_dollars": 1,
+      "mm_budget_max_dollars": 25000
+    },
+    "mms-04": {
+      "num_markets": 40,
+      "num_orders": 2000,
+      "num_mms": 4,
+      "order_size_min": 5,
+      "order_size_max": 250,
+      "mm_budget_min_dollars": 1,
+      "mm_budget_max_dollars": 25000
+    },
+    "mms-16": {
+      "num_markets": 40,
+      "num_orders": 2000,
+      "num_mms": 16,
+      "order_size_min": 5,
+      "order_size_max": 250,
+      "mm_budget_min_dollars": 1,
+      "mm_budget_max_dollars": 25000
+    }
+  },
+  "profiles": {
+    "market-like": {
+      "generator": "random",
+      "market_group_probability": 0.65,
+      "order_size_power": 2.8,
+      "retail_buy_probability": 0.65,
+      "liquidity_scarcity": 0.4,
+      "hot_market_fraction": 0.0,
+      "hot_order_probability": 0.0,
+      "market_activity_power": 1.15,
+      "liquidity_depth_levels": 5,
+      "liquidity_dispersion": 0.9,
+      "mm_spread_bps": 400,
+      "mm_capacity_multiplier": 6,
+      "mm_market_coverage_fraction": 1.0,
+      "mm_market_coverage_max": 32,
+      "mm_quote_style": "live_flash"
+    },
+    "numerical-range": {
+      "generator": "random",
+      "market_group_probability": 0.65,
+      "order_size_power": 3.5,
+      "retail_buy_probability": 0.65,
+      "liquidity_scarcity": 0.4,
+      "hot_market_fraction": 0.1,
+      "hot_order_probability": 0.75,
+      "market_activity_power": 0.0,
+      "liquidity_depth_levels": 6,
+      "liquidity_dispersion": 1.5,
+      "mm_spread_bps": 75,
+      "mm_capacity_multiplier": 50,
+      "mm_market_coverage_fraction": 1.0,
+      "mm_market_coverage_max": 30,
+      "mm_quote_style": "ladder"
+    },
+    "flash-ladder": {
+      "generator": "flash_ladder",
+      "market_group_probability": 0.0,
+      "order_size_power": 1.0,
+      "retail_buy_probability": 1.0,
+      "liquidity_scarcity": 1.0,
+      "hot_market_fraction": 0.0,
+      "hot_order_probability": 0.0,
+      "market_activity_power": 0.0,
+      "liquidity_depth_levels": 1,
+      "liquidity_dispersion": 0.0,
+      "mm_spread_bps": 0,
+      "mm_capacity_multiplier": 1,
+      "mm_market_coverage_fraction": 1.0,
+      "mm_market_coverage_max": 100,
+      "mm_quote_style": "ladder"
+    }
+  },
+  "experiments": [
+    {
+      "id": "market-like-snapshot",
+      "suite": "market_like",
+      "profile": "market-like",
+      "scale": "market-like",
+      "seed_start": 21000,
+      "seed_count": 4,
+      "budget_scales": [0.5, 1.0, 2.0],
+      "budget_basis": "generated",
+      "solvers": ["rc-highs", "rc-structural", "bundle-highs", "bundle-structural"]
+    },
+    {
+      "id": "flash-budget-sweep",
+      "suite": "budget",
+      "profile": "flash-ladder",
+      "scale": "flash-medium",
+      "seed_start": 21100,
+      "seed_count": 5,
+      "budget_scales": [0.1, 0.25, 0.5, 1.0, 2.0, 10.0],
+      "budget_basis": "lp_limit_value",
+      "solvers": ["rc-highs", "rc-structural", "bundle-highs", "bundle-structural"]
+    },
+    {
+      "id": "numerical-range",
+      "suite": "numerical",
+      "profile": "numerical-range",
+      "scale": "numerical",
+      "seed_start": 21200,
+      "seed_count": 5,
+      "budget_scales": [0.25, 10.0],
+      "budget_basis": "lp_limit_value",
+      "solvers": ["rc-highs", "rc-structural", "bundle-highs", "bundle-structural"]
+    },
+    {
+      "id": "mms-01",
+      "suite": "mm_scaling",
+      "profile": "flash-ladder",
+      "scale": "mms-01",
+      "seed_start": 21300,
+      "seed_count": 3,
+      "budget_scales": [0.25],
+      "budget_basis": "lp_limit_value",
+      "solvers": ["rc-highs", "rc-structural", "bundle-highs", "bundle-structural"]
+    },
+    {
+      "id": "mms-04",
+      "suite": "mm_scaling",
+      "profile": "flash-ladder",
+      "scale": "mms-04",
+      "seed_start": 21400,
+      "seed_count": 3,
+      "budget_scales": [0.25],
+      "budget_basis": "lp_limit_value",
+      "solvers": ["rc-highs", "rc-structural", "bundle-highs", "bundle-structural"]
+    },
+    {
+      "id": "mms-16",
+      "suite": "mm_scaling",
+      "profile": "flash-ladder",
+      "scale": "mms-16",
+      "seed_start": 21500,
+      "seed_count": 3,
+      "budget_scales": [0.25],
+      "budget_basis": "lp_limit_value",
+      "solvers": ["rc-highs", "rc-structural", "bundle-highs", "bundle-structural"]
+    }
+  ]
+}

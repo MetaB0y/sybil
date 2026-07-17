@@ -9,7 +9,7 @@ last_verified: 2026-07-17
 # Solver landscape
 
 > [!summary] In one paragraph
-> Solver implementations share one interface and integer trust boundary. The supported matching core is a fast LP; shared MM capital introduces endogenous price×quantity coupling. [[Retained Cash Solver|`RetainedCashSolver`]] remains the production default. The experimental [[Pacing Bundle Solver|`PacingBundleSolver`]] solves the same convex retained-cash program through a lower-dimensional pacing dual and a fully corrective primal bundle. [[Direct Price-Pacing Dual Solver|`DirectDualConicSolver`]] is an independent price-side certificate/reference whose continuous fill recovery is not yet robust enough for production integer landing.
+> Solver implementations share one interface and integer trust boundary. The supported matching core is a fast LP; shared MM capital introduces endogenous price×quantity coupling. [[Retained Cash Solver|`RetainedCashSolver`]] remains the production default. Its repeated fixed-pacing matching oracle can use reusable HiGHS or an experimental exact structural price sweep, while all production-default and integer-landing paths retain HiGHS. The experimental [[Pacing Bundle Solver|`PacingBundleSolver`]] solves the same convex retained-cash program through a lower-dimensional pacing dual and a fully corrective primal bundle. [[Direct Price-Pacing Dual Solver|`DirectDualConicSolver`]] is an independent price-side certificate/reference whose continuous fill recovery is not yet robust enough for production integer landing.
 
 | Solver | Feature | MM-budget approach | Role |
 |---|---|---|---|
@@ -37,8 +37,12 @@ flowchart LR
     INT --> VERIFY["sybil-verifier"]
 ```
 
-Shared machinery includes the HiGHS LP oracle, price normalization from duals,
-lexicographic nearest-face projection, and integer rounding. Retained-cash
+Shared machinery includes the HiGHS LP oracle, an optional structure-aware
+fixed-pacing price sweep, price normalization from duals, lexicographic
+nearest-face projection, and integer rounding. The structural oracle exploits
+one-hot single-market orders to recover a primal optimum analytically from
+price subgradients; it does not handle budget rows or replace HiGHS landing.
+Retained-cash
 projections preserve the certified target within the primary supporting face,
 re-solve price-dependent budget rows, and finalize only at a budget-consistent
 fixed point; the LP-SLP baseline still has a capped trimming path and is

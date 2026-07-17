@@ -981,11 +981,37 @@ mod conformance {
         run_solver_conformance(&solver, AvailabilityPolicy::RequireCandidate);
     }
 
+    #[cfg(feature = "retained-cash")]
+    #[test]
+    fn structural_retained_cash_solver_conformance() {
+        let solver =
+            matching_solver::RetainedCashSolver::with_config(matching_solver::RetainedCashConfig {
+                linear_oracle: matching_solver::LinearOracleBackend::StructuralPriceSweep,
+                gap_abs_nanos: 0.0,
+                gap_rel: 0.0,
+                ..Default::default()
+            });
+        run_solver_conformance(&solver, AvailabilityPolicy::RequireCandidate);
+    }
+
     #[cfg(feature = "lp")]
     #[test]
     fn pacing_bundle_solver_conformance() {
         let solver =
             matching_solver::PacingBundleSolver::with_config(matching_solver::PacingBundleConfig {
+                gap_abs_nanos: 0.0,
+                gap_rel: 0.0,
+                ..Default::default()
+            });
+        run_solver_conformance(&solver, AvailabilityPolicy::RequireCandidate);
+    }
+
+    #[cfg(feature = "lp")]
+    #[test]
+    fn structural_pacing_bundle_solver_conformance() {
+        let solver =
+            matching_solver::PacingBundleSolver::with_config(matching_solver::PacingBundleConfig {
+                linear_oracle: matching_solver::LinearOracleBackend::StructuralPriceSweep,
                 gap_abs_nanos: 0.0,
                 gap_rel: 0.0,
                 ..Default::default()

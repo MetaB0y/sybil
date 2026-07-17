@@ -25,7 +25,7 @@ pub mod conic_solver;
 #[cfg(feature = "conic")]
 pub mod direct_dual_conic_solver;
 
-#[cfg(feature = "conic")]
+#[cfg(feature = "retained-cash")]
 mod price_pacing_dual;
 
 #[cfg(feature = "retained-cash")]
@@ -58,6 +58,9 @@ pub use milp::{MilpConfig, MilpResult, MilpSolver, MmBudgetMode, SolveStatus};
 
 #[cfg(feature = "lp")]
 pub use lp_solver::{LpConfig, LpSolver};
+
+#[cfg(feature = "retained-cash")]
+pub use lp_solver::LinearOracleBackend;
 
 #[cfg(feature = "retained-cash")]
 pub use retained_cash_solver::{

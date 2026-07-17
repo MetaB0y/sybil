@@ -16,14 +16,16 @@ use std::time::{Duration, Instant};
 use matching_engine::{NANOS_PER_DOLLAR, Problem, SHARE_SCALE};
 
 use crate::lp_solver::{
-    ReusableLpOracle, SolverContext, build_solver_context, project_and_finalize,
-    support_and_finalize_target_with_objective, welfare_weights,
+    LinearOracleBackend, MatchingLpOracle, SolverContext, build_solver_context,
+    project_and_finalize, support_and_finalize_target_with_objective, welfare_weights,
 };
 use crate::result::{PipelineResult, SolverDiagnostics, TerminationStatus};
 
 /// Configuration for retained-cash generalized Frank--Wolfe.
 #[derive(Clone, Debug)]
 pub struct RetainedCashConfig {
+    /// Fixed-pacing matching oracle.
+    pub linear_oracle: LinearOracleBackend,
     /// Maximum allocation updates. One final oracle call is still made to
     /// certify the returned iterate when this cap is reached.
     pub max_iterations: usize,
@@ -38,6 +40,7 @@ pub struct RetainedCashConfig {
 impl Default for RetainedCashConfig {
     fn default() -> Self {
         Self {
+            linear_oracle: LinearOracleBackend::Highs,
             max_iterations: 100,
             gap_abs_nanos: 1_000_000.0, // $0.001
             gap_rel: 1e-5,
@@ -107,17 +110,20 @@ impl RetainedCashSolver {
 
         let mut oracle_orders = problem.orders.clone();
         model.disable_zero_budget_orders(&mut oracle_orders);
-        let Some(mut oracle) = ReusableLpOracle::new(
+        let Some(mut oracle) = MatchingLpOracle::new(
+            self.config.linear_oracle,
             &oracle_orders,
             &ctx.markets,
             &ctx.market_to_group,
             ctx.num_groups,
-            &[],
         ) else {
             return PipelineResult::failure(
                 "retained-cash-fw",
                 TerminationStatus::NumericalFailure,
-                "failed to construct the HiGHS oracle",
+                format!(
+                    "failed to construct the {:?} oracle",
+                    self.config.linear_oracle
+                ),
                 start.elapsed().as_secs_f64(),
             );
         };
@@ -153,7 +159,15 @@ impl RetainedCashSolver {
                 .config
                 .gap_abs_nanos
                 .max(self.config.gap_rel * objective.abs().max(1.0));
-            if last_gap <= tolerance {
+            // The upper and current scores are independently accumulated
+            // `f64` values. At large objective scales, their final subtraction
+            // can leave a few ULPs of positive gap at an exact optimum (for
+            // example 0.001953125 nanos beside a 1.6e13-nano score). Do not
+            // turn that representation floor into a false line-search
+            // failure when a caller deliberately configures zero tolerance.
+            let certificate_roundoff =
+                32.0 * f64::EPSILON * oracle_upper_score.abs().max(current_score.abs()).max(1.0);
+            if last_gap <= tolerance.max(certificate_roundoff) {
                 converged = true;
                 break;
             }
@@ -260,10 +274,10 @@ impl RetainedCashSolver {
                 integer_landing_loss: Some((objective - landed_objective).max(0.0)),
                 integer_landing_l1_ratio: landing_l1_ratio(&q, &landed_q),
                 integer_landing_budget_trimmed,
-                message: Some(
-                    "objective/gap/landing loss are continuous retained-cash nanodollars"
-                        .to_string(),
-                ),
+                message: Some(format!(
+                    "objective/gap/landing loss are continuous retained-cash nanodollars; linear oracle {:?}",
+                    self.config.linear_oracle
+                )),
                 ..Default::default()
             };
         }

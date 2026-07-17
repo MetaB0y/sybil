@@ -9,7 +9,7 @@ last_verified: 2026-07-17
 # Retained cash solver
 
 > [!summary] In one paragraph
-> `RetainedCashSolver` is the production default for shared-capital market makers. It maximizes the paper's exact affine-to-log retained-cash objective with generalized Frank--Wolfe, using the [[The LP Core|HiGHS matching LP]] as its linear oracle. It reports a continuous objective and a certified upper gap, then lands through a pacing-supported projection that must reach a hard-budget fixed point before finalization.
+> `RetainedCashSolver` is the production default for shared-capital market makers. It maximizes the paper's exact affine-to-log retained-cash objective with generalized Frank--Wolfe, using the [[The LP Core|matching LP]] as its linear oracle. Reusable HiGHS remains the default; a research configuration can use an exact structural price sweep for the repeated zero-RHS oracle calls. It reports a continuous objective and a certified upper gap, then lands through a pacing-supported HiGHS projection that must reach a hard-budget fixed point before finalization.
 
 For MM `k`, let `U_k` be its non-negative weighted fill after the
 buy/sell reduction and `B_k` its budget. Ignoring an allocation-independent
@@ -36,6 +36,15 @@ and cold simplex starts in the latency tail.
 Each returned allocation is summarized once into MM utilities, non-mint
 welfare, and per-outcome demands; line search then works in that compact space
 instead of rescanning every order at each derivative evaluation.
+
+`LinearOracleBackend::StructuralPriceSweep` is an experimental alternative for
+those direction calls. For supported one-hot single-market orders it solves
+the fixed-pacing price dual by sorting hinge breakpoints and recovers a primal
+optimum from the price subgradient. It checks primal/dual agreement on every
+call. The backend deliberately cannot handle price-linearized budget rows,
+arbitrary payoff vectors, the final supporting face, or integer landing; those
+paths still use HiGHS. Development results and rejected face selectors live in
+`design/solver-experiments/structural-price-sweep-oracle.md`.
 
 ## MM buys and sells
 
@@ -77,10 +86,12 @@ loss, allocation movement, budget trimming, and minting duality are separate
 diagnostics because continuous convergence alone does not certify integer
 recovery.
 
-`Converged` means the configured certified-gap tolerance was met. An
-`IterationLimit` result may still be integer-valid, but the reported gap—not
-iterate stability—states how far the continuous objective could remain from
-optimal. Backend and landing failures are surfaced directly.
+`Converged` means the configured certified-gap tolerance was met, up to a
+scale-aware few-ULP subtraction floor when independently accumulated upper and
+current scores coincide mathematically. The unsnapped reported gap remains
+visible. An `IterationLimit` result may still be integer-valid, but the
+reported gap—not iterate stability—states how far the continuous objective
+could remain from optimal. Backend and landing failures are surfaced directly.
 
 ## Where this lives
 

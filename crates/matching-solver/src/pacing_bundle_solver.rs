@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use matching_engine::{NANOS_PER_DOLLAR, Problem, SHARE_SCALE};
 
 use crate::lp_solver::{
-    ReusableLpOracle, build_solver_context, project_and_finalize,
+    LinearOracleBackend, MatchingLpOracle, build_solver_context, project_and_finalize,
     support_and_finalize_target_with_objective,
 };
 use crate::result::{PipelineResult, SolverDiagnostics, TerminationStatus};
@@ -26,6 +26,8 @@ use crate::retained_cash_solver::{ObjectiveModel, landed_quantities, landing_l1_
 /// Configuration for the experimental fully corrective pacing-bundle solver.
 #[derive(Clone, Debug)]
 pub struct PacingBundleConfig {
+    /// Fixed-pacing matching oracle.
+    pub linear_oracle: LinearOracleBackend,
     /// Maximum new matching-LP atoms. One final oracle call still certifies
     /// the current mixture when this cap is reached.
     pub max_iterations: usize,
@@ -46,6 +48,7 @@ pub struct PacingBundleConfig {
 impl Default for PacingBundleConfig {
     fn default() -> Self {
         Self {
+            linear_oracle: LinearOracleBackend::Highs,
             max_iterations: 100,
             max_master_iterations: 1_000,
             gap_abs_nanos: 1_000_000.0,
@@ -108,17 +111,20 @@ impl PacingBundleSolver {
 
         let mut oracle_orders = problem.orders.clone();
         model.disable_zero_budget_orders(&mut oracle_orders);
-        let Some(mut oracle) = ReusableLpOracle::new(
+        let Some(mut oracle) = MatchingLpOracle::new(
+            self.config.linear_oracle,
             &oracle_orders,
             &ctx.markets,
             &ctx.market_to_group,
             ctx.num_groups,
-            &[],
         ) else {
             return PipelineResult::failure(
                 "pacing-bundle",
                 TerminationStatus::NumericalFailure,
-                "failed to construct the HiGHS oracle",
+                format!(
+                    "failed to construct the {:?} oracle",
+                    self.config.linear_oracle
+                ),
                 start.elapsed().as_secs_f64(),
             );
         };
@@ -233,8 +239,9 @@ impl PacingBundleSolver {
             };
             let message = numerical_failure.unwrap_or_else(|| {
                 format!(
-                    "{} active atoms; {master_iterations} pairwise master steps; oracle {:.6}s; master {:.6}s",
+                    "{} active atoms; {master_iterations} pairwise master steps; {:?} oracle {:.6}s; master {:.6}s",
                     master.active_atoms(),
+                    self.config.linear_oracle,
                     oracle_time.as_secs_f64(),
                     master_time.as_secs_f64(),
                 )

@@ -19,7 +19,8 @@ use std::time::Instant;
 use highs::{Col, HighsModelStatus, Model, RowProblem, Sense};
 
 use matching_engine::{
-    Fill, MarketId, MmSide, NANOS_PER_DOLLAR, Nanos, Order, Problem, Qty, minting_cost_from_fills,
+    Fill, MarketId, MmSide, NANOS_PER_DOLLAR, Nanos, Order, Problem, Qty, SHARE_SCALE,
+    minting_cost_from_fills,
 };
 
 use crate::MatchingResult;
@@ -33,6 +34,16 @@ use crate::solver::order_sign;
 pub struct LpConfig {
     /// Max SLP iterations for MM budget linearization (0 = LP only, no MM handling).
     pub max_mm_iterations: usize,
+}
+
+/// Linear-oracle implementation used by retained-cash research solvers.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum LinearOracleBackend {
+    /// Mature sparse simplex implementation with reusable bases.
+    #[default]
+    Highs,
+    /// Structure-aware price sweep plus analytical marginal-face recovery.
+    StructuralPriceSweep,
 }
 
 impl Default for LpConfig {
@@ -242,6 +253,74 @@ pub(crate) struct LpSolution {
     /// oracle bound when HiGHS stops within floating-point tolerances.
     pub(crate) objective_upper_bound_dollars: Option<f64>,
     pub(crate) objective_value_dollars: f64,
+}
+
+/// Reusable linear-oracle facade for retained-cash algorithms.
+///
+/// The structural backend intentionally supports only the zero-RHS matching
+/// polytope. LP-SLP budget rows and integer landing continue to use HiGHS.
+pub(crate) enum MatchingLpOracle<'a> {
+    Highs(ReusableLpOracle),
+    Structural(crate::price_pacing_dual::PriceDualOracle<'a>),
+}
+
+impl<'a> MatchingLpOracle<'a> {
+    pub(crate) fn new(
+        backend: LinearOracleBackend,
+        orders: &'a [Order],
+        markets: &[MarketId],
+        market_to_group: &HashMap<MarketId, usize>,
+        num_groups: usize,
+    ) -> Option<Self> {
+        match backend {
+            LinearOracleBackend::Highs => {
+                ReusableLpOracle::new(orders, markets, market_to_group, num_groups, &[])
+                    .map(Self::Highs)
+            }
+            LinearOracleBackend::StructuralPriceSweep => {
+                crate::price_pacing_dual::PriceDualOracle::new(
+                    orders,
+                    markets,
+                    market_to_group,
+                    num_groups,
+                )
+                .map(Self::Structural)
+            }
+        }
+    }
+
+    pub(crate) fn solve(&mut self, objective_coeffs: &[f64]) -> Option<LpSolution> {
+        match self {
+            Self::Highs(oracle) => oracle.solve(objective_coeffs),
+            Self::Structural(oracle) => {
+                let solution = oracle.solve(objective_coeffs)?;
+                let nanos = NANOS_PER_DOLLAR as f64;
+                let dual_yes = oracle
+                    .markets()
+                    .iter()
+                    .copied()
+                    .zip(&solution.yes_prices)
+                    .map(|(market, &price)| (market, price * nanos))
+                    .collect();
+                let dual_no = oracle
+                    .markets()
+                    .iter()
+                    .copied()
+                    .zip(&solution.yes_prices)
+                    .map(|(market, &price)| (market, (1.0 - price) * nanos))
+                    .collect();
+                Some(LpSolution {
+                    q_values: solution.q_values,
+                    dual_yes,
+                    dual_no,
+                    objective_upper_bound_dollars: Some(
+                        solution.dual_objective_nanos * SHARE_SCALE as f64 / nanos,
+                    ),
+                    objective_value_dollars: solution.primal_objective_dollars,
+                })
+            }
+        }
+    }
 }
 
 /// A fixed matching LP whose objective can be changed between solves.

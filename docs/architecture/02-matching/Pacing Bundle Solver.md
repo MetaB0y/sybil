@@ -3,7 +3,7 @@ tags: [solver, fisher-market, market-maker, research]
 layer: solver
 crate: matching-solver
 status: current
-last_verified: 2026-07-14
+last_verified: 2026-07-17
 ---
 
 # Pacing bundle solver
@@ -22,6 +22,15 @@ Fixing all pacing factors `alpha_k` leaves the ordinary [[The LP Core|matching
 LP]] with every MM's reduced value shaded by its one common factor. One oracle
 solution therefore has two roles: it supplies a cutting plane for the convex
 pacing dual and a feasible atom for the primal allocation.
+
+The default oracle is reusable HiGHS.
+`LinearOracleBackend::StructuralPriceSweep` is an experimental exact
+alternative for supported one-hot single-market books. It obtains prices by
+sorting piecewise-linear hinge segments and uses complementary slackness plus
+balanced marginal-face recovery to produce the primal atom. Final price
+discovery and integer landing still use HiGHS. The backend comparison and
+failed face-selection variants are recorded in
+`design/solver-experiments/structural-price-sweep-oracle.md`.
 
 The implementation is a simplicial-decomposition / fully corrective bundle
 method. It keeps the distinct LP atoms, represents the current allocation as a

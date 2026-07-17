@@ -23,9 +23,9 @@ use matching_scenarios::{
 };
 use matching_solver::{
     ConicConfig, ConicSolver, DecomposedSolver, DirectDualConicConfig, DirectDualConicSolver,
-    LpConfig, LpSolver, MilpConfig, MilpSolver, MmBudgetMode, ObjectiveMode, PacingBundleConfig,
-    PacingBundleSolver, PipelineResult, RetainedCashConfig, RetainedCashSolver, SolveStatus,
-    TerminationStatus, retained_cash_objective_for_fills,
+    LinearOracleBackend, LpConfig, LpSolver, MilpConfig, MilpSolver, MmBudgetMode, ObjectiveMode,
+    PacingBundleConfig, PacingBundleSolver, PipelineResult, RetainedCashConfig, RetainedCashSolver,
+    SolveStatus, TerminationStatus, retained_cash_objective_for_fills,
     retained_cash_welfare_gap_bound_for_fills, zero_temperature_minting_cost_for_fills,
 };
 use serde::{Deserialize, Serialize};
@@ -846,8 +846,13 @@ fn execute_solver(solver: &SolverSpec, problem: &Problem) -> SolveOutput {
             .solve(problem),
             problem,
         ),
-        "retained-cash-fw" => pipeline_output(
+        "retained-cash-fw" | "retained-cash-structural" => pipeline_output(
             RetainedCashSolver::with_config(RetainedCashConfig {
+                linear_oracle: if solver.kind == "retained-cash-structural" {
+                    LinearOracleBackend::StructuralPriceSweep
+                } else {
+                    LinearOracleBackend::Highs
+                },
                 max_iterations: required_usize(solver, "max_iterations"),
                 gap_rel: required_f64(solver, "tolerance"),
                 gap_abs_nanos: required_f64(solver, "absolute_tolerance"),
@@ -856,8 +861,13 @@ fn execute_solver(solver: &SolverSpec, problem: &Problem) -> SolveOutput {
             .solve(problem),
             problem,
         ),
-        "pacing-bundle" => pipeline_output(
+        "pacing-bundle" | "pacing-bundle-structural" => pipeline_output(
             PacingBundleSolver::with_config(PacingBundleConfig {
+                linear_oracle: if solver.kind == "pacing-bundle-structural" {
+                    LinearOracleBackend::StructuralPriceSweep
+                } else {
+                    LinearOracleBackend::Highs
+                },
                 max_iterations: required_usize(solver, "max_iterations"),
                 max_master_iterations: required_usize(solver, "max_master_iterations"),
                 gap_rel: required_f64(solver, "tolerance"),
@@ -1403,6 +1413,26 @@ mod tests {
                 .values()
                 .any(|solver| solver.kind == "direct-dual-conic")
         );
+    }
+
+    #[test]
+    fn checked_in_structural_oracle_development_protocol_is_valid() {
+        let bytes = include_bytes!(
+            "../../../../benchmarks/solver/protocol-structural-oracle-development.json"
+        );
+        let protocol: Protocol = serde_json::from_slice(bytes).expect("parse protocol");
+        validate_protocol(&protocol).expect("valid protocol");
+        for kind in [
+            "retained-cash-fw",
+            "retained-cash-structural",
+            "pacing-bundle",
+            "pacing-bundle-structural",
+        ] {
+            assert!(
+                protocol.solvers.values().any(|solver| solver.kind == kind),
+                "protocol omitted {kind}"
+            );
+        }
     }
 
     #[test]

@@ -3,7 +3,7 @@ tags: [concept, solver]
 layer: solver
 crate: matching-solver
 status: current
-last_verified: 2026-07-13
+last_verified: 2026-07-17
 ---
 
 Without market maker budget constraints, the welfare-maximizing matching problem is a plain Linear Program. This is the structural insight that makes Sybil tractable: the core problem is trivially solvable, and all computational difficulty comes from a small number of [[MM Budget Constraint|bilinear side constraints]].
@@ -37,7 +37,17 @@ which restores a concave program and makes the budget self-enforcing. Entries
 in the [[Solver Landscape]] either solve that convex surrogate, approximate the
 bilinear model, or act as references.
 
-The problem size scales linearly in orders, markets, and groups. HiGHS (used by [[LP Solver]]) solves the core efficiently. Balance-constraint duals become [[LP Duality and Clearing Prices|clearing prices]] and minting stationarity produces price coherence; the verifier still checks the landed integer result.
+The problem size scales linearly in orders, markets, and groups. HiGHS (used
+by [[LP Solver]]) solves the general core efficiently. Retained-cash research
+solvers can alternatively exploit the supported one-hot, one-market order
+shape: each independent market becomes a sorted one-dimensional price hinge
+curve, while categorical groups merge those curves under one price-simplex
+capacity. Complementary-slackness intervals recover a matching primal point.
+This structural price sweep is exact only for the zero-RHS matching oracle;
+budget rows, supporting-face projection, and integer landing remain general
+HiGHS problems. Balance-constraint duals become [[LP Duality and Clearing
+Prices|clearing prices]] and minting stationarity produces price coherence;
+the verifier still checks the landed integer result.
 
 ## Key Properties
 - Variables: `q_i` (fills), free signed `mint_m` (per-market creation/burning), nonnegative `gmint_g` (group creation) — all continuous, bounded

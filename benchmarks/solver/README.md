@@ -144,6 +144,36 @@ python3 scripts/benchmarks/analyze_solver_experiments.py \
   /tmp/price-pacing-development
 ```
 
+## Structural-oracle development protocol
+
+`protocol-structural-oracle-development.json` isolates one implementation
+choice inside both retained-cash algorithms: the reusable HiGHS matching LP
+versus an exact domain-specific price sweep with analytical primal recovery.
+It declares 61 cases per solver and retains every recovery, certificate,
+landing, budget-fixed-point, and verifier failure.
+
+The workload crosses market-like order flow, a six-point tight flash-budget
+sweep, wide numerical ranges, and fixed-order-count 1/4/16-MM scaling. This
+makes it useful for detecting objective, availability, latency-tail, and
+degenerate-face regressions together. It is still synthetic development
+evidence, not a substitute for sequencer-boundary replay.
+
+Run it with:
+
+```bash
+cargo run --release -p matching-sim --all-features \
+  --bin solver-experiments -- \
+  --protocol benchmarks/solver/protocol-structural-oracle-development.json \
+  --source-revision <working-or-frozen-revision> \
+  --output-dir /tmp/structural-oracle-development --overwrite
+python3 scripts/benchmarks/analyze_solver_experiments.py \
+  /tmp/structural-oracle-development
+```
+
+The exact derivation, rejected marginal-face selectors, counterexample seed,
+and current development result are recorded in
+`design/solver-experiments/structural-price-sweep-oracle.md`.
+
 ## Protocol v2 suite structure
 
 - **Random quality:** neutral slack/tight controls and concentrated tight books,
