@@ -1704,6 +1704,32 @@ mod tests {
     }
 
     #[test]
+    fn checked_in_public_depth_development_protocol_is_valid() {
+        let bytes =
+            include_bytes!("../../../../benchmarks/solver/protocol-public-depth-development.json");
+        let protocol: Protocol = serde_json::from_slice(bytes).expect("parse protocol");
+        validate_protocol(&protocol).expect("valid protocol");
+        let protocol_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../benchmarks/solver/protocol-public-depth-development.json");
+        let corpora = load_corpora(&protocol, &protocol_path).expect("load pinned corpus");
+        validate_corpus_ranges(&protocol, &corpora).expect("valid public-depth ranges");
+        assert_eq!(protocol.schema_version, 3);
+        assert_eq!(corpora["polymarket-clob-depth-20260717-v1"].cases.len(), 8);
+        assert_eq!(
+            protocol
+                .experiments
+                .iter()
+                .map(|experiment| {
+                    experiment.seed_count
+                        * experiment.budget_scales.len()
+                        * experiment.solvers.len()
+                })
+                .sum::<usize>(),
+            60
+        );
+    }
+
+    #[test]
     fn evaluation_smoke_uses_disjoint_development_seeds() {
         let bytes = include_bytes!("../../../../benchmarks/solver/protocol-v2.json");
         let protocol: Protocol = serde_json::from_slice(bytes).expect("parse protocol");

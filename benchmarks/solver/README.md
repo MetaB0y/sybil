@@ -213,6 +213,52 @@ are recorded in
 `design/solver-experiments/sequencer-replay-corpus.md`. The guarded autonomous
 iteration policy is in `benchmarks/solver/research-loop.md`.
 
+## Public CLOB-depth development protocol
+
+`protocol-public-depth-development.json` complements generated and
+sequencer-sim workloads with one frozen public Polymarket snapshot. It selects
+one volume-ranked event from each of politics, sports, crypto, economics,
+technology, and culture; retains up to 20 near-touch levels per token side;
+preserves complete NegRisk groups; and pins the resulting MessagePack bytes by
+BLAKE3.
+
+A continuously matched resting book normally has no crossing flow, so the six
+event cases and connected portfolio add explicitly synthetic,
+depth-calibrated batch arrivals. Their two shared-budget maker overlays are
+also synthetic. The eighth case keeps the raw anonymous depth untouched as a
+fragmentation and no-trade control. This distinction is part of the protocol:
+public prices, quantities, group shapes, and depth are external observations;
+arrivals, maker identity, and maker capital are not.
+
+Run the fixed 60-row development matrix with:
+
+```bash
+cargo run --release -p matching-sim --all-features \
+  --bin solver-experiments -- \
+  --protocol benchmarks/solver/protocol-public-depth-development.json \
+  --source-revision <working-or-frozen-revision> \
+  --output-dir /tmp/solver-public-depth --overwrite
+python3 scripts/benchmarks/analyze_solver_experiments.py \
+  /tmp/solver-public-depth
+```
+
+The checked-in corpus should not be refreshed casually. To capture a new,
+separately versioned observation:
+
+```bash
+uv run scripts/benchmarks/capture_polymarket_depth.py \
+  --output benchmarks/solver/corpora/<corpus-id>.msgpack \
+  --manifest benchmarks/solver/corpora/<corpus-id>.manifest.json \
+  --corpus-id <corpus-id>
+```
+
+The capture uses Polymarket's public
+[Gamma events](https://docs.polymarket.com/market-data/fetching-markets) and
+[CLOB book](https://docs.polymarket.com/api-reference/market-data/get-order-books-request-body)
+APIs without credentials. Its calibration history, exact source event IDs,
+limitations, and initial result are recorded in
+`design/solver-experiments/public-clob-depth-corpus.md`.
+
 ## Protocol v2 suite structure
 
 - **Random quality:** neutral slack/tight controls and concentrated tight books,

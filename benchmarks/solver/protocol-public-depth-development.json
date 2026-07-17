@@ -1,0 +1,101 @@
+{
+  "schema_version": 3,
+  "protocol_id": "solver-public-clob-depth-development-v1",
+  "title": "Frozen public CLOB depth with explicit batch arrivals and MM overlays",
+  "analysis_policy": {
+    "evidence_status": "public Polymarket anonymous aggregated depth captured 2026-07-17; not Sybil flow; batch arrivals, maker identities, and maker capital are synthetic",
+    "primary_unit": "one frozen public-depth case, budget ratio, and solver",
+    "hard_gates": "no panic, solver failure, timeout, empty result, or verifier-invalid landed result",
+    "soft_metrics": "wall-time median and tails; retained-cash objective and welfare gaps; certificate and landing tails; allocation and price distance; MM utilization",
+    "selection_policy": "prefer Pareto improvements; preserve the raw fragmented portfolio and never present synthetic budget overlays as observed maker capital",
+    "corpus_policy": "six volume-ranked category events retain at most 20 near-touch levels per token side and complete NegRisk groups; event workloads add explicit depth-calibrated arrivals and shared-budget overlays, while one raw cross-event portfolio remains untouched"
+  },
+  "warmup": {
+    "corpus": "polymarket-clob-depth-20260717-v1",
+    "seed": 0,
+    "budget_scale": 1.0
+  },
+  "solvers": {
+    "lp": {
+      "kind": "lp",
+      "label": "Production LP-SLP plus visible landing trim",
+      "max_iterations": 5,
+      "fallback_to_lp": false
+    },
+    "rc-structural": {
+      "kind": "retained-cash-structural",
+      "label": "Certified retained-cash FW with structural oracle",
+      "max_iterations": 100,
+      "tolerance": 0.00001,
+      "absolute_tolerance": 1000000.0,
+      "line_search_steps": 48,
+      "fallback_to_lp": false
+    },
+    "exact-components-bundle-structural": {
+      "kind": "exact-components-pacing-bundle-structural",
+      "label": "Exact connectivity components around the structural pacing bundle",
+      "max_iterations": 100,
+      "max_master_iterations": 1000,
+      "tolerance": 0.00000001,
+      "absolute_tolerance": 100000.0,
+      "master_tolerance": 0.000000001,
+      "master_absolute_tolerance": 1000.0,
+      "line_search_steps": 48,
+      "fallback_to_lp": false
+    },
+    "conic-quasi": {
+      "kind": "conic-quasi",
+      "label": "Independent Clarabel retained-cash reference",
+      "max_iterations": 200,
+      "tolerance": 0.00000001,
+      "time_limit_seconds": 20.0,
+      "fallback_to_lp": false
+    }
+  },
+  "scales": {},
+  "profiles": {},
+  "corpora": {
+    "polymarket-clob-depth-20260717-v1": {
+      "path": "corpora/polymarket-clob-depth-20260717-v1.msgpack",
+      "blake3": "22bc4af085c1718059779fe1a2ae9f1e8a6dad8611608a613aa8f023c5295eaa"
+    }
+  },
+  "experiments": [
+    {
+      "id": "public-event-depth",
+      "suite": "external-snapshot",
+      "profile": "six-category-events",
+      "scale": "event-local-depth",
+      "corpus": "polymarket-clob-depth-20260717-v1",
+      "seed_start": 0,
+      "seed_count": 6,
+      "budget_scales": [0.1, 1.0],
+      "budget_basis": "generated",
+      "solvers": ["lp", "rc-structural", "exact-components-bundle-structural", "conic-quasi"]
+    },
+    {
+      "id": "public-fragmented-portfolio",
+      "suite": "external-snapshot",
+      "profile": "raw-anonymous-depth",
+      "scale": "fifty-market-portfolio",
+      "corpus": "polymarket-clob-depth-20260717-v1",
+      "seed_start": 6,
+      "seed_count": 1,
+      "budget_scales": [1.0],
+      "budget_basis": "generated",
+      "solvers": ["lp", "rc-structural", "exact-components-bundle-structural", "conic-quasi"]
+    },
+    {
+      "id": "public-budgeted-portfolio",
+      "suite": "external-snapshot",
+      "profile": "synthetic-shared-budget-overlay",
+      "scale": "fifty-market-portfolio",
+      "corpus": "polymarket-clob-depth-20260717-v1",
+      "seed_start": 7,
+      "seed_count": 1,
+      "budget_scales": [0.1, 1.0],
+      "budget_basis": "generated",
+      "solvers": ["lp", "rc-structural", "exact-components-bundle-structural", "conic-quasi"]
+    }
+  ]
+}

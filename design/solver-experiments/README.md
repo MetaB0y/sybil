@@ -23,3 +23,5 @@ protocol and source revision frozen before untouched seeds are evaluated.
   exact fixed-pacing primal/dual oracle and marginal-face recovery variants
 - [Exact economic-connectivity decomposition](exact-component-decomposition.md)
   — successful balanced-component router and replay topology audit
+- [Public CLOB-depth corpus](public-clob-depth-corpus.md) — frozen external
+  resting depth, explicit batch-flow synthesis, and benchmark calibration
