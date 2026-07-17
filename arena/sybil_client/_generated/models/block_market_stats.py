@@ -35,10 +35,10 @@ class BlockMarketStats:
                 platform `unique_placers` scalar counts the account once.
             unmatched (int | Unset): Resting orders touching this market that exited the book this
                 block WITHOUT any fill. Cancels are excluded.
-            volume_nanos (int | Unset): Per-market volume contribution from this block's fills. Integer nanodollars;
+            volume_nanos (str | Unset): Per-market volume contribution from this block's fills. Integer nanodollars;
                 1_000_000_000 = $1. Multi-market fills credit each active market with their
                 full notional; the platform `total_volume_nanos` scalar counts each fill once.
-            welfare_nanos (int | Unset): Per-market welfare contribution from this block's fills (B7). Integer nanodollars;
+            welfare_nanos (str | Unset): Per-market welfare contribution from this block's fills (B7). Integer nanodollars;
                 1_000_000_000 = $1. Multi-market fills credit each active market with their
                 full welfare; the platform `total_welfare_nanos` counts each fill once.
                 Encoded as signed nanos to match canonical welfare arithmetic.
@@ -48,8 +48,8 @@ class BlockMarketStats:
     placed: int | Unset = UNSET
     placers: int | Unset = UNSET
     unmatched: int | Unset = UNSET
-    volume_nanos: int | Unset = UNSET
-    welfare_nanos: int | Unset = UNSET
+    volume_nanos: str | Unset = UNSET
+    welfare_nanos: str | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 

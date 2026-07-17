@@ -32,6 +32,24 @@ pub mod process;
 
 static NEXT_STORE_ID: AtomicU64 = AtomicU64::new(0);
 
+#[allow(dead_code)]
+pub fn nanos_i64(value: &serde_json::Value) -> i64 {
+    value
+        .as_str()
+        .expect("*_nanos JSON value must be a decimal string")
+        .parse()
+        .expect("valid i64 decimal string")
+}
+
+#[allow(dead_code)]
+pub fn nanos_u64(value: &serde_json::Value) -> u64 {
+    value
+        .as_str()
+        .expect("*_nanos JSON value must be a decimal string")
+        .parse()
+        .expect("valid u64 decimal string")
+}
+
 fn temp_store_path() -> PathBuf {
     let id = NEXT_STORE_ID.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!("sybil-api-test-{}-{id}.redb", std::process::id()))

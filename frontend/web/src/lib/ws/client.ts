@@ -10,9 +10,8 @@
  *     a single ReplayComplete envelope. After that, live blocks follow.
  *   - On `lagged` envelope (server-side buffer overflow), the server closes
  *     with code 1008. We reconnect with from_block.
- *   - On "block not found" close reason (replay window too old), we drop
- *     lastSeenHeight and reconnect fresh; consumers must refetch a REST
- *     snapshot.
+ *   - On a retention gap, automatic reconnect stops. Consumers must fetch a
+ *     fresh REST snapshot and explicitly resume from that snapshot height.
  *   - The server pings every 30s; the browser auto-pongs. We don't need
  *     to send anything; just track that messages keep arriving.
  *   - On document.visibilitychange === "visible" with a stale connection,
@@ -31,7 +30,6 @@ import type {
 const VISIBILITY_STALE_MS = 30_000; // tab returned + no message for 30s → reconnect
 const INITIAL_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
-const MAX_BLOCK_NOT_FOUND_RETRIES = 1; // after this, give up and surface `failed`
 
 export class BlockStream {
   private readonly wsBase: string;
@@ -45,7 +43,7 @@ export class BlockStream {
   private backoffMs = INITIAL_BACKOFF_MS;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private explicitlyDisconnected = false;
-  private blockNotFoundRetries = 0;
+  private needsColdResync = false;
 
   private readonly listeners = new Map<WsEventType, Set<WsListener>>();
   private visibilityHandler: (() => void) | null = null;
@@ -62,6 +60,7 @@ export class BlockStream {
       return;
     }
     this.explicitlyDisconnected = false;
+    if (this.needsColdResync) return;
     this.attachVisibilityListener();
     if (this.state === "idle" || this.state === "failed") {
       this.openSocket("initial-connect");
@@ -106,6 +105,28 @@ export class BlockStream {
   seedLastSeenHeight(height: number): void {
     if (!Number.isFinite(height) || height < 0) return;
     this.lastSeenHeight = height;
+    this.replayWatermark = height;
+  }
+
+  /** Resume only after consumers have replaced their state from REST. */
+  recoverFromSnapshot(height: number): void {
+    if (!Number.isFinite(height) || height < 0) return;
+    const staleSocket = this.ws;
+    this.ws = null;
+    if (staleSocket) {
+      staleSocket.onclose = null;
+      try {
+        staleSocket.close(1000, "cold snapshot recovered");
+      } catch {
+        // ignore
+      }
+    }
+    this.cancelReconnect();
+    this.lastSeenHeight = height;
+    this.replayWatermark = height;
+    this.needsColdResync = false;
+    this.backoffMs = INITIAL_BACKOFF_MS;
+    this.openSocket("snapshot-recovered");
   }
 
   // ── Internal: socket lifecycle ────────────────────────────────────────
@@ -169,7 +190,8 @@ export class BlockStream {
         this.lastSeenHeight = block.height;
         // First envelope of a replayed reconnect → mark as replaying.
         if (this.state === "connecting") {
-          const replay = this.lastSeenHeight != null && this.replayWatermark != null;
+          const replay =
+            this.lastSeenHeight != null && this.replayWatermark != null;
           this.setState(replay ? "replaying" : "live", "first-envelope");
         }
         this.emit({ type: "block", block });
@@ -179,7 +201,6 @@ export class BlockStream {
         this.replayWatermark = null;
         this.setState("live", "replay-complete");
         this.backoffMs = INITIAL_BACKOFF_MS;
-        this.blockNotFoundRetries = 0;
         this.emit({
           type: "replay-complete",
           upToHeight: envelope.up_to_height,
@@ -200,11 +221,11 @@ export class BlockStream {
         break;
       }
       case "retention_gap": {
-        // The retained prefix is gone. Drop the replay cursor; after the
-        // server's policy close we reconnect at the current public head and
-        // consumers rebuild their derived caches from REST.
-        this.lastSeenHeight = null;
-        this.replayWatermark = null;
+        this.requireColdResync(
+          envelope.requested_height,
+          envelope.retention_min_height,
+          envelope.head_height,
+        );
         break;
       }
     }
@@ -212,28 +233,21 @@ export class BlockStream {
 
   private handleClose(code: number, reason: string): void {
     if (code === 1008 && /block not found/i.test(reason)) {
-      // Replay window has rolled past our last height. Drop it and either
-      // reconnect fresh, or give up if we've already retried.
-      this.lastSeenHeight = null;
-      this.replayWatermark = null;
-      this.blockNotFoundRetries++;
-      if (this.blockNotFoundRetries > MAX_BLOCK_NOT_FOUND_RETRIES) {
-        this.setState("failed", "block-not-found");
-        return;
-      }
-      this.scheduleReconnect("block-not-found");
+      // Compatibility with older servers that closed without first sending
+      // the structured retention_gap envelope.
+      this.requireColdResync(null, null, null, "block-not-found");
       return;
     }
+    if (this.needsColdResync) return;
     // Normal close (server initiated, transport error, lagged forced close).
     if (this.lastSeenHeight != null) {
       this.replayWatermark = this.lastSeenHeight;
     }
-    this.scheduleReconnect(
-      code === 1008 ? "lagged" : "transport-close"
-    );
+    this.scheduleReconnect(code === 1008 ? "lagged" : "transport-close");
   }
 
   private scheduleReconnect(reason: ConnectionTransitionReason): void {
+    if (this.needsColdResync) return;
     this.cancelReconnect();
     this.setState("reconnecting", reason);
     const delay = this.backoffMs;
@@ -251,11 +265,31 @@ export class BlockStream {
     }
   }
 
+  private requireColdResync(
+    requestedHeight: number | null,
+    retentionMinHeight: number | null,
+    headHeight: number | null,
+    reason: ConnectionTransitionReason = "retention-gap",
+  ): void {
+    if (this.needsColdResync) return;
+    this.needsColdResync = true;
+    this.cancelReconnect();
+    this.lastSeenHeight = null;
+    this.replayWatermark = null;
+    this.setState("failed", reason);
+    this.emit({
+      type: "retention-gap",
+      requestedHeight,
+      retentionMinHeight,
+      headHeight,
+    });
+  }
+
   // ── Internal: state + event emission ──────────────────────────────────
 
   private setState(
     state: ConnectionState,
-    reason: ConnectionTransitionReason
+    reason: ConnectionTransitionReason,
   ): void {
     if (this.state === state) return;
     this.state = state;
@@ -282,6 +316,7 @@ export class BlockStream {
     if (typeof document === "undefined") return;
     this.visibilityHandler = () => {
       if (document.visibilityState !== "visible") return;
+      if (this.needsColdResync) return;
       const stale =
         this.lastMessageAt == null ||
         Date.now() - this.lastMessageAt > VISIBILITY_STALE_MS;

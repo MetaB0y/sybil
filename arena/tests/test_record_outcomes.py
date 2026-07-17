@@ -97,7 +97,7 @@ def test_record_outcomes_is_idempotent_and_uses_live_wal_writer(tmp_path, monkey
                 json={
                     "market_id": 1,
                     "status": "resolved",
-                    "payout_nanos": 1_000_000_000,
+                    "payout_nanos": "1000000000",
                     "resolved_at_ms": 1_767_225_600_000,
                 },
             )

@@ -41,9 +41,12 @@ instead of rescanning every order at each derivative evaluation.
 those direction calls. For supported one-hot single-market orders it solves
 the fixed-pacing price dual by sorting hinge breakpoints and recovers a primal
 optimum from the price subgradient. It checks primal/dual agreement on every
-call. The backend deliberately cannot handle price-linearized budget rows,
-arbitrary payoff vectors, the final supporting face, or integer landing; those
-paths still use HiGHS. Development results and rejected face selectors live in
+call. Zero-tolerance certificate comparison uses a floating-evaluation bound
+over absolute affine terms and breakpoint quantity sensitivity; the raw
+unsnapped gap remains in diagnostics. The backend deliberately cannot handle
+price-linearized budget rows, arbitrary payoff vectors, the final supporting
+face, or integer landing; those paths still use HiGHS. Development results and
+rejected face selectors live in
 `design/solver-experiments/structural-price-sweep-oracle.md`.
 
 ## MM buys and sells

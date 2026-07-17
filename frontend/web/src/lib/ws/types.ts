@@ -46,7 +46,9 @@ export type ConnectionTransitionReason =
   | "first-envelope"
   | "replay-complete"
   | "lagged"
+  | "retention-gap"
   | "block-not-found"
+  | "snapshot-recovered"
   | "transport-close"
   | "transport-error"
   | "visibility-stale"
@@ -62,6 +64,12 @@ export type WsEvent =
       lastSentHeight: number | null;
     }
   | {
+      type: "retention-gap";
+      requestedHeight: number | null;
+      retentionMinHeight: number | null;
+      headHeight: number | null;
+    }
+  | {
       type: "connection";
       state: ConnectionState;
       reason: ConnectionTransitionReason;
@@ -70,5 +78,5 @@ export type WsEvent =
 export type WsEventType = WsEvent["type"];
 export type WsEventOf<T extends WsEventType> = Extract<WsEvent, { type: T }>;
 export type WsListener<T extends WsEventType = WsEventType> = (
-  event: WsEventOf<T>
+  event: WsEventOf<T>,
 ) => void;

@@ -28,20 +28,24 @@ The generated package is a typed substrate the thin layer draws on — it is not
 
 ## Spec provenance
 
-The spec is the `utoipa`-generated OpenAPI 3.1 document served by `sybil-api` at `/openapi.json`
-(the same document pinned by `crates/sybil-api/tests/openapi_drift.rs`). It is **not** vendored;
-`regen-sdk.sh` produces it fresh by building and briefly booting `sybil-api` on an ephemeral port
-and scraping `/openapi.json` — mirroring the frontend's `openapi-typescript` flow.
+The spec is the `utoipa`-generated OpenAPI 3.1 document rendered by the
+`sybil-openapi` binary (the same full development superset pinned by
+`crates/sybil-api/tests/openapi_drift.rs`). It is **not** vendored;
+`regen-sdk.sh` renders it directly, without starting a profile-dependent HTTP
+server. The generated package therefore covers public, owner, service, and dev
+operations even though a production runtime mounts only its enabled subset.
 
 Do not infer freshness from a commit hash recorded in this README. After an API
 schema change, run the regeneration command below and review the resulting diff.
 The generated model docstrings record the current unit contract: share units
 use `SHARE_SCALE = 1000` per share and money uses `1e9` nanodollars per dollar.
+Every `*_nanos` value is an exact decimal string on the JSON wire; generated
+models therefore type those fields as `str`.
 
 ## Regenerate
 
 ```bash
-just arena-sdk-regen              # build + boot sybil-api, scrape /openapi.json, regenerate
+just arena-sdk-regen              # render the canonical full document and regenerate
 # or, when the Rust workspace is mid-refactor / not compiling, feed a spec directly:
 SYBIL_OPENAPI=path/or/url ./arena/scripts/regen-sdk.sh
 ```
@@ -56,11 +60,14 @@ The surface the bots actually use — conveniences the raw generated client does
 - **`SybilClient`** — one async `httpx` client; `service_token` auth header; methods returning the
   ergonomic dataclasses in `types.py` (`get_account`, `list_markets`, `get_prices`, `submit_orders`,
   `buy_yes/no` + `sell_yes/no`, `get_portfolio`, `get_account_fills`, `resolve_market`, …).
-- **Block streaming** — `stream_blocks()` uses the versioned public WebSocket
-  with height-based resume, duplicate suppression, and reconnect backoff.
+- **Block streaming** — `stream_block_events()` preserves replay boundaries for
+  side-effecting consumers; `stream_blocks()` and `stream_live_blocks()` provide
+  all-block and live-only convenience views with height-based resume, duplicate
+  suppression, and reconnect backoff.
 - **Unit conversions** — the exchange speaks integer **share-units** (`SHARE_SCALE = 1000` per share)
   and integer **nanodollars** (`NANOS_PER_DOLLAR = 1e9` per $). The layer converts at the boundary:
   - `shares_to_quantity_units()` / `quantity_units_to_shares()`
+  - decimal-string nanos on the wire to Python `int` values in ergonomic dataclasses
   - display accessors: `Account.balance_dollars`, `Market.yes_price`/`no_price`, `Fill.fill_price`, …
   - `OrderSpec` builders (`BuyYes.at_price(price=0.55, quantity=10)`) that emit nanodollar limit prices
     and share-unit quantities.

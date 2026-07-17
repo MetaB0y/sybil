@@ -28,10 +28,10 @@ class LeaderboardEntryResponse:
                 display-name opt-in awaits profiles (SYB-60).
             display_name (str): Signed opt-in public profile name. Its presence is the publication
                 consent boundary for this entire financial row.
-            equity_nanos (int): Current portfolio equity (balance + marked positions). Integer nanodollars; 1_000_000_000 =
+            equity_nanos (str): Current portfolio equity (balance + marked positions). Integer nanodollars; 1_000_000_000 =
                 $1.
             markets_traded (int): Distinct markets with a currently open position.
-            pnl_nanos (int): Net PnL over the window (realized + unrealized). Integer nanodollars; 1_000_000_000 = $1.
+            pnl_nanos (str): Net PnL over the window (realized + unrealized). Integer nanodollars; 1_000_000_000 = $1.
             rank (int): 1-based rank within the returned window.
             roi_bps (int): Return on invested capital over the window, in basis points (100 = 1%).
             avatar_seed (None | str | Unset):
@@ -39,9 +39,9 @@ class LeaderboardEntryResponse:
 
     account_id: int
     display_name: str
-    equity_nanos: int
+    equity_nanos: str
     markets_traded: int
-    pnl_nanos: int
+    pnl_nanos: str
     rank: int
     roi_bps: int
     avatar_seed: None | str | Unset = UNSET

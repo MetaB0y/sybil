@@ -25,6 +25,8 @@ const OPENAPI_EXEMPT_PATHS: &[&str] = &[
 ];
 
 const EXPECTED_UNIT_FIELD_DESCRIPTIONS: usize = 136;
+const EXPECTED_NANOS_WIRE_FIELDS: usize = 108;
+const EXPECTED_NANOS_WIRE_PARAMETERS: usize = 3;
 
 /// Registered method/path pairs, minus the non-API exemptions.
 fn documented_route_mounts() -> BTreeSet<(String, String)> {
@@ -77,12 +79,7 @@ fn expected_unit_phrase(field: &str) -> Option<&'static str> {
             | "delta"
     ) {
         Some("Integer share-units")
-    } else if field.ends_with("_nanos")
-        || matches!(
-            field,
-            "prices" | "min_yes_price" | "max_yes_price" | "min_volume"
-        )
-    {
+    } else if field.ends_with("_nanos") {
         Some("Integer nanodollars")
     } else if matches!(
         field,
@@ -169,6 +166,94 @@ fn check_schema_unit_descriptions(
 
     for (key, child) in object {
         check_schema_unit_descriptions(child, &format!("{path}.{key}"), missing, covered);
+    }
+}
+
+fn nanos_schema_is_exact_decimal_string(schema: &serde_json::Value) -> bool {
+    match schema.get("type") {
+        Some(serde_json::Value::String(kind)) if kind == "string" => true,
+        Some(serde_json::Value::String(kind)) if kind == "array" => schema
+            .get("items")
+            .is_some_and(nanos_schema_is_exact_decimal_string),
+        Some(serde_json::Value::String(kind)) if kind == "object" => schema
+            .get("additionalProperties")
+            .is_some_and(nanos_schema_is_exact_decimal_string),
+        Some(serde_json::Value::Array(kinds)) => {
+            kinds.iter().any(|kind| kind == "string")
+                && kinds.iter().all(|kind| kind == "string" || kind == "null")
+        }
+        _ => false,
+    }
+}
+
+fn check_nanos_wire_schemas(
+    value: &serde_json::Value,
+    path: &str,
+    invalid: &mut Vec<String>,
+    covered: &mut usize,
+) {
+    let Some(object) = value.as_object() else {
+        if let Some(array) = value.as_array() {
+            for (index, child) in array.iter().enumerate() {
+                check_nanos_wire_schemas(child, &format!("{path}[{index}]"), invalid, covered);
+            }
+        }
+        return;
+    };
+
+    if let Some(properties) = object
+        .get("properties")
+        .and_then(serde_json::Value::as_object)
+    {
+        for (field, schema) in properties {
+            if !field.ends_with("_nanos") {
+                continue;
+            }
+            *covered += 1;
+            if !nanos_schema_is_exact_decimal_string(schema) {
+                invalid.push(format!("{path}.{field}: got {schema}"));
+            }
+        }
+    }
+
+    for (key, child) in object {
+        check_nanos_wire_schemas(child, &format!("{path}.{key}"), invalid, covered);
+    }
+}
+
+fn check_nanos_wire_parameters(
+    value: &serde_json::Value,
+    path: &str,
+    invalid: &mut Vec<String>,
+    covered: &mut usize,
+) {
+    let Some(object) = value.as_object() else {
+        if let Some(array) = value.as_array() {
+            for (index, child) in array.iter().enumerate() {
+                check_nanos_wire_parameters(child, &format!("{path}[{index}]"), invalid, covered);
+            }
+        }
+        return;
+    };
+
+    if object
+        .get("in")
+        .and_then(serde_json::Value::as_str)
+        .is_some()
+        && let Some(name) = object.get("name").and_then(serde_json::Value::as_str)
+        && name.ends_with("_nanos")
+    {
+        *covered += 1;
+        let exact = object
+            .get("schema")
+            .is_some_and(nanos_schema_is_exact_decimal_string);
+        if !exact {
+            invalid.push(format!("{path}.{name}: got {}", object["schema"]));
+        }
+    }
+
+    for (key, child) in object {
+        check_nanos_wire_parameters(child, &format!("{path}.{key}"), invalid, covered);
     }
 }
 
@@ -290,4 +375,99 @@ fn openapi_unit_fields_have_unit_descriptions() {
         covered, EXPECTED_UNIT_FIELD_DESCRIPTIONS,
         "OpenAPI unit-bearing field description count changed; update the pin if deliberate"
     );
+}
+
+#[test]
+fn openapi_nanos_fields_are_decimal_strings() {
+    let spec = openapi_json();
+    let schemas = spec
+        .pointer("/components/schemas")
+        .expect("OpenAPI components.schemas");
+    let mut invalid = Vec::new();
+    let mut covered_fields = 0;
+    let mut covered_parameters = 0;
+
+    check_nanos_wire_schemas(
+        schemas,
+        "components.schemas",
+        &mut invalid,
+        &mut covered_fields,
+    );
+    check_nanos_wire_parameters(
+        &spec["paths"],
+        "paths",
+        &mut invalid,
+        &mut covered_parameters,
+    );
+
+    assert!(
+        invalid.is_empty(),
+        "OpenAPI *_nanos fields and parameters must be exact decimal strings (including maps and nested arrays):\n{}",
+        invalid.join("\n")
+    );
+    assert_eq!(
+        covered_fields, EXPECTED_NANOS_WIRE_FIELDS,
+        "OpenAPI *_nanos field count changed; keep the decimal-string contract and update the pin"
+    );
+    assert_eq!(
+        covered_parameters, EXPECTED_NANOS_WIRE_PARAMETERS,
+        "OpenAPI *_nanos parameter count changed; keep the decimal-string contract and update the pin"
+    );
+}
+
+#[test]
+fn openapi_operation_ids_are_complete_and_unique() {
+    let spec = openapi_json();
+    let mut operation_ids = BTreeSet::new();
+    let mut operations = 0;
+
+    for item in spec["paths"].as_object().expect("OpenAPI paths").values() {
+        for (method, operation) in item.as_object().expect("OpenAPI path item") {
+            if !matches!(
+                method.as_str(),
+                "get" | "post" | "put" | "patch" | "delete" | "options" | "head" | "trace"
+            ) {
+                continue;
+            }
+            operations += 1;
+            let operation_id = operation["operationId"]
+                .as_str()
+                .expect("every operation needs an SDK-stable operationId");
+            assert!(
+                operation_ids.insert(operation_id.to_string()),
+                "duplicate OpenAPI operationId {operation_id:?}"
+            );
+        }
+    }
+
+    assert_eq!(operation_ids.len(), operations);
+}
+
+#[test]
+fn retained_block_response_documents_gone_status() {
+    let spec = openapi_json();
+    let response = spec
+        .pointer("/paths/~1v1~1blocks~1{height}/get/responses/410")
+        .expect("GET /v1/blocks/{height} must document retention expiry");
+    assert_eq!(
+        response.pointer("/content/application~1json/schema/$ref"),
+        Some(&serde_json::Value::String(
+            "#/components/schemas/ApiErrorResponse".to_string()
+        ))
+    );
+}
+
+#[test]
+fn public_key_examples_are_valid_compressed_p256_points() {
+    let spec = openapi_json();
+    for schema in ["RegisterKeyRequest", "SignedRegisterKeyRequest"] {
+        let pointer = format!("/components/schemas/{schema}/properties/public_key_hex/example");
+        let example = spec
+            .pointer(&pointer)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_else(|| panic!("{schema} needs a public-key example"));
+        let bytes = hex::decode(example).expect("public-key example must be hex");
+        p256::PublicKey::from_sec1_bytes(&bytes)
+            .unwrap_or_else(|error| panic!("{schema} example is not a P256 point: {error}"));
+    }
 }

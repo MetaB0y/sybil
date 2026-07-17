@@ -6845,6 +6845,7 @@ dependencies = [
  "sybil-l1-protocol",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-subscriber 0.3.23",
 ]
@@ -6923,6 +6924,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
+ "blake3",
  "clap",
  "futures-util",
  "getrandom 0.4.3",

@@ -48,9 +48,10 @@ acceptance contract to Playwright or source selectors.
 - `src/lib/api/schema.d.ts` is generated from `sybil-api`'s OpenAPI document.
   It stays committed so frontend builds do not need a running Rust server.
   `pnpm types:generate` exports `ApiDoc` directly from the local Rust revision,
-  applies the bigint declaration workaround, and formats the result
-  deterministically; it never depends on a deployed API. `pnpm types:check`
-  fails when the committed declaration has drifted.
+  and formats the result deterministically; it never depends on a deployed
+  API. Protocol-sized `*_nanos` values are decimal strings in both OpenAPI and
+  JSON, so JavaScript clients can parse them exactly as `bigint`.
+  `pnpm types:check` fails when the committed declaration has drifted.
 - Read API keys are read-only. Orders, cancels, key changes, and withdrawals
   require a registered signing key.
 

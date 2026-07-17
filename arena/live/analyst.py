@@ -793,7 +793,7 @@ class PersonaAnalyst:
     async def run(self) -> None:
         """Stream blocks for cadence; drive on_block. Fail-open per block (SYB-185)."""
         self._running = True
-        async for block in self.client.stream_blocks():
+        async for block in self.client.stream_live_blocks():
             if not self._running:
                 break
             try:

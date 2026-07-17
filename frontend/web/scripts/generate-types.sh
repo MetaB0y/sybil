@@ -26,7 +26,6 @@ else
 fi
 
 openapi-typescript "$SPEC" -o "$OUTPUT"
-node "$WEB_DIR/scripts/patch-bigints.mjs" "$OUTPUT"
 prettier --write "$OUTPUT"
 
 if [ "${1:-}" = "--check" ] && ! cmp -s "$SCHEMA" "$OUTPUT"; then

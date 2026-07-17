@@ -110,6 +110,22 @@ impl AppError {
         )
     }
 
+    pub fn sequencer_unavailable(error: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            error,
+            "SEQUENCER_UNAVAILABLE",
+        )
+    }
+
+    pub fn sequencer_persistence_unavailable(error: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            error,
+            "SEQUENCER_PERSISTENCE_UNAVAILABLE",
+        )
+    }
+
     pub fn bridge_unavailable() -> Self {
         Self::new(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -216,7 +232,7 @@ impl From<matching_sequencer::SequencerError> for AppError {
                 AppError::rate_limited(1).with_details(format!("{}", err))
             }
             matching_sequencer::SequencerError::ActorGone => {
-                AppError::internal("Sequencer actor shut down")
+                AppError::sequencer_unavailable("Sequencer actor is unavailable")
             }
             matching_sequencer::SequencerError::AccountAlreadyRegistered => {
                 AppError::conflict("Public key already registered to an account")
@@ -315,7 +331,10 @@ impl From<matching_sequencer::SequencerError> for AppError {
                 AppError::internal("Internal sequencer integrity failure")
             }
             matching_sequencer::SequencerError::Persistence(msg) => {
-                AppError::internal(format!("Persistence error: {msg}"))
+                tracing::error!(error = %msg, "sequencer persistence unavailable");
+                AppError::sequencer_persistence_unavailable(
+                    "Sequencer persistence is temporarily unavailable",
+                )
             }
         }
     }
@@ -360,6 +379,20 @@ mod tests {
         assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(error.body.code, "HISTORY_INCOMPLETE");
         assert_eq!(error.body.error, "window predates history");
+    }
+
+    #[test]
+    fn unavailable_actor_and_persistence_are_retryable_service_failures() {
+        let actor = AppError::from(matching_sequencer::SequencerError::ActorGone);
+        assert_eq!(actor.status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(actor.body.code, "SEQUENCER_UNAVAILABLE");
+
+        let persistence = AppError::from(matching_sequencer::SequencerError::Persistence(
+            "disk full".into(),
+        ));
+        assert_eq!(persistence.status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(persistence.body.code, "SEQUENCER_PERSISTENCE_UNAVAILABLE");
+        assert!(!persistence.body.error.contains("disk full"));
     }
 
     #[test]

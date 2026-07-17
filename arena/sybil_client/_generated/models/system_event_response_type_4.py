@@ -24,14 +24,14 @@ class SystemEventResponseType4:
     """ 
         Attributes:
             account_id (int):
-            amount_nanos (int): Refunded account credit. Integer nanodollars; 1_000_000_000 = $1.
+            amount_nanos (str): Refunded account credit. Integer nanodollars; 1_000_000_000 = $1.
             reason (str):
             type_ (SystemEventResponseType4Type):
             withdrawal_id (int):
      """
 
     account_id: int
-    amount_nanos: int
+    amount_nanos: str
     reason: str
     type_: SystemEventResponseType4Type
     withdrawal_id: int

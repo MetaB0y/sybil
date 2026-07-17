@@ -28,7 +28,7 @@ class AccountFillResponse:
             block_height (int):
             cursor (str): Stable cursor for forward pagination (`GET .../fills?after=<cursor>`).
                 Opaque to clients; current encoding is `<block_height>.<order_id>`.
-            fill_price_nanos (int): Fill price. Integer nanodollars; 1_000_000_000 = $1.
+            fill_price_nanos (str): Fill price. Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
             fill_qty (int): Fill quantity. Integer share-units; 1000 units = 1 share.
             order_id (int):
@@ -38,7 +38,7 @@ class AccountFillResponse:
 
     block_height: int
     cursor: str
-    fill_price_nanos: int
+    fill_price_nanos: str
     fill_qty: int
     order_id: int
     position_deltas: list[PositionDeltaResponse]

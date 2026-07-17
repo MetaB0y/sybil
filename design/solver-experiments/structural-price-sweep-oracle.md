@@ -202,7 +202,16 @@ Before considering a default change:
   `NumericalFailure`.
 - Decision: preserve proptest regression
   `9f52d6f39599cbcaec6aa89a718bcb627b6fc350ff30da0ae6782fdfe31da7f6`.
-  Accept convergence when the certified gap is below a 32-ULP,
-  score-scale-aware subtraction floor, while continuing to report the
-  unsnapped gap. This is a representation bound, not a relaxed economic
-  tolerance.
+  The first repair used a 32-ULP final-score floor.
+- Audit follow-up: a 2,048-case zero-tolerance conformance run found that the
+  fixed final-score scale was still insufficient. An exactly marginal
+  billion-unit order can have near-zero hinge value while breakpoint-price
+  rounding contributes a visible `0.11920928955078125`-nano residual. The
+  solver now uses a conservative `gamma_n = n*u/(1-n*u)` evaluation bound over
+  absolute affine terms plus every order's breakpoint Lipschitz scale. This
+  handles both cancellation and large marginal quantities without snapping the
+  reported gap to zero. Preserve regression
+  `74794fe1358c2f76416876a2b441d758d0ceb26ea2950f5982a7e7327d937b27`.
+  Both structural and HiGHS retained-cash profiles then passed 2,048 generated
+  cases with zero absolute and relative tolerances. This remains a
+  representation bound, not a relaxed economic tolerance.

@@ -23,24 +23,24 @@ T = TypeVar("T", bound="PositionValueResponse")
 class PositionValueResponse:
     """ 
         Attributes:
-            current_price_nanos (int): Current mark price. Integer nanodollars; 1_000_000_000 = $1.
+            current_price_nanos (str): Current mark price. Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
             market_id (int):
             outcome (str):
             quantity (int): Signed position quantity. Integer share-units; 1000 units = 1 share.
-            value_nanos (int): Mark-to-market position value. Integer nanodollars; 1_000_000_000 = $1.
-            avg_entry_price_nanos (int | Unset): Weighted-average entry price for this side of the market (C1). `0`
+            value_nanos (str): Mark-to-market position value. Integer nanodollars; 1_000_000_000 = $1.
+            avg_entry_price_nanos (str | Unset): Weighted-average entry price for this side of the market (C1). `0`
                 for positions opened before C1 landed (`#[serde(default)]` forward
                 compat). Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
      """
 
-    current_price_nanos: int
+    current_price_nanos: str
     market_id: int
     outcome: str
     quantity: int
-    value_nanos: int
-    avg_entry_price_nanos: int | Unset = UNSET
+    value_nanos: str
+    avg_entry_price_nanos: str | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 

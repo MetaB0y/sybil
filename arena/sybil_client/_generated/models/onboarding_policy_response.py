@@ -28,7 +28,7 @@ class OnboardingPolicyResponse:
             accounts_allocated (int): Durable non-system account ids already allocated on this chain.
             accounts_remaining (int): Remaining anonymous allocations under the current deployment policy.
             enabled (bool): Whether another anonymous account can currently be allocated.
-            grant_nanos (int): Fixed play-money balance assigned by the server to each new public
+            grant_nanos (str): Fixed play-money balance assigned by the server to each new public
                 account. Integer nanodollars; 1_000_000_000 = $1.
      """
 
@@ -36,7 +36,7 @@ class OnboardingPolicyResponse:
     accounts_allocated: int
     accounts_remaining: int
     enabled: bool
-    grant_nanos: int
+    grant_nanos: str
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 

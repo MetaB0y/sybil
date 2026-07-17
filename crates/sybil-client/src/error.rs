@@ -54,6 +54,15 @@ pub enum Error {
 }
 
 impl Error {
+    /// HTTP status for an API rejection, if the request reached the Sybil API.
+    /// Transport and protocol failures deliberately return `None`.
+    pub fn api_status(&self) -> Option<u16> {
+        match self {
+            Self::Api { status, .. } => Some(*status),
+            _ => None,
+        }
+    }
+
     /// Decode the server's stable error envelope while preserving the raw body
     /// on [`Error::Api`] for diagnostics and forward compatibility.
     pub fn api_error_response(&self) -> Option<sybil_api_types::ApiErrorResponse> {
@@ -80,5 +89,17 @@ mod tests {
         let details = response.details.unwrap();
         assert_eq!(details.market_id, Some(42));
         assert_eq!(details.market_status.as_deref(), Some("resolved"));
+    }
+
+    #[test]
+    fn api_status_does_not_treat_transport_failure_as_authoritative_absence() {
+        let missing = Error::Api {
+            status: 404,
+            body: r#"{"error":"missing","code":"NOT_FOUND"}"#.to_string(),
+        };
+        assert_eq!(missing.api_status(), Some(404));
+
+        let transport = Error::WebSocket("connection reset".to_string());
+        assert_eq!(transport.api_status(), None);
     }
 }

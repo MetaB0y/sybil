@@ -156,6 +156,11 @@ The explicit `validity` Compose profile runs one restart-safe `sybil-prover
 daemon`, with separate redb and artifact volumes and authenticated pull/ack
 against the API outbox. Its Compose configuration selects the typed mock
 backend for bounded integration tests; the repository daemon default is STARK.
+The scheduler, proof-job source, and HTTP server are all process-critical:
+an error, panic, or clean early return from any one broadcasts shutdown to its
+siblings, drains the HTTP server, and exits nonzero so Compose's bounded
+`on-failure` policy can act. `/readyz` is an additional serving contract, not a
+replacement for process supervision.
 The `docker-compose.validity.yml` overlay also enables source proof-job/DA
 retention and swaps VictoriaMetrics' empty prover discovery file for the exact
 daemon target. It must be selected from block 1; use
@@ -210,7 +215,12 @@ blessed from the current RPC view. A detected reorg, finality regression,
 provider disagreement, invalid hash binding, or root mismatch adds a persistent
 integrity latch that restarts refuse. Fatal startup or runtime failures retain
 only the metrics and unhealthy health endpoints so the first scrape cannot
-lose the incident; see the
+lose the incident. That fatal metrics-only mode still listens for Ctrl-C and
+Docker SIGTERM. Ordinary polling also honors those signals, cancels the
+in-flight poll, and gracefully drains the monitoring server. Every Ethereum
+RPC and Sybil API request shares a configurable end-to-end deadline
+(`SYBIL_L1_REQUEST_TIMEOUT_MS`, 30 seconds by default), so one silent provider
+cannot leave the last readiness snapshot looking healthy forever; see the
 [L1 reorg runbook](../../runbooks/l1-reorg-recovery.md).
 
 Local Anvil explicitly uses `unsafe-single-dev` and may set both confirmation
@@ -350,7 +360,12 @@ the actor's read-only progress snapshot: tracked markets, observed/completed
 block heights, last accepted submission block, progress time, and submission
 success/failure counters. Compose checks readiness directly and
 VictoriaMetrics scrapes the same owner; `sybil-api` does not infer native MM
-health from orders or fills.
+health from orders or fills. The process listens for Ctrl-C and Docker SIGTERM.
+WebSocket connection/retry and read-only refresh work are cancellation-aware;
+an already-started order submission is allowed to resolve so shutdown never
+turns it into an ambiguous accepted-or-dropped write. The process gives owned
+tasks 35 seconds and Compose gives the process 40 seconds before escalation.
+An unexpected actor or monitoring-server exit is a nonzero process failure.
 
 The Polymarket integration follows the same owner-health rule on private port
 9105, but its readiness composes all required actors: catalog sync, provider
@@ -360,7 +375,29 @@ it. Stale windows are three actor cadences with conservative floors (including
 twice the MM price-expiry window for the feed). Process liveness remains a
 separate `/healthz`, while `/readyz`, `/metrics`, Compose, VictoriaMetrics, and
 vmalert expose which owner stopped progressing. API-side reference-price
-expiry remains an independent consumer safety boundary.
+expiry remains an independent consumer safety boundary. Catalog sync,
+resolution, feed refresh, and WebSocket reconnects check the same cancellation
+token between safe side-effect boundaries. Clean or failed early return from
+any required actor stops the complete integration and exits nonzero; the
+internal 35-second shutdown deadline sits inside Compose's 40-second grace
+period.
+
+Mirror-side remote creation is restart-aware. Every Polymarket condition maps
+to a normalized, domain-separated creation key, so a lost market-create
+response returns the original Sybil market rather than allocating a duplicate.
+The integration durably checkpoints each returned market, group, extension,
+and completed event immediately; its mapping publication syncs the file,
+renames it atomically, and syncs the parent directory. Because market-group
+creation does not yet have protocol identity
+([#129](https://github.com/MetaB0y/sybil/issues/129)), restart also lists and
+adopts a uniquely compatible existing group left by a crash before the local
+checkpoint.
+
+Persisted MM accounts are replaced only after an authoritative API 404. A
+network, authentication, decode, or 5xx failure fails startup rather than
+minting another funded identity. The remaining crash window between committed
+account creation and receipt/local checkpoint requires idempotent provisioning
+([#188](https://github.com/MetaB0y/sybil/issues/188)).
 
 The initial history redb retains raw batches, fills, events, equity, prices,
 and candles without the former 30/31-day and global-row ceilings. This removes

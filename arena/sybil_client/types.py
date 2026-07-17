@@ -132,6 +132,24 @@ class Block:
         return None
 
 
+@dataclass(frozen=True)
+class BlockStreamBlockEvent:
+    """A committed block annotated with whether it came from replay."""
+
+    block: Block
+    replayed: bool
+
+
+@dataclass(frozen=True)
+class BlockStreamReplayCompleteEvent:
+    """Boundary after which subsequent blocks on this connection are live."""
+
+    up_to_height: int
+
+
+BlockStreamEvent = BlockStreamBlockEvent | BlockStreamReplayCompleteEvent
+
+
 @dataclass
 class PricePoint:
     """A single price observation at a given block."""

@@ -24,13 +24,13 @@ class SystemEventResponseType14:
     """ 
         Attributes:
             account_id (int):
-            amount_nanos (int): Amount moved into the account. Integer nanodollars; 1_000_000_000 = $1.
+            amount_nanos (str): Amount moved into the account. Integer nanodollars; 1_000_000_000 = $1.
             sybil_account_key_hex (str):
             type_ (SystemEventResponseType14Type):
      """
 
     account_id: int
-    amount_nanos: int
+    amount_nanos: str
     sybil_account_key_hex: str
     type_: SystemEventResponseType14Type
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)

@@ -871,7 +871,9 @@ fn parse_candle_resolution(input: &str) -> Result<u32, AppError> {
         ("tags" = Option<String>, Query, description = "Comma-separated tags"),
         ("category" = Option<String>, Query, description = "Category filter"),
         ("status" = Option<String>, Query, description = "Status filter"),
-        ("min_volume" = Option<u64>, Query, description = "Minimum volume"),
+        ("min_yes_price_nanos" = Option<String>, Query, description = "Minimum YES price. Integer nanodollars; per-share probabilities in [0, 1e9]"),
+        ("max_yes_price_nanos" = Option<String>, Query, description = "Maximum YES price. Integer nanodollars; per-share probabilities in [0, 1e9]"),
+        ("min_volume_nanos" = Option<String>, Query, description = "Minimum cumulative traded notional. Integer nanodollars"),
         ("sort" = Option<String>, Query, description = "Sort field"),
         ("limit" = Option<usize>, Query, description = "Result limit"),
         ("offset" = Option<usize>, Query, description = "Result offset"),
@@ -904,9 +906,9 @@ pub async fn search_markets(
         tags,
         category: params.category,
         status: params.status,
-        min_yes_price: params.min_yes_price.map(Nanos),
-        max_yes_price: params.max_yes_price.map(Nanos),
-        min_volume: params.min_volume,
+        min_yes_price: params.min_yes_price_nanos.map(Nanos),
+        max_yes_price: params.max_yes_price_nanos.map(Nanos),
+        min_volume: params.min_volume_nanos,
         sort_by,
         limit: params.limit,
         offset: params.offset,
@@ -982,7 +984,7 @@ pub async fn set_reference_prices(
     Json(req): Json<SetReferencePricesRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     if let Some((market_id, price)) = req
-        .prices
+        .prices_nanos
         .iter()
         .find(|(_, price)| **price > NANOS_PER_DOLLAR)
     {
@@ -990,7 +992,7 @@ pub async fn set_reference_prices(
             "reference price for market {market_id} exceeds {NANOS_PER_DOLLAR}: {price}"
         )));
     }
-    state.update_reference_prices(req.prices).await;
+    state.update_reference_prices(req.prices_nanos).await;
     Ok(Json(serde_json::json!({"updated": true})))
 }
 

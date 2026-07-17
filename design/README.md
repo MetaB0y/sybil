@@ -2,7 +2,7 @@
 tags: [moc, guide]
 layer: core
 status: current
-last_verified: 2026-07-13
+last_verified: 2026-07-17
 ---
 
 # Design workspace
@@ -67,6 +67,31 @@ Resurvey the named code and issue state before turning any of these into work.
 
 ## Current audits
 
+- [`code-quality-audit-session-report-2026-07-17.md`](code-quality-audit-session-report-2026-07-17.md)
+  — detailed time, sequence, changes, evidence, issue, and handoff report for
+  the six-cluster audit session.
+- [`code-quality-audit-program-2026-07.md`](code-quality-audit-program-2026-07.md)
+  — living cluster ledger, evidence hierarchy, and next-audit charter.
+- [`code-quality-audit-exact-wire-2026-07-17.md`](code-quality-audit-exact-wire-2026-07-17.md)
+  — Rust/OpenAPI/Python/TypeScript exact nanodollar contract; the broader
+  64-bit policy remains open in GitHub #177.
+- [`code-quality-audit-validity-mutation-2026-07-17.md`](code-quality-audit-validity-mutation-2026-07-17.md)
+  — targeted validity-core mutation campaign, survivor ledger, verifier and
+  settlement fixes, guest repin, and open policy issues #178/#179.
+- [`code-quality-audit-economic-properties-2026-07-17.md`](code-quality-audit-economic-properties-2026-07-17.md)
+  — independent settlement/MM/UCP oracles, complete-set mint/burn properties,
+  structural certificate fix, and open reservation-model issue #180.
+- [`code-quality-audit-api-client-conformance-2026-07-17.md`](code-quality-audit-api-client-conformance-2026-07-17.md)
+  — OpenAPI inventory, generated-client parity, replay/retention safety fixes,
+  and open executable-contract issues #181–#183.
+- [`code-quality-audit-actor-lifecycle-2026-07-17.md`](code-quality-audit-actor-lifecycle-2026-07-17.md)
+  — actor/task ownership matrix, cancellation and process-supervision fixes,
+  bounded verifier workers, and open lifecycle work #184–#187.
+- [`code-quality-audit-error-recovery-2026-07-17.md`](code-quality-audit-error-recovery-2026-07-17.md)
+  — production panic/error classification, durable-operation and retry
+  matrices, crash-window fixes, and open recovery work #188/#189.
+- [`code-quality-audit-collaboration-log-2026-07.md`](code-quality-audit-collaboration-log-2026-07.md)
+  — timestamped reviewer/agent handoff and decision record.
 - [`dos-audit-2026-07-11.md`](dos-audit-2026-07-11.md) — permissionless
   resource/state-growth audit. Findings remain active until code or a dated
   follow-up closes them.

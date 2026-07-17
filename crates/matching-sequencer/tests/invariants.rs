@@ -4,7 +4,6 @@
 //! only checks with `eprintln` warnings (sequencer.rs:650-715).
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use matching_engine::{
     MarketId, MarketSet, NANOS_PER_DOLLAR, Nanos, Qty, compute_fill_settlement, derive_minting,
@@ -271,10 +270,6 @@ fn expected_block_balance_delta(witness: &BlockWitness) -> i64 {
     balance_delta + mint_delta
 }
 
-// Counters to verify tests are actually exercising trades
-static TRADES_SEEN: AtomicU64 = AtomicU64::new(0);
-static CASES_WITH_TRADES: AtomicU64 = AtomicU64::new(0);
-
 // ---------------------------------------------------------------------------
 // Property tests
 // ---------------------------------------------------------------------------
@@ -292,10 +287,10 @@ proptest! {
         let bp = seq.produce_block(submissions, 1000);
 
         let n_fills = bp.block.fills.iter().filter(|f| f.fill_qty > Qty::ZERO).count();
-        if n_fills > 0 {
-            TRADES_SEEN.fetch_add(n_fills as u64, Ordering::Relaxed);
-            CASES_WITH_TRADES.fetch_add(1, Ordering::Relaxed);
-        }
+        assert!(
+            n_fills > 0,
+            "crossing generator produced a block with no non-zero fills"
+        );
 
         assert_position_balance(&seq, &markets);
     }
@@ -616,22 +611,6 @@ proptest! {
             pre_balance, post_balance, expected_balance_delta
         );
     }
-}
-
-/// Print trade coverage stats when the test binary exits.
-/// This is NOT a test — it's a diagnostic.
-#[test]
-fn z_print_trade_coverage() {
-    // Name starts with z_ so it runs last (tests are alphabetical within a binary).
-    // This test always passes — it just prints stats from the atomic counters.
-    let trades = TRADES_SEEN.load(Ordering::Relaxed);
-    let cases = CASES_WITH_TRADES.load(Ordering::Relaxed);
-    eprintln!(
-        "\n=== TRADE COVERAGE: {} fills across {} cases with trades ===\n",
-        trades, cases
-    );
-    // If we're getting zero trades, the strategies are broken
-    // (but don't assert here — the counters only track position_balance_after_block)
 }
 
 /// Regression: crossing pair + unfilled solo order on the same market must still produce fills.

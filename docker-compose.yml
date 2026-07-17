@@ -184,6 +184,9 @@ services:
       sybil-api:
         condition: service_healthy
     restart: unless-stopped
+    # Actor requests are bounded at 30s; allow an in-flight acknowledged write
+    # to settle before Docker escalates SIGTERM to SIGKILL.
+    stop_grace_period: 40s
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9105/readyz"]
       interval: 10s
@@ -237,6 +240,9 @@ services:
       sybil-native-admin:
         condition: service_completed_successfully
     restart: unless-stopped
+    # The shared MM awaits an in-flight order submission to avoid an ambiguous
+    # accept-or-drop result, then observes cancellation before new side effects.
+    stop_grace_period: 40s
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9104/readyz"]
       interval: 10s

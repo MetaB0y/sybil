@@ -24,13 +24,13 @@ class SystemEventResponseType5:
     """ 
         Attributes:
             account_id (int):
-            amount_nanos (int): Finalized withdrawal amount. Integer nanodollars; 1_000_000_000 = $1.
+            amount_nanos (str): Finalized withdrawal amount. Integer nanodollars; 1_000_000_000 = $1.
             type_ (SystemEventResponseType5Type):
             withdrawal_id (int):
      """
 
     account_id: int
-    amount_nanos: int
+    amount_nanos: str
     type_: SystemEventResponseType5Type
     withdrawal_id: int
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)

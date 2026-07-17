@@ -14,7 +14,7 @@ export async function addDemoFunds(
 ): Promise<void> {
   const res = await api.POST("/v1/accounts/{id}/fund", {
     params: { path: { id: accountId } },
-    body: { amount_nanos: Number(amountNanos) as unknown as string },
+    body: { amount_nanos: amountNanos.toString() },
   });
   if (res.error) {
     const status = res.response?.status;

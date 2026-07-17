@@ -7,7 +7,16 @@ import pytest
 from bots.base import BaseAgent
 from bots.informed import FixedProbabilityModel
 from sybil_client.client import SybilClientError
-from sybil_client.types import Account, AccountFill, Block, BuyNo, BuyYes, Position
+from sybil_client.types import (
+    Account,
+    AccountFill,
+    Block,
+    BlockStreamBlockEvent,
+    BlockStreamReplayCompleteEvent,
+    BuyNo,
+    BuyYes,
+    Position,
+)
 
 
 class TestProbabilityModel:
@@ -145,10 +154,10 @@ class _StreamingClient:
     def __init__(self, blocks: list[Block]):
         self.blocks = blocks
 
-    def stream_blocks(self):
+    def stream_block_events(self):
         async def _stream():
             for block in self.blocks:
-                yield block
+                yield BlockStreamBlockEvent(block=block, replayed=False)
 
         return _stream()
 
@@ -438,3 +447,44 @@ async def test_base_agent_on_block_exception_continues_loop(caplog):
     assert agent.on_block_error_count == 1
     assert "name=Flaky" in caplog.text
     assert "block_height=1" in caplog.text
+
+
+@pytest.mark.anyio
+async def test_base_agent_observes_replay_without_running_strategy():
+    replayed = Block(
+        height=5,
+        parent_hash="",
+        state_root="",
+        fills=[],
+        clearing_prices={},
+        total_welfare=0,
+        total_volume=0,
+        orders_filled=0,
+    )
+    live = Block(
+        height=6,
+        parent_hash="",
+        state_root="",
+        fills=[],
+        clearing_prices={},
+        total_welfare=0,
+        total_volume=0,
+        orders_filled=0,
+    )
+
+    class ReplayClient(_StreamingClient):
+        def stream_block_events(self):
+            async def _stream():
+                yield BlockStreamBlockEvent(block=replayed, replayed=True)
+                yield BlockStreamReplayCompleteEvent(up_to_height=5)
+                yield BlockStreamBlockEvent(block=live, replayed=False)
+
+            return _stream()
+
+    agent = _FailsOnceAgent(client=ReplayClient([]), account_id=7, name="ReplaySafe")
+    await agent.run()
+
+    # _FailsOnceAgent fails on its first strategy call. If replay had invoked
+    # the strategy, the live block would have been a second call.
+    assert agent.on_block_calls == 1
+    assert len(agent.balance_history) == 2

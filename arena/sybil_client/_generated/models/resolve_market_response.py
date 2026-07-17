@@ -23,13 +23,13 @@ class ResolveMarketResponse:
     """ 
         Attributes:
             market_id (int):
-            payout_nanos (int): Resolution payout per YES share. Integer nanodollars;
+            payout_nanos (str): Resolution payout per YES share. Integer nanodollars;
                 1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
             status (str):
      """
 
     market_id: int
-    payout_nanos: int
+    payout_nanos: str
     status: str
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 

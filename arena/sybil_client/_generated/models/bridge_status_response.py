@@ -37,7 +37,7 @@ class BridgeStatusResponse:
             quarantine_ledger_size (int | Unset):
             queued_withdrawal_count (int | Unset):
             refunded_withdrawal_count (int | Unset):
-            total_quarantined_nanos (int | Unset): Sum of parked value. Integer nanodollars; 1_000_000_000 = $1.
+            total_quarantined_nanos (str | Unset): Sum of parked value. Integer nanodollars; 1_000_000_000 = $1.
      """
 
     deposit_cursor: int
@@ -51,7 +51,7 @@ class BridgeStatusResponse:
     quarantine_ledger_size: int | Unset = UNSET
     queued_withdrawal_count: int | Unset = UNSET
     refunded_withdrawal_count: int | Unset = UNSET
-    total_quarantined_nanos: int | Unset = UNSET
+    total_quarantined_nanos: str | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 

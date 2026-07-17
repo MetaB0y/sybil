@@ -31,7 +31,7 @@ class RemovedOrderViewResponse:
             has_been_matched (bool):
             order_id (int):
             phase (str):
-            reserved_balance_released (int): Released reserved cash. Integer nanodollars; 1_000_000_000 = $1.
+            reserved_balance_released_nanos (str): Released reserved cash. Integer nanodollars; 1_000_000_000 = $1.
             active_markets (list[int] | Unset):
             rejection_reason (None | str | Unset):
             reserved_positions_released (list[ReservedPositionReleaseResponse] | Unset):
@@ -42,7 +42,7 @@ class RemovedOrderViewResponse:
     has_been_matched: bool
     order_id: int
     phase: str
-    reserved_balance_released: int
+    reserved_balance_released_nanos: str
     active_markets: list[int] | Unset = UNSET
     rejection_reason: None | str | Unset = UNSET
     reserved_positions_released: list[ReservedPositionReleaseResponse] | Unset = UNSET
@@ -64,7 +64,7 @@ class RemovedOrderViewResponse:
 
         phase = self.phase
 
-        reserved_balance_released = self.reserved_balance_released
+        reserved_balance_released_nanos = self.reserved_balance_released_nanos
 
         active_markets: list[int] | Unset = UNSET
         if not isinstance(self.active_markets, Unset):
@@ -96,7 +96,7 @@ class RemovedOrderViewResponse:
             "has_been_matched": has_been_matched,
             "order_id": order_id,
             "phase": phase,
-            "reserved_balance_released": reserved_balance_released,
+            "reserved_balance_released_nanos": reserved_balance_released_nanos,
         })
         if active_markets is not UNSET:
             field_dict["active_markets"] = active_markets
@@ -123,7 +123,7 @@ class RemovedOrderViewResponse:
 
         phase = d.pop("phase")
 
-        reserved_balance_released = d.pop("reserved_balance_released")
+        reserved_balance_released_nanos = d.pop("reserved_balance_released_nanos")
 
         active_markets = cast(list[int], d.pop("active_markets", UNSET))
 
@@ -156,7 +156,7 @@ class RemovedOrderViewResponse:
             has_been_matched=has_been_matched,
             order_id=order_id,
             phase=phase,
-            reserved_balance_released=reserved_balance_released,
+            reserved_balance_released_nanos=reserved_balance_released_nanos,
             active_markets=active_markets,
             rejection_reason=rejection_reason,
             reserved_positions_released=reserved_positions_released,

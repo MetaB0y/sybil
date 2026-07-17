@@ -243,7 +243,7 @@ fn service_probe_requests() -> Vec<(Method, &'static str, Value)> {
         (
             Method::POST,
             "/v1/markets/prices/reference",
-            json!({"prices": {"0": 500_000_000u64}}),
+            json!({"prices_nanos": {"0": "500000000"}}),
         ),
         (
             Method::POST,
@@ -752,13 +752,13 @@ async fn service_routes_succeed_with_token_in_prod() {
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
 
     let mut prices = serde_json::Map::new();
-    prices.insert(market_id.to_string(), json!(500_000_000u64));
+    prices.insert(market_id.to_string(), json!("500000000"));
     let (status, body) = request_json(
         app.clone(),
         Method::POST,
         "/v1/markets/prices/reference",
         Some(TOKEN),
-        json!({"prices": prices}),
+        json!({"prices_nanos": prices}),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));

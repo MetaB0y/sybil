@@ -621,13 +621,15 @@ async fn da_manifest_and_payload_verify_binding_chain() {
 async fn create_and_get_account() {
     let (app, _) = test_app(true).await;
 
-    let balance = 100_000_000_000u64; // $100
+    // First integer JavaScript cannot represent exactly. This pins both
+    // decimal-string request decoding and exact response serialization.
+    let balance = 9_007_199_254_740_993u64;
 
     // Create
     let (status, body) = post_json(
         app.clone(),
         "/v1/accounts",
-        json!({ "initial_balance_nanos": balance }),
+        json!({ "initial_balance_nanos": balance.to_string() }),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -639,7 +641,7 @@ async fn create_and_get_account() {
     assert_eq!(status, StatusCode::OK);
     let resp = parse_json(&body);
     assert_eq!(resp["account_id"].as_u64().unwrap(), account_id);
-    assert_eq!(resp["balance_nanos"].as_i64().unwrap(), balance as i64);
+    assert_eq!(common::nanos_i64(&resp["balance_nanos"]), balance as i64);
 }
 
 #[tokio::test]
@@ -668,7 +670,7 @@ async fn fund_account_increases_balance() {
     assert_eq!(status, StatusCode::OK);
     let resp = parse_json(&body);
     assert_eq!(
-        resp["balance_nanos"].as_i64().unwrap(),
+        common::nanos_i64(&resp["balance_nanos"]),
         (initial + fund_amount) as i64
     );
 }
@@ -715,7 +717,10 @@ async fn bridge_commitment_is_public_but_individual_rows_stay_private() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
-    assert_eq!(parse_json(&body)["balance_nanos"], json!(10_000_000i64));
+    assert_eq!(
+        common::nanos_i64(&parse_json(&body)["balance_nanos"]),
+        10_000_000
+    );
 
     let (status, body) = post_json(
         app.clone(),
@@ -734,7 +739,7 @@ async fn bridge_commitment_is_public_but_individual_rows_stay_private() {
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
     let withdrawal = parse_json(&body);
     assert_eq!(withdrawal["withdrawal_id"], json!(1));
-    assert_eq!(withdrawal["amount_nanos"], json!(4_000_000u64));
+    assert_eq!(common::nanos_u64(&withdrawal["amount_nanos"]), 4_000_000);
     assert!(withdrawal["withdrawal_leaf_digest_hex"].as_str().is_some());
     let nullifier_hex = withdrawal["nullifier_hex"].as_str().unwrap().to_string();
 
@@ -835,7 +840,10 @@ async fn bridge_money_routes_fail_closed_outside_configured_domain() {
     assert_eq!(parse_json(&body)["code"], json!("BRIDGE_UNAVAILABLE"));
     let (status, body) = get(disabled.clone(), &format!("/v1/accounts/{account_id}")).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(parse_json(&body)["balance_nanos"], json!(10_000_000i64));
+    assert_eq!(
+        common::nanos_i64(&parse_json(&body)["balance_nanos"]),
+        10_000_000
+    );
     let (status, body) = get(disabled, "/v1/bridge/status").await;
     assert_eq!(status, StatusCode::OK);
     assert!(parse_json(&body).get("configured_domain").is_none());
@@ -857,7 +865,10 @@ async fn bridge_money_routes_fail_closed_outside_configured_domain() {
     assert_eq!(parse_json(&body)["code"], json!("BRIDGE_DOMAIN_MISMATCH"));
     let (status, body) = get(configured.clone(), &format!("/v1/accounts/{account_id}")).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(parse_json(&body)["balance_nanos"], json!(10_000_000i64));
+    assert_eq!(
+        common::nanos_i64(&parse_json(&body)["balance_nanos"]),
+        10_000_000
+    );
     let (status, body) = get(configured, "/v1/bridge/status").await;
     assert_eq!(status, StatusCode::OK);
     let status = parse_json(&body);
@@ -1067,9 +1078,9 @@ async fn order_visible_immediately_after_submit() {
     let (status, body) = get(app, &format!("/v1/accounts/{account_id}")).await;
     assert_eq!(status, StatusCode::OK);
     let account = parse_json(&body);
-    let total = account["balance_nanos"].as_i64().unwrap();
-    let reserved = account["reserved_balance_nanos"].as_i64().unwrap();
-    let available = account["available_balance_nanos"].as_i64().unwrap();
+    let total = common::nanos_i64(&account["balance_nanos"]);
+    let reserved = common::nanos_i64(&account["reserved_balance_nanos"]);
+    let available = common::nanos_i64(&account["available_balance_nanos"]);
     assert!(reserved > 0, "resting buy must reserve balance");
     assert_eq!(available, total - reserved);
 }
@@ -1234,12 +1245,23 @@ async fn market_search_by_tag() {
     .await;
 
     // Search by tag
-    let (status, body) = get(app, "/v1/markets/search?tags=weather").await;
+    let (status, body) = get(app.clone(), "/v1/markets/search?tags=weather").await;
     assert_eq!(status, StatusCode::OK);
     let results = parse_json(&body);
     let results = results.as_array().unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0]["name"].as_str().unwrap(), "Rain?");
+
+    let (status, body) = get(
+        app.clone(),
+        "/v1/markets/search?min_volume_nanos=9007199254740993",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    assert!(parse_json(&body).as_array().unwrap().is_empty());
+
+    let (status, _) = get(app, "/v1/markets/search?min_volume=1").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -1268,9 +1290,17 @@ async fn market_reads_expire_each_reference_token_and_restart_empty() {
     let (status, _) = post_json(
         app.clone(),
         "/v1/markets/prices/reference",
-        json!({ "prices": std::collections::HashMap::from([
-            (first_id, 400_000_000u64),
-            (second_id, 600_000_000u64),
+        json!({ "prices": {first_id.to_string(): "400000000"} }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    let (status, _) = post_json(
+        app.clone(),
+        "/v1/markets/prices/reference",
+        json!({ "prices_nanos": std::collections::HashMap::from([
+            (first_id, "400000000"),
+            (second_id, "600000000"),
         ])}),
     )
     .await;
@@ -1280,8 +1310,8 @@ async fn market_reads_expire_each_reference_token_and_restart_empty() {
     let (status, _) = post_json(
         app.clone(),
         "/v1/markets/prices/reference",
-        json!({ "prices": std::collections::HashMap::from([
-            (first_id, 450_000_000u64),
+        json!({ "prices_nanos": std::collections::HashMap::from([
+            (first_id, "450000000"),
         ])}),
     )
     .await;
@@ -1299,7 +1329,10 @@ async fn market_reads_expire_each_reference_token_and_restart_empty() {
         .iter()
         .find(|market| market["market_id"].as_u64() == Some(second_id))
         .unwrap();
-    assert_eq!(first["reference_price_nanos"].as_u64(), Some(450_000_000));
+    assert_eq!(
+        common::nanos_u64(&first["reference_price_nanos"]),
+        450_000_000
+    );
     assert!(first["reference_price_expires_at_ms"].is_u64());
     assert!(second["reference_price_nanos"].is_null());
     assert!(second["reference_price_expires_at_ms"].is_null());
@@ -1387,7 +1420,7 @@ async fn list_markets_reports_traded_volume() {
         .find(|market| market["market_id"].as_u64().unwrap() == market_id)
         .expect("market should be returned");
     assert!(
-        market["volume_nanos"].as_u64().unwrap() > 0,
+        common::nanos_u64(&market["volume_nanos"]) > 0,
         "list endpoint should expose traded volume"
     );
 
@@ -1395,7 +1428,7 @@ async fn list_markets_reports_traded_volume() {
     assert_eq!(status, StatusCode::OK);
     let market = parse_json(&body);
     assert!(
-        market["volume_nanos"].as_u64().unwrap() > 0,
+        common::nanos_u64(&market["volume_nanos"]) > 0,
         "detail endpoint should expose traded volume"
     );
 }
@@ -1501,7 +1534,7 @@ async fn market_price_history_is_projected_by_history_service() {
     assert!(
         points
             .iter()
-            .all(|point| point["volume_nanos"].as_u64().unwrap() > 0)
+            .all(|point| common::nanos_u64(&point["volume_nanos"]) > 0)
     );
 
     let (status, body) = get(
@@ -1526,7 +1559,7 @@ async fn market_price_history_is_projected_by_history_service() {
     assert!(
         candles
             .iter()
-            .all(|candle| candle["volume_nanos"].as_u64().unwrap() > 0)
+            .all(|candle| common::nanos_u64(&candle["volume_nanos"]) > 0)
     );
 
     let (status, body) = get(
@@ -2038,7 +2071,7 @@ async fn end_to_end_trade_lifecycle() {
     assert_eq!(status, StatusCode::OK);
     let acct_a_resp = parse_json(&body);
     assert!(
-        acct_a_resp["balance_nanos"].as_i64().unwrap() < balance as i64,
+        common::nanos_i64(&acct_a_resp["balance_nanos"]) < balance as i64,
         "Account A balance should have decreased"
     );
     assert!(
@@ -2144,7 +2177,7 @@ async fn portfolio_reflects_positions() {
     assert_eq!(portfolio["account_id"].as_u64().unwrap(), 0);
     // Total deposited should match initial balance
     assert_eq!(
-        portfolio["total_deposited_nanos"].as_i64().unwrap(),
+        common::nanos_i64(&portfolio["total_deposited_nanos"]),
         balance as i64
     );
 }

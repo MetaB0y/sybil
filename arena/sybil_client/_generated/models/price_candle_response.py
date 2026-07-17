@@ -24,42 +24,42 @@ class PriceCandleResponse:
         Attributes:
             bucket_end_ms (int):
             bucket_start_ms (int):
-            close_no_price_nanos (int): Bucket close NO price. Integer nanodollars; 1_000_000_000 = $1.
+            close_no_price_nanos (str): Bucket close NO price. Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
-            close_yes_price_nanos (int): Bucket close YES price. Integer nanodollars; 1_000_000_000 = $1.
+            close_yes_price_nanos (str): Bucket close YES price. Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
             first_height (int):
-            high_no_price_nanos (int): Bucket high NO price. Integer nanodollars; 1_000_000_000 = $1.
+            high_no_price_nanos (str): Bucket high NO price. Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
-            high_yes_price_nanos (int): Bucket high YES price. Integer nanodollars; 1_000_000_000 = $1.
+            high_yes_price_nanos (str): Bucket high YES price. Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
             last_height (int):
-            low_no_price_nanos (int): Bucket low NO price. Integer nanodollars; 1_000_000_000 = $1.
+            low_no_price_nanos (str): Bucket low NO price. Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
-            low_yes_price_nanos (int): Bucket low YES price. Integer nanodollars; 1_000_000_000 = $1.
+            low_yes_price_nanos (str): Bucket low YES price. Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
-            open_no_price_nanos (int): Bucket open NO price. Integer nanodollars; 1_000_000_000 = $1.
+            open_no_price_nanos (str): Bucket open NO price. Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
-            open_yes_price_nanos (int): Bucket open YES price. Integer nanodollars; 1_000_000_000 = $1.
+            open_yes_price_nanos (str): Bucket open YES price. Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
             point_count (int):
-            volume_nanos (int): Bucket traded notional. Integer nanodollars; 1_000_000_000 = $1.
+            volume_nanos (str): Bucket traded notional. Integer nanodollars; 1_000_000_000 = $1.
      """
 
     bucket_end_ms: int
     bucket_start_ms: int
-    close_no_price_nanos: int
-    close_yes_price_nanos: int
+    close_no_price_nanos: str
+    close_yes_price_nanos: str
     first_height: int
-    high_no_price_nanos: int
-    high_yes_price_nanos: int
+    high_no_price_nanos: str
+    high_yes_price_nanos: str
     last_height: int
-    low_no_price_nanos: int
-    low_yes_price_nanos: int
-    open_no_price_nanos: int
-    open_yes_price_nanos: int
+    low_no_price_nanos: str
+    low_yes_price_nanos: str
+    open_no_price_nanos: str
+    open_yes_price_nanos: str
     point_count: int
-    volume_nanos: int
+    volume_nanos: str
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 

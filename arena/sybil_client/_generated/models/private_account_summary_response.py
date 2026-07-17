@@ -28,26 +28,26 @@ class PrivateAccountSummaryResponse:
 
         Attributes:
             account_id (int):
-            available_balance_nanos (int): Spendable account balance after live-order reservations. Integer
+            available_balance_nanos (str): Spendable account balance after live-order reservations. Integer
                 nanodollars; 1_000_000_000 = $1.
-            balance_nanos (int): Total (gross) account balance; see `available_balance_nanos` for spendable
+            balance_nanos (str): Total (gross) account balance; see `available_balance_nanos` for spendable
                 funds. Integer nanodollars; 1_000_000_000 = $1.
-            pnl_nanos (int): Portfolio value minus deposits. Integer nanodollars; 1_000_000_000 = $1.
-            portfolio_value_nanos (int): Current mark-to-market portfolio value. Integer nanodollars; 1_000_000_000 = $1.
-            reserved_balance_nanos (int): Balance reserved by live resting orders. Integer nanodollars;
+            pnl_nanos (str): Portfolio value minus deposits. Integer nanodollars; 1_000_000_000 = $1.
+            portfolio_value_nanos (str): Current mark-to-market portfolio value. Integer nanodollars; 1_000_000_000 = $1.
+            reserved_balance_nanos (str): Balance reserved by live resting orders. Integer nanodollars;
                 1_000_000_000 = $1.
-            total_deposited_nanos (int): Total deposited to date. Integer nanodollars; 1_000_000_000 = $1.
+            total_deposited_nanos (str): Total deposited to date. Integer nanodollars; 1_000_000_000 = $1.
             display_name (None | str | Unset):
             positions (list[PositionResponse] | Unset):
      """
 
     account_id: int
-    available_balance_nanos: int
-    balance_nanos: int
-    pnl_nanos: int
-    portfolio_value_nanos: int
-    reserved_balance_nanos: int
-    total_deposited_nanos: int
+    available_balance_nanos: str
+    balance_nanos: str
+    pnl_nanos: str
+    portfolio_value_nanos: str
+    reserved_balance_nanos: str
+    total_deposited_nanos: str
     display_name: None | str | Unset = UNSET
     positions: list[PositionResponse] | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)

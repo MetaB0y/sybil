@@ -115,7 +115,7 @@ from .revoke_key_request import RevokeKeyRequest
 from .set_market_metadata_request import SetMarketMetadataRequest
 from .set_profile_request import SetProfileRequest
 from .set_reference_prices_request import SetReferencePricesRequest
-from .set_reference_prices_request_prices import SetReferencePricesRequestPrices
+from .set_reference_prices_request_prices_nanos import SetReferencePricesRequestPricesNanos
 from .signed_attestation_dto import SignedAttestationDto
 from .signed_order_data import SignedOrderData
 from .signed_register_key_request import SignedRegisterKeyRequest
@@ -276,7 +276,7 @@ __all__ = (
     "SetMarketMetadataRequest",
     "SetProfileRequest",
     "SetReferencePricesRequest",
-    "SetReferencePricesRequestPrices",
+    "SetReferencePricesRequestPricesNanos",
     "SignedAttestationDto",
     "SignedOrderData",
     "SignedRegisterKeyRequest",

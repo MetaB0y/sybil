@@ -27,13 +27,13 @@ class AccountResponse:
     """ 
         Attributes:
             account_id (int):
-            available_balance_nanos (int): Spendable account balance after live-order reservations. Integer
+            available_balance_nanos (str): Spendable account balance after live-order reservations. Integer
                 nanodollars; 1_000_000_000 = $1.
-            balance_nanos (int): Total (gross) account balance; see `available_balance_nanos` for spendable
+            balance_nanos (str): Total (gross) account balance; see `available_balance_nanos` for spendable
                 funds. Integer nanodollars; 1_000_000_000 = $1.
             events_digest_hex (str): Current event-chain digest used to make every key operation one-shot.
             keys_digest_hex (str): Current validity key-set digest used to state-bind key operations.
-            reserved_balance_nanos (int): Balance reserved by live resting orders. Integer nanodollars;
+            reserved_balance_nanos (str): Balance reserved by live resting orders. Integer nanodollars;
                 1_000_000_000 = $1.
             avatar_seed (None | str | Unset): Optional deterministic identicon seed (SYB-60).
             display_name (None | str | Unset): Optional public display name. A non-empty value opts this account into
@@ -42,11 +42,11 @@ class AccountResponse:
      """
 
     account_id: int
-    available_balance_nanos: int
-    balance_nanos: int
+    available_balance_nanos: str
+    balance_nanos: str
     events_digest_hex: str
     keys_digest_hex: str
-    reserved_balance_nanos: int
+    reserved_balance_nanos: str
     avatar_seed: None | str | Unset = UNSET
     display_name: None | str | Unset = UNSET
     positions: list[PositionResponse] | Unset = UNSET

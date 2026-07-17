@@ -29,7 +29,7 @@ class ResolutionResponse:
             market_id (int):
             status (str):
             template (str):
-            payout_nanos (int | None | Unset): Resolution payout per YES share. Integer nanodollars;
+            payout_nanos (None | str | Unset): Resolution payout per YES share. Integer nanodollars;
                 1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
             resolved_at_ms (int | None | Unset):
             resolved_by_feed_id (int | None | Unset):
@@ -39,7 +39,7 @@ class ResolutionResponse:
     market_id: int
     status: str
     template: str
-    payout_nanos: int | None | Unset = UNSET
+    payout_nanos: None | str | Unset = UNSET
     resolved_at_ms: int | None | Unset = UNSET
     resolved_by_feed_id: int | None | Unset = UNSET
     resolved_by_feed_name: None | str | Unset = UNSET
@@ -56,7 +56,7 @@ class ResolutionResponse:
 
         template = self.template
 
-        payout_nanos: int | None | Unset
+        payout_nanos: None | str | Unset
         if isinstance(self.payout_nanos, Unset):
             payout_nanos = UNSET
         else:
@@ -110,12 +110,12 @@ class ResolutionResponse:
 
         template = d.pop("template")
 
-        def _parse_payout_nanos(data: object) -> int | None | Unset:
+        def _parse_payout_nanos(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(int | None | Unset, data)
+            return cast(None | str | Unset, data)
 
         payout_nanos = _parse_payout_nanos(d.pop("payout_nanos", UNSET))
 

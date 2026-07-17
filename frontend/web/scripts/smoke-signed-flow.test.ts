@@ -41,7 +41,7 @@ import {
 
 const BASE = process.env.SYBIL_API_BASE ?? "https://172-104-31-54.nip.io";
 const SERVICE_TOKEN = process.env.SYBIL_SERVICE_TOKEN;
-const SMOKE_FUND_NANOS = 1_000_000_000_000;
+const SMOKE_FUND_NANOS = "1000000000000";
 interface RestResult<T = unknown> {
   status: number;
   ok: boolean;
@@ -76,7 +76,7 @@ interface MarketSummary {
 
 interface AccountResponse {
   account_id: number;
-  balance_nanos: number;
+  balance_nanos: string;
 }
 
 interface CreateApiKeyResponse {
@@ -84,11 +84,11 @@ interface CreateApiKeyResponse {
 }
 
 interface PortfolioResponse {
-  balance_nanos: number;
+  balance_nanos: string;
   positions?: unknown[];
-  pnl_nanos?: number;
-  portfolio_value_nanos?: number;
-  total_deposited_nanos?: number;
+  pnl_nanos?: string;
+  portfolio_value_nanos?: string;
+  total_deposited_nanos?: string;
 }
 
 interface PendingOrder {
@@ -96,7 +96,7 @@ interface PendingOrder {
   account_id: number;
   market_id: number;
   side?: string;
-  limit_price_nanos: number;
+  limit_price_nanos: string;
   remaining_quantity: number;
 }
 
@@ -271,7 +271,7 @@ describe.skipIf(!RUN)("signed-flow smoke (live)", () => {
           order: {
             market_ids: [market.market_id],
             payoffs: [1, 0],
-            limit_price_nanos: Number(priceNanos),
+            limit_price_nanos: priceNanos.toString(),
             max_fill: Number(qty),
           },
           nonce: Number(orderNonce),

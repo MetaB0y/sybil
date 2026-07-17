@@ -377,9 +377,6 @@ fn verify_uniform_clearing_prices(
         }
 
         let market = order.markets[0];
-        let Some(prices) = witness.clearing_prices.get(&market) else {
-            continue;
-        };
 
         // Determine which outcome this order is for
         let num_states = order.num_states as usize;
@@ -391,26 +388,35 @@ fn verify_uniform_clearing_prices(
         let yes_payoff = order.payoffs[0];
         let no_payoff = order.payoffs[1];
 
-        let expected_price = if yes_payoff > 0 && no_payoff == 0 {
-            // Buy YES → should be filled at YES clearing price
-            prices.first().copied()
-        } else if yes_payoff == 0 && no_payoff > 0 {
-            // Buy NO → should be filled at NO clearing price
-            prices.get(1).copied()
-        } else if yes_payoff < 0 && no_payoff == 0 {
-            // Sell YES → should be filled at YES clearing price
-            prices.first().copied()
-        } else if yes_payoff == 0 && no_payoff < 0 {
-            // Sell NO → should be filled at NO clearing price
-            prices.get(1).copied()
-        } else {
-            // Mixed payoffs (e.g. spread on a single market) — skip
-            None
+        let expected_outcome = match (yes_payoff, no_payoff) {
+            // Production order validation permits exactly one ±1 payoff.
+            (1 | -1, 0) => Some(0),
+            (0, 1 | -1) => Some(1),
+            // Mixed or non-unit payoffs are outside this check and are rejected
+            // independently by production order validation.
+            _ => None,
         };
 
-        if let Some(expected) = expected_price
-            && fill.fill_price != expected
-        {
+        let Some(expected_outcome) = expected_outcome else {
+            continue;
+        };
+        let Some(expected) = witness
+            .clearing_prices
+            .get(&market)
+            .and_then(|prices| prices.get(expected_outcome))
+            .copied()
+        else {
+            violations.push(Violation {
+                kind: ViolationKind::UniformClearingPriceViolation,
+                details: format!(
+                    "Order {} on market {:?}: missing clearing price for outcome {}",
+                    fill.order_id, market, expected_outcome
+                ),
+            });
+            continue;
+        };
+
+        if fill.fill_price != expected {
             violations.push(Violation {
                 kind: ViolationKind::UniformClearingPriceViolation,
                 details: format!(
@@ -583,9 +589,9 @@ mod tests {
     use super::*;
     use crate::types::{WitnessBlockHeader, WitnessOrder};
     use matching_engine::{
-        MarketSet, MmConstraint, MmId, MmSide, Nanos, Qty, gross_welfare_from_fills,
-        minting_cost_from_fills, net_welfare, outcome_sell, shares_to_qty, simple_no_buy,
-        simple_yes_buy,
+        ConditionDir, MarketSet, MmConstraint, MmId, MmSide, Nanos, Qty, conditional_buy,
+        gross_welfare_from_fills, minting_cost_from_fills, net_welfare, outcome_sell,
+        shares_to_qty, simple_no_buy, simple_yes_buy,
     };
 
     fn empty_header() -> WitnessBlockHeader {
@@ -593,7 +599,7 @@ mod tests {
             height: 1,
             parent_hash: [0u8; 32],
             state_root: [0u8; 32],
-            events_root: crate::event_commitment::empty_events_root(),
+            events_root: crate::test_events_root(),
             order_count: 0,
             fill_count: 0,
             timestamp_ms: 0,
@@ -676,6 +682,71 @@ mod tests {
 
         let result = verify_match(&witness, false);
         assert!(result.valid, "Violations: {:?}", result.violations);
+    }
+
+    #[test]
+    fn uniform_clearing_price_rejects_every_supported_side_mismatch() {
+        let mut markets = MarketSet::new();
+        let market = markets.add_binary("M0");
+        let qty = shares_to_qty(10);
+        let orders = vec![
+            WitnessOrder {
+                order: simple_yes_buy(&markets, 1, market, 600_000_000, qty.0),
+                account_id: 0,
+                is_mm: false,
+            },
+            WitnessOrder {
+                order: simple_no_buy(&markets, 2, market, 600_000_000, qty.0),
+                account_id: 1,
+                is_mm: false,
+            },
+            WitnessOrder {
+                order: outcome_sell(&markets, 3, market, 0, 400_000_000, qty.0),
+                account_id: 2,
+                is_mm: false,
+            },
+            WitnessOrder {
+                order: outcome_sell(&markets, 4, market, 1, 400_000_000, qty.0),
+                account_id: 3,
+                is_mm: false,
+            },
+        ];
+        let fills = (1..=4)
+            .map(|order_id| Fill::new(order_id, qty, Nanos(550_000_000)))
+            .collect();
+        let mut witness = make_witness(orders, fills);
+        witness
+            .clearing_prices
+            .insert(market, vec![Nanos(500_000_000), Nanos(500_000_000)]);
+        refresh_welfare(&mut witness);
+
+        let result = verify_match(&witness, false);
+        let ucp_violations = result
+            .violations
+            .iter()
+            .filter(|violation| violation.kind == ViolationKind::UniformClearingPriceViolation)
+            .count();
+        assert_eq!(ucp_violations, 4, "{:?}", result.violations);
+    }
+
+    #[test]
+    fn uniform_clearing_price_requires_the_filled_outcome_price() {
+        let mut markets = MarketSet::new();
+        let market = markets.add_binary("M0");
+        let qty = shares_to_qty(10);
+        let order = WitnessOrder {
+            order: simple_yes_buy(&markets, 1, market, 600_000_000, qty.0),
+            account_id: 0,
+            is_mm: false,
+        };
+        let mut witness = make_witness(vec![order], vec![Fill::new(1, qty, Nanos(500_000_000))]);
+        refresh_welfare(&mut witness);
+
+        let result = verify_match(&witness, false);
+        assert!(result.violations.iter().any(|violation| {
+            violation.kind == ViolationKind::UniformClearingPriceViolation
+                && violation.details.contains("missing clearing price")
+        }));
     }
 
     #[test]
@@ -888,6 +959,124 @@ mod tests {
                 .iter()
                 .any(|v| v.kind == ViolationKind::PriceComplementarityViolation)
         );
+    }
+
+    #[test]
+    fn fill_on_resolved_market_is_rejected() {
+        let mut markets = MarketSet::new();
+        let market = markets.add_binary("M0");
+        let qty = shares_to_qty(10);
+        let mut witness = make_witness(
+            vec![buy_order(&markets, 1, market)],
+            vec![Fill::new(1, qty, Nanos(500_000_000))],
+        );
+        witness
+            .clearing_prices
+            .insert(market, vec![Nanos(500_000_000), Nanos(500_000_000)]);
+        witness.resolved_markets.push(market);
+        refresh_welfare(&mut witness);
+
+        let result = verify_match(&witness, false);
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|violation| { violation.kind == ViolationKind::ResolvedMarketViolation })
+        );
+    }
+
+    #[test]
+    fn conditional_activation_is_exclusive_in_both_directions() {
+        let mut markets = MarketSet::new();
+        let traded_market = markets.add_binary("traded");
+        let condition_market = markets.add_binary("condition");
+        let qty = shares_to_qty(10);
+        let threshold = 500_000_000;
+
+        for (index, direction, satisfying_price) in [
+            (0, ConditionDir::Above, threshold + 1),
+            (1, ConditionDir::Below, threshold - 1),
+        ] {
+            let order_id = index + 1;
+            let order = WitnessOrder {
+                order: conditional_buy(
+                    &markets,
+                    order_id,
+                    traded_market,
+                    600_000_000,
+                    qty.0,
+                    condition_market,
+                    threshold,
+                    direction,
+                ),
+                account_id: order_id,
+                is_mm: false,
+            };
+            let mut witness = make_witness(
+                vec![order],
+                vec![Fill::new(order_id, qty, Nanos(500_000_000))],
+            );
+            witness
+                .clearing_prices
+                .insert(traded_market, vec![Nanos(500_000_000), Nanos(500_000_000)]);
+            witness.clearing_prices.insert(
+                condition_market,
+                vec![Nanos(threshold), Nanos(NANOS_PER_DOLLAR - threshold)],
+            );
+            refresh_welfare(&mut witness);
+
+            let boundary = verify_match(&witness, false);
+            assert!(boundary.violations.iter().any(|violation| {
+                violation.kind == ViolationKind::ConditionalActivationViolation
+            }));
+
+            witness.clearing_prices.insert(
+                condition_market,
+                vec![
+                    Nanos(satisfying_price),
+                    Nanos(NANOS_PER_DOLLAR - satisfying_price),
+                ],
+            );
+            let satisfied = verify_match(&witness, false);
+            assert!(
+                satisfied.valid,
+                "{direction:?} should accept {satisfying_price}: {:?}",
+                satisfied.violations
+            );
+        }
+    }
+
+    #[test]
+    fn conditional_activation_requires_the_condition_market_price() {
+        let mut markets = MarketSet::new();
+        let traded_market = markets.add_binary("traded");
+        let condition_market = markets.add_binary("condition");
+        let qty = shares_to_qty(10);
+        let order = WitnessOrder {
+            order: conditional_buy(
+                &markets,
+                1,
+                traded_market,
+                600_000_000,
+                qty.0,
+                condition_market,
+                500_000_000,
+                ConditionDir::Above,
+            ),
+            account_id: 0,
+            is_mm: false,
+        };
+        let mut witness = make_witness(vec![order], vec![Fill::new(1, qty, Nanos(500_000_000))]);
+        witness
+            .clearing_prices
+            .insert(traded_market, vec![Nanos(500_000_000), Nanos(500_000_000)]);
+        refresh_welfare(&mut witness);
+
+        let result = verify_match(&witness, false);
+        assert!(result.violations.iter().any(|violation| {
+            violation.kind == ViolationKind::ConditionalActivationViolation
+                && violation.details.contains("no clearing price")
+        }));
     }
 
     #[test]

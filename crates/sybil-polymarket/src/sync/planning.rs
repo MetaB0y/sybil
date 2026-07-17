@@ -13,6 +13,21 @@ pub(super) enum NegRiskGroupAction {
     None,
 }
 
+/// Stable operator identity for a mirrored market.
+///
+/// The external condition id is normalized and hashed so malformed or
+/// unexpectedly long provider input cannot violate the API's creation-key
+/// alphabet/length contract. Retrying after an ambiguous response therefore
+/// resolves to the original Sybil market instead of allocating a duplicate.
+pub(super) fn polymarket_market_creation_key(condition_id: &str) -> String {
+    let normalized = condition_id.trim().to_ascii_lowercase();
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"sybil/polymarket-market-creation/v1");
+    hasher.update(&(normalized.len() as u64).to_le_bytes());
+    hasher.update(normalized.as_bytes());
+    format!("polymarket:{}", hasher.finalize().to_hex())
+}
+
 pub(super) fn plan_negrisk_group_action(
     event: &GammaEvent,
     active_mapped_ids: &[u32],

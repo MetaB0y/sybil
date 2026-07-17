@@ -4,7 +4,14 @@ import json
 
 import pytest
 
-from sybil_client import BuyNo, BuyYes, SellNo, SellYes
+from sybil_client import (
+    BlockStreamBlockEvent,
+    BlockStreamReplayCompleteEvent,
+    BuyNo,
+    BuyYes,
+    SellNo,
+    SellYes,
+)
 from sybil_client.types import (
     NANOS_PER_DOLLAR,
     SHARE_SCALE,
@@ -181,7 +188,7 @@ def test_submit_orders_can_set_ioc_time_in_force(monkeypatch):
         {
             "type": "BuyYes",
             "market_id": 7,
-            "limit_price_nanos": 550_000_000,
+            "limit_price_nanos": "550000000",
             "quantity": 3_000,
         }
     ]
@@ -246,6 +253,7 @@ async def test_stream_blocks_reconnects_from_next_height(monkeypatch):
     client = SybilClient("http://example.invalid")
     client._stream_reconnect_base_s = 0.0
     client._stream_reconnect_max_s = 0.0
+
     def envelope(height):
         return json.dumps({"v": 2, "type": "block", "data": {"height": height}})
 
@@ -272,6 +280,45 @@ async def test_stream_blocks_reconnects_from_next_height(monkeypatch):
         "ws://example.invalid/v2/blocks/ws",
         "ws://example.invalid/v2/blocks/ws?from_block=6",
     ]
+
+
+async def test_stream_block_events_marks_replay_until_boundary(monkeypatch):
+    from sybil_client import SybilClient
+    import sybil_client.client as client_module
+
+    def envelope(height):
+        return json.dumps({"v": 2, "type": "block", "data": {"height": height}})
+
+    messages = [
+        json.dumps({"v": 3, "type": "future_message", "data": "ignored"}),
+        envelope(5),
+        json.dumps({"v": 2, "type": "replay_complete", "up_to_height": 5}),
+        json.dumps({"v": 2, "type": "heartbeat", "at": 123}),
+        envelope(6),
+    ]
+    monkeypatch.setattr(
+        client_module,
+        "connect",
+        _FakeConnect([_FakeWebSocket(messages)]),
+    )
+
+    events = []
+    stream = SybilClient("http://example.invalid").stream_block_events(from_block=5)
+    try:
+        async for event in stream:
+            events.append(event)
+            if len(events) == 3:
+                break
+    finally:
+        await stream.aclose()
+
+    assert isinstance(events[0], BlockStreamBlockEvent)
+    assert events[0].block.height == 5
+    assert events[0].replayed is True
+    assert events[1] == BlockStreamReplayCompleteEvent(up_to_height=5)
+    assert isinstance(events[2], BlockStreamBlockEvent)
+    assert events[2].block.height == 6
+    assert events[2].replayed is False
 
 
 async def test_stream_blocks_surfaces_retention_gap(monkeypatch):

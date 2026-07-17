@@ -15,7 +15,7 @@ the frontend API client appears here.
 flowchart LR
     API["sybil-api REST"] --> QUERY["React Query caches"]
     HEAD["GET latest block + market prices"] --> STORE["Zustand realtime store"]
-    WS["/v1/blocks/ws<br/>resume from H+1"] --> STORE
+    WS["/v2/blocks/ws<br/>resume from H+1"] --> STORE
     QUERY --> PAGE["Next.js pages"]
     STORE --> PAGE
     LOCAL["Browser account session"] --> PAGE
@@ -23,17 +23,18 @@ flowchart LR
 
 - REST uses `src/lib/api/client.ts` and generated `schema.d.ts`.
 - Realtime hydration reads `GET /v1/blocks/latest` and
-  `GET /v1/markets/prices`, then opens `/v1/blocks/ws` with height resume.
+  `GET /v1/markets/prices`, then opens `/v2/blocks/ws` with height resume.
 - Money is nanodollars (`1_000_000_000 = $1`); quantity is share units
-  (`1000 = 1 share`). Application money arithmetic uses `bigint` helpers.
+  (`1000 = 1 share`). `*_nanos` fields cross JSON as exact decimal strings,
+  and application money arithmetic uses `bigint` helpers.
 
 ## Page map
 
 | Surface | Primary reads | Client-side work |
 |---|---|---|
-| Global shell/connect | `/v1/health`, `/v1/onboarding`, `/v1/accounts/{id}`, `/v1/accounts/{id}/portfolio`, `/v1/accounts/{id}/orders`, `/v1/markets`, `/v1/blocks/latest`, `/v1/blocks/ws` | Server-selected demo grant, session identity, genesis signing domain, available cash, search, connection/countdown |
+| Global shell/connect | `/v1/health`, `/v1/onboarding`, `/v1/accounts/{id}`, `/v1/accounts/{id}/portfolio`, `/v1/accounts/{id}/orders`, `/v1/markets`, `/v1/blocks/latest`, `/v2/blocks/ws` | Server-selected demo grant, session identity, genesis signing domain, available cash, search, connection/countdown |
 | Market index | `/v1/markets`, `/v1/markets/prices`, `/v1/markets/{id}/prices/history`, `/v1/events/{event_id}/traders`, `/v1/events/{event_id}/raw` | Event grouping, category choice, sparkline/delta, sorting |
-| Market detail | `/v1/markets/{id}`, `/v1/markets`, `/v1/markets/groups`, `/v1/markets/{id}/prices/history`, `/v1/markets/{id}/prices/candles`, `/v1/events/{event_id}/raw`, `/v1/blocks/ws` | Chart alignment, event outcome labels, live mark/age, paged event-volume activity, complete-set admission preflight |
+| Market detail | `/v1/markets/{id}`, `/v1/markets`, `/v1/markets/groups`, `/v1/markets/{id}/prices/history`, `/v1/markets/{id}/prices/candles`, `/v1/events/{event_id}/raw`, `/v2/blocks/ws` | Chart alignment, event outcome labels, live mark/age, paged event-volume activity, complete-set admission preflight |
 | Activity | `/v1/activity/overview`, `/v1/blocks`, `/v1/blocks/{height}`, `/v1/markets`, `/v1/markets/summary`, `/v1/bots/decisions` | Recent block merge, per-market presentation, unmatched counts |
 | Leaderboard | `/v1/leaderboard` | Window selection and own-row highlight |
 | Arena | `/v1/bots/decisions`, `/v1/bots/equity-series`, `/v1/activity/overview`, `/v1/markets/summary`, `/v1/blocks/latest`, `/v1/blocks/{height}` | Strategy grouping, cost/tokens, FV drift, recent charts |
@@ -86,8 +87,6 @@ state with clear provenance.
   duration remain placeholders.
 - The browser arena does not expose every raw news/source record available to
   the Streamlit/operator view.
-- JavaScript cannot safely parse arbitrary `u64` JSON numbers; see
-  [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md).
 - Several diagnostic endpoints exist in OpenAPI but are intentionally unused by
   the product UI. OpenAPI—not this file—is the complete endpoint inventory.
 - Quarantine status is aggregate-only. The portfolio can show an account's

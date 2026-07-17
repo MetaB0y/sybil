@@ -2,9 +2,9 @@
 #
 # Regenerate the vendored Sybil OpenAPI Python client.
 #
-# Mirrors the frontend's `types:generate` (openapi-typescript against the live
-# spec): builds and boots `sybil-api` on a free port, fetches /openapi.json, and
-# regenerates `arena/sybil_client/_generated` from it with openapi-python-client.
+# Mirrors the frontend's `types:generate`: renders the canonical full
+# development-superset document with the `sybil-openapi` binary and regenerates
+# `arena/sybil_client/_generated` with openapi-python-client.
 #
 # The hand-written ergonomic layer (`sybil_client/client.py` + `types.py`) is
 # NOT touched — only the `_generated/` package. Run it from anywhere:
@@ -14,7 +14,7 @@
 # Reproducible: post-generation hooks are disabled (see the --config file), so
 # the output is byte-stable across runs regardless of local formatter versions.
 #
-# Spec source (default: build + boot sybil-api locally and scrape /openapi.json):
+# Spec source (default: run the deterministic `sybil-openapi` renderer):
 #   SYBIL_OPENAPI=path/or/url   Use an existing spec and skip the Rust build+boot
 #                               entirely. Mirrors the frontend's
 #                               `${NEXT_PUBLIC_API_BASE}/openapi.json` override,
@@ -33,10 +33,8 @@ CONFIG="$ARENA_DIR/scripts/openapi-python-client-config.yml"
 GENERATOR_VERSION="0.29.0"
 
 SPEC="$(mktemp -t sybil-openapi.XXXXXX.json)"
-SERVER_PID=""
 
 cleanup() {
-    [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true
     rm -f "$SPEC"
 }
 trap cleanup EXIT
@@ -48,23 +46,11 @@ if [ -n "${SYBIL_OPENAPI:-}" ]; then
         *) cp "$SYBIL_OPENAPI" "$SPEC" ;;
     esac
 else
-    # Pick a free TCP port so we never collide with a running dev server.
-    PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
-
-    echo "==> Building sybil-api"
-    cargo build -p sybil-api --manifest-path "$REPO_ROOT/Cargo.toml"
-
-    echo "==> Booting sybil-api on port $PORT (in-memory defaults)"
-    SYBIL_PORT="$PORT" "$REPO_ROOT/target/debug/sybil-api" >/dev/null 2>&1 &
-    SERVER_PID=$!
-
-    echo "==> Waiting for /openapi.json"
-    for _ in $(seq 1 60); do
-        if curl -fsS "http://127.0.0.1:$PORT/openapi.json" -o "$SPEC" 2>/dev/null; then
-            break
-        fi
-        sleep 0.5
-    done
+    echo "==> Rendering canonical full OpenAPI document"
+    cargo run --quiet \
+        -p sybil-api \
+        --bin sybil-openapi \
+        --manifest-path "$REPO_ROOT/Cargo.toml" >"$SPEC"
 fi
 
 if [ ! -s "$SPEC" ]; then

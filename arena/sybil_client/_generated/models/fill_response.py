@@ -23,14 +23,14 @@ T = TypeVar("T", bound="FillResponse")
 class FillResponse:
     """ 
         Attributes:
-            fill_price_nanos (int): Fill price. Integer nanodollars; 1_000_000_000 = $1.
+            fill_price_nanos (str): Fill price. Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
             fill_qty (int): Fill quantity. Integer share-units; 1000 units = 1 share.
             order_id (int):
             account_id (int | Unset):
      """
 
-    fill_price_nanos: int
+    fill_price_nanos: str
     fill_qty: int
     order_id: int
     account_id: int | Unset = UNSET

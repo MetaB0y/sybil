@@ -26,12 +26,12 @@ T = TypeVar("T", bound="CreateAccountRequest")
 class CreateAccountRequest:
     """ 
         Attributes:
-            initial_balance_nanos (int): Initial account balance. Integer nanodollars; 1_000_000_000 = $1. Example:
+            initial_balance_nanos (str): Initial account balance. Integer nanodollars; 1_000_000_000 = $1. Example:
                 100000000000.
             initial_key (None | RegisterKeyRequest | Unset):
      """
 
-    initial_balance_nanos: int
+    initial_balance_nanos: str
     initial_key: None | RegisterKeyRequest | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 

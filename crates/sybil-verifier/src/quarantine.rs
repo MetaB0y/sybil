@@ -143,3 +143,212 @@ fn violation(details: String) -> Violation {
         details,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{DepositAccumulatorWitness, StateSidecarSnapshot, WitnessBlockHeader};
+
+    fn header(height: u64) -> WitnessBlockHeader {
+        WitnessBlockHeader {
+            height,
+            parent_hash: [0; 32],
+            state_root: [0; 32],
+            events_root: crate::test_events_root(),
+            order_count: 0,
+            fill_count: 0,
+            timestamp_ms: 0,
+        }
+    }
+
+    fn entry(key: [u8; 32], amount: i64) -> QuarantineEntrySnapshot {
+        QuarantineEntrySnapshot {
+            sybil_account_key: key,
+            amount,
+        }
+    }
+
+    fn witness(
+        pre: Vec<QuarantineEntrySnapshot>,
+        events: Vec<SystemEventWitness>,
+        post: Vec<QuarantineEntrySnapshot>,
+    ) -> BlockWitness {
+        let mut pre_state_sidecar = StateSidecarSnapshot::default();
+        pre_state_sidecar.bridge.quarantine = pre;
+        let mut state_sidecar = StateSidecarSnapshot::default();
+        state_sidecar.bridge.quarantine = post;
+        BlockWitness {
+            header: header(2),
+            previous_header: Some(header(1)),
+            genesis_hash: [0; 32],
+            orders: Vec::new(),
+            rejections: Vec::new(),
+            system_events: events,
+            deposit_accumulator: DepositAccumulatorWitness::default(),
+            fills: Vec::new(),
+            clearing_prices: Default::default(),
+            total_welfare: 0,
+            minting_cost: 0,
+            mm_constraints: Vec::new(),
+            market_groups: Vec::new(),
+            pre_state: Vec::new(),
+            post_system_state: Vec::new(),
+            post_state: Vec::new(),
+            account_keys: Vec::new(),
+            state_sidecar,
+            pre_state_sidecar,
+            resolved_markets: Vec::new(),
+        }
+    }
+
+    fn quarantined(key: [u8; 32], amount: i64) -> SystemEventWitness {
+        SystemEventWitness::DepositQuarantined {
+            amount,
+            deposit_id: 1,
+            deposit_root: [7; 32],
+            sybil_account_key: key,
+        }
+    }
+
+    fn claimed(account_id: u64, key: [u8; 32], amount: i64) -> SystemEventWitness {
+        SystemEventWitness::QuarantineClaimed {
+            account_id,
+            amount,
+            sybil_account_key: key,
+        }
+    }
+
+    fn assert_invalid(witness: &BlockWitness, expected: &str) {
+        let result = verify_quarantine_transition(witness);
+        assert!(!result.valid);
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|violation| violation.details.contains(expected)),
+            "expected {expected:?}, got {:?}",
+            result.violations
+        );
+    }
+
+    #[test]
+    fn ledger_digest_is_order_independent_and_field_sensitive() {
+        let a = entry([1; 32], 10);
+        let b = entry([2; 32], 20);
+        let expected = quarantine_ledger_digest(&[a.clone(), b.clone()]);
+
+        assert_eq!(expected, quarantine_ledger_digest(&[b.clone(), a.clone()]));
+        assert_ne!(expected, [0; 32]);
+        assert_ne!(expected, [1; 32]);
+        assert_ne!(expected, quarantine_ledger_digest(std::slice::from_ref(&a)));
+        assert_ne!(expected, quarantine_ledger_digest(&[a, entry([2; 32], 21)]));
+        assert_ne!(expected, quarantine_ledger_digest(&[entry([3; 32], 10), b]));
+    }
+
+    #[test]
+    fn ledger_map_requires_positive_unique_entries() {
+        let key = [1; 32];
+        assert_eq!(
+            ledger_map(&[entry(key, 7)], "test").unwrap(),
+            BTreeMap::from([(key, 7)])
+        );
+        assert!(ledger_map(&[entry(key, 0)], "test").is_err());
+        assert!(ledger_map(&[entry(key, -1)], "test").is_err());
+        assert!(ledger_map(&[entry(key, 1), entry(key, 2)], "test").is_err());
+    }
+
+    #[test]
+    fn quarantine_requires_positive_checked_accumulation() {
+        let key = [1; 32];
+        let mut ledger = BTreeMap::new();
+        quarantine(&mut ledger, key, 7).unwrap();
+        quarantine(&mut ledger, key, 5).unwrap();
+        assert_eq!(ledger.get(&key), Some(&12));
+        assert!(quarantine(&mut ledger, key, 0).is_err());
+        assert!(quarantine(&mut ledger, key, -1).is_err());
+
+        ledger.insert(key, i64::MAX);
+        assert!(quarantine(&mut ledger, key, 1).is_err());
+    }
+
+    #[test]
+    fn claim_requires_account_key_presence_and_exact_amount() {
+        let account_id = 7;
+        let key = bridge_account_key(account_id);
+        assert_ne!(key, [0; 32]);
+        assert_ne!(key, [1; 32]);
+        assert_ne!(key, bridge_account_key(account_id + 1));
+
+        let mut valid = BTreeMap::from([(key, 10)]);
+        claim(&mut valid, account_id, key, 10).unwrap();
+        assert!(valid.is_empty());
+
+        assert!(claim(&mut BTreeMap::new(), account_id, key, 10).is_err());
+        assert!(claim(&mut BTreeMap::from([(key, 10)]), account_id + 1, key, 10).is_err());
+        assert!(claim(&mut BTreeMap::from([(key, 10)]), account_id, key, 9).is_err());
+    }
+
+    #[test]
+    fn transition_replays_quarantine_and_claim_events() {
+        let account_id = 7;
+        let key = bridge_account_key(account_id);
+
+        let deposit = witness(Vec::new(), vec![quarantined(key, 10)], vec![entry(key, 10)]);
+        assert!(verify_quarantine_transition(&deposit).valid);
+
+        let claim = witness(
+            vec![entry(key, 10)],
+            vec![claimed(account_id, key, 10)],
+            Vec::new(),
+        );
+        assert!(verify_quarantine_transition(&claim).valid);
+    }
+
+    #[test]
+    fn transition_rejects_invalid_events_and_post_state() {
+        let account_id = 7;
+        let key = bridge_account_key(account_id);
+
+        assert_invalid(
+            &witness(Vec::new(), vec![quarantined(key, 0)], Vec::new()),
+            "must be positive",
+        );
+        assert_invalid(
+            &witness(
+                vec![entry(key, 10)],
+                vec![claimed(account_id, key, 9)],
+                Vec::new(),
+            ),
+            "does not equal parked amount",
+        );
+        assert_invalid(
+            &witness(Vec::new(), vec![quarantined(key, 10)], Vec::new()),
+            "post quarantine ledger does not match",
+        );
+    }
+
+    #[test]
+    fn transition_rejects_invalid_snapshots_and_nonempty_genesis() {
+        let key = bridge_account_key(7);
+
+        assert_invalid(
+            &witness(vec![entry(key, 0)], Vec::new(), Vec::new()),
+            "pre quarantine entry has non-positive amount",
+        );
+        assert_invalid(
+            &witness(vec![entry(key, 1), entry(key, 2)], Vec::new(), Vec::new()),
+            "pre quarantine ledger contains a duplicate key",
+        );
+        assert_invalid(
+            &witness(Vec::new(), Vec::new(), vec![entry(key, 0)]),
+            "post quarantine entry has non-positive amount",
+        );
+
+        let mut genesis = witness(vec![entry(key, 1)], Vec::new(), vec![entry(key, 1)]);
+        genesis.previous_header = None;
+        assert_invalid(
+            &genesis,
+            "genesis pre-state quarantine ledger must be empty",
+        );
+    }
+}

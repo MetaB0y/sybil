@@ -507,6 +507,7 @@ impl MmActor {
             // Wait for at least one market to be mirrored
             if self.state.markets.is_empty() {
                 tokio::select! {
+                    biased;
                     _ = cancel.cancelled() => {
                         info!("MmActor shutting down");
                         return;
@@ -529,15 +530,29 @@ impl MmActor {
                 from_block = next_from_block,
                 "connecting to block stream"
             );
-            let block_stream = match self
+            let connect = self
                 .sybil_client
-                .stream_block_events_from_block(next_from_block)
-                .await
-            {
+                .stream_block_events_from_block(next_from_block);
+            let connect_result = tokio::select! {
+                biased;
+                _ = cancel.cancelled() => {
+                    info!("MmActor shutting down");
+                    return;
+                }
+                result = connect => result,
+            };
+            let block_stream = match connect_result {
                 Ok(s) => s,
                 Err(e) => {
                     warn!(error = %e, "failed to connect block stream, retrying in 5s");
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    tokio::select! {
+                        biased;
+                        _ = cancel.cancelled() => {
+                            info!("MmActor shutting down");
+                            return;
+                        }
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {}
+                    }
                     continue;
                 }
             };
@@ -547,6 +562,7 @@ impl MmActor {
 
             loop {
                 tokio::select! {
+                    biased;
                     _ = cancel.cancelled() => {
                         info!("MmActor shutting down");
                         return;
@@ -566,12 +582,15 @@ impl MmActor {
                                     // state only. Historical blocks are never fresh quote ticks.
                                     self.observe_block(&block);
                                 } else {
-                                    self.on_block(&block).await;
+                                    self.on_block(&block, &cancel).await;
                                 }
                             }
                             Some(Ok(PublicBlockStreamEvent::ReplayComplete { up_to_height })) => {
                                 debug!(up_to_height, "block replay complete; following live stream");
-                                self.sync_positions().await;
+                                if !self.sync_positions(&cancel).await {
+                                    info!("MmActor shutting down");
+                                    return;
+                                }
                                 self.state.last_sync_block = up_to_height;
                                 replaying = false;
                             }
@@ -586,7 +605,10 @@ impl MmActor {
                                     head_height,
                                     "block stream resume point is below retention floor; resyncing positions and resuming at floor"
                                 );
-                                self.sync_positions().await;
+                                if !self.sync_positions(&cancel).await {
+                                    info!("MmActor shutting down");
+                                    return;
+                                }
                                 next_from_block = Some(retention_min_height);
                                 break; // Reconnect from retained floor
                             }
@@ -665,12 +687,19 @@ impl MmActor {
 
     // ----- Position sync -------------------------------------------------- //
 
-    async fn sync_positions(&mut self) {
-        let account = match self.sybil_client.get_account(self.account_id).await {
+    /// Refresh account state without making shutdown wait for a read-only HTTP
+    /// request. Returns `false` only when cancellation won the race.
+    async fn sync_positions(&mut self, cancel: &tokio_util::sync::CancellationToken) -> bool {
+        let account_result = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return false,
+            result = self.sybil_client.get_account(self.account_id) => result,
+        };
+        let account = match account_result {
             Ok(a) => a,
             Err(e) => {
                 warn!(error = %e, "position sync failed");
-                return;
+                return true;
             }
         };
 
@@ -694,6 +723,7 @@ impl MmActor {
             positions = account.positions.len(),
             "position sync complete"
         );
+        true
     }
 
     // ----- Budget computation --------------------------------------------- //
@@ -735,7 +765,11 @@ impl MmActor {
 
     // ----- Per-block quote generation ------------------------------------- //
 
-    async fn on_block(&mut self, block: &PublicBlockResponse) {
+    async fn on_block(
+        &mut self,
+        block: &PublicBlockResponse,
+        cancel: &tokio_util::sync::CancellationToken,
+    ) {
         let snapshot = self.price_rx.borrow().clone();
         let now = now_ms();
         self.state.progress.last_observed_block = Some(block.height);
@@ -746,7 +780,9 @@ impl MmActor {
         self.observe_block(block);
 
         // 1. Periodic position sync
-        self.maybe_sync_positions(block.height).await;
+        if !self.maybe_sync_positions(block.height, cancel).await {
+            return;
+        }
 
         // 2. Dynamic budget
         let budget_nanos = self.compute_budget(&snapshot);
@@ -854,6 +890,9 @@ impl MmActor {
         //    market lets us drop the poison defensively (PM-1 defence in depth)
         //    even if we never saw its `MarketResolved` (e.g. missed block, or a
         //    market that became untradeable for another reason).
+        if cancel.is_cancelled() {
+            return;
+        }
         match self
             .submit_orders(&orders, budget_nanos, block.height)
             .await
@@ -872,24 +911,39 @@ impl MmActor {
                 }
             }
         }
+        if cancel.is_cancelled() {
+            return;
+        }
 
         // 6. Push reference prices (IO)
-        if !ref_prices.is_empty()
-            && let Err(error) = self.sybil_client.set_reference_prices(&ref_prices).await
-        {
-            warn!(error = %error, prices = ref_prices.len(), "reference-price update failed");
+        if !ref_prices.is_empty() {
+            let update_result = tokio::select! {
+                biased;
+                _ = cancel.cancelled() => return,
+                result = self.sybil_client.set_reference_prices(&ref_prices) => result,
+            };
+            if let Err(error) = update_result {
+                warn!(error = %error, prices = ref_prices.len(), "reference-price update failed");
+            }
         }
         self.complete_quote_cycle(block.height);
     }
 
-    async fn maybe_sync_positions(&mut self, block_height: u64) {
+    async fn maybe_sync_positions(
+        &mut self,
+        block_height: u64,
+        cancel: &tokio_util::sync::CancellationToken,
+    ) -> bool {
         if block_height.saturating_sub(self.state.last_sync_block)
             >= self.config.mm_sync_interval_blocks
             || self.state.last_sync_block == 0
         {
-            self.sync_positions().await;
+            if !self.sync_positions(cancel).await {
+                return false;
+            }
             self.state.last_sync_block = block_height;
         }
+        true
     }
 
     /// Submit the IOC batch and report the operational outcome. A failure may
@@ -1117,6 +1171,59 @@ mod tests {
             progress_tx,
         );
         (actor, price_tx)
+    }
+
+    #[tokio::test]
+    async fn cancellation_interrupts_pending_block_stream_handshake() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (price_tx, price_rx) = watch::channel(PriceSnapshot::default());
+        let (mm_tx, mm_rx) = mpsc::channel(1);
+        let (progress_tx, _progress_rx) = watch::channel(MmProgress::default());
+        let client = SybilClient::with_defaults(format!("http://{address}"), None);
+        let actor = MmActor::new(
+            MmConfig::default().validate().unwrap(),
+            client,
+            1,
+            price_rx,
+            mm_rx,
+            progress_tx,
+        );
+        mm_tx
+            .send(MmMessage::MarketNative {
+                sybil_market_id: 1,
+                native_market_key: "native-1".to_string(),
+                quote_range: QuoteRange {
+                    min: 0.05,
+                    max: 0.95,
+                    initial: 0.5,
+                },
+                group_key: None,
+                group_size: 0,
+            })
+            .await
+            .unwrap();
+
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let actor_cancel = cancel.clone();
+        let mut actor_task = tokio::spawn(actor.run(actor_cancel));
+        let (_socket, _) =
+            tokio::time::timeout(std::time::Duration::from_secs(1), listener.accept())
+                .await
+                .expect("actor should start the WebSocket handshake")
+                .unwrap();
+
+        cancel.cancel();
+        let stopped =
+            tokio::time::timeout(std::time::Duration::from_millis(250), &mut actor_task).await;
+        if stopped.is_err() {
+            actor_task.abort();
+        }
+        assert!(
+            stopped.is_ok(),
+            "cancellation should not wait for the WebSocket handshake"
+        );
+        drop(price_tx);
     }
 
     fn track(actor: &mut MmActor, market_id: u32) {

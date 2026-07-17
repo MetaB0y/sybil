@@ -57,9 +57,9 @@ class BlockResponse:
             parent_hash (str):
             state_root (str): Post-block state root. Hex-encoded 32-byte qMDB root.
             timestamp_ms (int):
-            total_volume_nanos (int): Total traded notional in the block. Integer nanodollars;
+            total_volume_nanos (str): Total traded notional in the block. Integer nanodollars;
                 1_000_000_000 = $1.
-            total_welfare_nanos (int): Total solver welfare in the block. Integer nanodollars;
+            total_welfare_nanos (str): Total solver welfare in the block. Integer nanodollars;
                 1_000_000_000 = $1. Verified block welfare is non-negative.
             bridge (BridgeBlockResponse | Unset):
             by_market (BlockResponseByMarket | Unset): Nested per-market block scalars. Each
@@ -88,8 +88,8 @@ class BlockResponse:
     parent_hash: str
     state_root: str
     timestamp_ms: int
-    total_volume_nanos: int
-    total_welfare_nanos: int
+    total_volume_nanos: str
+    total_welfare_nanos: str
     bridge: BridgeBlockResponse | Unset = UNSET
     by_market: BlockResponseByMarket | Unset = UNSET
     clearing_prices_nanos: BlockResponseClearingPricesNanos | Unset = UNSET

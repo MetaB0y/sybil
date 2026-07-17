@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.public_block_response import PublicBlockResponse
 from typing import cast
 
@@ -33,7 +34,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | PublicBlockResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | ApiErrorResponse | PublicBlockResponse | None:
     if response.status_code == 200:
         response_200 = PublicBlockResponse.from_dict(response.json())
 
@@ -45,13 +46,20 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         response_404 = cast(Any, None)
         return response_404
 
+    if response.status_code == 410:
+        response_410 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_410
+
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
     else:
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | PublicBlockResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | ApiErrorResponse | PublicBlockResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -65,7 +73,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
 
-) -> Response[Any | PublicBlockResponse]:
+) -> Response[Any | ApiErrorResponse | PublicBlockResponse]:
     """ GET /v1/blocks/{height}
 
     Args:
@@ -76,7 +84,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | PublicBlockResponse]
+        Response[Any | ApiErrorResponse | PublicBlockResponse]
      """
 
 
@@ -96,7 +104,7 @@ def sync(
     *,
     client: AuthenticatedClient | Client,
 
-) -> Any | PublicBlockResponse | None:
+) -> Any | ApiErrorResponse | PublicBlockResponse | None:
     """ GET /v1/blocks/{height}
 
     Args:
@@ -107,7 +115,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | PublicBlockResponse
+        Any | ApiErrorResponse | PublicBlockResponse
      """
 
 
@@ -122,7 +130,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
 
-) -> Response[Any | PublicBlockResponse]:
+) -> Response[Any | ApiErrorResponse | PublicBlockResponse]:
     """ GET /v1/blocks/{height}
 
     Args:
@@ -133,7 +141,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | PublicBlockResponse]
+        Response[Any | ApiErrorResponse | PublicBlockResponse]
      """
 
 
@@ -153,7 +161,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient | Client,
 
-) -> Any | PublicBlockResponse | None:
+) -> Any | ApiErrorResponse | PublicBlockResponse | None:
     """ GET /v1/blocks/{height}
 
     Args:
@@ -164,7 +172,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | PublicBlockResponse
+        Any | ApiErrorResponse | PublicBlockResponse
      """
 
 

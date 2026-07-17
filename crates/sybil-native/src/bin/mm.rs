@@ -15,6 +15,8 @@ use sybil_native::{Error, NativeDeployment};
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
+const TASK_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(35);
+
 #[derive(Debug, Parser)]
 #[command(
     name = "sybil-native-mm",
@@ -104,8 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let token = std::env::var("SYBIL_SERVICE_TOKEN")
         .ok()
         .filter(|value| !value.trim().is_empty());
-    let http = reqwest::Client::new();
-    let client = SybilClient::new(http, config.sybil_url.clone(), token);
+    let client = SybilClient::with_defaults(config.sybil_url.clone(), token);
     let health = client.health().await?;
     if health
         .genesis_hash
@@ -166,20 +167,88 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let actor_cancel = cancel.clone();
     let mut actor_handle = tokio::spawn(async move { actor.run(actor_cancel).await });
-    tokio::select! {
-        result = tokio::signal::ctrl_c() => result?,
-        result = &mut actor_handle => result?,
-        result = &mut monitoring_handle => result??,
+    let unexpected_exit = tokio::select! {
+        _ = shutdown_signal() => None,
+        result = &mut actor_handle => Some(task_exit("MmActor", result)),
+        result = &mut monitoring_handle => Some(monitoring_exit(result)),
+    };
+    if let Some(message) = unexpected_exit.as_deref() {
+        tracing::error!(%message, "critical native MM task exited");
     }
     cancel.cancel();
-    if !actor_handle.is_finished() {
-        actor_handle.await?;
+    let stopped = tokio::time::timeout(TASK_SHUTDOWN_TIMEOUT, async {
+        let actor_result = if actor_handle.is_finished() {
+            None
+        } else {
+            Some((&mut actor_handle).await)
+        };
+        let monitoring_result = if monitoring_handle.is_finished() {
+            None
+        } else {
+            Some((&mut monitoring_handle).await)
+        };
+        (actor_result, monitoring_result)
+    })
+    .await;
+    let (actor_result, monitoring_result) = match stopped {
+        Ok(results) => results,
+        Err(_) => {
+            return Err(std::io::Error::other(format!(
+                "native MM tasks did not stop within {}s",
+                TASK_SHUTDOWN_TIMEOUT.as_secs()
+            ))
+            .into());
+        }
+    };
+    if let Some(result) = actor_result {
+        result?;
     }
-    if !monitoring_handle.is_finished() {
-        monitoring_handle.await??;
+    if let Some(result) = monitoring_result {
+        result??;
     }
     tracing::info!("native MM shutdown complete");
-    Ok(())
+    match unexpected_exit {
+        Some(message) => Err(std::io::Error::other(message).into()),
+        None => Ok(()),
+    }
+}
+
+fn task_exit(task: &'static str, result: Result<(), tokio::task::JoinError>) -> String {
+    match result {
+        Ok(()) => format!("{task} exited unexpectedly"),
+        Err(error) => format!("{task} panicked or was cancelled: {error}"),
+    }
+}
+
+fn monitoring_exit(result: Result<Result<(), std::io::Error>, tokio::task::JoinError>) -> String {
+    match result {
+        Ok(Ok(())) => "monitoring server exited unexpectedly".to_string(),
+        Ok(Err(error)) => format!("monitoring server failed: {error}"),
+        Err(error) => format!("monitoring server panicked or was cancelled: {error}"),
+    }
+}
+
+/// Resolve on either interactive Ctrl-C or Docker's SIGTERM.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl-C handler");
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        () = ctrl_c => tracing::info!("received Ctrl-C, shutting down"),
+        () = terminate => tracing::info!("received SIGTERM, shutting down"),
+    }
 }
 
 async fn resolve_account(
@@ -188,15 +257,31 @@ async fn resolve_account(
     deployment: &NativeDeployment,
     initial_balance_nanos: u64,
 ) -> Result<u64, Error> {
-    if let Ok(state) = load_state(state_path)
+    let persisted = match load_state(state_path) {
+        Ok(state) => Some(state),
+        Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error),
+    };
+    if let Some(state) = persisted
         && state.genesis_hash == deployment.genesis_hash
-        && client.get_account(state.account_id).await.is_ok()
     {
-        tracing::info!(
-            account_id = state.account_id,
-            "reattached native MM account"
-        );
-        return Ok(state.account_id);
+        match client.get_account(state.account_id).await {
+            Ok(_) => {
+                tracing::info!(
+                    account_id = state.account_id,
+                    "reattached native MM account"
+                );
+                return Ok(state.account_id);
+            }
+            Err(error) if error.api_status() == Some(404) => {
+                tracing::warn!(
+                    account_id = state.account_id,
+                    %error,
+                    "persisted native MM account no longer exists; minting a new one"
+                );
+            }
+            Err(error) => return Err(error.into()),
+        }
     }
     let account = client.create_bare_account(initial_balance_nanos).await?;
     save_state(

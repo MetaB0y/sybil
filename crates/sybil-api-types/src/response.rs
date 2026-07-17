@@ -37,12 +37,18 @@ pub struct AccountResponse {
     pub account_id: u64,
     /// Total (gross) account balance; see `available_balance_nanos` for spendable
     /// funds. Integer nanodollars; 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub balance_nanos: i64,
     /// Spendable account balance after live-order reservations. Integer
     /// nanodollars; 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub available_balance_nanos: i64,
     /// Balance reserved by live resting orders. Integer nanodollars;
     /// 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub reserved_balance_nanos: i64,
     /// Current validity key-set digest used to state-bind key operations.
     pub keys_digest_hex: String,
@@ -74,6 +80,8 @@ pub struct OnboardingPolicyResponse {
     pub accounts_remaining: u64,
     /// Fixed play-money balance assigned by the server to each new public
     /// account. Integer nanodollars; 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub grant_nanos: u64,
 }
 
@@ -141,18 +149,30 @@ pub struct PrivateAccountSummaryResponse {
     pub account_id: u64,
     /// Total (gross) account balance; see `available_balance_nanos` for spendable
     /// funds. Integer nanodollars; 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub balance_nanos: i64,
     /// Spendable account balance after live-order reservations. Integer
     /// nanodollars; 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub available_balance_nanos: i64,
     /// Balance reserved by live resting orders. Integer nanodollars;
     /// 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub reserved_balance_nanos: i64,
     /// Total deposited to date. Integer nanodollars; 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub total_deposited_nanos: i64,
     /// Current mark-to-market portfolio value. Integer nanodollars; 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub portfolio_value_nanos: i64,
     /// Portfolio value minus deposits. Integer nanodollars; 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub pnl_nanos: i64,
     #[serde(default)]
     pub positions: Vec<PositionResponse>,
@@ -176,14 +196,23 @@ pub struct MarketResponse {
     pub name: String,
     /// Current YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
+    #[serde(with = "crate::wire_integer::option")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub yes_price_nanos: Option<u64>,
     /// Current NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
+    #[serde(with = "crate::wire_integer::option")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub no_price_nanos: Option<u64>,
     pub status: String,
     /// Resolution payout per YES share. Integer nanodollars; 1_000_000_000 = $1.
     /// Payouts are per-share probabilities in [0, 1e9].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::wire_integer::option"
+    )]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub payout_nanos: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -198,12 +227,18 @@ pub struct MarketResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at_ms: Option<u64>,
     /// All-time traded notional. Integer nanodollars; 1_000_000_000 = $1.
-    #[serde(default)]
+    #[serde(default, with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub volume_nanos: u64,
     /// Reference price from external system (e.g., Polymarket), display only.
     /// Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::wire_integer::option"
+    )]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub reference_price_nanos: Option<u64>,
     /// Server-side expiry of `reference_price_nanos`, as Unix milliseconds.
     /// The price is omitted once this boundary has passed.
@@ -250,30 +285,43 @@ pub struct MarketResponse {
     /// Rolling 24h trading volume. Integer nanodollars; 1_000_000_000 = $1.
     /// Off-block;
     /// "since last restart" until prod persistence is enabled.
-    #[serde(default)]
+    #[serde(default, with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub volume_24h_nanos: u64,
     /// Clearing YES price ~24h ago, derived from the per-market
     /// hourly snapshot. `None` for markets younger than 24h or wiped on
     /// restart. FE computes the 24h delta as `current - snapshot`.
     /// Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::wire_integer::option"
+    )]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub yes_price_24h_ago_nanos: Option<u64>,
     /// Clearing NO price ~24h ago. See `yes_price_24h_ago_nanos`.
     /// Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::wire_integer::option"
+    )]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub no_price_24h_ago_nanos: Option<u64>,
     /// Rolling last-10-batch band depth average. Integer nanodollars;
     /// 1_000_000_000 = $1. Zero for markets without a clearing price yet.
     /// Pair with `liquidity_band_nanos` for labelling.
-    #[serde(default)]
+    #[serde(default, with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub liquidity_avg10_nanos: u64,
     /// Width of the band the liquidity score uses (the ± in "$X ±$0.05").
     /// Integer nanodollars; 1_000_000_000 = $1.
     /// Always the live config value — `0` when no liquidity has been
     /// recorded yet.
-    #[serde(default)]
+    #[serde(default, with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub liquidity_band_nanos: u64,
     /// All-time non-MM admissions counted against this market. Multi-market
     /// orders credit every active market; sum-of-per-market over-counts vs.
@@ -317,19 +365,30 @@ pub struct MarketSummaryResponse {
     pub name: String,
     /// Current YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
+    #[serde(with = "crate::wire_integer::option")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub yes_price_nanos: Option<u64>,
     /// Current NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
+    #[serde(with = "crate::wire_integer::option")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub no_price_nanos: Option<u64>,
     /// Reference price from external system (e.g., Polymarket), display only.
     /// Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::wire_integer::option"
+    )]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub reference_price_nanos: Option<u64>,
     /// Server-side expiry of `reference_price_nanos`, as Unix milliseconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference_price_expires_at_ms: Option<u64>,
     /// All-time traded notional. Integer nanodollars; 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub volume_nanos: u64,
     pub status: String,
     /// All-time unique trader count (mirrors `MarketResponse.trader_count`).
@@ -338,23 +397,36 @@ pub struct MarketSummaryResponse {
     /// Rolling 24h trading volume. Integer nanodollars; 1_000_000_000 = $1.
     /// Mirrors
     /// `MarketResponse.volume_24h_nanos`).
-    #[serde(default)]
+    #[serde(default, with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub volume_24h_nanos: u64,
     /// Clearing YES price ~24h ago. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::wire_integer::option"
+    )]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub yes_price_24h_ago_nanos: Option<u64>,
     /// Clearing NO price ~24h ago. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::wire_integer::option"
+    )]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub no_price_24h_ago_nanos: Option<u64>,
     /// Liquidity depth score. Integer nanodollars; 1_000_000_000 = $1.
     /// Mirrors `MarketResponse`.
-    #[serde(default)]
+    #[serde(default, with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub liquidity_avg10_nanos: u64,
     /// Liquidity price-band width. Integer nanodollars; 1_000_000_000 = $1.
     /// Mirrors `MarketResponse`.
-    #[serde(default)]
+    #[serde(default, with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub liquidity_band_nanos: u64,
     /// All-time placed/matched/unmatched (mirrors `MarketResponse`).
     #[serde(default)]
@@ -386,9 +458,13 @@ pub struct MarketPricesResponse {
 pub struct MarketPriceResponse {
     /// YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub yes_price_nanos: u64,
     /// NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub no_price_nanos: u64,
 }
 
@@ -414,6 +490,8 @@ pub struct FillResponse {
     pub fill_qty: u64,
     /// Fill price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub fill_price_nanos: u64,
     #[serde(default)]
     pub account_id: u64,
@@ -426,16 +504,22 @@ pub enum SystemEventResponse {
     CreateAccount {
         account_id: u64,
         /// Initial account balance. Integer nanodollars; 1_000_000_000 = $1.
+        #[serde(with = "crate::wire_integer")]
+        #[cfg_attr(feature = "openapi", schema(value_type = String))]
         initial_balance_nanos: i64,
     },
     Deposit {
         account_id: u64,
         /// Account credit amount. Integer nanodollars; 1_000_000_000 = $1.
+        #[serde(with = "crate::wire_integer")]
+        #[cfg_attr(feature = "openapi", schema(value_type = String))]
         amount_nanos: i64,
     },
     L1Deposit {
         account_id: u64,
         /// Account credit amount. Integer nanodollars; 1_000_000_000 = $1.
+        #[serde(with = "crate::wire_integer")]
+        #[cfg_attr(feature = "openapi", schema(value_type = String))]
         amount_nanos: i64,
         deposit_id: u64,
         deposit_root_hex: String,
@@ -444,6 +528,8 @@ pub enum SystemEventResponse {
     WithdrawalCreated {
         account_id: u64,
         /// Account debit amount. Integer nanodollars; 1_000_000_000 = $1.
+        #[serde(with = "crate::wire_integer")]
+        #[cfg_attr(feature = "openapi", schema(value_type = String))]
         amount_nanos: i64,
         withdrawal_id: u64,
         nullifier_hex: String,
@@ -451,6 +537,8 @@ pub enum SystemEventResponse {
     WithdrawalRefunded {
         account_id: u64,
         /// Refunded account credit. Integer nanodollars; 1_000_000_000 = $1.
+        #[serde(with = "crate::wire_integer")]
+        #[cfg_attr(feature = "openapi", schema(value_type = String))]
         amount_nanos: i64,
         withdrawal_id: u64,
         reason: String,
@@ -458,6 +546,8 @@ pub enum SystemEventResponse {
     WithdrawalFinalized {
         account_id: u64,
         /// Finalized withdrawal amount. Integer nanodollars; 1_000_000_000 = $1.
+        #[serde(with = "crate::wire_integer")]
+        #[cfg_attr(feature = "openapi", schema(value_type = String))]
         amount_nanos: i64,
         withdrawal_id: u64,
     },
@@ -468,6 +558,8 @@ pub enum SystemEventResponse {
         market_id: u32,
         /// Resolution payout per YES share. Integer nanodollars;
         /// 1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
+        #[serde(with = "crate::wire_integer")]
+        #[cfg_attr(feature = "openapi", schema(value_type = String))]
         payout_nanos: u64,
         affected_accounts: Vec<u64>,
     },
@@ -515,6 +607,8 @@ pub enum SystemEventResponse {
     },
     DepositQuarantined {
         /// Amount parked in the system ledger. Integer nanodollars; 1_000_000_000 = $1.
+        #[serde(with = "crate::wire_integer")]
+        #[cfg_attr(feature = "openapi", schema(value_type = String))]
         amount_nanos: i64,
         deposit_id: u64,
         deposit_root_hex: String,
@@ -523,6 +617,8 @@ pub enum SystemEventResponse {
     QuarantineClaimed {
         account_id: u64,
         /// Amount moved into the account. Integer nanodollars; 1_000_000_000 = $1.
+        #[serde(with = "crate::wire_integer")]
+        #[cfg_attr(feature = "openapi", schema(value_type = String))]
         amount_nanos: i64,
         sybil_account_key_hex: String,
     },
@@ -550,7 +646,8 @@ pub struct BlockMarketStats {
     /// Per-market volume contribution from this block's fills. Integer nanodollars;
     /// 1_000_000_000 = $1. Multi-market fills credit each active market with their
     /// full notional; the platform `total_volume_nanos` scalar counts each fill once.
-    #[serde(default)]
+    #[serde(default, with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub volume_nanos: u64,
     /// Non-MM admissions counted against this market in this block.
     /// Multi-market orders credit each active market.
@@ -568,7 +665,8 @@ pub struct BlockMarketStats {
     /// 1_000_000_000 = $1. Multi-market fills credit each active market with their
     /// full welfare; the platform `total_welfare_nanos` counts each fill once.
     /// Encoded as signed nanos to match canonical welfare arithmetic.
-    #[serde(default)]
+    #[serde(default, with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub welfare_nanos: i64,
 }
 
@@ -614,7 +712,9 @@ pub struct RemovedOrderViewResponse {
     pub exit_reason: String,
     pub has_been_matched: bool,
     /// Released reserved cash. Integer nanodollars; 1_000_000_000 = $1.
-    pub reserved_balance_released: i64,
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
+    pub reserved_balance_released_nanos: i64,
     #[serde(default)]
     pub reserved_positions_released: Vec<ReservedPositionReleaseResponse>,
     #[serde(default)]
@@ -672,7 +772,11 @@ pub struct PublicBlockResponse {
     pub timestamp_ms: u64,
     /// Clearing price vectors by market/group. Integer nanodollars;
     /// 1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
-    #[serde(default)]
+    #[serde(default, with = "crate::wire_integer::map_vec_u64")]
+    #[cfg_attr(
+        feature = "openapi",
+        schema(value_type = HashMap<String, Vec<String>>)
+    )]
     pub clearing_prices_nanos: HashMap<String, Vec<u64>>,
     /// Public bridge commitment/count only. Individual deposits and
     /// withdrawals remain private.
@@ -683,9 +787,13 @@ pub struct PublicBlockResponse {
     pub resolved_market_ids: Vec<u32>,
     /// Total solver welfare in the block. Integer nanodollars;
     /// 1_000_000_000 = $1. Signed: solver rounding can yield small negatives.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub total_welfare_nanos: i64,
     /// Total traded notional in the block. Integer nanodollars;
     /// 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub total_volume_nanos: u64,
     pub orders_filled: usize,
     /// Unique non-MM accounts admitted into this block. This is an aggregate,
@@ -723,7 +831,11 @@ pub struct BlockResponse {
     pub fills: Vec<FillResponse>,
     /// Clearing price vectors by market/group. Integer nanodollars;
     /// 1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
-    #[serde(default)]
+    #[serde(default, with = "crate::wire_integer::map_vec_u64")]
+    #[cfg_attr(
+        feature = "openapi",
+        schema(value_type = HashMap<String, Vec<String>>)
+    )]
     pub clearing_prices_nanos: HashMap<String, Vec<u64>>,
     #[serde(default)]
     pub rejections: Vec<RejectionResponse>,
@@ -731,9 +843,13 @@ pub struct BlockResponse {
     pub bridge: BridgeBlockResponse,
     /// Total solver welfare in the block. Integer nanodollars;
     /// 1_000_000_000 = $1. Verified block welfare is non-negative.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub total_welfare_nanos: i64,
     /// Total traded notional in the block. Integer nanodollars;
     /// 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub total_volume_nanos: u64,
     pub orders_filled: usize,
     /// Unique placers (non-MM accounts) admitted into this block. Platform
@@ -796,7 +912,8 @@ pub struct BridgeStatusResponse {
     pub refunded_withdrawal_count: usize,
     #[serde(default)]
     pub quarantine_ledger_size: usize,
-    #[serde(default)]
+    #[serde(default, with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     /// Sum of parked value. Integer nanodollars; 1_000_000_000 = $1.
     pub total_quarantined_nanos: i64,
 }
@@ -829,7 +946,12 @@ pub struct BridgeDepositResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account_id: Option<u64>,
     /// Account balance after the deposit. Integer nanodollars; 1_000_000_000 = $1.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::wire_integer::option"
+    )]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub balance_nanos: Option<i64>,
     /// `credited` or `quarantined`.
     pub disposition: String,
@@ -848,6 +970,8 @@ pub struct BridgeWithdrawalResponse {
     pub amount_token_units: u64,
     /// Off-chain balance amount burned for the withdrawal. Integer nanodollars;
     /// 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub amount_nanos: u64,
     pub expiry_height: u64,
     pub nullifier_hex: String,
@@ -1037,6 +1161,8 @@ pub struct ResolveMarketResponse {
     pub market_id: u32,
     /// Resolution payout per YES share. Integer nanodollars;
     /// 1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub payout_nanos: u64,
     pub status: String,
 }
@@ -1050,7 +1176,12 @@ pub struct ResolutionResponse {
     pub status: String,
     /// Resolution payout per YES share. Integer nanodollars;
     /// 1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::wire_integer::option"
+    )]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub payout_nanos: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolved_at_ms: Option<u64>,
@@ -1086,22 +1217,36 @@ pub struct PortfolioResponse {
     pub account_id: u64,
     /// Total (gross) account balance; see `available_balance_nanos` for spendable
     /// funds. Integer nanodollars; 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub balance_nanos: i64,
     /// Spendable account balance after live-order reservations. Integer
     /// nanodollars; 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub available_balance_nanos: i64,
     /// Balance reserved by live resting orders. Integer nanodollars;
     /// 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub reserved_balance_nanos: i64,
     /// Total account deposits. Integer nanodollars; 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub total_deposited_nanos: i64,
     pub positions: Vec<PositionValueResponse>,
     /// Mark-to-market value of all positions. Integer nanodollars;
     /// 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub total_position_value_nanos: i64,
     /// Total portfolio value. Integer nanodollars; 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub portfolio_value_nanos: i64,
     /// Total profit and loss. Integer nanodollars; 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub pnl_nanos: i64,
     /// First-deposit timestamp in ms since epoch (B8). `0` for accounts
     /// with no recorded deposit history (FE renders as "—"). Same
@@ -1118,12 +1263,14 @@ pub struct PortfolioResponse {
     /// 1_000_000_000 = $1. Signed.
     /// `pnl_nanos = realized + unrealized` once both fields populate, but
     /// `pnl_nanos` is kept for backward compatibility with pre-C1 clients.
-    #[serde(default)]
+    #[serde(default, with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub realized_pnl_nanos: i64,
     /// Mark-to-market PnL on currently open positions (C1). Integer nanodollars;
     /// 1_000_000_000 = $1. Computed as
     /// `sum((current_price - avg_entry) * quantity / SHARE_SCALE)` across positions.
-    #[serde(default)]
+    #[serde(default, with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub unrealized_pnl_nanos: i64,
 }
 
@@ -1136,14 +1283,19 @@ pub struct PositionValueResponse {
     pub quantity: i64,
     /// Current mark price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub current_price_nanos: u64,
     /// Mark-to-market position value. Integer nanodollars; 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub value_nanos: i64,
     /// Weighted-average entry price for this side of the market (C1). `0`
     /// for positions opened before C1 landed (`#[serde(default)]` forward
     /// compat). Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
-    #[serde(default)]
+    #[serde(default, with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub avg_entry_price_nanos: u64,
 }
 
@@ -1173,11 +1325,17 @@ pub struct PricePointResponse {
     pub timestamp_ms: u64,
     /// YES clearing price at this point. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub yes_price_nanos: u64,
     /// NO clearing price at this point. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub no_price_nanos: u64,
     /// Traded notional at this point. Integer nanodollars; 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub volume_nanos: u64,
 }
 
@@ -1206,29 +1364,47 @@ pub struct PriceCandleResponse {
     pub last_height: u64,
     /// Bucket open YES price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub open_yes_price_nanos: u64,
     /// Bucket high YES price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub high_yes_price_nanos: u64,
     /// Bucket low YES price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub low_yes_price_nanos: u64,
     /// Bucket close YES price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub close_yes_price_nanos: u64,
     /// Bucket open NO price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub open_no_price_nanos: u64,
     /// Bucket high NO price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub high_no_price_nanos: u64,
     /// Bucket low NO price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub low_no_price_nanos: u64,
     /// Bucket close NO price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub close_no_price_nanos: u64,
     /// Bucket traded notional. Integer nanodollars; 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub volume_nanos: u64,
     pub point_count: u64,
 }
@@ -1241,8 +1417,12 @@ pub struct EquityPointResponse {
     pub timestamp_ms: u64,
     pub height: u64,
     /// Portfolio value at this point. Integer nanodollars; 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub portfolio_value_nanos: i64,
     /// Deposited amount at this point. Integer nanodollars; 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub deposited_nanos: i64,
 }
 
@@ -1292,12 +1472,16 @@ pub struct LeaderboardEntryResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_seed: Option<String>,
     /// Net PnL over the window (realized + unrealized). Integer nanodollars; 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub pnl_nanos: i64,
     /// Return on invested capital over the window, in basis points (100 = 1%).
     pub roi_bps: i64,
     /// Distinct markets with a currently open position.
     pub markets_traded: u32,
     /// Current portfolio equity (balance + marked positions). Integer nanodollars; 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub equity_nanos: i64,
 }
 
@@ -1314,6 +1498,8 @@ pub struct AccountFillResponse {
     pub fill_qty: u64,
     /// Fill price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub fill_price_nanos: u64,
     pub block_height: u64,
     pub timestamp_ms: u64,
@@ -1372,6 +1558,8 @@ pub struct PendingOrderResponse {
     pub side: String,
     /// Limit price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub limit_price_nanos: u64,
     /// Remaining fill quantity. Integer share-units; 1000 units = 1 share.
     pub remaining_quantity: u64,
@@ -1402,12 +1590,14 @@ pub struct OverviewBucketResponse {
     pub unique_traders: u64,
     /// Total traded notional for this bucket. Integer nanodollars;
     /// 1_000_000_000 = $1.
-    #[serde(default)]
+    #[serde(default, with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub total_volume_nanos: u64,
     /// Cumulative platform welfare for this bucket. Integer nanodollars;
     /// 1_000_000_000 = $1. Sum of per-block `total_welfare` (each fill counted
     /// once). Verified block welfare is non-negative.
-    #[serde(default)]
+    #[serde(default, with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub total_welfare_nanos: i64,
     #[serde(default)]
     pub orders: OverviewOrderStatsResponse,
@@ -1445,15 +1635,18 @@ pub struct OpenBatchResponse {
     pub unique_placers: u32,
     /// Indicative YES price for the open batch. Integer nanodollars;
     /// 1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
-    #[serde(default)]
+    #[serde(default, with = "crate::wire_integer::option")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub indicative_yes_price_nanos: Option<u64>,
     /// Indicative NO price for the open batch. Integer nanodollars;
     /// 1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
-    #[serde(default)]
+    #[serde(default, with = "crate::wire_integer::option")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub indicative_no_price_nanos: Option<u64>,
     /// Indicative traded notional for the open batch. Integer nanodollars;
     /// 1_000_000_000 = $1.
-    #[serde(default)]
+    #[serde(default, with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub indicative_volume_nanos: u64,
     #[serde(default)]
     pub indicative_computed_at_ms: u64,
@@ -1489,13 +1682,28 @@ pub struct HistoryEventResponse {
     pub qty: Option<u64>,
     /// Event price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::wire_integer::option"
+    )]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub price_nanos: Option<u64>,
     /// Event cash amount. Integer nanodollars; 1_000_000_000 = $1.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::wire_integer::option"
+    )]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub amount_nanos: Option<i64>,
     /// Event realized PnL. Integer nanodollars; 1_000_000_000 = $1.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::wire_integer::option"
+    )]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub realized_pnl_nanos: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payout_outcome: Option<String>,
@@ -1504,10 +1712,20 @@ pub struct HistoryEventResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     /// Rejected-order required amount. Integer nanodollars; 1_000_000_000 = $1.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::wire_integer::option"
+    )]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub required_nanos: Option<i64>,
     /// Rejected-order available amount. Integer nanodollars; 1_000_000_000 = $1.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::wire_integer::option"
+    )]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub available_nanos: Option<i64>,
 }
 
@@ -1580,5 +1798,26 @@ mod tests {
         let parsed2: BlockResponse = serde_json::from_str(&json2).expect("deserialize with map");
         assert_eq!(parsed2.by_market.len(), 1);
         assert!(parsed2.by_market.contains_key("7"));
+    }
+
+    #[test]
+    fn semantic_nanodollar_alias_serializes_as_an_exact_string() {
+        let response = RemovedOrderViewResponse {
+            order_id: 1,
+            account_id: 2,
+            phase: "post_match".to_string(),
+            exit_reason: "filled".to_string(),
+            has_been_matched: true,
+            reserved_balance_released_nanos: i64::MAX,
+            reserved_positions_released: Vec::new(),
+            active_markets: Vec::new(),
+            rejection_reason: None,
+        };
+
+        let json = serde_json::to_value(response).expect("serialize removed-order view");
+        assert_eq!(
+            json["reserved_balance_released_nanos"],
+            i64::MAX.to_string()
+        );
     }
 }

@@ -114,6 +114,16 @@ struct Args {
     /// Poll interval in milliseconds.
     #[arg(long, env = "SYBIL_L1_POLL_MS", default_value_t = 1_000)]
     poll_ms: u64,
+    /// End-to-end timeout for each Ethereum RPC or Sybil API request. Without
+    /// a deadline, one silent provider can stall unanimous ingestion and
+    /// leave the last successful readiness snapshot looking current forever.
+    #[arg(
+        long,
+        env = "SYBIL_L1_REQUEST_TIMEOUT_MS",
+        default_value_t = 30_000,
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    request_timeout_ms: u64,
     /// Required path for the deployment-bound scan cursor, authenticated
     /// block-hash checkpoints, and durable source-integrity fail-stop latch.
     #[arg(long, env = "SYBIL_L1_CURSOR_PATH")]
@@ -563,15 +573,32 @@ async fn main() -> Result<()> {
         .map_err(IndexerError::MetricsIo)?;
     tracing::info!(address = %args.metrics_bind, "l1.indexer.monitoring_listening");
 
-    let server = monitoring::serve(listener, metrics.clone());
+    let monitoring_cancel = tokio_util::sync::CancellationToken::new();
+    let server = monitoring::serve(listener, metrics.clone(), monitoring_cancel.child_token());
     let indexer = run_indexer(&args, &metrics);
+    let shutdown = shutdown_signal();
     tokio::pin!(server);
     tokio::pin!(indexer);
+    tokio::pin!(shutdown);
 
     tokio::select! {
+        () = &mut shutdown => {
+            tracing::info!("l1.indexer.shutdown_requested");
+            monitoring_cancel.cancel();
+            server.as_mut().await.map_err(IndexerError::MetricsIo)?;
+            Ok(())
+        }
         outcome = &mut indexer => match outcome {
-            Ok(()) => Ok(()),
-            Err(failure) if !failure.fatal => Err(failure.error),
+            Ok(()) => {
+                monitoring_cancel.cancel();
+                server.as_mut().await.map_err(IndexerError::MetricsIo)?;
+                Ok(())
+            }
+            Err(failure) if !failure.fatal => {
+                monitoring_cancel.cancel();
+                server.as_mut().await.map_err(IndexerError::MetricsIo)?;
+                Err(failure.error)
+            }
             Err(failure) => {
                 metrics.record_fatal(
                     failure.error.metric_kind(),
@@ -579,12 +606,49 @@ async fn main() -> Result<()> {
                 );
                 tracing::error!(error = %failure.error, "l1.indexer.fatal_metrics_only_mode");
                 // Keep only /metrics and /healthz alive so the first scrape sees
-                // the nonzero fatal counter instead of losing it on process exit.
-                server.await.map_err(IndexerError::MetricsIo)?;
+                // the nonzero fatal counter instead of losing it on process
+                // exit, while still honoring Docker SIGTERM.
+                tokio::select! {
+                    () = &mut shutdown => {
+                        tracing::info!("l1.indexer.shutdown_requested_in_fatal_mode");
+                        monitoring_cancel.cancel();
+                        server.as_mut().await.map_err(IndexerError::MetricsIo)?;
+                    }
+                    result = &mut server => {
+                        result.map_err(IndexerError::MetricsIo)?;
+                    }
+                }
                 Err(failure.error)
             }
         },
-        server_result = &mut server => server_result.map_err(IndexerError::MetricsIo),
+        server_result = &mut server => {
+            server_result.map_err(IndexerError::MetricsIo)?;
+            Err(IndexerError::MetricsIo(std::io::Error::other(
+                "L1 indexer monitoring server exited unexpectedly",
+            )))
+        },
+    }
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl-C handler");
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        () = ctrl_c => tracing::info!("received Ctrl-C"),
+        () = terminate => tracing::info!("received SIGTERM"),
     }
 }
 
@@ -601,7 +665,14 @@ async fn run_indexer(args: &Args, metrics: &IndexerMetrics) -> std::result::Resu
     let vault_address =
         parse_hex_array::<20>(&args.vault_address, "vault_address").map_err(RunFailure::fatal)?;
     let vault_hex = hex::encode(vault_address);
-    let http = reqwest::Client::new();
+    let http = reqwest::Client::builder()
+        .timeout(Duration::from_millis(args.request_timeout_ms))
+        .build()
+        .map_err(|error| {
+            RunFailure::fatal(IndexerError::InvalidProviderConfig(format!(
+                "failed to build bounded HTTP client: {error}"
+            )))
+        })?;
     if args.rpc_urls.len() != args.rpc_ids.len() {
         return Err(RunFailure::fatal(IndexerError::InvalidProviderConfig(
             format!(
@@ -1439,6 +1510,7 @@ mod tests {
             min_confirmations: 0,
             max_block_span: 1_000,
             poll_ms: 0,
+            request_timeout_ms: 30_000,
             cursor_path: PathBuf::from("test-l1-cursor.json"),
             metrics_bind: "127.0.0.1:0".parse().unwrap(),
             once: true,

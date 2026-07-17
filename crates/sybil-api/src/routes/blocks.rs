@@ -9,7 +9,7 @@ use matching_sequencer::MAX_BLOCK_REPLAY_QUERY_BLOCKS;
 use crate::convert::public_block_to_response;
 use crate::state::AppState;
 use crate::types::error::AppError;
-use crate::types::response::PublicBlockResponse;
+use crate::types::response::{ApiErrorResponse, PublicBlockResponse};
 
 const DEFAULT_BLOCK_REPLAY_QUERY_BLOCKS: usize = 20;
 
@@ -119,7 +119,8 @@ pub async fn get_latest_block(
     params(("height" = u64, Path, description = "Block height")),
     responses(
         (status = 200, description = "Public block market tape at height", body = PublicBlockResponse),
-        (status = 404, description = "Block not found")
+        (status = 404, description = "Block not found"),
+        (status = 410, description = "Block predates retained history", body = ApiErrorResponse)
     )
 )]
 pub async fn get_block_by_height(

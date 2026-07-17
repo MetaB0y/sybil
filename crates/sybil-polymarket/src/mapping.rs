@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -85,13 +86,23 @@ impl MappingStore {
     /// Save to disk if a persistence path is configured.
     pub fn save(&self) -> Result<(), Error> {
         if let Some(ref path) = self.persist_path {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
+            let parent = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new("."));
+            std::fs::create_dir_all(parent)?;
             let data = serde_json::to_string_pretty(self)?;
             let temp = path.with_extension("json.tmp");
-            std::fs::write(&temp, data)?;
-            std::fs::rename(temp, path)?;
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .open(&temp)?;
+            file.write_all(data.as_bytes())?;
+            file.sync_all()?;
+            drop(file);
+            std::fs::rename(&temp, path)?;
+            sync_parent_directory(parent)?;
         }
         Ok(())
     }
@@ -274,6 +285,16 @@ impl MappingStore {
             })
             .collect()
     }
+}
+
+#[cfg(unix)]
+fn sync_parent_directory(parent: &Path) -> std::io::Result<()> {
+    std::fs::File::open(parent)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_parent_directory(_parent: &Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 #[cfg(test)]

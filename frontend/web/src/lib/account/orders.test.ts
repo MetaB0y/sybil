@@ -98,7 +98,7 @@ describe("submitSignedOrder", () => {
     expect(body.order).toEqual({
       market_ids: [MARKET_ID],
       payoffs: [1, 0],
-      limit_price_nanos: 500_000_000, // JSON number on the wire
+      limit_price_nanos: "500000000",
       max_fill: 3000,
     });
     expect(body.nonce).toBe(Number(nonce));

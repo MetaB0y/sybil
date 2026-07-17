@@ -529,7 +529,7 @@ mod tests {
             height: 1,
             parent_hash: [0u8; 32],
             state_root: [0u8; 32],
-            events_root: crate::event_commitment::empty_events_root(),
+            events_root: crate::test_events_root(),
             order_count: 0,
             fill_count: 0,
             timestamp_ms: 0,
@@ -584,6 +584,171 @@ mod tests {
 
     fn q(shares: u64) -> u64 {
         shares_to_qty(shares).0
+    }
+
+    fn snapshot(id: u64, balance: i64, positions: Vec<(MarketId, u8, i64)>) -> AccountSnapshot {
+        AccountSnapshot {
+            id,
+            balance,
+            total_deposited: 0,
+            positions,
+            events_digest: [0; 32],
+            keys_digest: crate::empty_account_keys_digest(id),
+            last_trading_nonce: 0,
+        }
+    }
+
+    fn identity_witness(
+        post_system_state: Vec<AccountSnapshot>,
+        post_state: Vec<AccountSnapshot>,
+    ) -> BlockWitness {
+        BlockWitness {
+            header: empty_header(),
+            previous_header: None,
+            genesis_hash: [0; 32],
+            orders: Vec::new(),
+            rejections: Vec::new(),
+            system_events: Vec::new(),
+            deposit_accumulator: crate::DepositAccumulatorWitness::default(),
+            fills: Vec::new(),
+            clearing_prices: HashMap::new(),
+            total_welfare: 0,
+            minting_cost: 0,
+            mm_constraints: Vec::new(),
+            market_groups: Vec::new(),
+            pre_state: post_system_state.clone(),
+            post_system_state,
+            post_state,
+            account_keys: Vec::new(),
+            state_sidecar: Default::default(),
+            pre_state_sidecar: Default::default(),
+            resolved_markets: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn zero_balance_and_position_are_valid_and_account_stats_are_reported() {
+        let account = snapshot(7, 0, vec![(MarketId(3), 0, 0)]);
+        let result = verify_settlement(&identity_witness(vec![account.clone()], vec![account]));
+
+        assert!(result.valid, "violations: {:?}", result.violations);
+        assert_eq!(result.stats.accounts_checked, 1);
+    }
+
+    #[test]
+    fn missing_post_account_is_rejected_for_balance_or_position_value() {
+        let balance_only = identity_witness(vec![snapshot(7, 1, Vec::new())], Vec::new());
+        assert!(
+            verify_settlement(&balance_only)
+                .violations
+                .iter()
+                .any(|violation| violation.kind == ViolationKind::SettlementAccountMismatch)
+        );
+
+        let position_only =
+            identity_witness(vec![snapshot(7, 0, vec![(MarketId(3), 0, 1)])], Vec::new());
+        assert!(
+            verify_settlement(&position_only)
+                .violations
+                .iter()
+                .any(|violation| violation.kind == ViolationKind::SettlementAccountMismatch)
+        );
+    }
+
+    #[test]
+    fn claimed_extra_position_is_rejected_when_derived_position_is_zero() {
+        let derived = snapshot(7, 0, Vec::new());
+        let claimed = snapshot(7, 0, vec![(MarketId(3), 0, 1)]);
+        let result = verify_settlement(&identity_witness(vec![derived], vec![claimed]));
+
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|violation| violation.kind == ViolationKind::SettlementPositionMismatch)
+        );
+    }
+
+    #[test]
+    fn claimed_missing_position_is_rejected_when_derived_position_is_nonzero() {
+        let derived = snapshot(7, 0, vec![(MarketId(3), 0, 1)]);
+        let claimed = snapshot(7, 0, Vec::new());
+        let result = verify_settlement(&identity_witness(vec![derived], vec![claimed]));
+
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|violation| violation.kind == ViolationKind::SettlementPositionMismatch)
+        );
+    }
+
+    #[test]
+    fn settlement_price_bounds_accept_one_dollar_and_reject_larger_values() {
+        let mut markets = MarketSet::new();
+        let market = markets.add_binary("boundary");
+        let qty = shares_to_qty(1);
+        let account = snapshot(7, 2 * NANOS_PER_DOLLAR as i64, Vec::new());
+        let mut prices = HashMap::new();
+        prices.insert(market, vec![Nanos(NANOS_PER_DOLLAR), Nanos::ZERO]);
+
+        let valid_order = outcome_buy(&markets, 1, market, 0, NANOS_PER_DOLLAR, qty.0);
+        let mut valid_fill = Fill::new(valid_order.id, qty, Nanos(NANOS_PER_DOLLAR));
+        valid_fill.account_id = 7;
+        let valid = derive_post_state(
+            std::slice::from_ref(&account),
+            &[WitnessOrder {
+                order: valid_order,
+                account_id: 7,
+                is_mm: false,
+            }],
+            &[valid_fill],
+            &prices,
+            1,
+        );
+        assert!(
+            valid.violations.is_empty(),
+            "violations: {:?}",
+            valid.violations
+        );
+
+        let invalid_limit = outcome_buy(&markets, 2, market, 0, NANOS_PER_DOLLAR + 1, qty.0);
+        let limit_result = derive_post_state(
+            std::slice::from_ref(&account),
+            &[WitnessOrder {
+                order: invalid_limit,
+                account_id: 7,
+                is_mm: false,
+            }],
+            &[Fill::new(2, qty, Nanos(NANOS_PER_DOLLAR))],
+            &prices,
+            1,
+        );
+        assert!(
+            limit_result
+                .violations
+                .iter()
+                .any(|violation| violation.kind == ViolationKind::SettlementOverflow)
+        );
+
+        let valid_order = outcome_buy(&markets, 3, market, 0, NANOS_PER_DOLLAR, qty.0);
+        let fill_result = derive_post_state(
+            &[account],
+            &[WitnessOrder {
+                order: valid_order,
+                account_id: 7,
+                is_mm: false,
+            }],
+            &[Fill::new(3, qty, Nanos(NANOS_PER_DOLLAR + 1))],
+            &prices,
+            1,
+        );
+        assert!(
+            fill_result
+                .violations
+                .iter()
+                .any(|violation| violation.kind == ViolationKind::SettlementOverflow)
+        );
     }
 
     #[test]
@@ -1613,6 +1778,12 @@ mod tests {
                 .violations
                 .iter()
                 .any(|v| v.kind == ViolationKind::MintingWithoutClearingPrice)
+        );
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.details.contains("no YES clearing price"))
         );
     }
 

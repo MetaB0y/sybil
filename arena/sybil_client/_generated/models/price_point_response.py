@@ -23,19 +23,19 @@ class PricePointResponse:
     """ 
         Attributes:
             height (int):
-            no_price_nanos (int): NO clearing price at this point. Integer nanodollars; 1_000_000_000 = $1.
+            no_price_nanos (str): NO clearing price at this point. Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
             timestamp_ms (int):
-            volume_nanos (int): Traded notional at this point. Integer nanodollars; 1_000_000_000 = $1.
-            yes_price_nanos (int): YES clearing price at this point. Integer nanodollars; 1_000_000_000 = $1.
+            volume_nanos (str): Traded notional at this point. Integer nanodollars; 1_000_000_000 = $1.
+            yes_price_nanos (str): YES clearing price at this point. Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
      """
 
     height: int
-    no_price_nanos: int
+    no_price_nanos: str
     timestamp_ms: int
-    volume_nanos: int
-    yes_price_nanos: int
+    volume_nanos: str
+    yes_price_nanos: str
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 

@@ -24,14 +24,14 @@ class SystemEventResponseType3:
     """ 
         Attributes:
             account_id (int):
-            amount_nanos (int): Account debit amount. Integer nanodollars; 1_000_000_000 = $1.
+            amount_nanos (str): Account debit amount. Integer nanodollars; 1_000_000_000 = $1.
             nullifier_hex (str):
             type_ (SystemEventResponseType3Type):
             withdrawal_id (int):
      """
 
     account_id: int
-    amount_nanos: int
+    amount_nanos: str
     nullifier_hex: str
     type_: SystemEventResponseType3Type
     withdrawal_id: int

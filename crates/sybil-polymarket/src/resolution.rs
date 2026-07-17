@@ -86,14 +86,23 @@ impl ResolutionActor {
 
         let interval = Duration::from_secs(self.config.resolution_poll_interval_secs.max(1));
         loop {
-            match self.tick().await {
+            if cancel.is_cancelled() {
+                info!("ResolutionActor shutting down");
+                return;
+            }
+            match self.tick(&cancel).await {
                 Ok(()) => self.progress.record_resolution_tick(true),
                 Err(e) => {
                     self.progress.record_resolution_tick(false);
                     warn!(error = %e, "resolution tick failed");
                 }
             }
+            if cancel.is_cancelled() {
+                info!("ResolutionActor shutting down");
+                return;
+            }
             tokio::select! {
+                biased;
                 _ = cancel.cancelled() => {
                     info!("ResolutionActor shutting down");
                     return;
@@ -103,7 +112,7 @@ impl ResolutionActor {
         }
     }
 
-    async fn tick(&self) -> Result<(), Error> {
+    async fn tick(&self, cancel: &CancellationToken) -> Result<(), Error> {
         // Snapshot the condition_id → sybil_market_id map under a short
         // read lock so the main sync loop isn't blocked while we do I/O.
         let mirrors = self
@@ -117,23 +126,34 @@ impl ResolutionActor {
         if mirrors.is_empty() {
             return Ok(());
         }
+        if cancel.is_cancelled() {
+            return Ok(());
+        }
 
-        let events = self
-            .gamma
-            .fetch_closed_events(self.config.max_events)
-            .await
-            .unwrap_or_else(|e| {
+        let events_result = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Ok(()),
+            result = self.gamma.fetch_closed_events(self.config.max_events) => result,
+        };
+        let events = events_result.unwrap_or_else(|e| {
                 warn!(error = %e, "closed-events fast path failed; continuing with mirrored condition poll");
                 Vec::new()
             });
+        if cancel.is_cancelled() {
+            return Ok(());
+        }
 
         let mut condition_ids: Vec<String> = mirrors.keys().cloned().collect();
         condition_ids.sort();
         let polled_condition_ids = self.next_condition_poll_ids(&condition_ids);
-        let condition_markets = self
-            .gamma
-            .fetch_markets_by_condition_ids(&polled_condition_ids)
-            .await?;
+        let condition_markets = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Ok(()),
+            result = self.gamma.fetch_markets_by_condition_ids(&polled_condition_ids) => result?,
+        };
+        if cancel.is_cancelled() {
+            return Ok(());
+        }
         let markets = mapped_resolution_markets(&events, condition_markets, &mirrors);
 
         // Mark-once: push `closed: true` off-block for any mapped market
@@ -151,6 +171,9 @@ impl ResolutionActor {
                 ..Default::default()
             };
             for (sybil_id, condition_id) in to_flag {
+                if cancel.is_cancelled() {
+                    return Ok(());
+                }
                 match self.sybil.set_market_metadata(sybil_id, &req).await {
                     Ok(()) => {
                         self.flagged_closed
@@ -167,10 +190,13 @@ impl ResolutionActor {
 
         let mut resolved = 0usize;
         for market in markets {
+            if cancel.is_cancelled() {
+                return Ok(());
+            }
             let Some(&sybil_id) = mirrors.get(&market.condition_id) else {
                 continue;
             };
-            match self.maybe_resolve(sybil_id, &market).await {
+            match self.maybe_resolve(sybil_id, &market, cancel).await {
                 Ok(true) => resolved += 1,
                 Ok(false) => {}
                 Err(e) => warn!(sybil_id, error = %e, "failed to resolve market"),
@@ -207,6 +233,7 @@ impl ResolutionActor {
         &self,
         sybil_market_id: u32,
         market: &GammaMarket,
+        cancel: &CancellationToken,
     ) -> Result<bool, Error> {
         let Some(payout_nanos) = market.resolved_payout() else {
             debug!(sybil_market_id, "skipping non-clean polymarket resolution");
@@ -214,7 +241,12 @@ impl ResolutionActor {
         };
 
         // Skip if already resolved on our side.
-        match self.sybil.get_market_resolution(sybil_market_id).await {
+        let resolution = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Ok(false),
+            result = self.sybil.get_market_resolution(sybil_market_id) => result,
+        };
+        match resolution {
             Ok(Some(res)) if res.status == "resolved" => {
                 debug!(sybil_market_id, "market already resolved on sybil");
                 return Ok(false);
@@ -223,6 +255,9 @@ impl ResolutionActor {
             Err(e) => {
                 warn!(sybil_market_id, error = %e, "could not query resolution; proceeding");
             }
+        }
+        if cancel.is_cancelled() {
+            return Ok(false);
         }
 
         let now_ms = std::time::SystemTime::now()

@@ -28,14 +28,14 @@ class BridgeDepositResponse:
             deposit_root_hex (str):
             disposition (str): `credited` or `quarantined`.
             account_id (int | None | Unset):
-            balance_nanos (int | None | Unset): Account balance after the deposit. Integer nanodollars; 1_000_000_000 = $1.
+            balance_nanos (None | str | Unset): Account balance after the deposit. Integer nanodollars; 1_000_000_000 = $1.
      """
 
     deposit_id: int
     deposit_root_hex: str
     disposition: str
     account_id: int | None | Unset = UNSET
-    balance_nanos: int | None | Unset = UNSET
+    balance_nanos: None | str | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
@@ -55,7 +55,7 @@ class BridgeDepositResponse:
         else:
             account_id = self.account_id
 
-        balance_nanos: int | None | Unset
+        balance_nanos: None | str | Unset
         if isinstance(self.balance_nanos, Unset):
             balance_nanos = UNSET
         else:
@@ -97,12 +97,12 @@ class BridgeDepositResponse:
         account_id = _parse_account_id(d.pop("account_id", UNSET))
 
 
-        def _parse_balance_nanos(data: object) -> int | None | Unset:
+        def _parse_balance_nanos(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(int | None | Unset, data)
+            return cast(None | str | Unset, data)
 
         balance_nanos = _parse_balance_nanos(d.pop("balance_nanos", UNSET))
 

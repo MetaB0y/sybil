@@ -41,6 +41,17 @@ class TestGeneratedPackageImports:
         )
         assert hasattr(list_markets, "sync_detailed") or hasattr(list_markets, "asyncio_detailed")
 
+    def test_full_document_includes_dev_route_modules(self):
+        for module in (
+            "routesorders.get_all_pending_orders",
+            "routesorders.get_market_orderbook",
+            "routessystem.attestation",
+            "routessystem.pause",
+            "routessystem.resume",
+        ):
+            generated = importlib.import_module(f"sybil_client._generated.api.{module}")
+            assert hasattr(generated, "asyncio_detailed")
+
 
 class TestGeneratedModelRoundTrip:
     """Generated attrs models must survive from_dict -> to_dict unchanged."""
@@ -54,8 +65,8 @@ class TestGeneratedModelRoundTrip:
             "market_id": 7,
             "outcome": "YES",
             "quantity": 3_000,  # share-units
-            "current_price_nanos": 550_000_000,
-            "value_nanos": 1_650_000_000,
+            "current_price_nanos": "550000000",
+            "value_nanos": "1650000000",
         }
         model = PositionValueResponse.from_dict(payload)
         assert model.market_id == 7
@@ -65,22 +76,22 @@ class TestGeneratedModelRoundTrip:
 def _portfolio_payload() -> dict:
     return {
         "account_id": 42,
-        "balance_nanos": 100 * NANOS_PER_DOLLAR,
-        "available_balance_nanos": 100 * NANOS_PER_DOLLAR,
-        "reserved_balance_nanos": 0,
-        "total_deposited_nanos": 100 * NANOS_PER_DOLLAR,
+        "balance_nanos": str(100 * NANOS_PER_DOLLAR),
+        "available_balance_nanos": str(100 * NANOS_PER_DOLLAR),
+        "reserved_balance_nanos": "0",
+        "total_deposited_nanos": str(100 * NANOS_PER_DOLLAR),
         "positions": [
             {
                 "market_id": 7,
                 "outcome": "YES",
                 "quantity": 3_000,  # 3.0 shares in share-units
-                "current_price_nanos": 550_000_000,
-                "value_nanos": 1_650_000_000,
+                "current_price_nanos": "550000000",
+                "value_nanos": "1650000000",
             }
         ],
-        "total_position_value_nanos": 1_650_000_000,
-        "portfolio_value_nanos": 101_650_000_000,
-        "pnl_nanos": 1_650_000_000,
+        "total_position_value_nanos": "1650000000",
+        "portfolio_value_nanos": "101650000000",
+        "pnl_nanos": "1650000000",
     }
 
 
@@ -107,6 +118,20 @@ def test_get_portfolio_decodes_via_generated_model(monkeypatch):
     assert len(portfolio.positions) == 1
     assert portfolio.positions[0].quantity == quantity_units_to_shares(3_000) == 3.0
     assert portfolio.positions[0].market_id == 7
+
+
+def test_get_portfolio_preserves_nanos_above_javascript_safe_range(monkeypatch):
+    client = SybilClient("http://example.invalid")
+    payload = _portfolio_payload()
+    payload["balance_nanos"] = "9007199254740993"
+
+    async def fake_request(method, path, **kwargs):
+        return payload
+
+    monkeypatch.setattr(client, "_request", fake_request)
+
+    portfolio = asyncio.run(client.get_portfolio(42))
+    assert portfolio.balance_nanos == 9_007_199_254_740_993
 
 
 class TestUnitConversionSymmetry:

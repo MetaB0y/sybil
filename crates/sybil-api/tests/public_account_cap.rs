@@ -84,7 +84,7 @@ async fn public_onboarding_uses_the_server_grant_and_rejects_funding_fields() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["balance_nanos"].as_i64(), Some(grant as i64));
+    assert_eq!(common::nanos_i64(&body["balance_nanos"]), grant as i64);
 
     let mut caller_funded = onboarding_body(2);
     caller_funded["initial_balance_nanos"] = json!(9_999_000_000_000u64);
@@ -132,7 +132,7 @@ async fn accumulated_public_account_stock_stops_at_the_lifetime_capacity() {
     assert_eq!(policy["account_capacity"], 2);
     assert_eq!(policy["accounts_allocated"], 2);
     assert_eq!(policy["accounts_remaining"], 0);
-    assert_eq!(policy["grant_nanos"], 100);
+    assert_eq!(common::nanos_u64(&policy["grant_nanos"]), 100);
 }
 
 #[tokio::test]
@@ -192,8 +192,8 @@ async fn service_creation_is_a_separate_explicitly_funded_operator_path() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
-        body["balance_nanos"].as_i64(),
-        Some(operator_balance as i64)
+        common::nanos_i64(&body["balance_nanos"]),
+        operator_balance as i64
     );
     assert_eq!(handle.account_stock().await.unwrap(), 2);
 

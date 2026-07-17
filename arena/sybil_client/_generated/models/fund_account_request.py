@@ -22,11 +22,11 @@ T = TypeVar("T", bound="FundAccountRequest")
 class FundAccountRequest:
     """ 
         Attributes:
-            amount_nanos (int): Amount to add to the account balance. Integer nanodollars; 1_000_000_000 = $1. Example:
+            amount_nanos (str): Amount to add to the account balance. Integer nanodollars; 1_000_000_000 = $1. Example:
                 50000000000.
      """
 
-    amount_nanos: int
+    amount_nanos: str
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 

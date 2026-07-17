@@ -26,12 +26,18 @@
 //!    A block whose book cannot cross produces zero fills and is an exact
 //!    economic no-op: balances, positions, escrow and the conservation defect
 //!    are all unchanged (no dust allowance — zero fills mean zero floors).
+//! 6. `complete_set_mint_then_burn_round_trip_conserves_value`
+//!    A generated complete set is minted through two complementary buys, then
+//!    burned through sells from the resulting live holdings. Both blocks obey
+//!    UCP and exact signed welfare; the full cycle restores aggregate cash and
+//!    destroys every generated position.
 //!
 //! Falsifiability (SYB-246 acceptance): the deterministic
 //! `falsifiability_*` tests feed post-hoc perturbed fills/prices from a real
 //! block through the *same* checker functions used by the properties above
-//! and assert the checkers reject them. This demonstrates the properties
-//! would fail on a broken solver without modifying `src/`.
+//! and assert the checkers reject them. The replay oracle deliberately does
+//! not call production settlement or minting helpers, so shared bugs cannot
+//! make the test agree with the implementation under test.
 //!
 //! Money model background (see `design/eg-conic.typ`, `design/mint-pnl.typ`,
 //! ADR-0001, ADR-0004): crossing BuyYES/BuyNO orders mint complete sets; the
@@ -44,8 +50,8 @@
 //! hence the explicit dust budget.
 
 use matching_engine::{
-    Fill, MarketId, MarketSet, NANOS_PER_DOLLAR, Nanos, Order, Qty, compute_fill_settlement,
-    derive_minting, notional_nanos, outcome_buy, shares_to_qty,
+    Fill, MarketId, MarketSet, NANOS_PER_DOLLAR, Nanos, Order, Qty, SHARE_SCALE, outcome_buy,
+    outcome_sell, shares_to_qty,
 };
 use matching_sequencer::bridge::{account_key, append_deposit_frontier};
 use matching_sequencer::{
@@ -128,6 +134,41 @@ fn nonzero_fill_count(witness: &BlockWitness) -> i64 {
 // falsifiability tests)
 // ---------------------------------------------------------------------------
 
+/// Test-oracle notional arithmetic, intentionally independent of
+/// `matching_engine::notional_nanos` and the production settlement helpers.
+fn oracle_notional(price_nanos: u64, qty: u64) -> Result<i64, String> {
+    let value = (price_nanos as u128)
+        .checked_mul(qty as u128)
+        .ok_or_else(|| format!("oracle notional overflow: price={price_nanos} qty={qty}"))?
+        / SHARE_SCALE as u128;
+    i64::try_from(value)
+        .map_err(|_| format!("oracle notional does not fit i64: price={price_nanos} qty={qty}"))
+}
+
+/// Independently recognize the public one-market/one-hot order language.
+/// Returns `(market, outcome, is_sell)`.
+fn oracle_order_side(order: &Order) -> Result<(MarketId, u8, bool), String> {
+    if order.num_markets != 1 || order.num_states != 2 {
+        return Err(format!(
+            "order {} is not a single binary order (markets={} states={})",
+            order.id, order.num_markets, order.num_states
+        ));
+    }
+    let side = match (order.payoffs[0], order.payoffs[1]) {
+        (1, 0) => (0, false),
+        (-1, 0) => (0, true),
+        (0, 1) => (1, false),
+        (0, -1) => (1, true),
+        payoffs => {
+            return Err(format!(
+                "order {} is not exact one-hot: payoffs={payoffs:?}",
+                order.id
+            ));
+        }
+    };
+    Ok((order.markets[0], side.0, side.1))
+}
+
 /// Value-conservation defect in nanos.
 ///
 /// Formal statement: with
@@ -159,9 +200,15 @@ fn value_conservation_defect(
                 "market {market:?} negative outstanding sets: {yes}"
             ));
         }
-        escrow_value += notional_nanos(Nanos(NANOS_PER_DOLLAR), Qty(yes as u64)).0 as i64;
+        escrow_value = escrow_value
+            .checked_add(oracle_notional(NANOS_PER_DOLLAR, yes as u64)?)
+            .ok_or_else(|| "complete-set escrow total overflowed i64".to_owned())?;
     }
-    Ok(external_in - withdrawal_escrow - balance_total - escrow_value)
+    external_in
+        .checked_sub(withdrawal_escrow)
+        .and_then(|value| value.checked_sub(balance_total))
+        .and_then(|value| value.checked_sub(escrow_value))
+        .ok_or_else(|| "value-conservation defect overflowed i64".to_owned())
 }
 
 /// Assert conservation within an explicit dust budget.
@@ -183,16 +230,15 @@ fn check_value_conservation(
     Ok(())
 }
 
-/// No-arbitrage price coherence (EG/Fisher, `design/eg-conic.typ` §Price
-/// Extraction): every published binary price vector has exactly two entries
-/// in [0, $1], and for every market in `minted_markets` (markets where the
-/// block created complete sets, i.e. minting was active) the complementary
+/// No-arbitrage price coherence: every published binary price vector has
+/// exactly two entries in [0, $1], and for every traded market the complementary
 /// prices satisfy p_YES + p_NO = $1 up to `PRICE_COHERENCE_DUST` nanos —
-/// stationarity of the free mint variable. If this failed, minting a set for
-/// p_YES + p_NO ≠ $1 and redeeming it for exactly $1 would be an arbitrage.
+/// the collateral identity for a complete set. If this failed, minting or
+/// burning at the clearing vector would exchange something worth $1 for a
+/// different amount of cash.
 fn check_no_arbitrage_prices(
     clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
-    minted_markets: &HashSet<MarketId>,
+    traded_markets: &HashSet<MarketId>,
 ) -> Result<(), String> {
     for (market, prices) in clearing_prices {
         if prices.len() != 2 {
@@ -208,7 +254,7 @@ fn check_no_arbitrage_prices(
                 ));
             }
         }
-        if minted_markets.contains(market) {
+        if traded_markets.contains(market) {
             let sum = prices[0].0 + prices[1].0;
             if sum.abs_diff(NANOS_PER_DOLLAR) > PRICE_COHERENCE_DUST {
                 return Err(format!(
@@ -219,33 +265,76 @@ fn check_no_arbitrage_prices(
             }
         }
     }
-    for market in minted_markets {
+    for market in traded_markets {
         if !clearing_prices.contains_key(market) {
             return Err(format!(
-                "market {market:?} minted sets but published no clearing prices"
+                "market {market:?} traded but published no clearing prices"
             ));
         }
     }
     Ok(())
 }
 
-/// Individual rationality: every non-zero fill executes within its order's
-/// limit (buyers never pay more, sellers never receive less) and at a price
-/// of at most $1. A fill outside the limit extracts value from a participant
-/// who never consented to it — an arbitrage against the book.
-fn check_fill_rationality(orders: &[(Order, u64)], fills: &[Fill]) -> Result<(), String> {
-    let order_map: HashMap<u64, &Order> = orders.iter().map(|(o, _)| (o.id, o)).collect();
+/// Fill feasibility and individual rationality. Every emitted fill is unique,
+/// positive, bounded by the admitted order, priced at the market's published
+/// UCP, and within the participant's limit.
+fn check_fill_feasibility(
+    orders: &[(Order, u64)],
+    fills: &[Fill],
+    clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
+) -> Result<(), String> {
+    let mut order_map = HashMap::new();
+    for (order, account_id) in orders {
+        if order_map.insert(order.id, (order, *account_id)).is_some() {
+            return Err(format!("duplicate witness order id {}", order.id));
+        }
+    }
+    let mut filled_orders = HashSet::new();
     for fill in fills {
         if fill.fill_qty == Qty::ZERO {
-            continue;
+            return Err(format!(
+                "order {} emitted a zero-quantity fill",
+                fill.order_id
+            ));
         }
-        let Some(order) = order_map.get(&fill.order_id) else {
+        if !filled_orders.insert(fill.order_id) {
+            return Err(format!("duplicate fill for order {}", fill.order_id));
+        }
+        let Some(&(order, account_id)) = order_map.get(&fill.order_id) else {
             return Err(format!("fill references unknown order {}", fill.order_id));
         };
+        if fill.fill_qty > order.max_fill {
+            return Err(format!(
+                "order {} fill quantity {} exceeds max {}",
+                fill.order_id, fill.fill_qty, order.max_fill
+            ));
+        }
+        if fill.account_id != 0 && fill.account_id != account_id {
+            return Err(format!(
+                "order {} fill account {} disagrees with witness account {}",
+                fill.order_id, fill.account_id, account_id
+            ));
+        }
         if fill.fill_price.0 > NANOS_PER_DOLLAR {
             return Err(format!(
                 "order {} filled at {} > $1",
                 fill.order_id, fill.fill_price
+            ));
+        }
+        let (market, outcome, is_sell) = oracle_order_side(order)?;
+        let ucp = clearing_prices
+            .get(&market)
+            .and_then(|prices| prices.get(outcome as usize))
+            .ok_or_else(|| {
+                format!(
+                    "order {} has no clearing price for market {market:?} outcome {outcome}",
+                    fill.order_id
+                )
+            })?;
+        if fill.fill_price != *ucp {
+            return Err(format!(
+                "order {} fill price {} disagrees with UCP {}",
+                fill.order_id, fill.fill_price, ucp
             ));
         }
         let ok = if order.is_seller() {
@@ -262,8 +351,37 @@ fn check_fill_rationality(orders: &[(Order, u64)], fills: &[Fill]) -> Result<(),
                 order.is_seller()
             ));
         }
+        if is_sell != order.is_seller() {
+            return Err(format!(
+                "order {} side classification disagrees with seller predicate",
+                fill.order_id
+            ));
+        }
     }
     Ok(())
+}
+
+/// Independently sum participant surplus from fill prices and order limits.
+fn oracle_fill_surplus(orders: &[(Order, u64)], fills: &[Fill]) -> Result<i64, String> {
+    let order_map: HashMap<u64, &Order> =
+        orders.iter().map(|(order, _)| (order.id, order)).collect();
+    let mut total = 0i64;
+    for fill in fills {
+        let order = order_map
+            .get(&fill.order_id)
+            .ok_or_else(|| format!("fill references unknown order {}", fill.order_id))?;
+        let (_, _, is_sell) = oracle_order_side(order)?;
+        let favorable_delta = if is_sell {
+            fill.fill_price.0.checked_sub(order.limit_price.0)
+        } else {
+            order.limit_price.0.checked_sub(fill.fill_price.0)
+        }
+        .ok_or_else(|| format!("order {} filled outside its limit", fill.order_id))?;
+        total = total
+            .checked_add(oracle_notional(favorable_delta, fill.fill_qty.0)?)
+            .ok_or_else(|| "aggregate fill surplus overflowed i64".to_owned())?;
+    }
+    Ok(total)
 }
 
 /// Witness orders as `(Order, account_id)` pairs for the checkers above.
@@ -275,10 +393,8 @@ fn witness_orders(witness: &BlockWitness) -> Vec<(Order, u64)> {
         .collect()
 }
 
-/// Markets in which a block's non-zero fills created complete sets. With the
-/// buy-only generators below every non-zero fill mints, so this is simply
-/// "markets with a non-zero fill".
-fn minted_markets(witness: &BlockWitness) -> HashSet<MarketId> {
+/// Markets in which a block contains a non-zero fill.
+fn traded_markets(witness: &BlockWitness) -> HashSet<MarketId> {
     let order_market: HashMap<u64, MarketId> = witness
         .orders
         .iter()
@@ -320,12 +436,9 @@ fn snapshot_ledger(seq: &BlockSequencer, markets: &MarketSet) -> LedgerSnapshot 
         .collect()
 }
 
-/// Re-derive the post-block ledger a *claimed* set of fills implies, using
-/// the shared settlement math (`compute_fill_settlement` + `derive_minting`)
-/// exactly like the verifier does. Returns `(Σ balances, market totals)`
-/// ready for [`value_conservation_defect`]. This lets the falsifiability
-/// tests run perturbed fills/prices through the same checkers the live
-/// properties use, without touching sequencer state or `src/`.
+/// Re-derive the post-block ledger a *claimed* set of fills implies. This is a
+/// deliberately narrow one-hot oracle with separately written arithmetic: it
+/// does not call `compute_fill_settlement`, `derive_minting`, or the verifier.
 fn replay_claimed_block(
     pre: &LedgerSnapshot,
     orders: &[(Order, u64)],
@@ -351,14 +464,23 @@ fn replay_claimed_block(
         } else {
             order_account
         };
-        let Some(delta) = compute_fill_settlement(order, fill) else {
-            continue;
-        };
+        let (market, outcome, is_sell) = oracle_order_side(order)?;
+        let qty = i64::try_from(fill.fill_qty.0)
+            .map_err(|_| format!("fill quantity {} does not fit i64", fill.fill_qty))?;
+        let balance_delta = oracle_notional(fill.fill_price.0, fill.fill_qty.0)?;
         let entry = ledger.entry(account_id).or_default();
-        entry.0 += delta.balance_delta;
-        for (market, outcome, qty_delta) in delta.position_deltas {
-            *entry.1.entry((market, outcome)).or_insert(0) += qty_delta;
-        }
+        entry.0 = entry
+            .0
+            .checked_add(if is_sell {
+                balance_delta
+            } else {
+                -balance_delta
+            })
+            .ok_or_else(|| format!("account {account_id} balance overflow"))?;
+        let position = entry.1.entry((market, outcome)).or_insert(0);
+        *position = position
+            .checked_add(if is_sell { -qty } else { qty })
+            .ok_or_else(|| format!("account {account_id} position overflow"))?;
     }
 
     let totals: Vec<(MarketId, i64, i64)> = markets
@@ -374,15 +496,32 @@ fn replay_claimed_block(
         })
         .collect();
 
-    // MINT absorbs any imbalance, exactly as the sequencer settles it.
-    let mint_adjustments = derive_minting(&totals, clearing_prices);
+    // Independently model the MINT counterparty: it shorts whichever outcome
+    // is long in aggregate and receives that outcome's UCP.
     let mint = ledger.entry(AccountId::MINT.0).or_default();
-    for adjustment in &mint_adjustments {
-        mint.0 += adjustment.balance_delta;
-        *mint
-            .1
-            .entry((adjustment.market_id, adjustment.outcome))
-            .or_insert(0) += adjustment.position_delta;
+    for &(market, yes, no) in &totals {
+        let diff = yes
+            .checked_sub(no)
+            .ok_or_else(|| format!("market {market:?} position difference overflow"))?;
+        if diff == 0 {
+            continue;
+        }
+        let (outcome, position_delta) = if diff > 0 { (0, -diff) } else { (1, diff) };
+        let price = clearing_prices
+            .get(&market)
+            .and_then(|prices| prices.get(outcome as usize))
+            .ok_or_else(|| {
+                format!("market {market:?} outcome {outcome} imbalance has no clearing price")
+            })?;
+        let balance_delta = oracle_notional(price.0, diff.unsigned_abs())?;
+        mint.0 = mint
+            .0
+            .checked_add(balance_delta)
+            .ok_or_else(|| "MINT balance overflow".to_owned())?;
+        let position = mint.1.entry((market, outcome)).or_insert(0);
+        *position = position
+            .checked_add(position_delta)
+            .ok_or_else(|| "MINT position overflow".to_owned())?;
     }
 
     let balance_total: i64 = ledger.values().map(|(balance, _)| balance).sum();
@@ -497,6 +636,19 @@ fn arb_noncrossing_book(markets: MarketSet) -> impl Strategy<Value = Vec<OrderSu
                 },
             ),
         1..=6,
+    )
+}
+
+/// Parameters for a full complete-set lifecycle. Buy limits sum above $1,
+/// while sell limits sum below $1, guaranteeing positive welfare in both
+/// directions.
+fn arb_complete_set_cycle() -> impl Strategy<Value = (u64, u64, u64, u64, u64)> {
+    (
+        NANOS_PER_DOLLAR / 10..9 * NANOS_PER_DOLLAR / 10,
+        1..NANOS_PER_DOLLAR / 10,
+        NANOS_PER_DOLLAR / 10..9 * NANOS_PER_DOLLAR / 10,
+        1..NANOS_PER_DOLLAR / 10,
+        1u64..=1_000,
     )
 }
 
@@ -783,16 +935,20 @@ proptest! {
         let (mut seq, _) = make_sequencer();
         let bp = seq.produce_block(submissions, 1_000);
 
-        let minted = minted_markets(&bp.witness);
-        prop_assert!(!minted.is_empty(), "crossing generator must mint in ≥1 market");
+        let traded = traded_markets(&bp.witness);
+        prop_assert!(!traded.is_empty(), "crossing generator must trade in ≥1 market");
 
         if let Err(violation) =
-            check_no_arbitrage_prices(&bp.block.clearing_prices, &minted)
+            check_no_arbitrage_prices(&bp.block.clearing_prices, &traded)
         {
             return Err(TestCaseError::fail(violation));
         }
         if let Err(violation) =
-            check_fill_rationality(&witness_orders(&bp.witness), &bp.witness.fills)
+            check_fill_feasibility(
+                &witness_orders(&bp.witness),
+                &bp.witness.fills,
+                &bp.block.clearing_prices,
+            )
         {
             return Err(TestCaseError::fail(violation));
         }
@@ -909,7 +1065,7 @@ proptest! {
                 return Err(TestCaseError::fail(format!("{label}: {violation}")));
             }
             if let Err(violation) =
-                check_no_arbitrage_prices(&bp.block.clearing_prices, &minted_markets(&bp.witness))
+                check_no_arbitrage_prices(&bp.block.clearing_prices, &traded_markets(&bp.witness))
             {
                 return Err(TestCaseError::fail(format!("{label}: {violation}")));
             }
@@ -976,6 +1132,226 @@ proptest! {
                 );
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Property 6: complete-set mint/burn round trip
+// ---------------------------------------------------------------------------
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    /// Complete-set lifecycle. Two complementary buys first mint a generated
+    /// quantity of live positions; the same accounts then sell those holdings
+    /// as a complete-set burn. Both price vectors sum to exactly $1, all four
+    /// orders fill fully at UCP, signed minting cost changes from +face value
+    /// to -face value, reported welfare equals an independent surplus oracle,
+    /// and the round trip restores aggregate cash with zero positions.
+    #[test]
+    fn complete_set_mint_then_burn_round_trip_conserves_value(
+        (mint_yes_limit, mint_surplus, burn_yes_limit, burn_surplus, shares)
+            in arb_complete_set_cycle(),
+    ) {
+        let markets = make_markets();
+        let market = MarketId::new(0);
+        let qty = shares_to_qty(shares);
+        let face_value = oracle_notional(NANOS_PER_DOLLAR, qty.0)
+            .map_err(TestCaseError::fail)?;
+        let initial_balance = face_value
+            .checked_add(NANOS_PER_DOLLAR as i64)
+            .expect("generated lifecycle balance fits i64");
+        let initial_cash = initial_balance
+            .checked_mul(2)
+            .expect("generated aggregate balance fits i64");
+
+        let mut accounts = AccountStore::new();
+        let yes_account = accounts.create_account(initial_balance);
+        let no_account = accounts.create_account(initial_balance);
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            SequencerConfig {
+                min_resting_order_notional_nanos: 0,
+                ..SequencerConfig::default()
+            },
+        );
+
+        let mint_no_limit = NANOS_PER_DOLLAR - mint_yes_limit + mint_surplus;
+        let mint = seq.produce_block(
+            vec![
+                OrderSubmission {
+                    account_id: yes_account,
+                    orders: vec![outcome_buy(
+                        &markets,
+                        0,
+                        market,
+                        0,
+                        mint_yes_limit,
+                        qty.0,
+                    )],
+                    mm_constraint: None,
+                },
+                OrderSubmission {
+                    account_id: no_account,
+                    orders: vec![outcome_buy(
+                        &markets,
+                        0,
+                        market,
+                        1,
+                        mint_no_limit,
+                        qty.0,
+                    )],
+                    mm_constraint: None,
+                },
+            ],
+            1_000,
+        );
+        let mint_orders = witness_orders(&mint.witness);
+        check_fill_feasibility(
+            &mint_orders,
+            &mint.witness.fills,
+            &mint.block.clearing_prices,
+        )
+        .map_err(TestCaseError::fail)?;
+        check_no_arbitrage_prices(
+            &mint.block.clearing_prices,
+            &traded_markets(&mint.witness),
+        )
+        .map_err(TestCaseError::fail)?;
+        let mint_prices = mint
+            .block
+            .clearing_prices
+            .get(&market)
+            .expect("mint block must publish its traded market");
+        prop_assert_eq!(
+            mint_prices[0].0 + mint_prices[1].0,
+            NANOS_PER_DOLLAR,
+            "mint UCP vector must sum exactly to face value"
+        );
+        prop_assert_eq!(mint.witness.fills.len(), 2, "both mint orders must fill");
+        for fill in &mint.witness.fills {
+            prop_assert_eq!(fill.fill_qty, qty, "mint order did not fill fully");
+        }
+        prop_assert_eq!(
+            mint.witness.minting_cost,
+            face_value,
+            "complete-set creation must have positive face-value cost"
+        );
+        let mint_surplus_oracle =
+            oracle_fill_surplus(&mint_orders, &mint.witness.fills).map_err(TestCaseError::fail)?;
+        prop_assert_eq!(mint.witness.total_welfare, mint_surplus_oracle);
+        prop_assert_eq!(mint.analytics.total_welfare, mint_surplus_oracle);
+        prop_assert_eq!(
+            mint.analytics.welfare_by_market.get(&market),
+            Some(&mint_surplus_oracle)
+        );
+        prop_assert!(sybil_verifier::verify_full(&mint.witness, false).valid);
+        prop_assert_eq!(seq.accounts.get(yes_account).unwrap().position(market, 0), qty.0 as i64);
+        prop_assert_eq!(seq.accounts.get(no_account).unwrap().position(market, 1), qty.0 as i64);
+        check_value_conservation(
+            initial_cash,
+            0,
+            total_balance(&seq),
+            &market_totals(&seq, &markets),
+            0,
+        )
+        .map_err(TestCaseError::fail)?;
+
+        let burn_no_limit = NANOS_PER_DOLLAR - burn_yes_limit - burn_surplus;
+        let burn = seq.produce_block(
+            vec![
+                OrderSubmission {
+                    account_id: yes_account,
+                    orders: vec![outcome_sell(
+                        &markets,
+                        0,
+                        market,
+                        0,
+                        burn_yes_limit,
+                        qty.0,
+                    )],
+                    mm_constraint: None,
+                },
+                OrderSubmission {
+                    account_id: no_account,
+                    orders: vec![outcome_sell(
+                        &markets,
+                        0,
+                        market,
+                        1,
+                        burn_no_limit,
+                        qty.0,
+                    )],
+                    mm_constraint: None,
+                },
+            ],
+            2_000,
+        );
+        let burn_orders = witness_orders(&burn.witness);
+        check_fill_feasibility(
+            &burn_orders,
+            &burn.witness.fills,
+            &burn.block.clearing_prices,
+        )
+        .map_err(TestCaseError::fail)?;
+        check_no_arbitrage_prices(
+            &burn.block.clearing_prices,
+            &traded_markets(&burn.witness),
+        )
+        .map_err(TestCaseError::fail)?;
+        let burn_prices = burn
+            .block
+            .clearing_prices
+            .get(&market)
+            .expect("burn block must publish its traded market");
+        prop_assert_eq!(
+            burn_prices[0].0 + burn_prices[1].0,
+            NANOS_PER_DOLLAR,
+            "burn UCP vector must sum exactly to face value"
+        );
+        prop_assert_eq!(burn.witness.fills.len(), 2, "both burn orders must fill");
+        for fill in &burn.witness.fills {
+            prop_assert_eq!(fill.fill_qty, qty, "burn order did not fill fully");
+        }
+        prop_assert_eq!(
+            burn.witness.minting_cost,
+            -face_value,
+            "complete-set burning must have negative face-value cost"
+        );
+        let burn_surplus_oracle =
+            oracle_fill_surplus(&burn_orders, &burn.witness.fills).map_err(TestCaseError::fail)?;
+        prop_assert_eq!(burn.witness.total_welfare, burn_surplus_oracle);
+        prop_assert_eq!(burn.analytics.total_welfare, burn_surplus_oracle);
+        prop_assert_eq!(
+            burn.analytics.welfare_by_market.get(&market),
+            Some(&burn_surplus_oracle)
+        );
+        prop_assert!(sybil_verifier::verify_full(&burn.witness, false).valid);
+        prop_assert_eq!(seq.accounts.get(yes_account).unwrap().position(market, 0), 0);
+        prop_assert_eq!(seq.accounts.get(no_account).unwrap().position(market, 1), 0);
+        for (settled_market, yes, no) in market_totals(&seq, &markets) {
+            prop_assert_eq!(
+                (yes, no),
+                (0, 0),
+                "round trip left positions in market {:?}",
+                settled_market
+            );
+        }
+        prop_assert_eq!(
+            total_balance(&seq),
+            initial_cash,
+            "mint/burn round trip must restore aggregate cash exactly"
+        );
+        check_value_conservation(
+            initial_cash,
+            0,
+            total_balance(&seq),
+            &market_totals(&seq, &markets),
+            0,
+        )
+        .map_err(TestCaseError::fail)?;
     }
 }
 
@@ -1139,7 +1515,8 @@ fn falsifiability_incoherent_clearing_prices_break_no_arbitrage() {
 
     check_no_arbitrage_prices(&hb.clearing_prices, &minted)
         .expect("honest clearing prices must be arbitrage-free");
-    check_fill_rationality(&hb.orders, &hb.fills).expect("honest fills must respect limits");
+    check_fill_feasibility(&hb.orders, &hb.fills, &hb.clearing_prices)
+        .expect("honest fills must be feasible at UCP");
 
     let mut broken = hb.clearing_prices.clone();
     let market_prices = broken
@@ -1174,7 +1551,56 @@ fn falsifiability_limit_violating_fill_breaks_rationality() {
     victim.fill_price = Nanos(limit.0 + 1);
 
     assert!(
-        check_fill_rationality(&hb.orders, &broken).is_err(),
+        check_fill_feasibility(&hb.orders, &broken, &hb.clearing_prices).is_err(),
         "rationality checker failed to reject a fill 1 nano above the buyer's limit"
+    );
+}
+
+/// A favorable but non-UCP execution is still invalid: uniform clearing is a
+/// market-level fairness guarantee, not merely an individual limit check.
+#[test]
+fn falsifiability_non_ucp_fill_breaks_uniform_clearing() {
+    let hb = honest_block();
+    check_fill_feasibility(&hb.orders, &hb.fills, &hb.clearing_prices)
+        .expect("honest fills must be feasible at UCP");
+
+    let mut broken = hb.fills.clone();
+    let victim = broken
+        .iter_mut()
+        .find(|fill| fill.fill_qty > Qty::ZERO)
+        .expect("honest block has a fill");
+    victim.fill_price = if victim.fill_price.0 > 0 {
+        Nanos(victim.fill_price.0 - 1)
+    } else {
+        Nanos(1)
+    };
+
+    assert!(
+        check_fill_feasibility(&hb.orders, &broken, &hb.clearing_prices).is_err(),
+        "feasibility checker failed to reject a favorable non-UCP fill"
+    );
+}
+
+/// Quantity bounds are economic authorization: a solver may not consume more
+/// balance or inventory than the participant offered.
+#[test]
+fn falsifiability_overfill_breaks_fill_feasibility() {
+    let hb = honest_block();
+    let mut broken = hb.fills.clone();
+    let victim = broken
+        .iter_mut()
+        .find(|fill| fill.fill_qty > Qty::ZERO)
+        .expect("honest block has a fill");
+    let max_fill = hb
+        .orders
+        .iter()
+        .find(|(order, _)| order.id == victim.order_id)
+        .map(|(order, _)| order.max_fill)
+        .expect("fill references a known order");
+    victim.fill_qty = Qty(max_fill.0 + 1);
+
+    assert!(
+        check_fill_feasibility(&hb.orders, &broken, &hb.clearing_prices).is_err(),
+        "feasibility checker failed to reject a one-unit overfill"
     );
 }

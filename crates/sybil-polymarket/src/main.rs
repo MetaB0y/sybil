@@ -19,6 +19,8 @@ use sybil_polymarket::resolution::ResolutionActor;
 use sybil_polymarket::signer::ResolutionSigner;
 use sybil_polymarket::sync::SyncActor;
 
+const TASK_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(35);
+
 /// Reattach to the persisted MM account, or mint and persist a fresh one (PM-7).
 ///
 /// A fresh account minted on every process start orphans prior inventory while
@@ -37,13 +39,14 @@ async fn resolve_mm_account(
                 info!(account_id, "reattached to persisted MM account");
                 return Ok(account_id);
             }
-            Err(e) => {
+            Err(error) if error.api_status() == Some(404) => {
                 warn!(
                     account_id,
-                    error = %e,
-                    "persisted MM account unusable; minting a new one"
+                    %error,
+                    "persisted MM account no longer exists; minting a new one"
                 );
             }
+            Err(error) => return Err(error.into()),
         }
     }
 
@@ -53,9 +56,7 @@ async fn resolve_mm_account(
     {
         let mut map = mapping.write().await;
         map.set_mm_account_id(account.account_id);
-        if let Err(e) = map.save() {
-            warn!(error = %e, "failed to persist MM account id (will re-mint next restart)");
-        }
+        map.save()?;
     }
     Ok(account.account_id)
 }
@@ -443,45 +444,80 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
     };
 
-    // Wait for shutdown signal
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => {
-            info!("received Ctrl+C, shutting down...");
-        }
-        r = sync_handle => {
-            if let Err(e) = r {
-                error!(error = %e, "SyncActor panicked");
-            }
-        }
-        r = feed_handle => {
-            if let Err(e) = r {
-                error!(error = %e, "FeedActor panicked");
-            }
-        }
-        r = mm_handle => {
-            if let Err(e) = r {
-                error!(error = %e, "MmActor panicked");
-            }
-        }
-        r = resolution_handle => {
-            if let Err(e) = r {
-                error!(error = %e, "ResolutionActor panicked");
-            } else {
-                error!("ResolutionActor exited unexpectedly");
-            }
-        }
-        r = monitoring_handle => {
-            match r {
-                Ok(Ok(())) => error!("monitoring server exited unexpectedly"),
-                Ok(Err(error)) => error!(%error, "monitoring server failed"),
-                Err(error) => error!(%error, "monitoring server panicked"),
-            }
-        }
+    // Any production actor is process-critical. A clean task return is still
+    // unexpected here: actors are defined to run until the shared token is
+    // cancelled, so treating it as success would leave Docker's supervisor
+    // unaware that part of the integration had stopped.
+    let unexpected_exit = tokio::select! {
+        _ = shutdown_signal() => None,
+        result = sync_handle => Some(task_exit("SyncActor", result)),
+        result = feed_handle => Some(task_exit("FeedActor", result)),
+        result = mm_handle => Some(task_exit("MmActor", result)),
+        result = resolution_handle => Some(task_exit("ResolutionActor", result)),
+        result = monitoring_handle => Some(monitoring_exit(result)),
+    };
+    if let Some(message) = unexpected_exit.as_deref() {
+        error!(%message, "critical integration task exited");
     }
 
     cancel.cancel();
     tasks.close();
-    tasks.wait().await;
-    info!("shutdown complete");
-    Ok(())
+    let shutdown_timed_out = tokio::time::timeout(TASK_SHUTDOWN_TIMEOUT, tasks.wait())
+        .await
+        .is_err();
+    if shutdown_timed_out {
+        error!(
+            timeout_secs = TASK_SHUTDOWN_TIMEOUT.as_secs(),
+            "integration task shutdown timed out"
+        );
+    } else {
+        info!("shutdown complete");
+    }
+    match (unexpected_exit, shutdown_timed_out) {
+        (Some(message), _) => Err(std::io::Error::other(message).into()),
+        (None, true) => Err(std::io::Error::other(format!(
+            "integration tasks did not stop within {}s",
+            TASK_SHUTDOWN_TIMEOUT.as_secs()
+        ))
+        .into()),
+        (None, false) => Ok(()),
+    }
+}
+
+fn task_exit(task: &'static str, result: Result<(), tokio::task::JoinError>) -> String {
+    match result {
+        Ok(()) => format!("{task} exited unexpectedly"),
+        Err(error) => format!("{task} panicked or was cancelled: {error}"),
+    }
+}
+
+fn monitoring_exit(result: Result<Result<(), std::io::Error>, tokio::task::JoinError>) -> String {
+    match result {
+        Ok(Ok(())) => "monitoring server exited unexpectedly".to_string(),
+        Ok(Err(error)) => format!("monitoring server failed: {error}"),
+        Err(error) => format!("monitoring server panicked or was cancelled: {error}"),
+    }
+}
+
+/// Resolve on either interactive Ctrl-C or Docker's SIGTERM.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl-C handler");
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        () = ctrl_c => info!("received Ctrl-C, shutting down"),
+        () = terminate => info!("received SIGTERM, shutting down"),
+    }
 }

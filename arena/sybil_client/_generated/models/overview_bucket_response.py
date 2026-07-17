@@ -30,17 +30,17 @@ class OverviewBucketResponse:
 
         Attributes:
             orders (OverviewOrderStatsResponse | Unset):
-            total_volume_nanos (int | Unset): Total traded notional for this bucket. Integer nanodollars;
+            total_volume_nanos (str | Unset): Total traded notional for this bucket. Integer nanodollars;
                 1_000_000_000 = $1.
-            total_welfare_nanos (int | Unset): Cumulative platform welfare for this bucket. Integer nanodollars;
+            total_welfare_nanos (str | Unset): Cumulative platform welfare for this bucket. Integer nanodollars;
                 1_000_000_000 = $1. Sum of per-block `total_welfare` (each fill counted
                 once). Verified block welfare is non-negative.
             unique_traders (int | Unset):
      """
 
     orders: OverviewOrderStatsResponse | Unset = UNSET
-    total_volume_nanos: int | Unset = UNSET
-    total_welfare_nanos: int | Unset = UNSET
+    total_volume_nanos: str | Unset = UNSET
+    total_welfare_nanos: str | Unset = UNSET
     unique_traders: int | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 

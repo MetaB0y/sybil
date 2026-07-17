@@ -101,6 +101,12 @@ less than 400 MiB of swap. Treat those figures as a floor, not a capacity SLO.
 - `GET /proofs/latest`: read-only compatibility projection for synthetic
   monitoring. It is not persistence authority.
 
+The scheduler, source puller, and HTTP server are process-critical. If any one
+panics, returns an error, or returns cleanly before shutdown, the daemon marks
+itself unready, stops its siblings, drains HTTP, and exits nonzero. Compose's
+bounded `on-failure` policy can therefore restart a transient process failure;
+an unhealthy-but-live shell is not used as a substitute for supervision.
+
 Authenticated mutations:
 
 ```bash

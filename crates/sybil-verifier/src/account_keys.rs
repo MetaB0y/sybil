@@ -157,6 +157,7 @@ mod tests {
     fn key_digest_is_sensitive_to_scheme_pubkey_and_count() {
         let base = account_keys_digest(42, [raw_key(0x11)]);
 
+        assert_ne!(base, account_keys_digest(43, [raw_key(0x11)]));
         assert_ne!(base, account_keys_digest(42, [webauthn_key(0x11)]));
         assert_ne!(base, account_keys_digest(42, [raw_key(0x12)]));
         let mut restricted = raw_key(0x11);
@@ -165,6 +166,105 @@ mod tests {
         assert_ne!(
             base,
             account_keys_digest(42, [raw_key(0x11), raw_key(0x12)])
+        );
+    }
+
+    #[test]
+    fn webauthn_envelope_limits_are_protocol_constants() {
+        assert_eq!(MAX_WEBAUTHN_AUTHENTICATOR_DATA_BYTES, 512);
+        assert_eq!(MAX_WEBAUTHN_CLIENT_DATA_JSON_BYTES, 2_048);
+    }
+
+    #[test]
+    fn key_operation_bytes_pin_domains_layout_and_all_fields() {
+        let genesis = [0x11; 32];
+        let key = webauthn_key(0x22);
+        let keys_digest = [0x33; 32];
+        let events_digest = [0x44; 32];
+        let registration =
+            canonical_key_registration_bytes(genesis, 7, &key, keys_digest, events_digest);
+        let revocation =
+            canonical_key_revocation_bytes(genesis, 7, &key, keys_digest, events_digest);
+
+        for (bytes, domain) in [
+            (
+                registration.as_slice(),
+                b"sybil/keyop/register/v1".as_slice(),
+            ),
+            (revocation.as_slice(), b"sybil/keyop/revoke/v1".as_slice()),
+        ] {
+            assert_eq!(&bytes[..domain.len()], domain);
+            let mut offset = domain.len();
+            assert_eq!(&bytes[offset..offset + 32], &genesis);
+            offset += 32;
+            assert_eq!(&bytes[offset..offset + 8], &7u64.to_le_bytes());
+            offset += 8;
+            assert_eq!(bytes[offset], key.auth_scheme);
+            offset += 1;
+            assert_eq!(&bytes[offset..offset + 33], &key.pubkey_sec1);
+            offset += 33;
+            assert_eq!(
+                &bytes[offset..offset + 4],
+                &key.capability_mask.to_le_bytes()
+            );
+            offset += 4;
+            assert_eq!(&bytes[offset..offset + 32], &keys_digest);
+            offset += 32;
+            assert_eq!(&bytes[offset..offset + 32], &events_digest);
+            offset += 32;
+            assert_eq!(offset, bytes.len());
+        }
+        assert_ne!(registration, revocation);
+
+        assert_ne!(
+            registration,
+            canonical_key_registration_bytes([0x12; 32], 7, &key, keys_digest, events_digest)
+        );
+        assert_ne!(
+            registration,
+            canonical_key_registration_bytes(genesis, 8, &key, keys_digest, events_digest)
+        );
+        assert_ne!(
+            registration,
+            canonical_key_registration_bytes(
+                genesis,
+                7,
+                &raw_key(0x22),
+                keys_digest,
+                events_digest
+            )
+        );
+        let mut different_pubkey = key;
+        different_pubkey.pubkey_sec1[1] ^= 1;
+        assert_ne!(
+            registration,
+            canonical_key_registration_bytes(
+                genesis,
+                7,
+                &different_pubkey,
+                keys_digest,
+                events_digest
+            )
+        );
+        let mut different_capability = key;
+        different_capability.capability_mask ^= 1;
+        assert_ne!(
+            registration,
+            canonical_key_registration_bytes(
+                genesis,
+                7,
+                &different_capability,
+                keys_digest,
+                events_digest
+            )
+        );
+        assert_ne!(
+            registration,
+            canonical_key_registration_bytes(genesis, 7, &key, [0x34; 32], events_digest)
+        );
+        assert_ne!(
+            registration,
+            canonical_key_registration_bytes(genesis, 7, &key, keys_digest, [0x45; 32])
         );
     }
 

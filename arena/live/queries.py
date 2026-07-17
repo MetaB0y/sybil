@@ -451,11 +451,13 @@ def get_mm_mtm(
     except Exception:
         return None
 
-    cash = portfolio["balance_nanos"] / 1e9
-    position_value = portfolio["total_position_value_nanos"] / 1e9
-    total = portfolio["portfolio_value_nanos"] / 1e9
-    pnl = portfolio["pnl_nanos"] / 1e9
-    deposited = portfolio.get("total_deposited_nanos", int(initial_balance * 1e9)) / 1e9
+    cash = int(portfolio["balance_nanos"]) / 1e9
+    position_value = int(portfolio["total_position_value_nanos"]) / 1e9
+    total = int(portfolio["portfolio_value_nanos"]) / 1e9
+    pnl = int(portfolio["pnl_nanos"]) / 1e9
+    deposited = int(
+        portfolio.get("total_deposited_nanos", int(initial_balance * 1e9))
+    ) / 1e9
     return {
         "cash": cash,
         "position_value": position_value,

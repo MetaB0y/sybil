@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fingerprint": "sha256:af3488cc6359fc9aedc88b6a2eb70b519df2b6248fb2c1178df37cfa3e0bbaf0",
+  "fingerprint": "sha256:9efced89d2fb2c466ab030dcac22fc146efb46e1e602c06afb6061de86a1237d",
   "inputs": {
     "commonware_packages": [
       {
@@ -74,20 +74,20 @@
     "guests": {
       "state_transition": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "874f3dc88c891340c10c5bd5f7fea2a1e8b4487f2f936e766b18af735dea3560",
-        "app_exe_commit": "0x007ed68957b0503461be92e3e35ca029819054b2742f815bce641f9664c5fd86",
+        "source_sha256": "a7a3afe6515cc51357570d4a65f6109b30926bf5602096e4957a6f5aec5d9411",
+        "app_exe_commit": "0x0078357d8232fb0ded2c529dc8b920e78a12a965ae46b5a4c93d9d03e8658210",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       },
       "escape_claim": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "b1d6e6669a61a512886c35356d0669a7fbb3e7e6493f9a7e10d4e47f56bdb1fb",
+        "source_sha256": "0185a41cdd0118f9fc84d2380a9aa29a7e5567bb138be24f366118cca939e6bb",
         "app_exe_commit": "0x008c8f972e57f4b15163aa7bb8d5ca89c5532212c091bb85c1c19a1428a53ffd",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       }
     },
     "desired_validity_pins": {
       "state_transition": {
-        "app_exe_commit": "0x007ed68957b0503461be92e3e35ca029819054b2742f815bce641f9664c5fd86",
+        "app_exe_commit": "0x0078357d8232fb0ded2c529dc8b920e78a12a965ae46b5a4c93d9d03e8658210",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       },
       "escape_claim": {
@@ -98,7 +98,7 @@
   },
   "decision": {
     "action": "fresh_genesis",
-    "reason": "Witness v11 removes unsupported proposal, challenge, void, duplicate market identity, and oracle-trait validity surface; the planned devnet redeploy starts from cleared state.",
+    "reason": "Fix fail-open clearing-price verification and strengthen validity-core transition checks",
     "reference": "docs/runbooks/fresh-genesis-redeploy.md"
   }
 }

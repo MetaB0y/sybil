@@ -23,14 +23,14 @@ T = TypeVar("T", bound="SignedOrderData")
 class SignedOrderData:
     """ 
         Attributes:
-            limit_price_nanos (int): Limit price. Integer nanodollars; 1_000_000_000 = $1.
+            limit_price_nanos (str): Limit price. Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
             market_ids (list[int]): Market IDs this order spans.
             max_fill (int): Maximum fill quantity. Integer share-units; 1000 units = 1 share.
             payoffs (list[int]): Payoff vector.
      """
 
-    limit_price_nanos: int
+    limit_price_nanos: str
     market_ids: list[int]
     max_fill: int
     payoffs: list[int]

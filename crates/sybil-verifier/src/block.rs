@@ -34,6 +34,7 @@ const ITEMS_PER_BLOB: u64 = 1024;
 const WRITE_BUFFER_BYTES: usize = 64 * 1024;
 const MAX_KEY_BYTES: usize = 64;
 const MAX_VALUE_BYTES: usize = 1 << 20;
+const ROOT_WORKER_QUEUE_CAPACITY: usize = 64;
 
 type StateRootDb = OrderedVariableDb<
     MmrFamily,
@@ -52,7 +53,7 @@ struct StateRootRequest {
 }
 
 struct StateRootWorker {
-    sender: mpsc::Sender<StateRootRequest>,
+    sender: mpsc::SyncSender<StateRootRequest>,
 }
 
 static STATE_ROOT_WORKER: OnceLock<StateRootWorker> = OnceLock::new();
@@ -226,7 +227,11 @@ pub fn state_root_from_leaves(leaves: &[(Vec<u8>, Vec<u8>)]) -> [u8; 32] {
 
 fn state_root_worker() -> &'static StateRootWorker {
     STATE_ROOT_WORKER.get_or_init(|| {
-        let (sender, receiver) = mpsc::channel::<StateRootRequest>();
+        // Root computation is deliberately serialized by one native qMDB
+        // runtime. Bound the pending work so concurrent callers apply
+        // backpressure instead of accumulating witness-sized requests without
+        // limit.
+        let (sender, receiver) = mpsc::sync_channel::<StateRootRequest>(ROOT_WORKER_QUEUE_CAPACITY);
         thread::Builder::new()
             .name("sybil-state-root-qmdb".to_string())
             .spawn(move || {

@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use reqwest::Client;
+use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use tokio_tungstenite::tungstenite::protocol::Message;
 
@@ -555,7 +556,9 @@ impl SybilClient {
     /// Push reference prices to sybil-api (display only, not matching logic).
     /// A zero value explicitly evicts that market's current reference.
     pub async fn set_reference_prices(&self, prices: &HashMap<u32, u64>) -> Result<(), Error> {
-        let body = serde_json::json!({ "prices": prices });
+        let body = sybil_api_types::SetReferencePricesRequest {
+            prices_nanos: prices.clone(),
+        };
         let resp = self
             .with_service_auth(self.http.post(self.url("/v1/markets/prices/reference")))
             .json(&body)
@@ -634,7 +637,8 @@ impl SybilClient {
 
                 match msg {
                     Message::Text(text) => match decode_block_stream_message(text.as_ref()) {
-                        Ok(event) => return Some((Ok(event), socket)),
+                        Ok(Some(event)) => return Some((Ok(event), socket)),
+                        Ok(None) => continue,
                         Err(e) => return Some((Err(e), socket)),
                     },
                     Message::Binary(bytes) => {
@@ -650,7 +654,8 @@ impl SybilClient {
                             }
                         };
                         match decode_block_stream_message(text) {
-                            Ok(event) => return Some((Ok(event), socket)),
+                            Ok(Some(event)) => return Some((Ok(event), socket)),
+                            Ok(None) => continue,
                             Err(e) => return Some((Err(e), socket)),
                         }
                     }
@@ -706,19 +711,32 @@ fn classify_attestation(
     })
 }
 
-fn decode_block_stream_message(text: &str) -> Result<PublicBlockStreamEvent, Error> {
-    let msg: PublicBlockStreamMessage = serde_json::from_str(text)?;
-    if msg.v != PUBLIC_BLOCK_STREAM_VERSION {
-        return Err(Error::Protocol(format!(
-            "unsupported block stream version {}; expected {}",
-            msg.v, PUBLIC_BLOCK_STREAM_VERSION
-        )));
+#[derive(Deserialize)]
+struct BlockStreamEnvelopeHeader {
+    v: u32,
+    #[serde(rename = "type")]
+    message_type: String,
+}
+
+fn decode_block_stream_message(text: &str) -> Result<Option<PublicBlockStreamEvent>, Error> {
+    let header: BlockStreamEnvelopeHeader = serde_json::from_str(text)?;
+    if header.v != PUBLIC_BLOCK_STREAM_VERSION {
+        return Ok(None);
+    }
+    if !matches!(
+        header.message_type.as_str(),
+        "block" | "replay_complete" | "lagged" | "retention_gap"
+    ) {
+        return Ok(None);
     }
 
+    let msg: PublicBlockStreamMessage = serde_json::from_str(text)?;
     match msg.payload {
-        PublicBlockStreamPayload::Block { data } => Ok(PublicBlockStreamEvent::Block(data)),
+        PublicBlockStreamPayload::Block { data } => Ok(Some(PublicBlockStreamEvent::Block(data))),
         PublicBlockStreamPayload::ReplayComplete { up_to_height } => {
-            Ok(PublicBlockStreamEvent::ReplayComplete { up_to_height })
+            Ok(Some(PublicBlockStreamEvent::ReplayComplete {
+                up_to_height,
+            }))
         }
         PublicBlockStreamPayload::Lagged {
             skipped,
@@ -784,11 +802,35 @@ mod tests {
     fn replay_complete_boundary_is_preserved() {
         let event =
             decode_block_stream_message(r#"{"v":2,"type":"replay_complete","up_to_height":42}"#)
-                .expect("valid replay boundary");
+                .expect("valid replay boundary")
+                .expect("known message type");
 
         assert!(matches!(
             event,
             PublicBlockStreamEvent::ReplayComplete { up_to_height: 42 }
         ));
+    }
+
+    #[test]
+    fn unknown_block_stream_version_is_ignored_before_payload_decoding() {
+        let event =
+            decode_block_stream_message(r#"{"v":3,"type":"future_message","new_shape":true}"#)
+                .expect("unknown versions are forward-compatible");
+        assert!(event.is_none());
+    }
+
+    #[test]
+    fn unknown_v2_message_type_is_ignored() {
+        let event =
+            decode_block_stream_message(r#"{"v":2,"type":"heartbeat","server_timestamp_ms":123}"#)
+                .expect("additive message types are forward-compatible");
+        assert!(event.is_none());
+    }
+
+    #[test]
+    fn malformed_known_message_remains_a_protocol_error() {
+        let error = decode_block_stream_message(r#"{"v":2,"type":"replay_complete"}"#)
+            .expect_err("known message payload must remain strict");
+        assert!(matches!(error, Error::Json(_)));
     }
 }

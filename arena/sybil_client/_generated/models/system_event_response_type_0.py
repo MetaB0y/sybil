@@ -24,12 +24,12 @@ class SystemEventResponseType0:
     """ 
         Attributes:
             account_id (int):
-            initial_balance_nanos (int): Initial account balance. Integer nanodollars; 1_000_000_000 = $1.
+            initial_balance_nanos (str): Initial account balance. Integer nanodollars; 1_000_000_000 = $1.
             type_ (SystemEventResponseType0Type):
      """
 
     account_id: int
-    initial_balance_nanos: int
+    initial_balance_nanos: str
     type_: SystemEventResponseType0Type
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 

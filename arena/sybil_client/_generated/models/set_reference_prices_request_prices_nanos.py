@@ -14,19 +14,19 @@ from ..types import UNSET, Unset
 
 
 
-T = TypeVar("T", bound="SetReferencePricesRequestPrices")
+T = TypeVar("T", bound="SetReferencePricesRequestPricesNanos")
 
 
 
 @_attrs_define
-class SetReferencePricesRequestPrices:
+class SetReferencePricesRequestPricesNanos:
     """ Map of market_id -> reference price. Integer nanodollars;
     1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
     Zero explicitly evicts the current reference for that market.
 
      """
 
-    additional_properties: dict[str, int] = _attrs_field(init=False, factory=dict)
+    additional_properties: dict[str, str] = _attrs_field(init=False, factory=dict)
 
 
 
@@ -44,21 +44,21 @@ class SetReferencePricesRequestPrices:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        set_reference_prices_request_prices = cls(
+        set_reference_prices_request_prices_nanos = cls(
         )
 
 
-        set_reference_prices_request_prices.additional_properties = d
-        return set_reference_prices_request_prices
+        set_reference_prices_request_prices_nanos.additional_properties = d
+        return set_reference_prices_request_prices_nanos
 
     @property
     def additional_keys(self) -> list[str]:
         return list(self.additional_properties.keys())
 
-    def __getitem__(self, key: str) -> int:
+    def __getitem__(self, key: str) -> str:
         return self.additional_properties[key]
 
-    def __setitem__(self, key: str, value: int) -> None:
+    def __setitem__(self, key: str, value: str) -> None:
         self.additional_properties[key] = value
 
     def __delitem__(self, key: str) -> None:

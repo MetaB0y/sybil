@@ -160,13 +160,18 @@ impl RetainedCashSolver {
                 .gap_abs_nanos
                 .max(self.config.gap_rel * objective.abs().max(1.0));
             // The upper and current scores are independently accumulated
-            // `f64` values. At large objective scales, their final subtraction
-            // can leave a few ULPs of positive gap at an exact optimum (for
-            // example 0.001953125 nanos beside a 1.6e13-nano score). Do not
-            // turn that representation floor into a false line-search
-            // failure when a caller deliberately configures zero tolerance.
-            let certificate_roundoff =
-                32.0 * f64::EPSILON * oracle_upper_score.abs().max(current_score.abs()).max(1.0);
+            // `f64` values. Their subtraction can leave a small positive gap
+            // at an exact optimum, especially when large positive and negative
+            // affine terms cancel. Bound that evaluation error from the
+            // absolute terms and operation count instead of using a fixed ULP
+            // multiplier on the possibly cancelled final score.
+            let certificate_roundoff = model.certificate_roundoff_bound(
+                &q,
+                &summary,
+                &alpha_q,
+                oracle_upper_score,
+                current_score,
+            );
             if last_gap <= tolerance.max(certificate_roundoff) {
                 converged = true;
                 break;
@@ -647,6 +652,61 @@ impl<'a> ObjectiveModel<'a> {
                 .sum::<f64>()
     }
 
+    /// Conservative floating-point evaluation floor for the generalized
+    /// Frank--Wolfe certificate.
+    ///
+    /// The oracle bound is a sum of non-negative hinge terms. The current
+    /// affine score may cancel retail, MM sell-correction, and minting terms,
+    /// so its final magnitude is not a safe error scale. We instead sum the
+    /// absolute affine terms at the current allocation and apply Higham's
+    /// `gamma_n = n*u/(1-n*u)` bound with a deliberately conservative count
+    /// for coefficient construction, accumulation, and unit conversion.
+    fn certificate_roundoff_bound(
+        &self,
+        q: &[f64],
+        summary: &AllocationSummary,
+        alpha: &[f64],
+        oracle_upper_score: f64,
+        current_score: f64,
+    ) -> f64 {
+        let share_scale = SHARE_SCALE as f64;
+        let mut absolute_scale = oracle_upper_score.abs().max(current_score.abs());
+        for (index, (&quantity, &weight)) in q.iter().zip(&self.welfare_weights).enumerate() {
+            let coefficient = self.log_mm_by_order[index]
+                .map(|mm_index| {
+                    let sell_correction = if weight < 0.0 {
+                        NANOS_PER_DOLLAR as f64
+                    } else {
+                        0.0
+                    };
+                    alpha[mm_index] * self.mm_values[index] - sell_correction
+                })
+                .unwrap_or(weight);
+            absolute_scale += coefficient.abs() * quantity.abs() / share_scale;
+        }
+        // A structural breakpoint is a floating division in probability
+        // space. An order can be exactly marginal (zero hinge value) while a
+        // few ULPs of price error become visible after multiplication by its
+        // full quantity. Such a term contributes almost nothing to the final
+        // score, so include its Lipschitz scale explicitly.
+        absolute_scale += self
+            .problem
+            .orders
+            .iter()
+            .map(|order| 2.0 * NANOS_PER_DOLLAR as f64 * order.max_fill.0 as f64 / share_scale)
+            .sum::<f64>();
+        absolute_scale += self
+            .minting_cost_from_demands(&summary.yes, &summary.no)
+            .abs();
+
+        let operation_count = 16 * (self.problem.orders.len() + 1)
+            + 8 * (self.ctx.markets.len() + self.mm_groups.len() + 1)
+            + 64;
+        let nu = operation_count as f64 * f64::EPSILON;
+        let gamma_n = nu / (1.0 - nu);
+        gamma_n * absolute_scale.max(1.0)
+    }
+
     pub(crate) fn segment_argmax(
         &self,
         utilities: &[f64],
@@ -1030,6 +1090,65 @@ mod tests {
         assert_eq!(retained_cash_utility(budget, 4.0), 4.0);
         assert_eq!(retained_cash_utility(budget, budget), budget);
         assert!(retained_cash_utility(budget, 20.0) < 20.0);
+    }
+
+    #[test]
+    fn structural_zero_tolerance_accepts_dust_scale_certificate_roundoff() {
+        let mut problem = Problem::new("structural_dust_certificate_roundoff");
+        let market = problem.markets.add_binary("market");
+        problem.orders.extend([
+            outcome_buy(&problem.markets, 1, market, 0, 600_000_000, 1),
+            outcome_buy(&problem.markets, 2, market, 1, 600_000_000, 1),
+            outcome_sell(&problem.markets, 3, market, 0, 400_000_000, 1),
+            outcome_sell(&problem.markets, 4, market, 1, 400_000_000, 1),
+            outcome_buy(&problem.markets, 5, market, 1, 0, 1),
+            outcome_sell(&problem.markets, 6, market, 1, 376_365_845, 56),
+        ]);
+        let mut mm = MmConstraint::new(MmId::new(1), Nanos(1_000_000));
+        mm.add_order(5, MmSide::BuyNo);
+        problem.mm_constraints.push(mm);
+
+        let result = RetainedCashSolver::with_config(RetainedCashConfig {
+            linear_oracle: LinearOracleBackend::StructuralPriceSweep,
+            gap_abs_nanos: 0.0,
+            gap_rel: 0.0,
+            ..Default::default()
+        })
+        .solve(&problem);
+
+        assert_eq!(
+            result.diagnostics.status,
+            TerminationStatus::Converged,
+            "{:?}",
+            result.diagnostics
+        );
+        assert!(!result.result.fills.is_empty());
+        assert!(result.diagnostics.optimality_gap.unwrap_or(f64::INFINITY) > 0.0);
+    }
+
+    #[test]
+    fn structural_roundoff_floor_does_not_mask_a_material_gap() {
+        let problem = tight_budget_problem(10);
+        let result = RetainedCashSolver::with_config(RetainedCashConfig {
+            linear_oracle: LinearOracleBackend::StructuralPriceSweep,
+            max_iterations: 0,
+            gap_abs_nanos: 0.0,
+            gap_rel: 0.0,
+            ..Default::default()
+        })
+        .solve(&problem);
+
+        assert_eq!(
+            result.diagnostics.status,
+            TerminationStatus::IterationLimit,
+            "{:?}",
+            result.diagnostics
+        );
+        assert!(
+            result.diagnostics.optimality_gap.unwrap_or(0.0) >= NANOS_PER_DOLLAR as f64,
+            "material initial gap was unexpectedly hidden: {:?}",
+            result.diagnostics
+        );
     }
 
     #[test]

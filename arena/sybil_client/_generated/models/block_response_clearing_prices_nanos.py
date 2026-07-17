@@ -26,7 +26,7 @@ class BlockResponseClearingPricesNanos:
 
      """
 
-    additional_properties: dict[str, list[int]] = _attrs_field(init=False, factory=dict)
+    additional_properties: dict[str, list[str]] = _attrs_field(init=False, factory=dict)
 
 
 
@@ -54,7 +54,7 @@ class BlockResponseClearingPricesNanos:
 
         additional_properties = {}
         for prop_name, prop_dict in d.items():
-            additional_property = cast(list[int], prop_dict)
+            additional_property = cast(list[str], prop_dict)
 
             additional_properties[prop_name] = additional_property
 
@@ -65,10 +65,10 @@ class BlockResponseClearingPricesNanos:
     def additional_keys(self) -> list[str]:
         return list(self.additional_properties.keys())
 
-    def __getitem__(self, key: str) -> list[int]:
+    def __getitem__(self, key: str) -> list[str]:
         return self.additional_properties[key]
 
-    def __setitem__(self, key: str, value: list[int]) -> None:
+    def __setitem__(self, key: str, value: list[str]) -> None:
         self.additional_properties[key] = value
 
     def __delitem__(self, key: str) -> None:

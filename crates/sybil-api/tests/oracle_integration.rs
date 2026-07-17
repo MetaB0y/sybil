@@ -120,7 +120,7 @@ async fn signed_resolve_via_polymarket_template_succeeds() {
     assert_eq!(status, StatusCode::OK);
     let res: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(res["status"], "resolved");
-    assert_eq!(res["payout_nanos"], NANOS_PER_DOLLAR);
+    assert_eq!(common::nanos_u64(&res["payout_nanos"]), NANOS_PER_DOLLAR);
     assert_eq!(res["resolved_by_feed_name"], "polymarket_mirror");
     assert_eq!(res["template"], "polymarket_mirror");
 }

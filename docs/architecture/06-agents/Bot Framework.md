@@ -7,6 +7,11 @@ last_verified: 2026-07-17
 
 The bot framework is a Python base class pattern for building trading agents. Every bot extends `BaseAgent` and implements a single method: `on_block(block: Block) -> list[OrderSpec]`. When a new block arrives via the [[WebSocket Block Stream]], the framework calls `on_block()` and submits any returned orders via the [[Python SDK]]. This event-driven design means bots are reactive — they make decisions in response to market state changes.
 
+Reconnect replay is observational, not a new trading cadence. `BaseAgent`
+updates canonical account/fill state for replayed block events but calls
+`on_block()` only after the SDK's replay-complete boundary. Historical blocks
+therefore cannot resubmit strategy work after a transient disconnect.
+
 Several reference bots demonstrate the pattern. `SimpleMarketMaker` quotes both sides of each market with a configurable spread. `RandomTrader` generates noise flow for testing. `InformedTrader` has a private model of true probabilities and trades when the edge (model price minus market price) exceeds a threshold. `MomentumTrader` follows price trends. All bots accept `market_ids: list[int] | None` to restrict which markets they trade on, enabling focused strategies in multi-market simulations.
 
 The competition runner orchestrates multiple bots trading simultaneously. It starts the Sybil server, creates accounts for each bot, creates markets, and runs the bots in parallel. Each bot has its own account and sees the same block stream. The runner collects results and produces performance analytics. Adding a new bot is a four-step process: create the class extending `BaseAgent`, implement `on_block()`, export from `bots/__init__.py`, and add to the competition config.

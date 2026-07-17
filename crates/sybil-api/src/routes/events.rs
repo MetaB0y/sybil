@@ -1,4 +1,7 @@
+use std::io::Write;
 use std::path::{Path as FsPath, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::Json;
 use axum::body::Bytes;
@@ -26,23 +29,58 @@ fn snapshot_path(dir: &FsPath, event_id: &str) -> Option<PathBuf> {
 /// the target — so a crash or restart mid-write can never leave a torn/partial
 /// snapshot: readers see either the old snapshot or the fully-written new one.
 async fn store_snapshot(path: &FsPath, body: &[u8]) -> std::io::Result<()> {
-    // Unique temp name in the same dir keeps `rename` atomic (same filesystem)
-    // and avoids collisions between overlapping writes for the same event.
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
+    let path = path.to_path_buf();
+    let body = body.to_vec();
+    tokio::task::spawn_blocking(move || store_snapshot_blocking(&path, &body))
+        .await
+        .map_err(|error| std::io::Error::other(format!("snapshot writer task failed: {error}")))?
+}
+
+fn store_snapshot_blocking(path: &FsPath, body: &[u8]) -> std::io::Result<()> {
+    static TEMP_NONCE: AtomicU64 = AtomicU64::new(0);
+
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| FsPath::new("."));
+    std::fs::create_dir_all(parent)?;
+    // Timestamp, process id, and monotonic process-local nonce avoid collisions
+    // with overlapping PUTs and stale temp files left by a prior process.
+    let nonce = TEMP_NONCE.fetch_add(1, Ordering::Relaxed);
+    let timestamp_nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
     let mut tmp = path.as_os_str().to_owned();
-    tmp.push(format!(".{nonce}.tmp"));
+    tmp.push(format!(
+        ".{timestamp_nanos}.{}.{nonce}.tmp",
+        std::process::id()
+    ));
     let tmp = PathBuf::from(tmp);
-    if let Err(e) = tokio::fs::write(&tmp, body).await {
-        let _ = tokio::fs::remove_file(&tmp).await;
-        return Err(e);
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&tmp)?;
+        file.write_all(body)?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&tmp, path)?;
+        sync_parent_directory(parent)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
     }
-    if let Err(e) = tokio::fs::rename(&tmp, path).await {
-        let _ = tokio::fs::remove_file(&tmp).await;
-        return Err(e);
-    }
+    result
+}
+
+#[cfg(unix)]
+fn sync_parent_directory(parent: &FsPath) -> std::io::Result<()> {
+    std::fs::File::open(parent)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_parent_directory(_parent: &FsPath) -> std::io::Result<()> {
     Ok(())
 }
 

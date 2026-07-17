@@ -30,19 +30,19 @@ class HistoryEventResponse:
             id (str):
             timestamp_ms (int):
             type_ (str):
-            amount_nanos (int | None | Unset): Event cash amount. Integer nanodollars; 1_000_000_000 = $1.
-            available_nanos (int | None | Unset): Rejected-order available amount. Integer nanodollars; 1_000_000_000 = $1.
+            amount_nanos (None | str | Unset): Event cash amount. Integer nanodollars; 1_000_000_000 = $1.
+            available_nanos (None | str | Unset): Rejected-order available amount. Integer nanodollars; 1_000_000_000 = $1.
             market_id (int | None | Unset):
             order_id (int | None | Unset):
             outcome (None | str | Unset):
             payout_outcome (None | str | Unset):
-            price_nanos (int | None | Unset): Event price. Integer nanodollars; 1_000_000_000 = $1.
+            price_nanos (None | str | Unset): Event price. Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
             qty (int | None | Unset): Event quantity. Integer share-units; 1000 units = 1 share.
-            realized_pnl_nanos (int | None | Unset): Event realized PnL. Integer nanodollars; 1_000_000_000 = $1.
+            realized_pnl_nanos (None | str | Unset): Event realized PnL. Integer nanodollars; 1_000_000_000 = $1.
             reason (None | str | Unset): Rejected only: reason code (`insufficient_balance` | `insufficient_position`
                 | `complete_set` | …).
-            required_nanos (int | None | Unset): Rejected-order required amount. Integer nanodollars; 1_000_000_000 = $1.
+            required_nanos (None | str | Unset): Rejected-order required amount. Integer nanodollars; 1_000_000_000 = $1.
             side (None | str | Unset):
      """
 
@@ -51,17 +51,17 @@ class HistoryEventResponse:
     id: str
     timestamp_ms: int
     type_: str
-    amount_nanos: int | None | Unset = UNSET
-    available_nanos: int | None | Unset = UNSET
+    amount_nanos: None | str | Unset = UNSET
+    available_nanos: None | str | Unset = UNSET
     market_id: int | None | Unset = UNSET
     order_id: int | None | Unset = UNSET
     outcome: None | str | Unset = UNSET
     payout_outcome: None | str | Unset = UNSET
-    price_nanos: int | None | Unset = UNSET
+    price_nanos: None | str | Unset = UNSET
     qty: int | None | Unset = UNSET
-    realized_pnl_nanos: int | None | Unset = UNSET
+    realized_pnl_nanos: None | str | Unset = UNSET
     reason: None | str | Unset = UNSET
-    required_nanos: int | None | Unset = UNSET
+    required_nanos: None | str | Unset = UNSET
     side: None | str | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -80,13 +80,13 @@ class HistoryEventResponse:
 
         type_ = self.type_
 
-        amount_nanos: int | None | Unset
+        amount_nanos: None | str | Unset
         if isinstance(self.amount_nanos, Unset):
             amount_nanos = UNSET
         else:
             amount_nanos = self.amount_nanos
 
-        available_nanos: int | None | Unset
+        available_nanos: None | str | Unset
         if isinstance(self.available_nanos, Unset):
             available_nanos = UNSET
         else:
@@ -116,7 +116,7 @@ class HistoryEventResponse:
         else:
             payout_outcome = self.payout_outcome
 
-        price_nanos: int | None | Unset
+        price_nanos: None | str | Unset
         if isinstance(self.price_nanos, Unset):
             price_nanos = UNSET
         else:
@@ -128,7 +128,7 @@ class HistoryEventResponse:
         else:
             qty = self.qty
 
-        realized_pnl_nanos: int | None | Unset
+        realized_pnl_nanos: None | str | Unset
         if isinstance(self.realized_pnl_nanos, Unset):
             realized_pnl_nanos = UNSET
         else:
@@ -140,7 +140,7 @@ class HistoryEventResponse:
         else:
             reason = self.reason
 
-        required_nanos: int | None | Unset
+        required_nanos: None | str | Unset
         if isinstance(self.required_nanos, Unset):
             required_nanos = UNSET
         else:
@@ -204,22 +204,22 @@ class HistoryEventResponse:
 
         type_ = d.pop("type")
 
-        def _parse_amount_nanos(data: object) -> int | None | Unset:
+        def _parse_amount_nanos(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(int | None | Unset, data)
+            return cast(None | str | Unset, data)
 
         amount_nanos = _parse_amount_nanos(d.pop("amount_nanos", UNSET))
 
 
-        def _parse_available_nanos(data: object) -> int | None | Unset:
+        def _parse_available_nanos(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(int | None | Unset, data)
+            return cast(None | str | Unset, data)
 
         available_nanos = _parse_available_nanos(d.pop("available_nanos", UNSET))
 
@@ -264,12 +264,12 @@ class HistoryEventResponse:
         payout_outcome = _parse_payout_outcome(d.pop("payout_outcome", UNSET))
 
 
-        def _parse_price_nanos(data: object) -> int | None | Unset:
+        def _parse_price_nanos(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(int | None | Unset, data)
+            return cast(None | str | Unset, data)
 
         price_nanos = _parse_price_nanos(d.pop("price_nanos", UNSET))
 
@@ -284,12 +284,12 @@ class HistoryEventResponse:
         qty = _parse_qty(d.pop("qty", UNSET))
 
 
-        def _parse_realized_pnl_nanos(data: object) -> int | None | Unset:
+        def _parse_realized_pnl_nanos(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(int | None | Unset, data)
+            return cast(None | str | Unset, data)
 
         realized_pnl_nanos = _parse_realized_pnl_nanos(d.pop("realized_pnl_nanos", UNSET))
 
@@ -304,12 +304,12 @@ class HistoryEventResponse:
         reason = _parse_reason(d.pop("reason", UNSET))
 
 
-        def _parse_required_nanos(data: object) -> int | None | Unset:
+        def _parse_required_nanos(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(int | None | Unset, data)
+            return cast(None | str | Unset, data)
 
         required_nanos = _parse_required_nanos(d.pop("required_nanos", UNSET))
 

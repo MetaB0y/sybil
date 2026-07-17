@@ -136,10 +136,16 @@ def _fetch_resolution(
                 f"market {market_id} returned payout_nanos while status={status!r}"
             )
         return None
-    if not isinstance(payout_nanos, int) or isinstance(payout_nanos, bool):
+    if isinstance(payout_nanos, bool) or not isinstance(payout_nanos, (str, int)):
         raise InvalidOutcomeResponseError(
             f"market {market_id} returned invalid payout_nanos={payout_nanos!r}"
         )
+    try:
+        payout_nanos = int(payout_nanos)
+    except ValueError as exc:
+        raise InvalidOutcomeResponseError(
+            f"market {market_id} returned invalid payout_nanos={payout_nanos!r}"
+        ) from exc
     if not 0 <= payout_nanos <= NANOS_PER_DOLLAR:
         raise InvalidOutcomeResponseError(
             f"market {market_id} returned invalid payout_nanos={payout_nanos}"

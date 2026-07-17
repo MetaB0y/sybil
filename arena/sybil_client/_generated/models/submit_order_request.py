@@ -33,7 +33,7 @@ class SubmitOrderRequest:
             account_id (int): Account ID submitting the orders.
             orders (list[OrderSpecType0 | OrderSpecType1 | OrderSpecType2 | OrderSpecType3]): Orders to submit.
             expires_at_block (int | None | Unset): Last eligible block height for explicit-expiry orders.
-            mm_budget_nanos (int | None | Unset): If set, treat these orders as market maker orders with flash liquidity.
+            mm_budget_nanos (None | str | Unset): If set, treat these orders as market maker orders with flash liquidity.
                 The value is the MM's total capital budget. Integer nanodollars;
                 1_000_000_000 = $1.
                 MM orders skip per-order balance validation; instead the solver enforces
@@ -44,7 +44,7 @@ class SubmitOrderRequest:
     account_id: int
     orders: list[OrderSpecType0 | OrderSpecType1 | OrderSpecType2 | OrderSpecType3]
     expires_at_block: int | None | Unset = UNSET
-    mm_budget_nanos: int | None | Unset = UNSET
+    mm_budget_nanos: None | str | Unset = UNSET
     time_in_force: TimeInForce | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -81,7 +81,7 @@ class SubmitOrderRequest:
         else:
             expires_at_block = self.expires_at_block
 
-        mm_budget_nanos: int | None | Unset
+        mm_budget_nanos: None | str | Unset
         if isinstance(self.mm_budget_nanos, Unset):
             mm_budget_nanos = UNSET
         else:
@@ -176,12 +176,12 @@ class SubmitOrderRequest:
         expires_at_block = _parse_expires_at_block(d.pop("expires_at_block", UNSET))
 
 
-        def _parse_mm_budget_nanos(data: object) -> int | None | Unset:
+        def _parse_mm_budget_nanos(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(int | None | Unset, data)
+            return cast(None | str | Unset, data)
 
         mm_budget_nanos = _parse_mm_budget_nanos(d.pop("mm_budget_nanos", UNSET))
 

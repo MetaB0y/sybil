@@ -56,6 +56,12 @@ struct PendingMmNotification {
     initial_mid: f64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SyncCycle {
+    Complete,
+    Cancelled,
+}
+
 impl SyncActor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -93,11 +99,21 @@ impl SyncActor {
         info!("SyncActor started");
 
         loop {
-            let mut succeeded = true;
-            if let Err(e) = self.sync_once().await {
-                succeeded = false;
-                warn!(error = %e, "sync cycle failed");
+            if cancel.is_cancelled() {
+                info!("SyncActor shutting down");
+                let _ = self.mapping.read().await.save();
+                return;
             }
+            let mut succeeded = true;
+            let cancelled = match self.sync_once(&cancel).await {
+                Ok(SyncCycle::Complete) => false,
+                Ok(SyncCycle::Cancelled) => true,
+                Err(e) => {
+                    succeeded = false;
+                    warn!(error = %e, "sync cycle failed");
+                    false
+                }
+            };
 
             // Save mapping after each cycle
             if let Err(e) = self.mapping.read().await.save() {
@@ -105,8 +121,13 @@ impl SyncActor {
                 warn!(error = %e, "failed to save mapping");
             }
             self.progress.record_sync_cycle(succeeded);
+            if cancelled {
+                info!("SyncActor shutting down");
+                return;
+            }
 
             tokio::select! {
+                biased;
                 _ = cancel.cancelled() => {
                     info!("SyncActor shutting down");
                     let _ = self.mapping.read().await.save();
@@ -117,24 +138,32 @@ impl SyncActor {
         }
     }
 
-    async fn sync_once(&mut self) -> Result<(), crate::error::Error> {
+    async fn sync_once(
+        &mut self,
+        cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<SyncCycle, crate::error::Error> {
         let mut mm_live = self.mm_live_rx.borrow().tracked_markets;
 
         // Curated mode (SYB-150): mirror exactly the allowlisted events by id.
         // Otherwise fall back to the volume-ranked category scan.
         let mut events = if self.curated_event_ids.is_empty() {
-            self.gamma_client
-                .fetch_active_events(
-                    self.config.max_events,
-                    &self.config.mirror_categories,
-                    &self.config.mirror_excluded_categories,
-                    self.config.min_volume_usd,
-                )
-                .await?
+            let fetch = self.gamma_client.fetch_active_events(
+                self.config.max_events,
+                &self.config.mirror_categories,
+                &self.config.mirror_excluded_categories,
+                self.config.min_volume_usd,
+            );
+            tokio::select! {
+                biased;
+                _ = cancel.cancelled() => return Ok(SyncCycle::Cancelled),
+                result = fetch => result?,
+            }
         } else {
-            self.gamma_client
-                .fetch_curated_events(&self.curated_event_ids)
-                .await?
+            tokio::select! {
+                biased;
+                _ = cancel.cancelled() => return Ok(SyncCycle::Cancelled),
+                result = self.gamma_client.fetch_curated_events(&self.curated_event_ids) => result?,
+            }
         };
         if !self.curated_condition_ids.is_empty() {
             for event in &mut events {
@@ -144,6 +173,9 @@ impl SyncActor {
                 });
             }
             events.retain(|event| !event.markets.is_empty());
+        }
+        if cancel.is_cancelled() {
+            return Ok(SyncCycle::Cancelled);
         }
 
         // Baseline live-set size for MM admission this cycle (PM-8). Copied out
@@ -162,6 +194,9 @@ impl SyncActor {
         // an idempotent upsert each cycle, so the folder self-heals after a
         // restart of either process. Only events with a tradeable market.
         for event in &events {
+            if cancel.is_cancelled() {
+                return Ok(SyncCycle::Cancelled);
+            }
             if !event.markets.iter().any(|m| m.active && !m.closed) {
                 continue;
             }
@@ -182,17 +217,21 @@ impl SyncActor {
         // existing markets without wiping market_ref_data.json. Collect under
         // the lock, then POST after releasing it.
         if self.first_sync {
+            if cancel.is_cancelled() {
+                return Ok(SyncCycle::Cancelled);
+            }
             // Fully-closed events drop out of the active fetch, so pull the
             // closed-event list once too — that's how their markets get flagged
             // `closed` for the frontend to hide.
-            let closed_events = self
-                .gamma_client
-                .fetch_closed_events(self.config.max_events)
-                .await
-                .unwrap_or_else(|e| {
-                    warn!(error = %e, "failed to fetch closed events for backfill");
-                    Vec::new()
-                });
+            let closed_events_result = tokio::select! {
+                biased;
+                _ = cancel.cancelled() => return Ok(SyncCycle::Cancelled),
+                result = self.gamma_client.fetch_closed_events(self.config.max_events) => result,
+            };
+            let closed_events = closed_events_result.unwrap_or_else(|e| {
+                warn!(error = %e, "failed to fetch closed events for backfill");
+                Vec::new()
+            });
             let refresh: Vec<(u32, SetMarketMetadataRequest)> = {
                 let map = self.mapping.read().await;
                 // Re-push display metadata for every mapped market — active
@@ -220,6 +259,9 @@ impl SyncActor {
                 "backfilling market metadata (one-time)"
             );
             for (sid, req) in refresh {
+                if cancel.is_cancelled() {
+                    return Ok(SyncCycle::Cancelled);
+                }
                 if let Err(e) = self.sybil_client.set_market_metadata(sid, &req).await {
                     warn!(sybil_id = sid, error = %e, "metadata backfill failed");
                 }
@@ -230,6 +272,9 @@ impl SyncActor {
         let mut new_token_ids = Vec::new();
 
         for event in &events {
+            if cancel.is_cancelled() {
+                return Ok(SyncCycle::Cancelled);
+            }
             let active_markets: Vec<_> = event
                 .markets
                 .iter()
@@ -272,6 +317,9 @@ impl SyncActor {
             let mut pending_mm = Vec::new();
 
             for poly_market in &active_markets {
+                if cancel.is_cancelled() {
+                    return Ok(SyncCycle::Cancelled);
+                }
                 if self
                     .mapping
                     .read()
@@ -319,7 +367,7 @@ impl SyncActor {
                 // Create market on Sybil
                 let req = CreateMarketRequest {
                     name: name.clone(),
-                    creation_key: None,
+                    creation_key: Some(polymarket_market_creation_key(&poly_market.condition_id)),
                     description: poly_market.description.clone(),
                     category: event.primary_category(),
                     tags: Some({
@@ -346,11 +394,19 @@ impl SyncActor {
                             "created market"
                         );
 
-                        self.mapping.write().await.register_market(
-                            poly_market.condition_id.clone(),
-                            token_ids.clone(),
-                            sybil_id,
-                        );
+                        {
+                            let mut mapping = self.mapping.write().await;
+                            mapping.register_market(
+                                poly_market.condition_id.clone(),
+                                token_ids.clone(),
+                                sybil_id,
+                            );
+                            // The remote create is already committed. Persist
+                            // its local identity before any later I/O so a
+                            // process crash cannot turn the next cycle into a
+                            // second allocation attempt.
+                            mapping.save()?;
+                        }
 
                         // Push off-block metadata (event id/title, images, end
                         // dates, category) so the frontend can render real
@@ -390,6 +446,9 @@ impl SyncActor {
                 }
             }
 
+            if cancel.is_cancelled() {
+                return Ok(SyncCycle::Cancelled);
+            }
             let (active_mapped_ids, unmapped_after) = {
                 let map = self.mapping.read().await;
                 let mapped: Vec<u32> = active_markets
@@ -418,32 +477,75 @@ impl SyncActor {
             };
             match group_action {
                 NegRiskGroupAction::Create(market_ids) => {
-                    let group_req = CreateMarketGroupRequest {
-                        name: event.title.clone(),
-                        market_ids: market_ids.clone(),
+                    let expected_group = GroupInfo {
+                        group_name: event.title.clone(),
+                        sybil_market_ids: market_ids.clone(),
+                        neg_risk: true,
                     };
-                    match self.sybil_client.create_market_group(&group_req).await {
-                        Ok(_) => {
-                            info!(
-                                event_id = &event.id,
-                                markets = market_ids.len(),
-                                "created market group"
-                            );
-                            self.mapping.write().await.register_event(
-                                event.id.clone(),
-                                GroupInfo {
-                                    group_name: event.title.clone(),
-                                    sybil_market_ids: market_ids,
-                                    neg_risk: true,
-                                },
-                            );
-                        }
-                        Err(e) => {
-                            warn!(
-                                event_id = &event.id,
-                                error = %e,
-                                "failed to create market group"
-                            );
+                    // Group creation has no server-side idempotency key. Read
+                    // before writing and adopt an overlapping same-name group
+                    // left by a crash after the prior response but before the
+                    // local mapping checkpoint.
+                    let groups = tokio::select! {
+                        biased;
+                        _ = cancel.cancelled() => return Ok(SyncCycle::Cancelled),
+                        result = self.sybil_client.list_market_groups() => result?,
+                    };
+                    if let Some(group_id) = matching_sybil_group_id(&groups, &expected_group) {
+                        let recovered = groups
+                            .iter()
+                            .find(|group| group.group_id == group_id)
+                            .ok_or_else(|| {
+                                crate::error::Error::Mapping(format!(
+                                    "matched Sybil market group {group_id} disappeared from one response"
+                                ))
+                            })?;
+                        let mut mapping = self.mapping.write().await;
+                        mapping.register_event(
+                            event.id.clone(),
+                            GroupInfo {
+                                group_name: event.title.clone(),
+                                sybil_market_ids: recovered.market_ids.clone(),
+                                neg_risk: true,
+                            },
+                        );
+                        mapping.save()?;
+                        info!(
+                            event_id = &event.id,
+                            group_id,
+                            markets = recovered.market_ids.len(),
+                            "recovered existing market group after missing local checkpoint"
+                        );
+                    } else {
+                        let group_req = CreateMarketGroupRequest {
+                            name: event.title.clone(),
+                            market_ids: market_ids.clone(),
+                        };
+                        match self.sybil_client.create_market_group(&group_req).await {
+                            Ok(group) => {
+                                info!(
+                                    event_id = &event.id,
+                                    markets = market_ids.len(),
+                                    "created market group"
+                                );
+                                let mut mapping = self.mapping.write().await;
+                                mapping.register_event(
+                                    event.id.clone(),
+                                    GroupInfo {
+                                        group_name: event.title.clone(),
+                                        sybil_market_ids: group.market_ids,
+                                        neg_risk: true,
+                                    },
+                                );
+                                mapping.save()?;
+                            }
+                            Err(e) => {
+                                warn!(
+                                    event_id = &event.id,
+                                    error = %e,
+                                    "failed to create market group"
+                                );
+                            }
                         }
                     }
                 }
@@ -451,7 +553,12 @@ impl SyncActor {
                     missing_market_ids,
                     existing_group_market_ids,
                 } => {
-                    let groups = match self.sybil_client.list_market_groups().await {
+                    let groups_result = tokio::select! {
+                        biased;
+                        _ = cancel.cancelled() => return Ok(SyncCycle::Cancelled),
+                        result = self.sybil_client.list_market_groups() => result,
+                    };
+                    let groups = match groups_result {
                         Ok(groups) => groups,
                         Err(e) => {
                             warn!(
@@ -483,6 +590,9 @@ impl SyncActor {
 
                     let mut extended = Vec::new();
                     for market_id in &missing_market_ids {
+                        if cancel.is_cancelled() {
+                            return Ok(SyncCycle::Cancelled);
+                        }
                         let req = ExtendMarketGroupRequest {
                             market_id: *market_id,
                         };
@@ -509,10 +619,9 @@ impl SyncActor {
                         }
                     }
                     if !extended.is_empty() {
-                        self.mapping
-                            .write()
-                            .await
-                            .extend_event_group(&event.id, &extended);
+                        let mut mapping = self.mapping.write().await;
+                        mapping.extend_event_group(&event.id, &extended);
+                        mapping.save()?;
                     }
                 }
                 NegRiskGroupAction::None => {}
@@ -522,7 +631,9 @@ impl SyncActor {
                 && !active_mapped_ids.is_empty()
                 && unmapped_after == 0
             {
-                self.mapping.write().await.mark_event_synced(&event.id);
+                let mut mapping = self.mapping.write().await;
+                mapping.mark_event_synced(&event.id);
+                mapping.save()?;
             } else if active_mapped_ids.is_empty() {
                 warn!(
                     event_id = &event.id,
@@ -532,6 +643,9 @@ impl SyncActor {
 
             let group_after_sync = self.mapping.read().await.event_group(&event.id);
             for pending in pending_mm {
+                if cancel.is_cancelled() {
+                    return Ok(SyncCycle::Cancelled);
+                }
                 let (group_key, group_size) = mm_group_membership(
                     &event.id,
                     pending.sybil_market_id,
@@ -549,17 +663,19 @@ impl SyncActor {
                 }
 
                 if self.config.mm_max_markets == 0 || mm_live < self.config.mm_max_markets {
-                    match self
-                        .mm_tx
-                        .send(MmMessage::MarketMirrored {
-                            sybil_market_id: pending.sybil_market_id,
-                            yes_token_id: pending.yes_token_id.clone(),
-                            initial_mid: pending.initial_mid,
-                            group_key,
-                            group_size,
-                        })
-                        .await
-                    {
+                    let notification = self.mm_tx.send(MmMessage::MarketMirrored {
+                        sybil_market_id: pending.sybil_market_id,
+                        yes_token_id: pending.yes_token_id.clone(),
+                        initial_mid: pending.initial_mid,
+                        group_key,
+                        group_size,
+                    });
+                    let send_result = tokio::select! {
+                        biased;
+                        _ = cancel.cancelled() => return Ok(SyncCycle::Cancelled),
+                        result = notification => result,
+                    };
+                    match send_result {
                         Ok(()) => {
                             mm_live += 1;
                             new_token_ids.push(pending.yes_token_id);
@@ -584,16 +700,24 @@ impl SyncActor {
         }
 
         // Notify Feed about new tokens to subscribe
-        if !new_token_ids.is_empty()
-            && let Err(e) = self
+        if cancel.is_cancelled() {
+            return Ok(SyncCycle::Cancelled);
+        }
+        if !new_token_ids.is_empty() {
+            let notification = self
                 .feed_tx
-                .send(FeedMessage::SubscribeTokens(new_token_ids))
-                .await
-        {
-            warn!(error = %e, "failed to notify feed about new token subscriptions");
+                .send(FeedMessage::SubscribeTokens(new_token_ids));
+            let send_result = tokio::select! {
+                biased;
+                _ = cancel.cancelled() => return Ok(SyncCycle::Cancelled),
+                result = notification => result,
+            };
+            if let Err(e) = send_result {
+                warn!(error = %e, "failed to notify feed about new token subscriptions");
+            }
         }
 
-        Ok(())
+        Ok(SyncCycle::Complete)
     }
 }
 
@@ -722,6 +846,26 @@ mod tests {
             market_ids: vec![0, 1, 2, 3],
         }];
         assert_eq!(matching_sybil_group_id(&groups, &existing_group), Some(9));
+    }
+
+    #[test]
+    fn polymarket_creation_key_is_stable_bounded_and_normalized() {
+        let lower = polymarket_market_creation_key(
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        );
+        let upper = polymarket_market_creation_key(
+            "  0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  ",
+        );
+        let other = polymarket_market_creation_key(
+            "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        );
+
+        assert_eq!(lower, upper);
+        assert_ne!(lower, other);
+        assert!(lower.len() <= 128);
+        assert!(lower.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b':' | b'.' | b'/')
+        }));
     }
 
     #[test]

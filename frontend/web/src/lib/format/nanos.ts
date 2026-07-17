@@ -1,12 +1,9 @@
 /**
  * Helpers for Sybil's nanos values (1 unit = 1e9 nanos).
  *
- * ⚠ The OpenAPI schema declares `*_nanos` fields as `string` in TypeScript via
- * the `scripts/patch-bigints.mjs` post-process — but the live backend still
- * serializes them as JSON numbers on the wire. That means values above 2^53
- * can already be corrupted by the time the JSON arrives. `parseNanos` accepts
- * `number | string | bigint` so we cope at runtime, but the proper fix is
- * server-side (utoipa → emit u64 as JSON string). See frontend/KNOWN_ISSUES.md.
+ * The API serializes every `*_nanos` field as an exact decimal string.
+ * `parseNanos` also accepts numbers for local fixtures and legacy payloads,
+ * while all application arithmetic proceeds as `bigint`.
  */
 
 export const NANOS_PER_UNIT = 1_000_000_000n;
@@ -16,7 +13,12 @@ export type NanosInput = string | number | bigint;
 export const parseNanos = (v: NanosInput): bigint => {
   if (typeof v === "bigint") return v;
   if (typeof v === "string") return BigInt(v);
-  // JSON number on the wire. Safe up to Number.MAX_SAFE_INTEGER.
+  // Compatibility for local fixtures and pre-decimal-string API payloads.
+  // Reject values that JSON.parse may already have rounded; converting such a
+  // number to bigint would preserve the wrong integer with false confidence.
+  if (!Number.isSafeInteger(v)) {
+    throw new RangeError("numeric nanos must be a safe integer");
+  }
   return BigInt(v);
 };
 

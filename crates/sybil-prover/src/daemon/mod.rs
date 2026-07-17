@@ -5,6 +5,7 @@ mod model;
 mod source;
 mod store;
 
+use std::future::IntoFuture;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -212,7 +213,7 @@ pub async fn run(args: DaemonArgs) -> Result<(), DaemonError> {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let scheduler_runtime = Arc::clone(&runtime);
     let scheduler_shutdown = shutdown_rx.clone();
-    let scheduler = tokio::spawn(async move {
+    let mut scheduler = tokio::spawn(async move {
         let result = scheduler_loop(Arc::clone(&scheduler_runtime), scheduler_shutdown).await;
         if let Err(error) = &result {
             scheduler_runtime.ready.store(false, Ordering::Release);
@@ -221,8 +222,8 @@ pub async fn run(args: DaemonArgs) -> Result<(), DaemonError> {
         result
     });
     let source_runtime = Arc::clone(&runtime);
-    let source_shutdown = shutdown_rx;
-    let source_task = tokio::spawn(async move {
+    let source_shutdown = shutdown_rx.clone();
+    let mut source_task = tokio::spawn(async move {
         let result = source_loop(Arc::clone(&source_runtime), source_shutdown).await;
         if let Err(error) = &result {
             source_runtime.ready.store(false, Ordering::Release);
@@ -231,17 +232,77 @@ pub async fn run(args: DaemonArgs) -> Result<(), DaemonError> {
         result
     });
     let app = http::router(Arc::clone(&runtime));
-    let shutdown = async move {
-        shutdown_signal().await;
-        let _ = shutdown_tx.send(true);
+    let mut server_shutdown = shutdown_rx;
+    let graceful_shutdown = async move {
+        while server_shutdown.changed().await.is_ok() {
+            if *server_shutdown.borrow() {
+                return;
+            }
+        }
     };
-    let serve_result = axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown)
-        .await;
+    let server = axum::serve(listener, app)
+        .with_graceful_shutdown(graceful_shutdown)
+        .into_future();
+    let signal = shutdown_signal();
+    tokio::pin!(server);
+    tokio::pin!(signal);
+
+    // Scheduler and source ownership are process-critical. Readiness alone is
+    // not supervision: Docker only applies `restart: on-failure` after the
+    // process exits, so a dead child must stop the HTTP server and surface a
+    // nonzero result.
+    enum Exit {
+        Signal,
+        Scheduler(Result<Result<(), DaemonError>, tokio::task::JoinError>),
+        Source(Result<Result<(), DaemonError>, tokio::task::JoinError>),
+        Server(std::io::Result<()>),
+    }
+    let exit = tokio::select! {
+        () = &mut signal => Exit::Signal,
+        result = &mut scheduler => Exit::Scheduler(result),
+        result = &mut source_task => Exit::Source(result),
+        result = &mut server => Exit::Server(result),
+    };
+
+    let _ = shutdown_tx.send(true);
     runtime.ready.store(false, Ordering::Release);
-    scheduler.await??;
-    source_task.await??;
-    serve_result.map_err(DaemonError::Io)
+    match exit {
+        Exit::Signal => {
+            server.as_mut().await.map_err(DaemonError::Io)?;
+            scheduler.await??;
+            source_task.await??;
+            Ok(())
+        }
+        Exit::Scheduler(result) => {
+            let error = critical_task_error("scheduler", result);
+            source_task.await??;
+            server.as_mut().await.map_err(DaemonError::Io)?;
+            Err(error)
+        }
+        Exit::Source(result) => {
+            let error = critical_task_error("proof-job source", result);
+            scheduler.await??;
+            server.as_mut().await.map_err(DaemonError::Io)?;
+            Err(error)
+        }
+        Exit::Server(result) => {
+            result.map_err(DaemonError::Io)?;
+            scheduler.await??;
+            source_task.await??;
+            Err(DaemonError::CriticalTaskExited("HTTP server"))
+        }
+    }
+}
+
+fn critical_task_error(
+    task: &'static str,
+    result: Result<Result<(), DaemonError>, tokio::task::JoinError>,
+) -> DaemonError {
+    match result {
+        Ok(Ok(())) => DaemonError::CriticalTaskExited(task),
+        Ok(Err(error)) => error,
+        Err(error) => DaemonError::Task(error),
+    }
 }
 
 fn reconcile(runtime: &Runtime) -> Result<(), DaemonError> {
@@ -595,6 +656,32 @@ pub enum DaemonError {
     Envelope(#[from] sybil_proof_protocol::ProofEnvelopeError),
     #[error("scheduler task failed: {0}")]
     Task(#[from] tokio::task::JoinError),
+    #[error("critical prover task exited unexpectedly: {0}")]
+    CriticalTaskExited(&'static str),
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    #[test]
+    fn clean_critical_task_exit_is_still_a_process_failure() {
+        assert!(matches!(
+            critical_task_error("scheduler", Ok(Ok(()))),
+            DaemonError::CriticalTaskExited("scheduler")
+        ));
+    }
+
+    #[test]
+    fn critical_task_error_is_preserved() {
+        assert!(matches!(
+            critical_task_error(
+                "scheduler",
+                Ok(Err(DaemonError::Config("broken".to_string())))
+            ),
+            DaemonError::Config(message) if message == "broken"
+        ));
+    }
 }
 
 #[cfg(all(test, feature = "sequencer-store"))]

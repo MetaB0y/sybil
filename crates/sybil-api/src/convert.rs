@@ -291,7 +291,7 @@ fn derived_view_sidecar_to_response(
                 phase: removed_order_phase(removed.phase).to_string(),
                 exit_reason: removed_order_exit_reason(removed.exit_reason).to_string(),
                 has_been_matched: removed.has_been_matched,
-                reserved_balance_released: removed.reserved_balance_released,
+                reserved_balance_released_nanos: removed.reserved_balance_released,
                 reserved_positions_released: removed
                     .reserved_positions_released
                     .iter()

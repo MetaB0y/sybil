@@ -332,7 +332,7 @@ fn assert_funding_history_once(history: &Value) {
         1,
         "account creation history must appear once; history={history}"
     );
-    assert_eq!(created[0]["amount_nanos"].as_i64(), Some(1_000));
+    assert_eq!(common::nanos_i64(&created[0]["amount_nanos"]), 1_000);
 
     let deposits: Vec<_> = events
         .iter()
@@ -343,7 +343,7 @@ fn assert_funding_history_once(history: &Value) {
         1,
         "deposit history must appear once; history={history}"
     );
-    assert_eq!(deposits[0]["amount_nanos"].as_i64(), Some(250));
+    assert_eq!(common::nanos_i64(&deposits[0]["amount_nanos"]), 250);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -390,7 +390,7 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
         json!({ "amount_nanos": 250u64 }),
     )
     .await;
-    assert_eq!(funded["balance_nanos"].as_i64(), Some(1_250));
+    assert_eq!(common::nanos_i64(&funded["balance_nanos"]), 1_250);
 
     let market = post_json(
         &client,
@@ -497,7 +497,7 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
         &format!("/v1/accounts/{account_id}"),
     )
     .await;
-    assert_eq!(restored_account["balance_nanos"].as_i64(), Some(1_250));
+    assert_eq!(common::nanos_i64(&restored_account["balance_nanos"]), 1_250);
     let restored_funding_history = get_json(
         &client,
         &reader.base_url,
@@ -559,8 +559,8 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
         Some("resolved")
     );
     assert_eq!(
-        restored_resolved_market["payout_nanos"].as_u64(),
-        Some(1_000_000_000)
+        common::nanos_u64(&restored_resolved_market["payout_nanos"]),
+        1_000_000_000
     );
 
     let restored_pending = get_json(
@@ -744,7 +744,7 @@ async fn extracted_history_survives_process_restart_and_canonical_block_pruning(
     assert!(
         points
             .iter()
-            .all(|point| point["volume_nanos"].as_u64().unwrap() > 0)
+            .all(|point| common::nanos_u64(&point["volume_nanos"]) > 0)
     );
 
     let candles = get_json(

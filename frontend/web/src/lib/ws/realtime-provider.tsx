@@ -39,8 +39,13 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const stream = getBlockStream();
-    const { setConnection, setHydration, applyBlock, applyRestPrices } =
-      useStore.getState();
+    const {
+      setConnection,
+      setHydration,
+      applyBlock,
+      applyRestPrices,
+      resetForFreshSnapshot,
+    } = useStore.getState();
 
     const offConnection = stream.on("connection", (event) => {
       setConnection({
@@ -82,8 +87,14 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     });
 
     let cancelled = false;
+    let recoveryInFlight = false;
 
-    (async () => {
+    const hydrateSnapshot = async (recovering: boolean) => {
+      if (recovering) {
+        if (recoveryInFlight) return;
+        recoveryInFlight = true;
+        resetForFreshSnapshot();
+      }
       setHydration("hydrating");
       try {
         const [latestRes, pricesRes] = await Promise.all([
@@ -106,22 +117,38 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 
         const h0 = latestRes.data.height;
         setHydration("hydrated", h0);
-        stream.seedLastSeenHeight(h0);
-        stream.connect();
+        if (recovering) {
+          stream.recoverFromSnapshot(h0);
+          void queryClient.invalidateQueries();
+        } else {
+          stream.seedLastSeenHeight(h0);
+          stream.connect();
+        }
       } catch (err) {
         if (cancelled) return;
         console.error("[realtime] hydration failed:", err);
         setHydration("error");
-        // Best-effort: connect anyway with no from_block. We'll get live
-        // blocks; missed-snapshot recovery is a future concern.
-        stream.connect();
+        if (!recovering) {
+          // There is no stale local snapshot on initial mount, so a live-only
+          // connection is still useful while REST is unavailable.
+          stream.connect();
+        }
+      } finally {
+        recoveryInFlight = false;
       }
-    })();
+    };
+
+    const offRetentionGap = stream.on("retention-gap", () => {
+      void hydrateSnapshot(true);
+    });
+
+    void hydrateSnapshot(false);
 
     return () => {
       cancelled = true;
       offConnection();
       offBlock();
+      offRetentionGap();
       stream.disconnect();
     };
     // `queryClient` is created once in <Providers> (useState) so its identity is

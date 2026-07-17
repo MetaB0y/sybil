@@ -368,8 +368,8 @@ arena-check:
     cd arena && uv run pytest -q
 
 # Regenerate the vendored Sybil OpenAPI Python client (arena/sybil_client/_generated)
-# from the live spec. Mirrors the frontend's `types:generate`; boots sybil-api on a
-# free port, fetches /openapi.json, and regenerates only the _generated/ package.
+# from the canonical full spec. Mirrors the frontend's `types:generate`; renders
+# with `sybil-openapi` and regenerates only the _generated/ package.
 arena-sdk-regen:
     ./arena/scripts/regen-sdk.sh
 

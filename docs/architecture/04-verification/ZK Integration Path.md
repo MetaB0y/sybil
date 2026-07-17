@@ -2,7 +2,7 @@
 tags: [zk]
 layer: verification
 status: current
-last_verified: 2026-07-15
+last_verified: 2026-07-17
 ---
 
 # ZK Integration Path
@@ -115,6 +115,12 @@ publishes fsynced content-addressed envelope/payload directories. Startup
 reconciliation validates database references, quarantines interrupted output,
 and adopts an exact artifact left by a crash after rename but before the redb
 commit.
+
+The scheduler, source puller, and daemon HTTP server are one supervised process
+unit. Any error, panic, or clean early return from a child marks readiness
+false, signals its siblings to stop, drains the server, and exits nonzero.
+Keeping an unhealthy HTTP shell alive is not supervision because the Compose
+restart policy only observes process exit.
 
 That acknowledgement transfers durable source ownership. The sequencer keeps
 a configurable safety window, then atomically removes the matching job and ack

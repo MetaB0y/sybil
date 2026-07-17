@@ -38,7 +38,8 @@ class SignedRegisterKeyRequest:
         Attributes:
             bound_events_digest_hex (str): Hex account event-chain digest the authorization is state-bound to.
             bound_keys_digest_hex (str): Hex account key-set digest the authorization is state-bound to.
-            public_key_hex (str): Hex-encoded compressed P256 public key (33 bytes) of the NEW key. Example: 02a1b2c3....
+            public_key_hex (str): Hex-encoded compressed P256 public key (33 bytes) of the NEW key. Example:
+                036b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296.
             signer_pubkey_hex (str): Hex-encoded compressed P256 public key of the SIGNER — an existing active
                 key on this account authorizing the registration.
             auth_scheme (AuthScheme | Unset):

@@ -260,12 +260,18 @@ impl IndexerMetrics {
     }
 }
 
-pub(super) async fn serve(listener: TcpListener, metrics: IndexerMetrics) -> std::io::Result<()> {
+pub(super) async fn serve(
+    listener: TcpListener,
+    metrics: IndexerMetrics,
+    cancel: tokio_util::sync::CancellationToken,
+) -> std::io::Result<()> {
     let app = Router::new()
         .route("/metrics", get(metrics_handler))
         .route("/healthz", get(health_handler))
         .with_state(metrics);
-    axum::serve(listener, app).await
+    axum::serve(listener, app)
+        .with_graceful_shutdown(cancel.cancelled_owned())
+        .await
 }
 
 async fn metrics_handler(State(metrics): State<IndexerMetrics>) -> String {
@@ -373,7 +379,8 @@ mod tests {
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
-        let server = tokio::spawn(serve(listener, metrics));
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let server = tokio::spawn(serve(listener, metrics, cancel.child_token()));
 
         let health = reqwest::get(format!("http://{address}/healthz"))
             .await
@@ -403,7 +410,12 @@ mod tests {
         );
         assert!(body.contains("sybil_l1_indexer_checkpoint_block 8"));
 
-        server.abort();
+        cancel.cancel();
+        tokio::time::timeout(std::time::Duration::from_secs(1), server)
+            .await
+            .expect("monitoring server should honor cancellation")
+            .unwrap()
+            .unwrap();
     }
 
     #[test]

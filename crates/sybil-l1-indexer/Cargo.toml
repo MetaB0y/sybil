@@ -22,7 +22,8 @@ sybil-client = { path = "../sybil-client" }
 sybil-l1-abi = { path = "../sybil-l1-abi" }
 sybil-l1-protocol = { path = "../sybil-l1-protocol" }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
+tokio-util = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 

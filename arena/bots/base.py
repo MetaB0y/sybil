@@ -3,7 +3,7 @@
 import logging
 from abc import ABC, abstractmethod
 
-from sybil_client import Block, OrderSpec, SybilClient
+from sybil_client import Block, BlockStreamBlockEvent, OrderSpec, SybilClient
 from sybil_client.client import SybilClientError
 from sybil_client.types import TimeInForce
 
@@ -70,19 +70,29 @@ class BaseAgent(ABC):
         self._running = True
         blocks_traded = 0
         try:
-            async for block in self.client.stream_blocks():
+            async for event in self.client.stream_block_events():
+                if not isinstance(event, BlockStreamBlockEvent):
+                    continue
+                block = event.block
                 if not self._running:
                     break
 
                 # Update our state
                 await self._update_state(block)
 
+                # Replays repair canonical observations after reconnect but
+                # must never call a strategy or submit historical orders.
+                if event.replayed:
+                    continue
+
                 if await self._has_pending_orders():
                     continue
 
                 # Record block-level stats (welfare, volume, fills)
                 self.block_stats[block.height] = (
-                    block.total_welfare, block.total_volume, block.orders_filled,
+                    block.total_welfare,
+                    block.total_volume,
+                    block.orders_filled,
                 )
 
                 # Get orders from strategy. Strategy errors are isolated to this
@@ -107,7 +117,8 @@ class BaseAgent(ABC):
                 if orders:
                     try:
                         accepted = await self.client.submit_orders(
-                            self.account_id, orders,
+                            self.account_id,
+                            orders,
                             mm_budget_nanos=self.mm_budget_nanos,
                             time_in_force=self.time_in_force,
                             expires_at_block=self.expires_at_block,
@@ -165,9 +176,7 @@ class BaseAgent(ABC):
 
     def _apply_canonical_account(self, account, *, replace_latest_balance: bool = False) -> None:
         """Replace strategy state from the canonical account snapshot."""
-        self.positions = {
-            (pos.market_id, pos.outcome): pos.quantity for pos in account.positions
-        }
+        self.positions = {(pos.market_id, pos.outcome): pos.quantity for pos in account.positions}
         if replace_latest_balance and self.balance_history:
             self.balance_history[-1] = account.balance_dollars
         else:
@@ -235,7 +244,4 @@ class BaseAgent(ABC):
         default_price = (500_000_000, 500_000_000)
         if self.market_ids is None:
             return block.clearing_prices
-        return {
-            mid: block.clearing_prices.get(mid, default_price)
-            for mid in self.market_ids
-        }
+        return {mid: block.clearing_prices.get(mid, default_price) for mid in self.market_ids}

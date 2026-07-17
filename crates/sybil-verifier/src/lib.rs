@@ -81,6 +81,21 @@ pub use types::{
 };
 pub use violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
 
+#[cfg(test)]
+pub(crate) fn test_events_root() -> [u8; 32] {
+    #[cfg(feature = "qmdb")]
+    {
+        event_commitment::empty_events_root()
+    }
+    #[cfg(not(feature = "qmdb"))]
+    {
+        // Match/order/settlement tests do not verify the header commitment.
+        // Keep their fixtures available to the guest-safe feature subset
+        // without pulling in the optional qMDB implementation.
+        [0; 32]
+    }
+}
+
 /// Verify fill-level and market-level invariants.
 ///
 /// Core checks (ZK invariants) always run. Diagnostic checks (quality metrics

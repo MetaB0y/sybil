@@ -26,7 +26,7 @@ class BridgeWithdrawalResponse:
     """ 
         Attributes:
             account_id (int):
-            amount_nanos (int): Off-chain balance amount burned for the withdrawal. Integer nanodollars;
+            amount_nanos (str): Off-chain balance amount burned for the withdrawal. Integer nanodollars;
                 1_000_000_000 = $1.
             amount_token_units (int): Token base units released by the vault.
             created_at_height (int):
@@ -46,7 +46,7 @@ class BridgeWithdrawalResponse:
      """
 
     account_id: int
-    amount_nanos: int
+    amount_nanos: str
     amount_token_units: int
     created_at_height: int
     expiry_height: int

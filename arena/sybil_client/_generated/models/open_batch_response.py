@@ -28,19 +28,19 @@ class OpenBatchResponse:
         Attributes:
             unique_placers (int):
             indicative_computed_at_ms (int | Unset):
-            indicative_no_price_nanos (int | None | Unset): Indicative NO price for the open batch. Integer nanodollars;
+            indicative_no_price_nanos (None | str | Unset): Indicative NO price for the open batch. Integer nanodollars;
                 1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
-            indicative_volume_nanos (int | Unset): Indicative traded notional for the open batch. Integer nanodollars;
+            indicative_volume_nanos (str | Unset): Indicative traded notional for the open batch. Integer nanodollars;
                 1_000_000_000 = $1.
-            indicative_yes_price_nanos (int | None | Unset): Indicative YES price for the open batch. Integer nanodollars;
+            indicative_yes_price_nanos (None | str | Unset): Indicative YES price for the open batch. Integer nanodollars;
                 1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
      """
 
     unique_placers: int
     indicative_computed_at_ms: int | Unset = UNSET
-    indicative_no_price_nanos: int | None | Unset = UNSET
-    indicative_volume_nanos: int | Unset = UNSET
-    indicative_yes_price_nanos: int | None | Unset = UNSET
+    indicative_no_price_nanos: None | str | Unset = UNSET
+    indicative_volume_nanos: str | Unset = UNSET
+    indicative_yes_price_nanos: None | str | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
@@ -52,7 +52,7 @@ class OpenBatchResponse:
 
         indicative_computed_at_ms = self.indicative_computed_at_ms
 
-        indicative_no_price_nanos: int | None | Unset
+        indicative_no_price_nanos: None | str | Unset
         if isinstance(self.indicative_no_price_nanos, Unset):
             indicative_no_price_nanos = UNSET
         else:
@@ -60,7 +60,7 @@ class OpenBatchResponse:
 
         indicative_volume_nanos = self.indicative_volume_nanos
 
-        indicative_yes_price_nanos: int | None | Unset
+        indicative_yes_price_nanos: None | str | Unset
         if isinstance(self.indicative_yes_price_nanos, Unset):
             indicative_yes_price_nanos = UNSET
         else:
@@ -92,24 +92,24 @@ class OpenBatchResponse:
 
         indicative_computed_at_ms = d.pop("indicative_computed_at_ms", UNSET)
 
-        def _parse_indicative_no_price_nanos(data: object) -> int | None | Unset:
+        def _parse_indicative_no_price_nanos(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(int | None | Unset, data)
+            return cast(None | str | Unset, data)
 
         indicative_no_price_nanos = _parse_indicative_no_price_nanos(d.pop("indicative_no_price_nanos", UNSET))
 
 
         indicative_volume_nanos = d.pop("indicative_volume_nanos", UNSET)
 
-        def _parse_indicative_yes_price_nanos(data: object) -> int | None | Unset:
+        def _parse_indicative_yes_price_nanos(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(int | None | Unset, data)
+            return cast(None | str | Unset, data)
 
         indicative_yes_price_nanos = _parse_indicative_yes_price_nanos(d.pop("indicative_yes_price_nanos", UNSET))
 

@@ -7,8 +7,8 @@ mod conformance {
 
     use matching_engine::{
         MAX_ORDER_QTY, MarketId, MarketSet, MintAdjustment, MmConstraint, MmId, MmSide,
-        NANOS_PER_DOLLAR, Nanos, Order, Problem, Qty, compute_fill_settlement, derive_minting,
-        notional_nanos, outcome_buy, outcome_sell, shares_to_qty,
+        NANOS_PER_DOLLAR, Nanos, Order, Problem, Qty, SHARE_SCALE, compute_fill_settlement,
+        derive_minting, notional_nanos, outcome_buy, outcome_sell, shares_to_qty,
     };
     use matching_solver::{PipelineResult, Solver, TerminationStatus};
     use proptest::prelude::*;
@@ -417,6 +417,7 @@ mod conformance {
         );
         assert_fill_totals(&pipeline)?;
         assert_fill_limits(&case.problem, &pipeline)?;
+        assert_mm_budgets(&case.problem, &pipeline)?;
 
         let clearing_prices = pipeline
             .price_discovery
@@ -605,11 +606,95 @@ mod conformance {
                 continue;
             };
             let market = order.markets[0];
+            let outcome = match (order.payoffs[0], order.payoffs[1]) {
+                (1 | -1, 0) => 0,
+                (0, 1 | -1) => 1,
+                payoffs => {
+                    return Err(TestCaseError::fail(format!(
+                        "filled order {} is not exact one-hot: {payoffs:?}",
+                        fill.order_id
+                    )));
+                }
+            };
+            let Some(ucp) = clearing_prices
+                .get(&market)
+                .and_then(|prices| prices.get(outcome))
+            else {
+                return Err(TestCaseError::fail(format!(
+                    "filled order {} has no clearing price for market {:?} outcome {}",
+                    fill.order_id, market, outcome
+                )));
+            };
+            prop_assert_eq!(
+                fill.fill_price,
+                *ucp,
+                "order {} fill price must equal the published UCP",
+                fill.order_id
+            );
+        }
+        Ok(())
+    }
+
+    /// Independently enforce conservative MM capital usage. This deliberately
+    /// does not call `MmSide::capital_needed`, `MmConstraint::capital_used`, or
+    /// the verifier so a shared helper defect cannot bless the solver output.
+    fn assert_mm_budgets(
+        problem: &Problem,
+        pipeline: &PipelineResult,
+    ) -> Result<(), TestCaseError> {
+        let fill_map: HashMap<u64, _> = pipeline
+            .result
+            .fills
+            .iter()
+            .map(|fill| (fill.order_id, fill))
+            .collect();
+        for constraint in &problem.mm_constraints {
+            let mut capital_used = 0u128;
+            for order_id in &constraint.order_ids {
+                let Some(fill) = fill_map.get(order_id) else {
+                    continue;
+                };
+                let Some(side) = constraint.order_sides.get(order_id) else {
+                    return Err(TestCaseError::fail(format!(
+                        "MM {:?} order {} has no side",
+                        constraint.mm_id, order_id
+                    )));
+                };
+                let risk_price = match side {
+                    MmSide::BuyYes | MmSide::BuyNo => fill.fill_price.0,
+                    MmSide::SellYes | MmSide::SellNo => NANOS_PER_DOLLAR
+                        .checked_sub(fill.fill_price.0)
+                        .ok_or_else(|| {
+                            TestCaseError::fail(format!(
+                                "MM {:?} order {} has price above $1",
+                                constraint.mm_id, order_id
+                            ))
+                        })?,
+                };
+                let numerator = (risk_price as u128)
+                    .checked_mul(fill.fill_qty.0 as u128)
+                    .and_then(|value| value.checked_add(SHARE_SCALE as u128 - 1))
+                    .ok_or_else(|| {
+                        TestCaseError::fail(format!(
+                            "MM {:?} independent capital oracle overflowed",
+                            constraint.mm_id
+                        ))
+                    })?;
+                capital_used = capital_used
+                    .checked_add(numerator / SHARE_SCALE as u128)
+                    .ok_or_else(|| {
+                        TestCaseError::fail(format!(
+                            "MM {:?} independent capital total overflowed",
+                            constraint.mm_id
+                        ))
+                    })?;
+            }
             prop_assert!(
-                clearing_prices.contains_key(&market),
-                "filled order {} has no clearing price for market {:?}",
-                fill.order_id,
-                market
+                capital_used <= constraint.max_capital.0 as u128,
+                "MM {:?} independently computed capital {} exceeds budget {}",
+                constraint.mm_id,
+                capital_used,
+                constraint.max_capital.0
             );
         }
         Ok(())

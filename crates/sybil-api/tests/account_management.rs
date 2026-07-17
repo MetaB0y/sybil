@@ -1058,7 +1058,7 @@ async fn api_key_create_show_once_then_gate_private_summary() {
     let summary = parse(&body);
     assert_eq!(summary["account_id"].as_u64().unwrap(), account_id);
     assert_eq!(
-        summary["balance_nanos"].as_i64().unwrap(),
+        common::nanos_i64(&summary["balance_nanos"]),
         ApiConfig::default().public_account_grant_nanos as i64
     );
 

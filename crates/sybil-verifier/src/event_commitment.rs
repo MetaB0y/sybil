@@ -28,6 +28,7 @@ const PAGE_CACHE_PAGES: usize = 128;
 const ITEMS_PER_BLOB: u64 = 1024;
 const WRITE_BUFFER_BYTES: usize = 64 * 1024;
 const MAX_VALUE_BYTES: usize = 1 << 20;
+const ROOT_WORKER_QUEUE_CAPACITY: usize = 64;
 
 type EventRootDb =
     KeylessVariableDb<MmrFamily, deterministic::Context, Vec<u8>, QmdbSha256, Sequential>;
@@ -38,7 +39,7 @@ struct EventRootRequest {
 }
 
 struct EventRootWorker {
-    sender: mpsc::Sender<EventRootRequest>,
+    sender: mpsc::SyncSender<EventRootRequest>,
 }
 
 static EVENT_ROOT_WORKER: OnceLock<EventRootWorker> = OnceLock::new();
@@ -71,7 +72,11 @@ pub fn events_root_from_event_bytes(events: &[Vec<u8>]) -> [u8; 32] {
 
 fn event_root_worker() -> &'static EventRootWorker {
     EVENT_ROOT_WORKER.get_or_init(|| {
-        let (sender, receiver) = mpsc::channel::<EventRootRequest>();
+        // Root computation is deliberately serialized by one native qMDB
+        // runtime. Bound the pending work so concurrent callers apply
+        // backpressure instead of accumulating block-sized event vectors
+        // without limit.
+        let (sender, receiver) = mpsc::sync_channel::<EventRootRequest>(ROOT_WORKER_QUEUE_CAPACITY);
         thread::Builder::new()
             .name("sybil-event-root-qmdb".to_string())
             .spawn(move || {

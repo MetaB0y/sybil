@@ -6,7 +6,11 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateAccountRequest {
     /// Initial account balance. Integer nanodollars; 1_000_000_000 = $1.
-    #[cfg_attr(feature = "openapi", schema(example = 100_000_000_000u64))]
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(
+        feature = "openapi",
+        schema(value_type = String, example = "100000000000")
+    )]
     pub initial_balance_nanos: u64,
     /// First signing key to register in the same account-creation operation.
     ///
@@ -34,7 +38,11 @@ pub struct OnboardAccountRequest {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct FundAccountRequest {
     /// Amount to add to the account balance. Integer nanodollars; 1_000_000_000 = $1.
-    #[cfg_attr(feature = "openapi", schema(example = 50_000_000_000u64))]
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(
+        feature = "openapi",
+        schema(value_type = String, example = "50000000000")
+    )]
     pub amount_nanos: u64,
 }
 
@@ -167,7 +175,10 @@ pub enum AuthScheme {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RegisterKeyRequest {
     /// Hex-encoded compressed P256 public key (33 bytes).
-    #[cfg_attr(feature = "openapi", schema(example = "02a1b2c3..."))]
+    #[cfg_attr(
+        feature = "openapi",
+        schema(example = "036b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296")
+    )]
     pub public_key_hex: String,
     /// Authentication scheme associated with this account key. Defaults to
     /// `raw_p256` so existing bots, SDKs, and arena clients are unchanged.
@@ -205,7 +216,10 @@ pub struct RegisterKeyRequest {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SignedRegisterKeyRequest {
     /// Hex-encoded compressed P256 public key (33 bytes) of the NEW key.
-    #[cfg_attr(feature = "openapi", schema(example = "02a1b2c3..."))]
+    #[cfg_attr(
+        feature = "openapi",
+        schema(example = "036b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296")
+    )]
     pub public_key_hex: String,
     /// Authentication scheme of the NEW key. Defaults to `raw_p256`. When
     /// `webauthn`, `webauthn_registration` must prove possession of the new key.
@@ -424,7 +438,11 @@ pub struct ExtendMarketGroupRequest {
 pub struct ResolveMarketRequest {
     /// Payout per YES share. Integer nanodollars; 1_000_000_000 = $1.
     /// Payouts are per-share probabilities in [0, 1e9].
-    #[cfg_attr(feature = "openapi", schema(example = 1_000_000_000u64))]
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(
+        feature = "openapi",
+        schema(value_type = String, example = "1000000000")
+    )]
     pub payout_nanos: u64,
     /// Optional signed attestation. When provided, the market's resolution
     /// template drives verification; dev_mode is not required. When omitted,
@@ -473,7 +491,8 @@ pub struct SubmitOrderRequest {
     /// 1_000_000_000 = $1.
     /// MM orders skip per-order balance validation; instead the solver enforces
     /// the portfolio-level budget constraint at clearing time.
-    #[serde(default)]
+    #[serde(default, with = "crate::wire_integer::option")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub mm_budget_nanos: Option<u64>,
 }
 
@@ -501,6 +520,8 @@ pub enum OrderSpec {
         market_id: u32,
         /// Limit price. Integer nanodollars; 1_000_000_000 = $1.
         /// Prices are per-share probabilities in [0, 1e9].
+        #[serde(with = "crate::wire_integer")]
+        #[cfg_attr(feature = "openapi", schema(value_type = String))]
         limit_price_nanos: u64,
         /// Order quantity. Integer share-units; 1000 units = 1 share.
         quantity: u64,
@@ -510,6 +531,8 @@ pub enum OrderSpec {
         market_id: u32,
         /// Limit price. Integer nanodollars; 1_000_000_000 = $1.
         /// Prices are per-share probabilities in [0, 1e9].
+        #[serde(with = "crate::wire_integer")]
+        #[cfg_attr(feature = "openapi", schema(value_type = String))]
         limit_price_nanos: u64,
         /// Order quantity. Integer share-units; 1000 units = 1 share.
         quantity: u64,
@@ -519,6 +542,8 @@ pub enum OrderSpec {
         market_id: u32,
         /// Limit price. Integer nanodollars; 1_000_000_000 = $1.
         /// Prices are per-share probabilities in [0, 1e9].
+        #[serde(with = "crate::wire_integer")]
+        #[cfg_attr(feature = "openapi", schema(value_type = String))]
         limit_price_nanos: u64,
         /// Order quantity. Integer share-units; 1000 units = 1 share.
         quantity: u64,
@@ -528,6 +553,8 @@ pub enum OrderSpec {
         market_id: u32,
         /// Limit price. Integer nanodollars; 1_000_000_000 = $1.
         /// Prices are per-share probabilities in [0, 1e9].
+        #[serde(with = "crate::wire_integer")]
+        #[cfg_attr(feature = "openapi", schema(value_type = String))]
         limit_price_nanos: u64,
         /// Order quantity. Integer share-units; 1000 units = 1 share.
         quantity: u64,
@@ -537,6 +564,7 @@ pub enum OrderSpec {
 /// Query parameters for market search.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
 pub struct MarketSearchParams {
     /// Text search (searches name + description).
     #[serde(default)]
@@ -552,15 +580,18 @@ pub struct MarketSearchParams {
     pub status: Option<String>,
     /// Minimum YES price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
-    #[serde(default)]
-    pub min_yes_price: Option<u64>,
+    #[serde(default, with = "crate::wire_integer::option")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
+    pub min_yes_price_nanos: Option<u64>,
     /// Maximum YES price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
-    #[serde(default)]
-    pub max_yes_price: Option<u64>,
+    #[serde(default, with = "crate::wire_integer::option")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
+    pub max_yes_price_nanos: Option<u64>,
     /// Minimum cumulative traded notional. Integer nanodollars; 1_000_000_000 = $1.
-    #[serde(default)]
-    pub min_volume: Option<u64>,
+    #[serde(default, with = "crate::wire_integer::option")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
+    pub min_volume_nanos: Option<u64>,
     /// Sort field: "volume", "created_at", "name", "price".
     #[serde(default)]
     pub sort: Option<String>,
@@ -629,6 +660,8 @@ pub struct SignedOrderData {
     pub payoffs: Vec<i8>,
     /// Limit price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub limit_price_nanos: u64,
     /// Maximum fill quantity. Integer share-units; 1000 units = 1 share.
     pub max_fill: u64,
@@ -636,11 +669,17 @@ pub struct SignedOrderData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
 pub struct SetReferencePricesRequest {
     /// Map of market_id -> reference price. Integer nanodollars;
     /// 1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
     /// Zero explicitly evicts the current reference for that market.
-    pub prices: std::collections::HashMap<u32, u64>,
+    #[serde(with = "crate::wire_integer::map_u32_u64")]
+    #[cfg_attr(
+        feature = "openapi",
+        schema(value_type = std::collections::HashMap<u32, String>)
+    )]
+    pub prices_nanos: std::collections::HashMap<u32, u64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

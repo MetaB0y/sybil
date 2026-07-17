@@ -23,14 +23,14 @@ T = TypeVar("T", bound="SystemEventResponseType13")
 class SystemEventResponseType13:
     """ 
         Attributes:
-            amount_nanos (int): Amount parked in the system ledger. Integer nanodollars; 1_000_000_000 = $1.
+            amount_nanos (str): Amount parked in the system ledger. Integer nanodollars; 1_000_000_000 = $1.
             deposit_id (int):
             deposit_root_hex (str):
             sybil_account_key_hex (str):
             type_ (SystemEventResponseType13Type):
      """
 
-    amount_nanos: int
+    amount_nanos: str
     deposit_id: int
     deposit_root_hex: str
     sybil_account_key_hex: str

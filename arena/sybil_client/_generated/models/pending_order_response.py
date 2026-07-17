@@ -26,7 +26,7 @@ class PendingOrderResponse:
             account_id (int):
             created_at_block (int):
             expires_at_block (int):
-            limit_price_nanos (int): Limit price. Integer nanodollars; 1_000_000_000 = $1.
+            limit_price_nanos (str): Limit price. Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
             market_id (int):
             order_id (int):
@@ -44,7 +44,7 @@ class PendingOrderResponse:
     account_id: int
     created_at_block: int
     expires_at_block: int
-    limit_price_nanos: int
+    limit_price_nanos: str
     market_id: int
     order_id: int
     remaining_quantity: int

@@ -1316,7 +1316,6 @@ export interface components {
        */
       cursor: string;
       /**
-       * Format: int64
        * @description Fill price. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
@@ -1364,7 +1363,6 @@ export interface components {
       /** Format: int64 */
       account_id: number;
       /**
-       * Format: int64
        * @description Spendable account balance after live-order reservations. Integer
        *     nanodollars; 1_000_000_000 = $1.
        */
@@ -1372,7 +1370,6 @@ export interface components {
       /** @description Optional deterministic identicon seed (SYB-60). */
       avatar_seed?: string | null;
       /**
-       * Format: int64
        * @description Total (gross) account balance; see `available_balance_nanos` for spendable
        *     funds. Integer nanodollars; 1_000_000_000 = $1.
        */
@@ -1388,7 +1385,6 @@ export interface components {
       keys_digest_hex: string;
       positions?: components["schemas"]["PositionResponse"][];
       /**
-       * Format: int64
        * @description Balance reserved by live resting orders. Integer nanodollars;
        *     1_000_000_000 = $1.
        */
@@ -1510,14 +1506,12 @@ export interface components {
        */
       unmatched?: number;
       /**
-       * Format: int64
        * @description Per-market volume contribution from this block's fills. Integer nanodollars;
        *     1_000_000_000 = $1. Multi-market fills credit each active market with their
        *     full notional; the platform `total_volume_nanos` scalar counts each fill once.
        */
       volume_nanos?: string;
       /**
-       * Format: int64
        * @description Per-market welfare contribution from this block's fills (B7). Integer nanodollars;
        *     1_000_000_000 = $1. Multi-market fills credit each active market with their
        *     full welfare; the platform `total_welfare_nanos` counts each fill once.
@@ -1570,13 +1564,11 @@ export interface components {
       /** Format: int64 */
       timestamp_ms: number;
       /**
-       * Format: int64
        * @description Total traded notional in the block. Integer nanodollars;
        *     1_000_000_000 = $1.
        */
       total_volume_nanos: string;
       /**
-       * Format: int64
        * @description Total solver welfare in the block. Integer nanodollars;
        *     1_000_000_000 = $1. Verified block welfare is non-negative.
        */
@@ -1732,10 +1724,7 @@ export interface components {
     BridgeDepositResponse: {
       /** Format: int64 */
       account_id?: number | null;
-      /**
-       * Format: int64
-       * @description Account balance after the deposit. Integer nanodollars; 1_000_000_000 = $1.
-       */
+      /** @description Account balance after the deposit. Integer nanodollars; 1_000_000_000 = $1. */
       balance_nanos?: string | null;
       /** Format: int64 */
       deposit_id: number;
@@ -1763,10 +1752,7 @@ export interface components {
       quarantine_ledger_size?: number;
       queued_withdrawal_count?: number;
       refunded_withdrawal_count?: number;
-      /**
-       * Format: int64
-       * @description Sum of parked value. Integer nanodollars; 1_000_000_000 = $1.
-       */
+      /** @description Sum of parked value. Integer nanodollars; 1_000_000_000 = $1. */
       total_quarantined_nanos?: string;
       withdrawal_count: number;
     };
@@ -1785,7 +1771,6 @@ export interface components {
       /** Format: int64 */
       account_id: number;
       /**
-       * Format: int64
        * @description Off-chain balance amount burned for the withdrawal. Integer nanodollars;
        *     1_000_000_000 = $1.
        */
@@ -1849,7 +1834,6 @@ export interface components {
     };
     CreateAccountRequest: {
       /**
-       * Format: int64
        * @description Initial account balance. Integer nanodollars; 1_000_000_000 = $1.
        * @example 100000000000
        */
@@ -2063,17 +2047,11 @@ export interface components {
       removed_orders?: components["schemas"]["RemovedOrderViewResponse"][];
     };
     EquityPointResponse: {
-      /**
-       * Format: int64
-       * @description Deposited amount at this point. Integer nanodollars; 1_000_000_000 = $1.
-       */
+      /** @description Deposited amount at this point. Integer nanodollars; 1_000_000_000 = $1. */
       deposited_nanos: string;
       /** Format: int64 */
       height: number;
-      /**
-       * Format: int64
-       * @description Portfolio value at this point. Integer nanodollars; 1_000_000_000 = $1.
-       */
+      /** @description Portfolio value at this point. Integer nanodollars; 1_000_000_000 = $1. */
       portfolio_value_nanos: string;
       /** Format: int64 */
       timestamp_ms: number;
@@ -2116,7 +2094,6 @@ export interface components {
       /** Format: int64 */
       account_id?: number;
       /**
-       * Format: int64
        * @description Fill price. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
@@ -2131,7 +2108,6 @@ export interface components {
     };
     FundAccountRequest: {
       /**
-       * Format: int64
        * @description Amount to add to the account balance. Integer nanodollars; 1_000_000_000 = $1.
        * @example 50000000000
        */
@@ -2146,15 +2122,9 @@ export interface components {
     };
     /** @description One entry in the per-account history feed (`GET /v1/accounts/{id}/events`). */
     HistoryEventResponse: {
-      /**
-       * Format: int64
-       * @description Event cash amount. Integer nanodollars; 1_000_000_000 = $1.
-       */
+      /** @description Event cash amount. Integer nanodollars; 1_000_000_000 = $1. */
       amount_nanos?: string | null;
-      /**
-       * Format: int64
-       * @description Rejected-order available amount. Integer nanodollars; 1_000_000_000 = $1.
-       */
+      /** @description Rejected-order available amount. Integer nanodollars; 1_000_000_000 = $1. */
       available_nanos?: string | null;
       /** Format: int64 */
       block_height: number;
@@ -2167,7 +2137,6 @@ export interface components {
       outcome?: string | null;
       payout_outcome?: string | null;
       /**
-       * Format: int64
        * @description Event price. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
@@ -2177,20 +2146,14 @@ export interface components {
        * @description Event quantity. Integer share-units; 1000 units = 1 share.
        */
       qty?: number | null;
-      /**
-       * Format: int64
-       * @description Event realized PnL. Integer nanodollars; 1_000_000_000 = $1.
-       */
+      /** @description Event realized PnL. Integer nanodollars; 1_000_000_000 = $1. */
       realized_pnl_nanos?: string | null;
       /**
        * @description Rejected only: reason code (`insufficient_balance` | `insufficient_position`
        *     | `complete_set` | …).
        */
       reason?: string | null;
-      /**
-       * Format: int64
-       * @description Rejected-order required amount. Integer nanodollars; 1_000_000_000 = $1.
-       */
+      /** @description Rejected-order required amount. Integer nanodollars; 1_000_000_000 = $1. */
       required_nanos?: string | null;
       side?: string | null;
       /** Format: int64 */
@@ -2222,20 +2185,14 @@ export interface components {
        *     consent boundary for this entire financial row.
        */
       display_name: string;
-      /**
-       * Format: int64
-       * @description Current portfolio equity (balance + marked positions). Integer nanodollars; 1_000_000_000 = $1.
-       */
+      /** @description Current portfolio equity (balance + marked positions). Integer nanodollars; 1_000_000_000 = $1. */
       equity_nanos: string;
       /**
        * Format: int32
        * @description Distinct markets with a currently open position.
        */
       markets_traded: number;
-      /**
-       * Format: int64
-       * @description Net PnL over the window (realized + unrealized). Integer nanodollars; 1_000_000_000 = $1.
-       */
+      /** @description Net PnL over the window (realized + unrealized). Integer nanodollars; 1_000_000_000 = $1. */
       pnl_nanos: string;
       /**
        * Format: int32
@@ -2262,13 +2219,11 @@ export interface components {
     };
     MarketPriceResponse: {
       /**
-       * Format: int64
        * @description NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
       no_price_nanos: string;
       /**
-       * Format: int64
        * @description YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
@@ -2329,14 +2284,12 @@ export interface components {
        */
       group_item_title?: string | null;
       /**
-       * Format: int64
        * @description Rolling last-10-batch band depth average. Integer nanodollars;
        *     1_000_000_000 = $1. Zero for markets without a clearing price yet.
        *     Pair with `liquidity_band_nanos` for labelling.
        */
       liquidity_avg10_nanos?: string;
       /**
-       * Format: int64
        * @description Width of the band the liquidity score uses (the ± in "$X ±$0.05").
        *     Integer nanodollars; 1_000_000_000 = $1.
        *     Always the live config value — `0` when no liquidity has been
@@ -2361,14 +2314,12 @@ export interface components {
       market_start_date_ms?: number | null;
       name: string;
       /**
-       * Format: int64
        * @description Clearing NO price ~24h ago. See `yes_price_24h_ago_nanos`.
        *     Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
       no_price_24h_ago_nanos?: string | null;
       /**
-       * Format: int64
        * @description Current NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
@@ -2393,7 +2344,6 @@ export interface components {
        */
       orders_unmatched_total?: number;
       /**
-       * Format: int64
        * @description Resolution payout per YES share. Integer nanodollars; 1_000_000_000 = $1.
        *     Payouts are per-share probabilities in [0, 1e9].
        */
@@ -2410,7 +2360,6 @@ export interface components {
        */
       reference_price_expires_at_ms?: number | null;
       /**
-       * Format: int64
        * @description Reference price from external system (e.g., Polymarket), display only.
        *     Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
@@ -2427,19 +2376,14 @@ export interface components {
        */
       trader_count?: number;
       /**
-       * Format: int64
        * @description Rolling 24h trading volume. Integer nanodollars; 1_000_000_000 = $1.
        *     Off-block;
        *     "since last restart" until prod persistence is enabled.
        */
       volume_24h_nanos?: string;
-      /**
-       * Format: int64
-       * @description All-time traded notional. Integer nanodollars; 1_000_000_000 = $1.
-       */
+      /** @description All-time traded notional. Integer nanodollars; 1_000_000_000 = $1. */
       volume_nanos?: string;
       /**
-       * Format: int64
        * @description Clearing YES price ~24h ago, derived from the per-market
        *     hourly snapshot. `None` for markets younger than 24h or wiped on
        *     restart. FE computes the 24h delta as `current - snapshot`.
@@ -2448,7 +2392,6 @@ export interface components {
        */
       yes_price_24h_ago_nanos?: string | null;
       /**
-       * Format: int64
        * @description Current YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
@@ -2460,22 +2403,17 @@ export interface components {
       category?: string | null;
       limit?: number | null;
       /**
-       * Format: int64
        * @description Maximum YES price. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
-      max_yes_price?: number | null;
+      max_yes_price_nanos?: string | null;
+      /** @description Minimum cumulative traded notional. Integer nanodollars; 1_000_000_000 = $1. */
+      min_volume_nanos?: string | null;
       /**
-       * Format: int64
-       * @description Minimum cumulative traded notional. Integer nanodollars; 1_000_000_000 = $1.
-       */
-      min_volume?: number | null;
-      /**
-       * Format: int64
        * @description Minimum YES price. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
-      min_yes_price?: number | null;
+      min_yes_price_nanos?: string | null;
       offset?: number | null;
       /** @description Text search (searches name + description). */
       q?: string | null;
@@ -2489,13 +2427,11 @@ export interface components {
     /** @description Minimal market data for high-throughput dashboards (drops strings & metadata). */
     MarketSummaryResponse: {
       /**
-       * Format: int64
        * @description Liquidity depth score. Integer nanodollars; 1_000_000_000 = $1.
        *     Mirrors `MarketResponse`.
        */
       liquidity_avg10_nanos?: string;
       /**
-       * Format: int64
        * @description Liquidity price-band width. Integer nanodollars; 1_000_000_000 = $1.
        *     Mirrors `MarketResponse`.
        */
@@ -2504,13 +2440,11 @@ export interface components {
       market_id: number;
       name: string;
       /**
-       * Format: int64
        * @description Clearing NO price ~24h ago. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
       no_price_24h_ago_nanos?: string | null;
       /**
-       * Format: int64
        * @description Current NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
@@ -2530,7 +2464,6 @@ export interface components {
        */
       reference_price_expires_at_ms?: number | null;
       /**
-       * Format: int64
        * @description Reference price from external system (e.g., Polymarket), display only.
        *     Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
@@ -2543,25 +2476,19 @@ export interface components {
        */
       trader_count?: number;
       /**
-       * Format: int64
        * @description Rolling 24h trading volume. Integer nanodollars; 1_000_000_000 = $1.
        *     Mirrors
        *     `MarketResponse.volume_24h_nanos`).
        */
       volume_24h_nanos?: string;
-      /**
-       * Format: int64
-       * @description All-time traded notional. Integer nanodollars; 1_000_000_000 = $1.
-       */
+      /** @description All-time traded notional. Integer nanodollars; 1_000_000_000 = $1. */
       volume_nanos: string;
       /**
-       * Format: int64
        * @description Clearing YES price ~24h ago. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
       yes_price_24h_ago_nanos?: string | null;
       /**
-       * Format: int64
        * @description Current YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
@@ -2611,7 +2538,6 @@ export interface components {
       /** @description Whether another anonymous account can currently be allocated. */
       enabled: boolean;
       /**
-       * Format: int64
        * @description Fixed play-money balance assigned by the server to each new public
        *     account. Integer nanodollars; 1_000_000_000 = $1.
        */
@@ -2625,19 +2551,16 @@ export interface components {
       /** Format: int64 */
       indicative_computed_at_ms?: number;
       /**
-       * Format: int64
        * @description Indicative NO price for the open batch. Integer nanodollars;
        *     1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
        */
       indicative_no_price_nanos?: string | null;
       /**
-       * Format: int64
        * @description Indicative traded notional for the open batch. Integer nanodollars;
        *     1_000_000_000 = $1.
        */
       indicative_volume_nanos?: string;
       /**
-       * Format: int64
        * @description Indicative YES price for the open batch. Integer nanodollars;
        *     1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
        */
@@ -2660,7 +2583,6 @@ export interface components {
     OrderSpec:
       | {
           /**
-           * Format: int64
            * @description Limit price. Integer nanodollars; 1_000_000_000 = $1.
            *     Prices are per-share probabilities in [0, 1e9].
            */
@@ -2677,7 +2599,6 @@ export interface components {
         }
       | {
           /**
-           * Format: int64
            * @description Limit price. Integer nanodollars; 1_000_000_000 = $1.
            *     Prices are per-share probabilities in [0, 1e9].
            */
@@ -2694,7 +2615,6 @@ export interface components {
         }
       | {
           /**
-           * Format: int64
            * @description Limit price. Integer nanodollars; 1_000_000_000 = $1.
            *     Prices are per-share probabilities in [0, 1e9].
            */
@@ -2711,7 +2631,6 @@ export interface components {
         }
       | {
           /**
-           * Format: int64
            * @description Limit price. Integer nanodollars; 1_000_000_000 = $1.
            *     Prices are per-share probabilities in [0, 1e9].
            */
@@ -2734,13 +2653,11 @@ export interface components {
     OverviewBucketResponse: {
       orders?: components["schemas"]["OverviewOrderStatsResponse"];
       /**
-       * Format: int64
        * @description Total traded notional for this bucket. Integer nanodollars;
        *     1_000_000_000 = $1.
        */
       total_volume_nanos?: string;
       /**
-       * Format: int64
        * @description Cumulative platform welfare for this bucket. Integer nanodollars;
        *     1_000_000_000 = $1. Sum of per-block `total_welfare` (each fill counted
        *     once). Verified block welfare is non-negative.
@@ -2778,7 +2695,6 @@ export interface components {
       /** Format: int64 */
       expires_at_block: number;
       /**
-       * Format: int64
        * @description Limit price. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
@@ -2807,13 +2723,11 @@ export interface components {
       /** Format: int64 */
       account_id: number;
       /**
-       * Format: int64
        * @description Spendable account balance after live-order reservations. Integer
        *     nanodollars; 1_000_000_000 = $1.
        */
       available_balance_nanos: string;
       /**
-       * Format: int64
        * @description Total (gross) account balance; see `available_balance_nanos` for spendable
        *     funds. Integer nanodollars; 1_000_000_000 = $1.
        */
@@ -2826,19 +2740,12 @@ export interface components {
        *     until persistence runs in prod.
        */
       first_deposit_ms?: number;
-      /**
-       * Format: int64
-       * @description Total profit and loss. Integer nanodollars; 1_000_000_000 = $1.
-       */
+      /** @description Total profit and loss. Integer nanodollars; 1_000_000_000 = $1. */
       pnl_nanos: string;
-      /**
-       * Format: int64
-       * @description Total portfolio value. Integer nanodollars; 1_000_000_000 = $1.
-       */
+      /** @description Total portfolio value. Integer nanodollars; 1_000_000_000 = $1. */
       portfolio_value_nanos: string;
       positions: components["schemas"]["PositionValueResponse"][];
       /**
-       * Format: int64
        * @description Accumulated realized PnL across all closed positions (C1). Integer nanodollars;
        *     1_000_000_000 = $1. Signed.
        *     `pnl_nanos = realized + unrealized` once both fields populate, but
@@ -2846,15 +2753,11 @@ export interface components {
        */
       realized_pnl_nanos?: string;
       /**
-       * Format: int64
        * @description Balance reserved by live resting orders. Integer nanodollars;
        *     1_000_000_000 = $1.
        */
       reserved_balance_nanos: string;
-      /**
-       * Format: int64
-       * @description Total account deposits. Integer nanodollars; 1_000_000_000 = $1.
-       */
+      /** @description Total account deposits. Integer nanodollars; 1_000_000_000 = $1. */
       total_deposited_nanos: string;
       /**
        * Format: int64
@@ -2864,13 +2767,11 @@ export interface components {
        */
       total_fill_count?: number;
       /**
-       * Format: int64
        * @description Mark-to-market value of all positions. Integer nanodollars;
        *     1_000_000_000 = $1.
        */
       total_position_value_nanos: string;
       /**
-       * Format: int64
        * @description Mark-to-market PnL on currently open positions (C1). Integer nanodollars;
        *     1_000_000_000 = $1. Computed as
        *     `sum((current_price - avg_entry) * quantity / SHARE_SCALE)` across positions.
@@ -2899,7 +2800,6 @@ export interface components {
     };
     PositionValueResponse: {
       /**
-       * Format: int64
        * @description Weighted-average entry price for this side of the market (C1). `0`
        *     for positions opened before C1 landed (`#[serde(default)]` forward
        *     compat). Integer nanodollars; 1_000_000_000 = $1.
@@ -2907,7 +2807,6 @@ export interface components {
        */
       avg_entry_price_nanos?: string;
       /**
-       * Format: int64
        * @description Current mark price. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
@@ -2920,10 +2819,7 @@ export interface components {
        * @description Signed position quantity. Integer share-units; 1000 units = 1 share.
        */
       quantity: number;
-      /**
-       * Format: int64
-       * @description Mark-to-market position value. Integer nanodollars; 1_000_000_000 = $1.
-       */
+      /** @description Mark-to-market position value. Integer nanodollars; 1_000_000_000 = $1. */
       value_nanos: string;
     };
     PriceCandleResponse: {
@@ -2932,13 +2828,11 @@ export interface components {
       /** Format: int64 */
       bucket_start_ms: number;
       /**
-       * Format: int64
        * @description Bucket close NO price. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
       close_no_price_nanos: string;
       /**
-       * Format: int64
        * @description Bucket close YES price. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
@@ -2946,13 +2840,11 @@ export interface components {
       /** Format: int64 */
       first_height: number;
       /**
-       * Format: int64
        * @description Bucket high NO price. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
       high_no_price_nanos: string;
       /**
-       * Format: int64
        * @description Bucket high YES price. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
@@ -2960,35 +2852,28 @@ export interface components {
       /** Format: int64 */
       last_height: number;
       /**
-       * Format: int64
        * @description Bucket low NO price. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
       low_no_price_nanos: string;
       /**
-       * Format: int64
        * @description Bucket low YES price. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
       low_yes_price_nanos: string;
       /**
-       * Format: int64
        * @description Bucket open NO price. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
       open_no_price_nanos: string;
       /**
-       * Format: int64
        * @description Bucket open YES price. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
       open_yes_price_nanos: string;
       /** Format: int64 */
       point_count: number;
-      /**
-       * Format: int64
-       * @description Bucket traded notional. Integer nanodollars; 1_000_000_000 = $1.
-       */
+      /** @description Bucket traded notional. Integer nanodollars; 1_000_000_000 = $1. */
       volume_nanos: string;
     };
     PriceCandlesResponse: {
@@ -3029,20 +2914,15 @@ export interface components {
       /** Format: int64 */
       height: number;
       /**
-       * Format: int64
        * @description NO clearing price at this point. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
       no_price_nanos: string;
       /** Format: int64 */
       timestamp_ms: number;
-      /**
-       * Format: int64
-       * @description Traded notional at this point. Integer nanodollars; 1_000_000_000 = $1.
-       */
+      /** @description Traded notional at this point. Integer nanodollars; 1_000_000_000 = $1. */
       volume_nanos: string;
       /**
-       * Format: int64
        * @description YES clearing price at this point. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
@@ -3053,39 +2933,27 @@ export interface components {
       /** Format: int64 */
       account_id: number;
       /**
-       * Format: int64
        * @description Spendable account balance after live-order reservations. Integer
        *     nanodollars; 1_000_000_000 = $1.
        */
       available_balance_nanos: string;
       /**
-       * Format: int64
        * @description Total (gross) account balance; see `available_balance_nanos` for spendable
        *     funds. Integer nanodollars; 1_000_000_000 = $1.
        */
       balance_nanos: string;
       display_name?: string | null;
-      /**
-       * Format: int64
-       * @description Portfolio value minus deposits. Integer nanodollars; 1_000_000_000 = $1.
-       */
+      /** @description Portfolio value minus deposits. Integer nanodollars; 1_000_000_000 = $1. */
       pnl_nanos: string;
-      /**
-       * Format: int64
-       * @description Current mark-to-market portfolio value. Integer nanodollars; 1_000_000_000 = $1.
-       */
+      /** @description Current mark-to-market portfolio value. Integer nanodollars; 1_000_000_000 = $1. */
       portfolio_value_nanos: string;
       positions?: components["schemas"]["PositionResponse"][];
       /**
-       * Format: int64
        * @description Balance reserved by live resting orders. Integer nanodollars;
        *     1_000_000_000 = $1.
        */
       reserved_balance_nanos: string;
-      /**
-       * Format: int64
-       * @description Total deposited to date. Integer nanodollars; 1_000_000_000 = $1.
-       */
+      /** @description Total deposited to date. Integer nanodollars; 1_000_000_000 = $1. */
       total_deposited_nanos: string;
     };
     ProofJobAckRequest: {
@@ -3145,13 +3013,11 @@ export interface components {
       /** Format: int64 */
       timestamp_ms: number;
       /**
-       * Format: int64
        * @description Total traded notional in the block. Integer nanodollars;
        *     1_000_000_000 = $1.
        */
       total_volume_nanos: string;
       /**
-       * Format: int64
        * @description Total solver welfare in the block. Integer nanodollars;
        *     1_000_000_000 = $1. Signed: solver rounding can yield small negatives.
        */
@@ -3219,7 +3085,7 @@ export interface components {
       label?: string | null;
       /**
        * @description Hex-encoded compressed P256 public key (33 bytes).
-       * @example 02a1b2c3...
+       * @example 036b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296
        */
       public_key_hex: string;
       /**
@@ -3265,11 +3131,8 @@ export interface components {
       order_id: number;
       phase: string;
       rejection_reason?: string | null;
-      /**
-       * Format: int64
-       * @description Released reserved cash. Integer nanodollars; 1_000_000_000 = $1.
-       */
-      reserved_balance_released: number;
+      /** @description Released reserved cash. Integer nanodollars; 1_000_000_000 = $1. */
+      reserved_balance_released_nanos: string;
       reserved_positions_released?: components["schemas"]["ReservedPositionReleaseResponse"][];
     };
     ReservedPositionReleaseResponse: {
@@ -3291,7 +3154,6 @@ export interface components {
       /** Format: int32 */
       market_id: number;
       /**
-       * Format: int64
        * @description Resolution payout per YES share. Integer nanodollars;
        *     1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
        */
@@ -3307,7 +3169,6 @@ export interface components {
     ResolveMarketRequest: {
       attestation?: null | components["schemas"]["SignedAttestationDto"];
       /**
-       * Format: int64
        * @description Payout per YES share. Integer nanodollars; 1_000_000_000 = $1.
        *     Payouts are per-share probabilities in [0, 1e9].
        * @example 1000000000
@@ -3318,7 +3179,6 @@ export interface components {
       /** Format: int32 */
       market_id: number;
       /**
-       * Format: int64
        * @description Resolution payout per YES share. Integer nanodollars;
        *     1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
        */
@@ -3461,8 +3321,8 @@ export interface components {
        *     1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
        *     Zero explicitly evicts the current reference for that market.
        */
-      prices: {
-        [key: string]: number;
+      prices_nanos: {
+        [key: string]: string;
       };
     };
     /** @description Wire form of a signed resolution attestation. */
@@ -3479,7 +3339,6 @@ export interface components {
     };
     SignedOrderData: {
       /**
-       * Format: int64
        * @description Limit price. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
@@ -3522,7 +3381,7 @@ export interface components {
       label?: string | null;
       /**
        * @description Hex-encoded compressed P256 public key (33 bytes) of the NEW key.
-       * @example 02a1b2c3...
+       * @example 036b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296
        */
       public_key_hex: string;
       /** @description Scope tag for the new key. Defaults to `primary`. */
@@ -3633,7 +3492,6 @@ export interface components {
        */
       expires_at_block?: number | null;
       /**
-       * Format: int64
        * @description If set, treat these orders as market maker orders with flash liquidity.
        *     The value is the MM's total capital budget. Integer nanodollars;
        *     1_000_000_000 = $1.
@@ -3676,10 +3534,7 @@ export interface components {
       | {
           /** Format: int64 */
           account_id: number;
-          /**
-           * Format: int64
-           * @description Initial account balance. Integer nanodollars; 1_000_000_000 = $1.
-           */
+          /** @description Initial account balance. Integer nanodollars; 1_000_000_000 = $1. */
           initial_balance_nanos: string;
           /** @enum {string} */
           type: "create_account";
@@ -3687,10 +3542,7 @@ export interface components {
       | {
           /** Format: int64 */
           account_id: number;
-          /**
-           * Format: int64
-           * @description Account credit amount. Integer nanodollars; 1_000_000_000 = $1.
-           */
+          /** @description Account credit amount. Integer nanodollars; 1_000_000_000 = $1. */
           amount_nanos: string;
           /** @enum {string} */
           type: "deposit";
@@ -3698,10 +3550,7 @@ export interface components {
       | {
           /** Format: int64 */
           account_id: number;
-          /**
-           * Format: int64
-           * @description Account credit amount. Integer nanodollars; 1_000_000_000 = $1.
-           */
+          /** @description Account credit amount. Integer nanodollars; 1_000_000_000 = $1. */
           amount_nanos: string;
           /** Format: int64 */
           deposit_id: number;
@@ -3713,10 +3562,7 @@ export interface components {
       | {
           /** Format: int64 */
           account_id: number;
-          /**
-           * Format: int64
-           * @description Account debit amount. Integer nanodollars; 1_000_000_000 = $1.
-           */
+          /** @description Account debit amount. Integer nanodollars; 1_000_000_000 = $1. */
           amount_nanos: string;
           nullifier_hex: string;
           /** @enum {string} */
@@ -3727,10 +3573,7 @@ export interface components {
       | {
           /** Format: int64 */
           account_id: number;
-          /**
-           * Format: int64
-           * @description Refunded account credit. Integer nanodollars; 1_000_000_000 = $1.
-           */
+          /** @description Refunded account credit. Integer nanodollars; 1_000_000_000 = $1. */
           amount_nanos: string;
           reason: string;
           /** @enum {string} */
@@ -3741,10 +3584,7 @@ export interface components {
       | {
           /** Format: int64 */
           account_id: number;
-          /**
-           * Format: int64
-           * @description Finalized withdrawal amount. Integer nanodollars; 1_000_000_000 = $1.
-           */
+          /** @description Finalized withdrawal amount. Integer nanodollars; 1_000_000_000 = $1. */
           amount_nanos: string;
           /** @enum {string} */
           type: "withdrawal_finalized";
@@ -3762,7 +3602,6 @@ export interface components {
           /** Format: int32 */
           market_id: number;
           /**
-           * Format: int64
            * @description Resolution payout per YES share. Integer nanodollars;
            *     1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
            */
@@ -3831,10 +3670,7 @@ export interface components {
           type: "client_action_authorized";
         }
       | {
-          /**
-           * Format: int64
-           * @description Amount parked in the system ledger. Integer nanodollars; 1_000_000_000 = $1.
-           */
+          /** @description Amount parked in the system ledger. Integer nanodollars; 1_000_000_000 = $1. */
           amount_nanos: string;
           /** Format: int64 */
           deposit_id: number;
@@ -3846,10 +3682,7 @@ export interface components {
       | {
           /** Format: int64 */
           account_id: number;
-          /**
-           * Format: int64
-           * @description Amount moved into the account. Integer nanodollars; 1_000_000_000 = $1.
-           */
+          /** @description Amount moved into the account. Integer nanodollars; 1_000_000_000 = $1. */
           amount_nanos: string;
           sybil_account_key_hex: string;
           /** @enum {string} */
@@ -4960,6 +4793,15 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description Block predates retained history */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
+      };
     };
   };
   get_bot_decisions: {
@@ -5787,8 +5629,12 @@ export interface operations {
         category?: string;
         /** @description Status filter */
         status?: string;
-        /** @description Minimum volume */
-        min_volume?: number;
+        /** @description Minimum YES price. Integer nanodollars; per-share probabilities in [0, 1e9] */
+        min_yes_price_nanos?: string;
+        /** @description Maximum YES price. Integer nanodollars; per-share probabilities in [0, 1e9] */
+        max_yes_price_nanos?: string;
+        /** @description Minimum cumulative traded notional. Integer nanodollars */
+        min_volume_nanos?: string;
         /** @description Sort field */
         sort?: string;
         /** @description Result limit */

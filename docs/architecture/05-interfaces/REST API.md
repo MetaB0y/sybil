@@ -12,7 +12,27 @@ retrieval, and historical product views. OpenAPI is generated for clients.
 Current exchange reads/writes use `SequencerHandle`; historical reads are
 owner-authorized here and proxied to the private `sybil-history` service.
 
+## Units
+
+Protocol quantity fields use integer share-units (`1000` units = 1 share).
+Money and every `*_nanos` field use integer nanodollars
+(`1_000_000_000` = $1); price and payout nanos are per-share probabilities in
+`[0, 1e9]`.
+
+All `*_nanos` values cross REST and WebSocket JSON as exact base-10 strings,
+including values nested in `clearing_prices_nanos` arrays. Rust DTOs retain
+`u64`/`i64` internally. The API accepts legacy integer tokens on input during
+migration but always emits strings, and OpenAPI advertises the string contract.
+Clients must parse these values with integer/big-integer arithmetic rather than
+floating point.
+
 The endpoint groups are: **System** (`/v1/health`, `/v1/state-root`), **Proofs** (`/v1/proofs/state/{leaf_key_hex}`), **Data Availability** (`/v1/da/{height}/manifest`, `/v1/da/{height}/payload`), **Accounts** (create, query balance/positions, fund, register keys), **Markets** (list, create, query details/prices/groups, resolve), **Orders** (submit unsigned or [[P256 Authentication|signed]]), **Bridge** (status, account bridge keys, L1 deposits, signed/unsigned withdrawal leaves), and **Blocks** (latest, by height, and the privacy-preserving [[WebSocket Block Stream|public WebSocket stream]] at `/v2/blocks/ws?from_block=N`). `/v1/health` reads committed height and genesis hash in one actor snapshot; snapshot failure returns 503 rather than reporting a partial chain identity as healthy. Operator/service writes, the state-proof and DA-payload custody surfaces, authenticated canonical v1 block stream, and bridge operations require `Authorization: Bearer $SYBIL_SERVICE_TOKEN`; an unset token fails closed. Dev mode skips that service bearer check for local workflows and additionally mounts simulation pause/resume, diagnostic all-pending/orderbook listings, and the explicit unverified [[Attestation|attestation shape stub]].
+
+When `SYBIL_EVENT_SNAPSHOT_DIR` is configured, startup requires that directory
+to be usable. Raw event PUTs publish through a unique same-directory temporary
+file, sync its contents, atomically rename it, and sync the parent directory on
+Unix. Readers therefore see a complete old or new snapshot across restart;
+configured persistence does not silently degrade to volatile behavior.
 
 Per-account reads (`/accounts/{id}`, portfolio, fills, equity, events, orders,
 signing-key metadata, read-key metadata, bridge key, active withdrawals, and private summary) require
@@ -158,7 +178,7 @@ The endpoint is bounded by `limit` and pages older committed points with
 `before_height` / `next_before_height`.
 
 External reference prices have a separate off-block freshness contract.
-`POST /v1/markets/prices/reference` records one server receive timestamp per
+`POST /v1/markets/prices/reference` accepts a `prices_nanos` map and records one server receive timestamp per
 named market; a partial update refreshes only those names, and zero explicitly
 evicts one value. `SYBIL_REFERENCE_PRICE_TTL_MS` defaults to 60 seconds. After
 that age, market list, summary, search, and detail responses omit both
@@ -227,6 +247,13 @@ without entering the actor mailbox. Historical product-range queries take the
 independent private service path and therefore cannot occupy the sequencer
 actor or scan its database.
 
+Actor and persistence availability retain stable retry identity at this
+boundary. A missing canonical actor returns `503 SEQUENCER_UNAVAILABLE`;
+failure to commit through the sequencer persistence layer returns
+`503 SEQUENCER_PERSISTENCE_UNAVAILABLE`. The latter logs its internal cause but
+does not expose filesystem/provider details in the response. Integrity
+violations remain separate, fail-stop errors rather than availability retries.
+
 The same atomic operational snapshot includes the sequencer's integrity-halt
 state. After a hard block invariant fails, `/v1/health` returns `503` with
 `status = "integrity_halted"` and the last committed height/genesis for
@@ -287,6 +314,8 @@ row. In-memory API instances return 503 because they have no durable outbox.
 
 ## Key Properties
 - Axum-based, async, with OpenAPI auto-generation
+- `sybil-openapi` renders the deterministic full public/owner/service/dev
+  superset for generated clients; each runtime serves only its mounted profile
 - Actor model for current state/mutation; private HTTP projection for history
 - All values in [[Nanos and Integer Arithmetic|nanos]] (u64)
 - Service bearer auth gates operator writes in production; dev mode is limited to local conveniences and diagnostics

@@ -3,7 +3,7 @@ tags: [infrastructure]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-16
+last_verified: 2026-07-17
 ---
 
 The WebSocket block stream is the first-party production transport for the
@@ -54,6 +54,10 @@ Every message on the wire is JSON with a schema version and a type tag:
 {"v": 2, "type": "retention_gap", "requested_height": 10, "retention_min_height": 25, "head_height": 80}
 ```
 
+Every `*_nanos` value inside a block is an exact base-10 JSON string. This
+includes each element of `clearing_prices_nanos`; clients should parse these
+values as integers/`bigint`, never JavaScript `number`.
+
 - **`block`** — a committed public market-tape row. Sent during replay and live streaming. `data` is the same `PublicBlockResponse` shape returned by `GET /v1/blocks/{height}`: commitments, prices, aggregate analytics, bridge root/count, and sanitized resolved-market ids. Account-bearing canonical rows are absent by type.
 - **`replay_complete`** — sent once after a `?from_block=N` replay finishes. `up_to_height` is the block height at which the server switched from history-replay to the live feed. Anything after this is a live block.
 - **`lagged`** — server-side broadcast buffer overflowed. This is the last message on the stream; the server closes the connection with code 1008 immediately after. `last_sent_height` is the highest block the client already received.
@@ -76,6 +80,13 @@ a block has the same effect as observing it live. The Polymarket MM, for
 example, replays lifecycle and native-price state but never emits historical
 quotes.
 
+The Python SDK mirrors that boundary with `stream_block_events()`: block events
+carry `replayed`, followed by an explicit replay-complete event.
+`stream_blocks()` is the all-block convenience view and
+`stream_live_blocks()` filters replay. `BaseAgent` consumes events so replay
+can refresh canonical account/fill state without calling `on_block` or
+submitting historical orders; the live analyst consumes only live blocks.
+
 When draining a severely backed-up connection, the client may encounter an old
 Ping after the server has already queued `lagged` and closed its write side. A
 failed late Pong is therefore non-terminal: `sybil-client` keeps reading so the
@@ -88,6 +99,13 @@ the recent cache has evicted a block. If `from_block` is below the retained floo
 closes. Clients can reconnect at `retention_min_height` only after rebuilding
 their local state from REST/snapshot data, because blocks below that floor are
 not recoverable from this stream.
+
+The browser client therefore enters a failed/cold-resync state on
+`retention_gap`; it does not automatically reconnect. `RealtimeProvider`
+clears derived stream state, fetches latest block and market prices from REST,
+applies that snapshot, then resumes with
+`?from_block=<snapshot_height + 1>`. The initial REST-seeded connection follows
+the same replay classification until `replay_complete`.
 
 ## Keepalive
 

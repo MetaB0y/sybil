@@ -27,10 +27,11 @@ class MarketSearchParams:
         Attributes:
             category (None | str | Unset): Exact category match.
             limit (int | None | Unset):
-            max_yes_price (int | None | Unset): Maximum YES price. Integer nanodollars; 1_000_000_000 = $1.
+            max_yes_price_nanos (None | str | Unset): Maximum YES price. Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
-            min_volume (int | None | Unset): Minimum cumulative traded notional. Integer nanodollars; 1_000_000_000 = $1.
-            min_yes_price (int | None | Unset): Minimum YES price. Integer nanodollars; 1_000_000_000 = $1.
+            min_volume_nanos (None | str | Unset): Minimum cumulative traded notional. Integer nanodollars; 1_000_000_000 =
+                $1.
+            min_yes_price_nanos (None | str | Unset): Minimum YES price. Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
             offset (int | None | Unset):
             q (None | str | Unset): Text search (searches name + description).
@@ -41,15 +42,14 @@ class MarketSearchParams:
 
     category: None | str | Unset = UNSET
     limit: int | None | Unset = UNSET
-    max_yes_price: int | None | Unset = UNSET
-    min_volume: int | None | Unset = UNSET
-    min_yes_price: int | None | Unset = UNSET
+    max_yes_price_nanos: None | str | Unset = UNSET
+    min_volume_nanos: None | str | Unset = UNSET
+    min_yes_price_nanos: None | str | Unset = UNSET
     offset: int | None | Unset = UNSET
     q: None | str | Unset = UNSET
     sort: None | str | Unset = UNSET
     status: None | str | Unset = UNSET
     tags: None | str | Unset = UNSET
-    additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
 
@@ -68,23 +68,23 @@ class MarketSearchParams:
         else:
             limit = self.limit
 
-        max_yes_price: int | None | Unset
-        if isinstance(self.max_yes_price, Unset):
-            max_yes_price = UNSET
+        max_yes_price_nanos: None | str | Unset
+        if isinstance(self.max_yes_price_nanos, Unset):
+            max_yes_price_nanos = UNSET
         else:
-            max_yes_price = self.max_yes_price
+            max_yes_price_nanos = self.max_yes_price_nanos
 
-        min_volume: int | None | Unset
-        if isinstance(self.min_volume, Unset):
-            min_volume = UNSET
+        min_volume_nanos: None | str | Unset
+        if isinstance(self.min_volume_nanos, Unset):
+            min_volume_nanos = UNSET
         else:
-            min_volume = self.min_volume
+            min_volume_nanos = self.min_volume_nanos
 
-        min_yes_price: int | None | Unset
-        if isinstance(self.min_yes_price, Unset):
-            min_yes_price = UNSET
+        min_yes_price_nanos: None | str | Unset
+        if isinstance(self.min_yes_price_nanos, Unset):
+            min_yes_price_nanos = UNSET
         else:
-            min_yes_price = self.min_yes_price
+            min_yes_price_nanos = self.min_yes_price_nanos
 
         offset: int | None | Unset
         if isinstance(self.offset, Unset):
@@ -118,19 +118,19 @@ class MarketSearchParams:
 
 
         field_dict: dict[str, Any] = {}
-        field_dict.update(self.additional_properties)
+
         field_dict.update({
         })
         if category is not UNSET:
             field_dict["category"] = category
         if limit is not UNSET:
             field_dict["limit"] = limit
-        if max_yes_price is not UNSET:
-            field_dict["max_yes_price"] = max_yes_price
-        if min_volume is not UNSET:
-            field_dict["min_volume"] = min_volume
-        if min_yes_price is not UNSET:
-            field_dict["min_yes_price"] = min_yes_price
+        if max_yes_price_nanos is not UNSET:
+            field_dict["max_yes_price_nanos"] = max_yes_price_nanos
+        if min_volume_nanos is not UNSET:
+            field_dict["min_volume_nanos"] = min_volume_nanos
+        if min_yes_price_nanos is not UNSET:
+            field_dict["min_yes_price_nanos"] = min_yes_price_nanos
         if offset is not UNSET:
             field_dict["offset"] = offset
         if q is not UNSET:
@@ -169,34 +169,34 @@ class MarketSearchParams:
         limit = _parse_limit(d.pop("limit", UNSET))
 
 
-        def _parse_max_yes_price(data: object) -> int | None | Unset:
+        def _parse_max_yes_price_nanos(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(int | None | Unset, data)
+            return cast(None | str | Unset, data)
 
-        max_yes_price = _parse_max_yes_price(d.pop("max_yes_price", UNSET))
+        max_yes_price_nanos = _parse_max_yes_price_nanos(d.pop("max_yes_price_nanos", UNSET))
 
 
-        def _parse_min_volume(data: object) -> int | None | Unset:
+        def _parse_min_volume_nanos(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(int | None | Unset, data)
+            return cast(None | str | Unset, data)
 
-        min_volume = _parse_min_volume(d.pop("min_volume", UNSET))
+        min_volume_nanos = _parse_min_volume_nanos(d.pop("min_volume_nanos", UNSET))
 
 
-        def _parse_min_yes_price(data: object) -> int | None | Unset:
+        def _parse_min_yes_price_nanos(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(int | None | Unset, data)
+            return cast(None | str | Unset, data)
 
-        min_yes_price = _parse_min_yes_price(d.pop("min_yes_price", UNSET))
+        min_yes_price_nanos = _parse_min_yes_price_nanos(d.pop("min_yes_price_nanos", UNSET))
 
 
         def _parse_offset(data: object) -> int | None | Unset:
@@ -252,9 +252,9 @@ class MarketSearchParams:
         market_search_params = cls(
             category=category,
             limit=limit,
-            max_yes_price=max_yes_price,
-            min_volume=min_volume,
-            min_yes_price=min_yes_price,
+            max_yes_price_nanos=max_yes_price_nanos,
+            min_volume_nanos=min_volume_nanos,
+            min_yes_price_nanos=min_yes_price_nanos,
             offset=offset,
             q=q,
             sort=sort,
@@ -262,22 +262,5 @@ class MarketSearchParams:
             tags=tags,
         )
 
-
-        market_search_params.additional_properties = d
         return market_search_params
 
-    @property
-    def additional_keys(self) -> list[str]:
-        return list(self.additional_properties.keys())
-
-    def __getitem__(self, key: str) -> Any:
-        return self.additional_properties[key]
-
-    def __setitem__(self, key: str, value: Any) -> None:
-        self.additional_properties[key] = value
-
-    def __delitem__(self, key: str) -> None:
-        del self.additional_properties[key]
-
-    def __contains__(self, key: str) -> bool:
-        return key in self.additional_properties

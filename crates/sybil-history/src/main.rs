@@ -4,6 +4,7 @@ use std::time::Duration;
 use clap::Parser;
 use sybil_history::{HistoryHandle, HistoryHttpConfig, HistoryStore, router};
 use tokio::net::TcpListener;
+use tokio::sync::watch;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Parser)]
@@ -60,31 +61,62 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let listener = TcpListener::bind(&config.bind).await?;
     tracing::info!(bind = %config.bind, "Sybil history service listening");
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+
+    let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+    let server = async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                while shutdown_rx.changed().await.is_ok() {
+                    if *shutdown_rx.borrow() {
+                        return;
+                    }
+                }
+            })
+            .await
+    };
+    let signal = shutdown_signal();
+    tokio::pin!(server);
+    tokio::pin!(signal);
+
+    let server_result = tokio::select! {
+        result = &mut signal => match result {
+            Ok(()) => {
+                let _ = shutdown_tx.send(true);
+                server.as_mut().await
+            }
+            Err(error) => Err(error),
+        },
+        result = &mut server => match result {
+            Ok(()) => Err(std::io::Error::other(
+                "history HTTP server exited unexpectedly",
+            )),
+            Err(error) => Err(error),
+        }
+    };
     if !handle.stop_and_wait(Duration::from_secs(5)).await {
         tracing::warn!("history projector stop timed out");
     }
+    server_result?;
     Ok(())
 }
 
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        let _ = tokio::signal::ctrl_c().await;
-    };
+async fn shutdown_signal() -> std::io::Result<()> {
+    let ctrl_c = tokio::signal::ctrl_c();
     #[cfg(unix)]
     let terminate = async {
-        if let Ok(mut signal) =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-        {
-            signal.recv().await;
-        }
+        let mut signal = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        signal.recv().await.ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "SIGTERM signal stream closed",
+            )
+        })?;
+        Ok(())
     };
     #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
+    let terminate = std::future::pending::<std::io::Result<()>>();
     tokio::select! {
-        () = ctrl_c => {},
-        () = terminate => {},
+        result = ctrl_c => result,
+        result = terminate => result,
     }
 }

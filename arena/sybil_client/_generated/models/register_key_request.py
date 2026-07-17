@@ -28,7 +28,8 @@ T = TypeVar("T", bound="RegisterKeyRequest")
 class RegisterKeyRequest:
     """ 
         Attributes:
-            public_key_hex (str): Hex-encoded compressed P256 public key (33 bytes). Example: 02a1b2c3....
+            public_key_hex (str): Hex-encoded compressed P256 public key (33 bytes). Example:
+                036b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296.
             auth_scheme (AuthScheme | Unset):
             credential_id_b64url (None | str | Unset): Base64url credential id for WebAuthn keys. Stored client-side today
                 and

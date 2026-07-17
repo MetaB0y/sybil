@@ -26,12 +26,12 @@ T = TypeVar("T", bound="ResolveMarketRequest")
 class ResolveMarketRequest:
     """ 
         Attributes:
-            payout_nanos (int): Payout per YES share. Integer nanodollars; 1_000_000_000 = $1.
+            payout_nanos (str): Payout per YES share. Integer nanodollars; 1_000_000_000 = $1.
                 Payouts are per-share probabilities in [0, 1e9]. Example: 1000000000.
             attestation (None | SignedAttestationDto | Unset):
      """
 
-    payout_nanos: int
+    payout_nanos: str
     attestation: None | SignedAttestationDto | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 

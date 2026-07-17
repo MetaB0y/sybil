@@ -2,7 +2,7 @@
 tags: [contracts, bridge, validium, spec]
 layer: verification
 status: current
-last_verified: 2026-07-15
+last_verified: 2026-07-17
 ---
 
 # L1 settlement and vault
@@ -162,6 +162,14 @@ preserve the store/cursor, and follow the
 [L1 reorg runbook](../../runbooks/l1-reorg-recovery.md). Complete validium-state
 rollback/reconstruction is not implemented, so this remains a blocker before
 real funds.
+
+Indexer transport cannot wait forever for a silent member of the unanimous
+provider set. Ethereum RPC and Sybil API calls share a configurable 30-second
+default deadline. Ctrl-C or SIGTERM cancels ordinary polling and drains the
+monitoring server; the fatal metrics-only incident posture remains scrapeable
+until it receives the same shutdown signal. Cursor writes remain atomic, and
+an interrupted post-before-cursor window is replayed through the API's
+idempotent bridge lifecycle boundary.
 
 Local Anvil may explicitly select `unsafe-single-dev` and use zero
 confirmations; that mode logs a `DEV-ONLY` warning and makes no public-finality

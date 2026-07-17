@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatCentsPrecise, formatPercentPrecise } from "./nanos";
+import { formatCentsPrecise, formatPercentPrecise, parseNanos } from "./nanos";
 
 // 1 cent = 1e7 nanos; 1% probability = 1e7 nanos (a binary price IS its odds).
 const CENT = 10_000_000n;
@@ -37,6 +37,15 @@ describe("formatCentsPrecise", () => {
   it("accepts string / number nanos via parseNanos", () => {
     expect(formatCentsPrecise("55000000")).toBe("5.5¢");
     expect(formatCentsPrecise(55_000_000)).toBe("5.5¢");
+  });
+
+  it("rejects unsafe legacy numbers instead of preserving rounded values", () => {
+    expect(() => parseNanos(Number.MAX_SAFE_INTEGER + 1)).toThrow(
+      "numeric nanos must be a safe integer",
+    );
+    expect(() => parseNanos(1.5)).toThrow(
+      "numeric nanos must be a safe integer",
+    );
   });
 });
 

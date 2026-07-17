@@ -47,10 +47,10 @@ class MarketResponse:
             group_item_title (None | str | Unset): Polymarket short outcome label (`groupItemTitle`, e.g. "May 15"). Off-
                 block; the frontend uses it as the per-outcome name so it needn't fetch
                 the raw event JSON just for labels.
-            liquidity_avg10_nanos (int | Unset): Rolling last-10-batch band depth average. Integer nanodollars;
+            liquidity_avg10_nanos (str | Unset): Rolling last-10-batch band depth average. Integer nanodollars;
                 1_000_000_000 = $1. Zero for markets without a clearing price yet.
                 Pair with `liquidity_band_nanos` for labelling.
-            liquidity_band_nanos (int | Unset): Width of the band the liquidity score uses (the ± in "$X ±$0.05").
+            liquidity_band_nanos (str | Unset): Width of the band the liquidity score uses (the ± in "$X ±$0.05").
                 Integer nanodollars; 1_000_000_000 = $1.
                 Always the live config value — `0` when no liquidity has been
                 recorded yet.
@@ -58,10 +58,10 @@ class MarketResponse:
             market_icon_url (None | str | Unset): Per-market icon URL (secondary image fallback).
             market_image_url (None | str | Unset): Per-market image URL.
             market_start_date_ms (int | None | Unset): Per-market start date (epoch ms) from Polymarket. Display/sort only.
-            no_price_24h_ago_nanos (int | None | Unset): Clearing NO price ~24h ago. See `yes_price_24h_ago_nanos`.
+            no_price_24h_ago_nanos (None | str | Unset): Clearing NO price ~24h ago. See `yes_price_24h_ago_nanos`.
                 Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
-            no_price_nanos (int | None | Unset): Current NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
+            no_price_nanos (None | str | Unset): Current NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
             orders_matched_total (int | Unset): All-time admissions that received at least one fill (B5's
                 `has_been_matched` true at removal time). Cancels are NOT counted.
@@ -70,14 +70,14 @@ class MarketResponse:
                 the platform total — that's the documented attribution rule.
             orders_unmatched_total (int | Unset): All-time admissions that exited the book without any fill. Cancels
                 are tracked separately and do not count here.
-            payout_nanos (int | None | Unset): Resolution payout per YES share. Integer nanodollars; 1_000_000_000 = $1.
+            payout_nanos (None | str | Unset): Resolution payout per YES share. Integer nanodollars; 1_000_000_000 = $1.
                 Payouts are per-share probabilities in [0, 1e9].
             polymarket_condition_id (None | str | Unset): Polymarket on-chain condition id — FE join key into
                 `GET /v1/events/{event_id}/raw` `markets[].conditionId`. Off-block.
             reference_price_expires_at_ms (int | None | Unset): Server-side expiry of `reference_price_nanos`, as Unix
                 milliseconds.
                 The price is omitted once this boundary has passed.
-            reference_price_nanos (int | None | Unset): Reference price from external system (e.g., Polymarket), display
+            reference_price_nanos (None | str | Unset): Reference price from external system (e.g., Polymarket), display
                 only.
                 Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
@@ -86,16 +86,16 @@ class MarketResponse:
             trader_count (int | Unset): All-time unique trader count for this market (decision Q-table:
                 MM, MINT, multi-market split, etc.). Off-block — "since last
                 restart" until prod persistence is enabled.
-            volume_24h_nanos (int | Unset): Rolling 24h trading volume. Integer nanodollars; 1_000_000_000 = $1.
+            volume_24h_nanos (str | Unset): Rolling 24h trading volume. Integer nanodollars; 1_000_000_000 = $1.
                 Off-block;
                 "since last restart" until prod persistence is enabled.
-            volume_nanos (int | Unset): All-time traded notional. Integer nanodollars; 1_000_000_000 = $1.
-            yes_price_24h_ago_nanos (int | None | Unset): Clearing YES price ~24h ago, derived from the per-market
+            volume_nanos (str | Unset): All-time traded notional. Integer nanodollars; 1_000_000_000 = $1.
+            yes_price_24h_ago_nanos (None | str | Unset): Clearing YES price ~24h ago, derived from the per-market
                 hourly snapshot. `None` for markets younger than 24h or wiped on
                 restart. FE computes the 24h delta as `current - snapshot`.
                 Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
-            yes_price_nanos (int | None | Unset): Current YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
+            yes_price_nanos (None | str | Unset): Current YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
      """
 
@@ -116,28 +116,28 @@ class MarketResponse:
     expiry_timestamp_ms: int | None | Unset = UNSET
     external_url: None | str | Unset = UNSET
     group_item_title: None | str | Unset = UNSET
-    liquidity_avg10_nanos: int | Unset = UNSET
-    liquidity_band_nanos: int | Unset = UNSET
+    liquidity_avg10_nanos: str | Unset = UNSET
+    liquidity_band_nanos: str | Unset = UNSET
     market_end_date_ms: int | None | Unset = UNSET
     market_icon_url: None | str | Unset = UNSET
     market_image_url: None | str | Unset = UNSET
     market_start_date_ms: int | None | Unset = UNSET
-    no_price_24h_ago_nanos: int | None | Unset = UNSET
-    no_price_nanos: int | None | Unset = UNSET
+    no_price_24h_ago_nanos: None | str | Unset = UNSET
+    no_price_nanos: None | str | Unset = UNSET
     orders_matched_total: int | Unset = UNSET
     orders_placed_total: int | Unset = UNSET
     orders_unmatched_total: int | Unset = UNSET
-    payout_nanos: int | None | Unset = UNSET
+    payout_nanos: None | str | Unset = UNSET
     polymarket_condition_id: None | str | Unset = UNSET
     reference_price_expires_at_ms: int | None | Unset = UNSET
-    reference_price_nanos: int | None | Unset = UNSET
+    reference_price_nanos: None | str | Unset = UNSET
     resolution_criteria: None | str | Unset = UNSET
     tags: list[str] | None | Unset = UNSET
     trader_count: int | Unset = UNSET
-    volume_24h_nanos: int | Unset = UNSET
-    volume_nanos: int | Unset = UNSET
-    yes_price_24h_ago_nanos: int | None | Unset = UNSET
-    yes_price_nanos: int | None | Unset = UNSET
+    volume_24h_nanos: str | Unset = UNSET
+    volume_nanos: str | Unset = UNSET
+    yes_price_24h_ago_nanos: None | str | Unset = UNSET
+    yes_price_nanos: None | str | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
@@ -267,13 +267,13 @@ class MarketResponse:
         else:
             market_start_date_ms = self.market_start_date_ms
 
-        no_price_24h_ago_nanos: int | None | Unset
+        no_price_24h_ago_nanos: None | str | Unset
         if isinstance(self.no_price_24h_ago_nanos, Unset):
             no_price_24h_ago_nanos = UNSET
         else:
             no_price_24h_ago_nanos = self.no_price_24h_ago_nanos
 
-        no_price_nanos: int | None | Unset
+        no_price_nanos: None | str | Unset
         if isinstance(self.no_price_nanos, Unset):
             no_price_nanos = UNSET
         else:
@@ -285,7 +285,7 @@ class MarketResponse:
 
         orders_unmatched_total = self.orders_unmatched_total
 
-        payout_nanos: int | None | Unset
+        payout_nanos: None | str | Unset
         if isinstance(self.payout_nanos, Unset):
             payout_nanos = UNSET
         else:
@@ -303,7 +303,7 @@ class MarketResponse:
         else:
             reference_price_expires_at_ms = self.reference_price_expires_at_ms
 
-        reference_price_nanos: int | None | Unset
+        reference_price_nanos: None | str | Unset
         if isinstance(self.reference_price_nanos, Unset):
             reference_price_nanos = UNSET
         else:
@@ -331,13 +331,13 @@ class MarketResponse:
 
         volume_nanos = self.volume_nanos
 
-        yes_price_24h_ago_nanos: int | None | Unset
+        yes_price_24h_ago_nanos: None | str | Unset
         if isinstance(self.yes_price_24h_ago_nanos, Unset):
             yes_price_24h_ago_nanos = UNSET
         else:
             yes_price_24h_ago_nanos = self.yes_price_24h_ago_nanos
 
-        yes_price_nanos: int | None | Unset
+        yes_price_nanos: None | str | Unset
         if isinstance(self.yes_price_nanos, Unset):
             yes_price_nanos = UNSET
         else:
@@ -629,22 +629,22 @@ class MarketResponse:
         market_start_date_ms = _parse_market_start_date_ms(d.pop("market_start_date_ms", UNSET))
 
 
-        def _parse_no_price_24h_ago_nanos(data: object) -> int | None | Unset:
+        def _parse_no_price_24h_ago_nanos(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(int | None | Unset, data)
+            return cast(None | str | Unset, data)
 
         no_price_24h_ago_nanos = _parse_no_price_24h_ago_nanos(d.pop("no_price_24h_ago_nanos", UNSET))
 
 
-        def _parse_no_price_nanos(data: object) -> int | None | Unset:
+        def _parse_no_price_nanos(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(int | None | Unset, data)
+            return cast(None | str | Unset, data)
 
         no_price_nanos = _parse_no_price_nanos(d.pop("no_price_nanos", UNSET))
 
@@ -655,12 +655,12 @@ class MarketResponse:
 
         orders_unmatched_total = d.pop("orders_unmatched_total", UNSET)
 
-        def _parse_payout_nanos(data: object) -> int | None | Unset:
+        def _parse_payout_nanos(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(int | None | Unset, data)
+            return cast(None | str | Unset, data)
 
         payout_nanos = _parse_payout_nanos(d.pop("payout_nanos", UNSET))
 
@@ -685,12 +685,12 @@ class MarketResponse:
         reference_price_expires_at_ms = _parse_reference_price_expires_at_ms(d.pop("reference_price_expires_at_ms", UNSET))
 
 
-        def _parse_reference_price_nanos(data: object) -> int | None | Unset:
+        def _parse_reference_price_nanos(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(int | None | Unset, data)
+            return cast(None | str | Unset, data)
 
         reference_price_nanos = _parse_reference_price_nanos(d.pop("reference_price_nanos", UNSET))
 
@@ -729,22 +729,22 @@ class MarketResponse:
 
         volume_nanos = d.pop("volume_nanos", UNSET)
 
-        def _parse_yes_price_24h_ago_nanos(data: object) -> int | None | Unset:
+        def _parse_yes_price_24h_ago_nanos(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(int | None | Unset, data)
+            return cast(None | str | Unset, data)
 
         yes_price_24h_ago_nanos = _parse_yes_price_24h_ago_nanos(d.pop("yes_price_24h_ago_nanos", UNSET))
 
 
-        def _parse_yes_price_nanos(data: object) -> int | None | Unset:
+        def _parse_yes_price_nanos(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(int | None | Unset, data)
+            return cast(None | str | Unset, data)
 
         yes_price_nanos = _parse_yes_price_nanos(d.pop("yes_price_nanos", UNSET))
 

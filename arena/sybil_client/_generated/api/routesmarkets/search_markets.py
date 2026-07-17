@@ -20,7 +20,9 @@ def _get_kwargs(
     tags: str | Unset = UNSET,
     category: str | Unset = UNSET,
     status: str | Unset = UNSET,
-    min_volume: int | Unset = UNSET,
+    min_yes_price_nanos: str | Unset = UNSET,
+    max_yes_price_nanos: str | Unset = UNSET,
+    min_volume_nanos: str | Unset = UNSET,
     sort: str | Unset = UNSET,
     limit: int | Unset = UNSET,
     offset: int | Unset = UNSET,
@@ -40,7 +42,11 @@ def _get_kwargs(
 
     params["status"] = status
 
-    params["min_volume"] = min_volume
+    params["min_yes_price_nanos"] = min_yes_price_nanos
+
+    params["max_yes_price_nanos"] = max_yes_price_nanos
+
+    params["min_volume_nanos"] = min_volume_nanos
 
     params["sort"] = sort
 
@@ -98,7 +104,9 @@ def sync_detailed(
     tags: str | Unset = UNSET,
     category: str | Unset = UNSET,
     status: str | Unset = UNSET,
-    min_volume: int | Unset = UNSET,
+    min_yes_price_nanos: str | Unset = UNSET,
+    max_yes_price_nanos: str | Unset = UNSET,
+    min_volume_nanos: str | Unset = UNSET,
     sort: str | Unset = UNSET,
     limit: int | Unset = UNSET,
     offset: int | Unset = UNSET,
@@ -111,7 +119,9 @@ def sync_detailed(
         tags (str | Unset):
         category (str | Unset):
         status (str | Unset):
-        min_volume (int | Unset):
+        min_yes_price_nanos (str | Unset):
+        max_yes_price_nanos (str | Unset):
+        min_volume_nanos (str | Unset):
         sort (str | Unset):
         limit (int | Unset):
         offset (int | Unset):
@@ -130,7 +140,9 @@ def sync_detailed(
 tags=tags,
 category=category,
 status=status,
-min_volume=min_volume,
+min_yes_price_nanos=min_yes_price_nanos,
+max_yes_price_nanos=max_yes_price_nanos,
+min_volume_nanos=min_volume_nanos,
 sort=sort,
 limit=limit,
 offset=offset,
@@ -150,7 +162,9 @@ def sync(
     tags: str | Unset = UNSET,
     category: str | Unset = UNSET,
     status: str | Unset = UNSET,
-    min_volume: int | Unset = UNSET,
+    min_yes_price_nanos: str | Unset = UNSET,
+    max_yes_price_nanos: str | Unset = UNSET,
+    min_volume_nanos: str | Unset = UNSET,
     sort: str | Unset = UNSET,
     limit: int | Unset = UNSET,
     offset: int | Unset = UNSET,
@@ -163,7 +177,9 @@ def sync(
         tags (str | Unset):
         category (str | Unset):
         status (str | Unset):
-        min_volume (int | Unset):
+        min_yes_price_nanos (str | Unset):
+        max_yes_price_nanos (str | Unset):
+        min_volume_nanos (str | Unset):
         sort (str | Unset):
         limit (int | Unset):
         offset (int | Unset):
@@ -183,7 +199,9 @@ q=q,
 tags=tags,
 category=category,
 status=status,
-min_volume=min_volume,
+min_yes_price_nanos=min_yes_price_nanos,
+max_yes_price_nanos=max_yes_price_nanos,
+min_volume_nanos=min_volume_nanos,
 sort=sort,
 limit=limit,
 offset=offset,
@@ -197,7 +215,9 @@ async def asyncio_detailed(
     tags: str | Unset = UNSET,
     category: str | Unset = UNSET,
     status: str | Unset = UNSET,
-    min_volume: int | Unset = UNSET,
+    min_yes_price_nanos: str | Unset = UNSET,
+    max_yes_price_nanos: str | Unset = UNSET,
+    min_volume_nanos: str | Unset = UNSET,
     sort: str | Unset = UNSET,
     limit: int | Unset = UNSET,
     offset: int | Unset = UNSET,
@@ -210,7 +230,9 @@ async def asyncio_detailed(
         tags (str | Unset):
         category (str | Unset):
         status (str | Unset):
-        min_volume (int | Unset):
+        min_yes_price_nanos (str | Unset):
+        max_yes_price_nanos (str | Unset):
+        min_volume_nanos (str | Unset):
         sort (str | Unset):
         limit (int | Unset):
         offset (int | Unset):
@@ -229,7 +251,9 @@ async def asyncio_detailed(
 tags=tags,
 category=category,
 status=status,
-min_volume=min_volume,
+min_yes_price_nanos=min_yes_price_nanos,
+max_yes_price_nanos=max_yes_price_nanos,
+min_volume_nanos=min_volume_nanos,
 sort=sort,
 limit=limit,
 offset=offset,
@@ -249,7 +273,9 @@ async def asyncio(
     tags: str | Unset = UNSET,
     category: str | Unset = UNSET,
     status: str | Unset = UNSET,
-    min_volume: int | Unset = UNSET,
+    min_yes_price_nanos: str | Unset = UNSET,
+    max_yes_price_nanos: str | Unset = UNSET,
+    min_volume_nanos: str | Unset = UNSET,
     sort: str | Unset = UNSET,
     limit: int | Unset = UNSET,
     offset: int | Unset = UNSET,
@@ -262,7 +288,9 @@ async def asyncio(
         tags (str | Unset):
         category (str | Unset):
         status (str | Unset):
-        min_volume (int | Unset):
+        min_yes_price_nanos (str | Unset):
+        max_yes_price_nanos (str | Unset):
+        min_volume_nanos (str | Unset):
         sort (str | Unset):
         limit (int | Unset):
         offset (int | Unset):
@@ -282,7 +310,9 @@ q=q,
 tags=tags,
 category=category,
 status=status,
-min_volume=min_volume,
+min_yes_price_nanos=min_yes_price_nanos,
+max_yes_price_nanos=max_yes_price_nanos,
+min_volume_nanos=min_volume_nanos,
 sort=sort,
 limit=limit,
 offset=offset,

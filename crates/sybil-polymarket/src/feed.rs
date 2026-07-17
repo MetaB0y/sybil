@@ -63,6 +63,7 @@ impl FeedActor {
             if self.token_ids.is_empty() {
                 // Nothing to subscribe to yet — wait for sync actor
                 tokio::select! {
+                    biased;
                     _ = cancel.cancelled() => {
                         info!("FeedActor shutting down");
                         return;
@@ -84,7 +85,10 @@ impl FeedActor {
                 tokens = self.token_ids.len(),
                 "attempting WebSocket connection"
             );
-            self.poll_rest_once().await;
+            if !self.poll_rest_or_cancel(&cancel).await {
+                info!("FeedActor shutting down");
+                return;
+            }
             // Clone the connection inputs so the `feed_rx.recv()` branch below
             // can take `&mut self` to fold in a new subscription and reconnect
             // immediately, instead of waiting for the current WebSocket to drop.
@@ -103,6 +107,7 @@ impl FeedActor {
 
             let ws_result = loop {
                 tokio::select! {
+                    biased;
                     _ = cancel.cancelled() => {
                         info!("FeedActor shutting down");
                         return;
@@ -128,7 +133,10 @@ impl FeedActor {
                         // WebSocket messages are change-driven. Quiet order
                         // books still need fresh timestamps so unchanged prices
                         // do not become falsely stale.
-                        self.poll_rest_once().await;
+                        if !self.poll_rest_or_cancel(&cancel).await {
+                            info!("FeedActor shutting down");
+                            return;
+                        }
                     }
                     result = &mut ws_feed => break result,
                 }
@@ -145,7 +153,10 @@ impl FeedActor {
                     } else {
                         warn!(error = %e, "WebSocket failed, falling back to REST");
                     }
-                    self.poll_rest_once().await;
+                    if !self.poll_rest_or_cancel(&cancel).await {
+                        info!("FeedActor shutting down");
+                        return;
+                    }
                     backoff_secs = (backoff_secs * 2).min(60);
                 }
             }
@@ -157,12 +168,21 @@ impl FeedActor {
 
             // Backoff before reconnect
             tokio::select! {
+                biased;
                 _ = cancel.cancelled() => {
                     info!("FeedActor shutting down");
                     return;
                 }
                 _ = tokio::time::sleep(Duration::from_secs(backoff_secs)) => {}
             }
+        }
+    }
+
+    async fn poll_rest_or_cancel(&self, cancel: &tokio_util::sync::CancellationToken) -> bool {
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => false,
+            () = self.poll_rest_once() => true,
         }
     }
 

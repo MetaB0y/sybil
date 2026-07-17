@@ -27,23 +27,23 @@ class PortfolioResponse:
     """ 
         Attributes:
             account_id (int):
-            available_balance_nanos (int): Spendable account balance after live-order reservations. Integer
+            available_balance_nanos (str): Spendable account balance after live-order reservations. Integer
                 nanodollars; 1_000_000_000 = $1.
-            balance_nanos (int): Total (gross) account balance; see `available_balance_nanos` for spendable
+            balance_nanos (str): Total (gross) account balance; see `available_balance_nanos` for spendable
                 funds. Integer nanodollars; 1_000_000_000 = $1.
-            pnl_nanos (int): Total profit and loss. Integer nanodollars; 1_000_000_000 = $1.
-            portfolio_value_nanos (int): Total portfolio value. Integer nanodollars; 1_000_000_000 = $1.
+            pnl_nanos (str): Total profit and loss. Integer nanodollars; 1_000_000_000 = $1.
+            portfolio_value_nanos (str): Total portfolio value. Integer nanodollars; 1_000_000_000 = $1.
             positions (list[PositionValueResponse]):
-            reserved_balance_nanos (int): Balance reserved by live resting orders. Integer nanodollars;
+            reserved_balance_nanos (str): Balance reserved by live resting orders. Integer nanodollars;
                 1_000_000_000 = $1.
-            total_deposited_nanos (int): Total account deposits. Integer nanodollars; 1_000_000_000 = $1.
-            total_position_value_nanos (int): Mark-to-market value of all positions. Integer nanodollars;
+            total_deposited_nanos (str): Total account deposits. Integer nanodollars; 1_000_000_000 = $1.
+            total_position_value_nanos (str): Mark-to-market value of all positions. Integer nanodollars;
                 1_000_000_000 = $1.
             first_deposit_ms (int | Unset): First-deposit timestamp in ms since epoch (B8). `0` for accounts
                 with no recorded deposit history (FE renders as "—"). Same
                 "since last restart" caveat as the other off-block aggregates
                 until persistence runs in prod.
-            realized_pnl_nanos (int | Unset): Accumulated realized PnL across all closed positions (C1). Integer
+            realized_pnl_nanos (str | Unset): Accumulated realized PnL across all closed positions (C1). Integer
                 nanodollars;
                 1_000_000_000 = $1. Signed.
                 `pnl_nanos = realized + unrealized` once both fields populate, but
@@ -51,24 +51,24 @@ class PortfolioResponse:
             total_fill_count (int | Unset): All-time fill count (B8). The bounded fill window in
                 `account_fills` may cap older trades; this counter never does,
                 so FE shows the real number instead of "200+".
-            unrealized_pnl_nanos (int | Unset): Mark-to-market PnL on currently open positions (C1). Integer nanodollars;
+            unrealized_pnl_nanos (str | Unset): Mark-to-market PnL on currently open positions (C1). Integer nanodollars;
                 1_000_000_000 = $1. Computed as
                 `sum((current_price - avg_entry) * quantity / SHARE_SCALE)` across positions.
      """
 
     account_id: int
-    available_balance_nanos: int
-    balance_nanos: int
-    pnl_nanos: int
-    portfolio_value_nanos: int
+    available_balance_nanos: str
+    balance_nanos: str
+    pnl_nanos: str
+    portfolio_value_nanos: str
     positions: list[PositionValueResponse]
-    reserved_balance_nanos: int
-    total_deposited_nanos: int
-    total_position_value_nanos: int
+    reserved_balance_nanos: str
+    total_deposited_nanos: str
+    total_position_value_nanos: str
     first_deposit_ms: int | Unset = UNSET
-    realized_pnl_nanos: int | Unset = UNSET
+    realized_pnl_nanos: str | Unset = UNSET
     total_fill_count: int | Unset = UNSET
-    unrealized_pnl_nanos: int | Unset = UNSET
+    unrealized_pnl_nanos: str | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 

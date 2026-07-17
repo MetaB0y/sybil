@@ -43,9 +43,9 @@ class PublicBlockResponse:
             rejection_count (int): Number of rejected orders without identities, order ids, or reasons.
             state_root (str): Post-block state root. Hex-encoded 32-byte qMDB root.
             timestamp_ms (int):
-            total_volume_nanos (int): Total traded notional in the block. Integer nanodollars;
+            total_volume_nanos (str): Total traded notional in the block. Integer nanodollars;
                 1_000_000_000 = $1.
-            total_welfare_nanos (int): Total solver welfare in the block. Integer nanodollars;
+            total_welfare_nanos (str): Total solver welfare in the block. Integer nanodollars;
                 1_000_000_000 = $1. Signed: solver rounding can yield small negatives.
             by_market (PublicBlockResponseByMarket | Unset):
             clearing_prices_nanos (PublicBlockResponseClearingPricesNanos | Unset): Clearing price vectors by market/group.
@@ -67,8 +67,8 @@ class PublicBlockResponse:
     rejection_count: int
     state_root: str
     timestamp_ms: int
-    total_volume_nanos: int
-    total_welfare_nanos: int
+    total_volume_nanos: str
+    total_welfare_nanos: str
     by_market: PublicBlockResponseByMarket | Unset = UNSET
     clearing_prices_nanos: PublicBlockResponseClearingPricesNanos | Unset = UNSET
     resolved_market_ids: list[int] | Unset = UNSET

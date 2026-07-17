@@ -22,6 +22,9 @@ from .types import (
     Account,
     AccountFill,
     Block,
+    BlockStreamBlockEvent,
+    BlockStreamEvent,
+    BlockStreamReplayCompleteEvent,
     BuyNo,
     BuyYes,
     Fill,
@@ -53,6 +56,18 @@ def _opt(value: Any) -> Any:
     ``None`` so callers can apply their own defaults.
     """
     return None if isinstance(value, Unset) else value
+
+
+def _nanos_int(value: Any) -> int:
+    """Parse an exact decimal-string nanos value, with legacy integer support."""
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise TypeError(f"expected decimal-string nanos, got {value!r}")
+    return int(value)
+
+
+def _optional_nanos_int(value: Any) -> int | None:
+    value = _opt(value)
+    return None if value is None else _nanos_int(value)
 
 
 class SybilClientError(Exception):
@@ -119,7 +134,7 @@ class SybilClient:
     async def create_account(self, initial_balance_nanos: int = 0) -> Account:
         """Create a new account (dev mode only)."""
         data = await self._request(
-            "POST", "/v1/accounts", json={"initial_balance_nanos": initial_balance_nanos}
+            "POST", "/v1/accounts", json={"initial_balance_nanos": str(initial_balance_nanos)}
         )
         return self._parse_account(data)
 
@@ -131,7 +146,7 @@ class SybilClient:
     async def fund_account(self, account_id: int, amount_nanos: int) -> Account:
         """Add funds to account (dev mode only)."""
         data = await self._request(
-            "POST", f"/v1/accounts/{account_id}/fund", json={"amount_nanos": amount_nanos}
+            "POST", f"/v1/accounts/{account_id}/fund", json={"amount_nanos": str(amount_nanos)}
         )
         return self._parse_account(data)
 
@@ -144,19 +159,19 @@ class SybilClient:
                 market_id=p.market_id,
                 outcome=p.outcome,
                 quantity=quantity_units_to_shares(p.quantity),
-                current_price_nanos=p.current_price_nanos,
-                value_nanos=p.value_nanos,
+                current_price_nanos=_nanos_int(p.current_price_nanos),
+                value_nanos=_nanos_int(p.value_nanos),
             )
             for p in model.positions
         ]
         return Portfolio(
             account_id=model.account_id,
-            balance_nanos=model.balance_nanos,
-            total_deposited_nanos=model.total_deposited_nanos,
+            balance_nanos=_nanos_int(model.balance_nanos),
+            total_deposited_nanos=_nanos_int(model.total_deposited_nanos),
             positions=positions,
-            total_position_value_nanos=model.total_position_value_nanos,
-            portfolio_value_nanos=model.portfolio_value_nanos,
-            pnl_nanos=model.pnl_nanos,
+            total_position_value_nanos=_nanos_int(model.total_position_value_nanos),
+            portfolio_value_nanos=_nanos_int(model.portfolio_value_nanos),
+            pnl_nanos=_nanos_int(model.pnl_nanos),
         )
 
     async def get_account_fills(
@@ -175,9 +190,7 @@ class SybilClient:
             params["offset"] = offset
         if market_id is not None:
             params["market_id"] = market_id
-        data = await self._request(
-            "GET", f"/v1/accounts/{account_id}/fills", params=params
-        )
+        data = await self._request("GET", f"/v1/accounts/{account_id}/fills", params=params)
         if data.get("cursor_gap"):
             raise SybilClientError(
                 410,
@@ -195,7 +208,7 @@ class SybilClient:
                     cursor=str(cursor),
                     order_id=f.order_id,
                     fill_qty=quantity_units_to_shares(f.fill_qty),
-                    fill_price_nanos=f.fill_price_nanos,
+                    fill_price_nanos=_nanos_int(f.fill_price_nanos),
                     block_height=f.block_height,
                     timestamp_ms=f.timestamp_ms,
                     position_deltas=[
@@ -212,9 +225,6 @@ class SybilClient:
 
     async def get_pending_orders(self, account_id: int) -> list[PendingOrder]:
         """Get pending orders for an account."""
-        # Hand-written: the generated ``PendingOrderResponse`` marks
-        # ``expires_at_block`` as required, but the server omits it for
-        # non-GTD orders. Keep the lenient ``.get`` so GTC/IOC orders parse.
         data = await self._request("GET", f"/v1/accounts/{account_id}/orders")
         return [
             PendingOrder(
@@ -222,7 +232,7 @@ class SybilClient:
                 account_id=o["account_id"],
                 market_id=o["market_id"],
                 side=o["side"],
-                limit_price_nanos=o["limit_price_nanos"],
+                limit_price_nanos=_nanos_int(o["limit_price_nanos"]),
                 remaining_quantity=quantity_units_to_shares(o["remaining_quantity"]),
                 created_at_block=o["created_at_block"],
                 expires_at_block=o.get("expires_at_block"),
@@ -239,7 +249,7 @@ class SybilClient:
             Position(p.market_id, p.outcome, quantity_units_to_shares(p.quantity))
             for p in (_opt(model.positions) or [])
         ]
-        return Account(model.account_id, model.balance_nanos, positions)
+        return Account(model.account_id, _nanos_int(model.balance_nanos), positions)
 
     # === Markets ===
 
@@ -296,7 +306,10 @@ class SybilClient:
         # Response is wrapped: {"prices": {"0": {...}, "1": {...}}}
         prices_map = data.get("prices", data) if isinstance(data, dict) else data
         return {
-            int(market_id): (p["yes_price_nanos"], p["no_price_nanos"])
+            int(market_id): (
+                _nanos_int(p["yes_price_nanos"]),
+                _nanos_int(p["no_price_nanos"]),
+            )
             for market_id, p in prices_map.items()
         }
 
@@ -312,17 +325,15 @@ class SybilClient:
             params["from_ms"] = from_ms
         if to_ms is not None:
             params["to_ms"] = to_ms
-        data = await self._request(
-            "GET", f"/v1/markets/{market_id}/prices/history", params=params
-        )
+        data = await self._request("GET", f"/v1/markets/{market_id}/prices/history", params=params)
         model = PriceHistoryResponse.from_dict(data)
         return [
             PricePoint(
                 height=p.height,
                 timestamp_ms=p.timestamp_ms,
-                yes_price_nanos=p.yes_price_nanos,
-                no_price_nanos=p.no_price_nanos,
-                volume_nanos=p.volume_nanos,
+                yes_price_nanos=_nanos_int(p.yes_price_nanos),
+                no_price_nanos=_nanos_int(p.no_price_nanos),
+                volume_nanos=_nanos_int(p.volume_nanos),
             )
             for p in model.points
         ]
@@ -334,7 +345,7 @@ class SybilClient:
         tags: list[str] | None = None,
         category: str | None = None,
         status: str | None = None,
-        min_volume: int | None = None,
+        min_volume_nanos: int | None = None,
         sort: str | None = None,
         limit: int | None = None,
         offset: int | None = None,
@@ -349,8 +360,8 @@ class SybilClient:
             params["category"] = category
         if status is not None:
             params["status"] = status
-        if min_volume is not None:
-            params["min_volume"] = min_volume
+        if min_volume_nanos is not None:
+            params["min_volume_nanos"] = str(min_volume_nanos)
         if sort is not None:
             params["sort"] = sort
         if limit is not None:
@@ -363,7 +374,7 @@ class SybilClient:
     async def resolve_market(self, market_id: int, payout_nanos: int) -> None:
         """Resolve a market (dev mode only)."""
         await self._request(
-            "POST", f"/v1/markets/{market_id}/resolve", json={"payout_nanos": payout_nanos}
+            "POST", f"/v1/markets/{market_id}/resolve", json={"payout_nanos": str(payout_nanos)}
         )
 
     def _parse_market(self, data: dict[str, Any]) -> Market:
@@ -375,10 +386,10 @@ class SybilClient:
         return Market(
             id=data["market_id"],
             name=data["name"],
-            yes_price_nanos=data.get("yes_price_nanos") or 0,
-            no_price_nanos=data.get("no_price_nanos") or 0,
+            yes_price_nanos=_nanos_int(data.get("yes_price_nanos") or 0),
+            no_price_nanos=_nanos_int(data.get("no_price_nanos") or 0),
             status=data.get("status", "Active"),
-            reference_price_nanos=data.get("reference_price_nanos"),
+            reference_price_nanos=_optional_nanos_int(data.get("reference_price_nanos")),
             reference_price_expires_at_ms=data.get("reference_price_expires_at_ms"),
             polymarket_condition_id=data.get("polymarket_condition_id"),
             description=data.get("description", ""),
@@ -387,7 +398,7 @@ class SybilClient:
             resolution_criteria=data.get("resolution_criteria", ""),
             expiry_timestamp_ms=data.get("expiry_timestamp_ms", 0),
             created_at_ms=data.get("created_at_ms", 0),
-            volume_nanos=data.get("volume_nanos", 0),
+            volume_nanos=_nanos_int(data.get("volume_nanos", 0)),
             closed=data.get("closed", False),
         )
 
@@ -417,7 +428,7 @@ class SybilClient:
         order_specs = [self._order_to_json(o) for o in orders]
         payload: dict[str, Any] = {"account_id": account_id, "orders": order_specs}
         if mm_budget_nanos is not None:
-            payload["mm_budget_nanos"] = mm_budget_nanos
+            payload["mm_budget_nanos"] = str(mm_budget_nanos)
         if time_in_force is not None:
             payload["time_in_force"] = time_in_force
         if expires_at_block is not None:
@@ -429,61 +440,53 @@ class SybilClient:
         self, account_id: int, market_id: int, price: float, quantity: int | float
     ) -> bool:
         """Submit a buy YES order."""
-        return await self.submit_orders(
-            account_id, [BuyYes.at_price(market_id, price, quantity)]
-        )
+        return await self.submit_orders(account_id, [BuyYes.at_price(market_id, price, quantity)])
 
     async def buy_no(
         self, account_id: int, market_id: int, price: float, quantity: int | float
     ) -> bool:
         """Submit a buy NO order."""
-        return await self.submit_orders(
-            account_id, [BuyNo.at_price(market_id, price, quantity)]
-        )
+        return await self.submit_orders(account_id, [BuyNo.at_price(market_id, price, quantity)])
 
     async def sell_yes(
         self, account_id: int, market_id: int, price: float, quantity: int | float
     ) -> bool:
         """Submit a sell YES order."""
-        return await self.submit_orders(
-            account_id, [SellYes.at_price(market_id, price, quantity)]
-        )
+        return await self.submit_orders(account_id, [SellYes.at_price(market_id, price, quantity)])
 
     async def sell_no(
         self, account_id: int, market_id: int, price: float, quantity: int | float
     ) -> bool:
         """Submit a sell NO order."""
-        return await self.submit_orders(
-            account_id, [SellNo.at_price(market_id, price, quantity)]
-        )
+        return await self.submit_orders(account_id, [SellNo.at_price(market_id, price, quantity)])
 
     def _order_to_json(self, order: OrderSpec) -> dict[str, Any]:
         if isinstance(order, BuyYes):
             return {
                 "type": "BuyYes",
                 "market_id": order.market_id,
-                "limit_price_nanos": order.limit_price_nanos,
+                "limit_price_nanos": str(order.limit_price_nanos),
                 "quantity": shares_to_quantity_units(order.quantity),
             }
         elif isinstance(order, BuyNo):
             return {
                 "type": "BuyNo",
                 "market_id": order.market_id,
-                "limit_price_nanos": order.limit_price_nanos,
+                "limit_price_nanos": str(order.limit_price_nanos),
                 "quantity": shares_to_quantity_units(order.quantity),
             }
         elif isinstance(order, SellYes):
             return {
                 "type": "SellYes",
                 "market_id": order.market_id,
-                "limit_price_nanos": order.limit_price_nanos,
+                "limit_price_nanos": str(order.limit_price_nanos),
                 "quantity": shares_to_quantity_units(order.quantity),
             }
         elif isinstance(order, SellNo):
             return {
                 "type": "SellNo",
                 "market_id": order.market_id,
-                "limit_price_nanos": order.limit_price_nanos,
+                "limit_price_nanos": str(order.limit_price_nanos),
                 "quantity": shares_to_quantity_units(order.quantity),
             }
         else:
@@ -511,25 +514,27 @@ class SybilClient:
         data = await self._request("GET", f"/v1/blocks/{height}")
         return self._parse_block(data)
 
-    async def stream_blocks(self, from_block: int | None = None) -> AsyncIterator[Block]:
-        """Stream committed blocks over the resumable public WebSocket.
+    async def stream_block_events(
+        self, from_block: int | None = None
+    ) -> AsyncIterator[BlockStreamEvent]:
+        """Stream blocks while preserving the replay-to-live boundary.
 
         After delivering a block, reconnects request the next height so a
         transient disconnect cannot silently skip blocks. A retention gap is
         terminal because the caller must perform a cold resync before it can
-        safely continue.
+        safely continue. Replayed blocks are explicitly marked so side-effecting
+        consumers can rebuild state without submitting historical work.
         """
         backoff = self._stream_reconnect_base_s
         last_seen_height = from_block - 1 if from_block is not None else None
-        ws_base_url = self.base_url.replace("https://", "wss://", 1).replace(
-            "http://", "ws://", 1
-        )
+        ws_base_url = self.base_url.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
         while True:
             next_height = last_seen_height + 1 if last_seen_height is not None else None
             url = f"{ws_base_url}/v2/blocks/ws"
             if next_height is not None:
                 url = f"{url}?from_block={next_height}"
             try:
+                replaying = next_height is not None
                 async with connect(
                     url,
                     ping_interval=20,
@@ -551,9 +556,12 @@ class SybilClient:
                                 continue
                             last_seen_height = block.height
                             backoff = self._stream_reconnect_base_s
-                            yield block
+                            yield BlockStreamBlockEvent(block=block, replayed=replaying)
                         elif message_type == "replay_complete":
-                            continue
+                            replaying = False
+                            yield BlockStreamReplayCompleteEvent(
+                                up_to_height=int(message["up_to_height"])
+                            )
                         elif message_type == "lagged":
                             server_height = message.get("last_sent_height")
                             if server_height is not None:
@@ -584,12 +592,24 @@ class SybilClient:
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, self._stream_reconnect_max_s)
 
+    async def stream_blocks(self, from_block: int | None = None) -> AsyncIterator[Block]:
+        """Stream all committed blocks, including blocks replayed after reconnect."""
+        async for event in self.stream_block_events(from_block=from_block):
+            if isinstance(event, BlockStreamBlockEvent):
+                yield event.block
+
+    async def stream_live_blocks(self, from_block: int | None = None) -> AsyncIterator[Block]:
+        """Stream only blocks known to be live, never replayed history."""
+        async for event in self.stream_block_events(from_block=from_block):
+            if isinstance(event, BlockStreamBlockEvent) and not event.replayed:
+                yield event.block
+
     def _parse_block(self, data: dict[str, Any]) -> Block:
         fills = [
             Fill(
                 f["order_id"],
                 quantity_units_to_shares(f["fill_qty"]),
-                f["fill_price_nanos"],
+                _nanos_int(f["fill_price_nanos"]),
             )
             for f in data.get("fills", [])
         ]
@@ -597,17 +617,20 @@ class SybilClient:
         prices = {}
         for k, v in data.get("clearing_prices_nanos", {}).items():
             if isinstance(v, list) and len(v) >= 2:
-                prices[int(k)] = (v[0], v[1])
+                prices[int(k)] = (_nanos_int(v[0]), _nanos_int(v[1]))
             elif isinstance(v, dict):
-                prices[int(k)] = (v.get("yes_price_nanos", 0), v.get("no_price_nanos", 0))
+                prices[int(k)] = (
+                    _nanos_int(v.get("yes_price_nanos", 0)),
+                    _nanos_int(v.get("no_price_nanos", 0)),
+                )
         return Block(
             height=data["height"],
             parent_hash=data.get("parent_hash", ""),
             state_root=data.get("state_root", ""),
             fills=fills,
             clearing_prices=prices,
-            total_welfare=data.get("total_welfare_nanos", data.get("total_welfare", 0)),
-            total_volume=data.get("total_volume_nanos", data.get("total_volume", 0)),
+            total_welfare=_nanos_int(data.get("total_welfare_nanos", data.get("total_welfare", 0))),
+            total_volume=_nanos_int(data.get("total_volume_nanos", data.get("total_volume", 0))),
             orders_filled=data.get("orders_filled", 0),
         )
 

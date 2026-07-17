@@ -251,11 +251,11 @@ async fn run_witness_import(config: &ApiConfig) -> Result<(), Box<dyn std::error
     Ok(())
 }
 
-fn init_telemetry() -> metrics_exporter_prometheus::PrometheusHandle {
+fn init_telemetry()
+-> Result<metrics_exporter_prometheus::PrometheusHandle, Box<dyn std::error::Error>> {
     // Prometheus metrics recorder
-    let prometheus_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
-        .install_recorder()
-        .expect("failed to install Prometheus metrics recorder");
+    let prometheus_handle =
+        metrics_exporter_prometheus::PrometheusBuilder::new().install_recorder()?;
 
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -263,12 +263,12 @@ fn init_telemetry() -> metrics_exporter_prometheus::PrometheusHandle {
         )
         .init();
 
-    prometheus_handle
+    Ok(prometheus_handle)
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let prometheus_handle = init_telemetry();
+    let prometheus_handle = init_telemetry()?;
     let config = ApiConfig::parse();
 
     if config.import_witness {
@@ -291,14 +291,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // idempotent overwrite-by-event-id upsert, so stale entries self-heal.
     if !config.event_snapshot_dir.is_empty() {
         let dir = std::path::Path::new(&config.event_snapshot_dir);
-        match std::fs::create_dir_all(dir) {
-            Ok(()) => {
-                tracing::info!(dir = %dir.display(), "event snapshot dir ready (persisted across restart)")
-            }
-            Err(e) => {
-                tracing::warn!(dir = %dir.display(), error = %e, "failed to create event snapshot dir")
-            }
-        }
+        std::fs::create_dir_all(dir).map_err(|error| {
+            std::io::Error::other(format!(
+                "failed to create configured event snapshot directory {}: {error}",
+                dir.display()
+            ))
+        })?;
+        tracing::info!(dir = %dir.display(), "event snapshot dir ready (persisted across restart)");
     }
 
     tracing::info!(
@@ -317,7 +316,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let store = if !config.data_dir.is_empty() {
         let data_dir = std::path::Path::new(&config.data_dir);
-        std::fs::create_dir_all(data_dir).expect("failed to create data dir");
+        std::fs::create_dir_all(data_dir).map_err(|error| {
+            std::io::Error::other(format!(
+                "failed to create persistent data directory {}: {error}",
+                data_dir.display()
+            ))
+        })?;
         let db_path = data_dir.join("sybil.redb");
         match matching_sequencer::store::Store::open(&db_path) {
             Ok(s) => match s.bind_validity_artifact_retention(config.retain_validity_artifacts) {
@@ -426,9 +430,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Fail fast: without the admin feed + templates installed, attestation-
     // based resolution is silently broken. Better to crash at startup than
     // to discover it when operators go to resolve a market.
-    if let Err(err) = bootstrap_oracle_feeds(&handle, &config).await {
-        panic!("failed to bootstrap oracle feeds: {err}");
-    }
+    bootstrap_oracle_feeds(&handle, &config)
+        .await
+        .map_err(|error| {
+            std::io::Error::other(format!("failed to bootstrap oracle feeds: {error}"))
+        })?;
 
     let shutdown_handle = handle.clone();
     let state = AppState::new(handle, &config, prometheus_handle);
@@ -458,9 +464,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         (None, None) => {}
     }
-    if let Err(err) = state.initialize_read_models().await {
-        panic!("failed to initialize API read models: {err}");
-    }
+    state.initialize_read_models().await.map_err(|error| {
+        std::io::Error::other(format!("failed to initialize API read models: {error}"))
+    })?;
     let leaderboard_state = state.clone();
     let leaderboard_cancel = worker_cancel.child_token();
     workers.spawn(async move {
@@ -470,7 +476,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let app = create_router(state);
     let addr = format!("0.0.0.0:{}", config.port);
-    let listener = TcpListener::bind(&addr).await.unwrap();
+    let listener = TcpListener::bind(&addr).await?;
     tracing::info!("Listening on {}", addr);
     tracing::info!(
         "OpenAPI spec: http://localhost:{}/openapi.json",
@@ -482,8 +488,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
     .with_graceful_shutdown(shutdown_signal())
-    .await
-    .unwrap();
+    .await?;
 
     worker_cancel.cancel();
     workers.close();

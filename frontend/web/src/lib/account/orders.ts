@@ -91,8 +91,7 @@ export async function submitSignedOrder(
       order: {
         market_ids: [args.marketId],
         payoffs,
-        // patched schema says string; wire wants JSON number.
-        limit_price_nanos: Number(args.limitPriceNanos) as unknown as string,
+        limit_price_nanos: args.limitPriceNanos.toString(),
         max_fill: Number(args.maxFill),
       },
       nonce: u64JsonNumber(nonce),
