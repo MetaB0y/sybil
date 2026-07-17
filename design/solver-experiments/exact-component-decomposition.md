@@ -239,3 +239,63 @@ complete 11-test sequencer invariant target pass after the repair.
 Shared result aggregation also moved out of `decomposed.rs` into the neutral
 `component_assembly.rs`. Exact production decomposition no longer depends
 conceptually or structurally on the approximate proportional-response solver.
+
+## Experiment ECD-004 — adversarial one-component audit
+
+### Question
+
+Does the promoted solver remain operationally credible when an adversary
+removes every decomposition opportunity? If so, is the exact router cheap
+enough on that hostile topology to justify keeping it as an opportunistic
+accelerator?
+
+The answer is deliberately split in two. `PacingBundleSolver` is the economic
+algorithm and security baseline. `ExactComponentSolver` is only a routing
+optimization; success on fragmented books cannot compensate for failure of
+the monolith on a connected book.
+
+### Frozen threat model and protocol
+
+`benchmarks/solver/protocol-adversarial-connectivity-v1.json` declares 20
+scored books and 60 solver rows before evaluation:
+
+- 64 markets with either 10,000 or 50,000 accumulated retail orders;
+- one broad maker connecting every market through 384 orders, which fits one
+  production submission; or
+- sixteen local 24-order MM constraints plus one economically active,
+  one-share-per-market 64-order bridge.
+
+The bridge uses maximally willing YES bids and retains a small positive
+generated budget under both pressure ratios. The local-MM experiments also use
+generated rather than per-constraint LP-calibrated budgets: the development
+smoke showed that independent unconstrained calibration legitimately assigns
+zero to inactive local makers, which turns the intended connectivity test into
+a zero-budget post-processing test. The global-MM experiments retain
+LP-limit-value calibration. Every MM constraint is bounded by the API's
+512-order submission limit. All cases must have exactly one economic
+component.
+
+The paired solvers are RC-FW, monolithic pacing bundle, and the exact-component
+wrapper around the same bundle. Solver order rotates within each book. The
+untouched evaluation ranges are `72000..72002`, `72100..72101`,
+`72200..72202`, and `72300..72301`; smoke mode maps these to disjoint
+42,000-series development seeds.
+
+### Preregistered decision rule
+
+The complete matrix, fingerprints, verifier checks, and one-component topology
+are hard gates. The monolithic bundle may not lose landed retained-cash
+objective to RC-FW by more than
+`max(1,000 nanodollars, 1e-8 × |RC-FW objective|)`. Its maximum wall time must
+remain below three seconds at 10,000 retail orders and the deployed ten-second
+block interval at 50,000.
+
+On every connected pair, the wrapper and monolith must have identical
+termination, landed allocation, welfare, and retained objective. Retain the
+router in `ProductionSolver` only if those gates pass and its paired P95 scan
+overhead at each scale is at most the larger of 5% and 50 milliseconds.
+Otherwise make the monolithic pacing bundle the production default.
+
+This section, the attack generator, and the protocol must be pushed before any
+72,000-series seed is generated. Record the immutable freeze revision and the
+single evaluation below after the run; do not retune this protocol.

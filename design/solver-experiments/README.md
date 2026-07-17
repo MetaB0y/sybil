@@ -22,7 +22,8 @@ protocol and source revision frozen before untouched seeds are evaluated.
 - [Structural price-sweep matching oracle](structural-price-sweep-oracle.md) —
   exact fixed-pacing primal/dual oracle and marginal-face recovery variants
 - [Exact economic-connectivity decomposition](exact-component-decomposition.md)
-  — successful balanced-component router and replay topology audit
+  — successful balanced-component router, replay topology audit, and frozen
+  adversarial one-component production audit
 - [Public CLOB-depth corpus](public-clob-depth-corpus.md) — frozen external
   resting depth, observed taker-flow windows, explicit synthetic controls, and
   benchmark calibration

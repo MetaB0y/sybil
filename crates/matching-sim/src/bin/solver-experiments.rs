@@ -16,7 +16,10 @@ use std::process::Command;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use clap::Parser;
-use matching_engine::{Fill, MarketId, NANOS_PER_DOLLAR, Nanos, Problem, Qty, notional_nanos};
+use matching_engine::{
+    Fill, MarketId, MmConstraint, MmId, MmSide, NANOS_PER_DOLLAR, Nanos, Problem, Qty,
+    notional_nanos, outcome_buy, shares_to_qty,
+};
 use matching_scenarios::{
     FlashLiquidityConfig, MmQuoteStyle, ScenarioConfig, SolverReplayCorpusV1,
     generate_flash_liquidity_scenario, generate_scenario,
@@ -710,6 +713,11 @@ fn build_scenario(seed: u64, scale: &ScaleSpec, profile: &ProfileSpec) -> Scenar
 fn generate_problem(seed: u64, scale: &ScaleSpec, profile: &ProfileSpec) -> Problem {
     match profile.generator.as_deref().unwrap_or("random") {
         "random" => generate_scenario(build_scenario(seed, scale, profile)),
+        "random_tiny_mm_bridge" => {
+            let mut problem = generate_scenario(build_scenario(seed, scale, profile));
+            add_tiny_mm_bridge(&mut problem);
+            problem
+        }
         "flash_ladder" => generate_flash_liquidity_scenario(FlashLiquidityConfig {
             seed,
             num_markets: scale.num_markets,
@@ -721,6 +729,56 @@ fn generate_problem(seed: u64, scale: &ScaleSpec, profile: &ProfileSpec) -> Prob
         }),
         other => panic!("unknown scenario generator {other}"),
     }
+}
+
+/// Add an admission-sized MM bundle that joins every market while contributing
+/// only one share of maximally willing YES demand per market.
+///
+/// This models a cheap connectivity attack against exact decomposition: a
+/// large resting book can be accumulated normally, then one <=512-order MM
+/// submission can turn as many markets into one optimization component. The
+/// bridge remains economically active under LP-limit-value budget calibration,
+/// so the protocol does not rely on zero-budget constraints affecting routing.
+fn add_tiny_mm_bridge(problem: &mut Problem) {
+    let mut market_ids: Vec<_> = problem.markets.iter().map(|market| market.id).collect();
+    market_ids.sort_unstable();
+    assert!(
+        market_ids.len() <= 512,
+        "adversarial MM bridge must fit one production submission"
+    );
+
+    let mut next_order_id = problem
+        .orders
+        .iter()
+        .map(|order| order.id)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1);
+    let next_mm_id = problem
+        .mm_constraints
+        .iter()
+        .map(|constraint| constraint.mm_id.0)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1);
+    let mut bridge = MmConstraint::new(
+        MmId::new(next_mm_id),
+        Nanos(market_ids.len() as u64 * NANOS_PER_DOLLAR),
+    );
+
+    for market_id in market_ids {
+        problem.orders.push(outcome_buy(
+            &problem.markets,
+            next_order_id,
+            market_id,
+            0,
+            NANOS_PER_DOLLAR,
+            shares_to_qty(1).0,
+        ));
+        bridge.add_order(next_order_id, MmSide::BuyYes);
+        next_order_id = next_order_id.saturating_add(1);
+    }
+    problem.mm_constraints.push(bridge);
 }
 
 fn apply_mm_budgets(problem: &mut Problem, scale: f64, calibrated: Option<&[u64]>) {
@@ -1790,6 +1848,62 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert!(seeds.iter().all(|seed| (70_000..=71_002).contains(seed)));
+    }
+
+    #[test]
+    fn checked_in_adversarial_connectivity_protocol_is_frozen() {
+        let bytes = include_bytes!(
+            "../../../../benchmarks/solver/protocol-adversarial-connectivity-v1.json"
+        );
+        let protocol: Protocol = serde_json::from_slice(bytes).expect("parse protocol");
+        validate_protocol(&protocol).expect("valid protocol");
+        assert_eq!(protocol.schema_version, 2);
+        assert_eq!(
+            protocol.protocol_id,
+            "solver-adversarial-connectivity-evaluation-v1"
+        );
+        assert_eq!(
+            protocol
+                .experiments
+                .iter()
+                .map(|experiment| {
+                    experiment.seed_count
+                        * experiment.budget_scales.len()
+                        * experiment.solvers.len()
+                })
+                .sum::<usize>(),
+            60
+        );
+        let seeds = protocol
+            .experiments
+            .iter()
+            .flat_map(|experiment| {
+                experiment.seed_start..experiment.seed_start + experiment.seed_count as u64
+            })
+            .collect::<Vec<_>>();
+        assert!(seeds.iter().all(|seed| (72_000..=72_301).contains(seed)));
+
+        // Validate the attack construction on a disjoint development seed,
+        // preserving the preregistered 72xxx range for its one full run.
+        for experiment in &protocol.experiments {
+            let scale = &protocol.scales[&experiment.scale];
+            let profile = &protocol.profiles[&experiment.profile];
+            let problem = generate_problem(42_000, scale, profile);
+            assert_eq!(
+                exact_component_stats(&problem).components,
+                1,
+                "{} was not connected",
+                experiment.id
+            );
+            assert!(
+                problem
+                    .mm_constraints
+                    .iter()
+                    .all(|constraint| constraint.order_ids.len() <= 512),
+                "{} exceeded the admission-sized MM constraint",
+                experiment.id
+            );
+        }
     }
 
     #[test]
