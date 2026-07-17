@@ -203,8 +203,13 @@ python3 scripts/benchmarks/analyze_solver_experiments.py \
   /tmp/solver-replay-development
 ```
 
-The corpus design, capture limitation, calibration history, and current
-576-row result are recorded in
+Protocol v3 keeps the four-solver, 576-row budget by replacing the monolithic
+structural bundle with its exact-connectivity router. The report includes a
+compact topology-coverage table, making the corpus's mostly connected books
+visible instead of silently treating them as fragmentation evidence.
+
+The corpus design, capture limitation, calibration history, and current result
+are recorded in
 `design/solver-experiments/sequencer-replay-corpus.md`. The guarded autonomous
 iteration policy is in `benchmarks/solver/research-loop.md`.
 

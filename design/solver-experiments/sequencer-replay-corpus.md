@@ -201,6 +201,24 @@ retained-cash budget-fixed-point failures. The implementation, four protocol
 runs, and limitations are recorded in
 `design/solver-experiments/integer-price-recovery.md`.
 
+## Experiment SRC-006 — exact-connectivity coverage
+
+`ExactComponentSolver` exposed a missing coverage dimension: market count does
+not say whether a book is one optimization cluster or many independent ones.
+Replay protocol v3 replaces the monolithic structural pacing bundle with its
+topology-aware wrapper without increasing the four-solver, 576-row matrix.
+The analyzer now reports component count and largest-component market, order,
+and MM shares.
+
+Only 10 of 72 unique replay books are fragmented. All are mid-resolution
+books, and their largest cluster contains a median 94.3% of orders and every
+MM. The other 62 books are fully connected. This corpus therefore remains a
+good lifecycle and connected-book regression signal but is not representative
+evidence for fragmented scaling. The implementation, synthetic balanced
+component controls, raw-decomposition counterexample, and 80% routing rule are
+recorded in
+`design/solver-experiments/exact-component-decomposition.md`.
+
 ## Interpretation
 
 Replay is already a useful discriminator. It found a large
@@ -214,5 +232,6 @@ are correlated within trajectories, each regime has one synthetic seed, maker
 budgets need counterfactual tightening, and the account/MM inventory limitation
 prevents calling the captures full-account-valid evidence. Next corpus work
 should add held-out seeds per regime and privacy-reviewed redacted deployed
-captures. Until then, use replay beside the numerical, flash, scale, and exact
-reference suites, never instead of them.
+captures. Its mostly connected topology is now another explicit limitation.
+Until then, use replay beside the numerical, flash, balanced-component, scale,
+and exact-reference suites, never instead of them.

@@ -56,6 +56,10 @@ The current mix is suitable for bounded autonomous campaigns, not an unbounded
 unattended search. Generated stress cases cover scale and numerical extremes;
 four replay regimes add correlated resting books, grouped outcomes, news,
 mid-simulation resolution, and dense flow. The replay is still synthetic, has
-only one seed per regime, and needs counterfactual tight maker budgets. Before
-long runs become authoritative, add held-out seeds for each lifecycle regime
-and privacy-reviewed redacted captures from the deployed solver boundary.
+only one seed per regime, and needs counterfactual tight maker budgets. It is
+also overwhelmingly one connected optimization cluster: only 10 of 72 books
+fragment, and those have a median 94.3% of orders in the largest component.
+Always report economic-connectivity coverage and keep balanced-component
+synthetic slices in decomposition campaigns. Before long runs become
+authoritative, add held-out seeds for each lifecycle regime and privacy-reviewed
+redacted captures from the deployed solver boundary.

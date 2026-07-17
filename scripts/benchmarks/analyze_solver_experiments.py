@@ -30,6 +30,8 @@ COLORS = {
     "pacing-bundle": "#ea580c",
     "rc-structural": "#6d28d9",
     "bundle-structural": "#c2410c",
+    "exact-components-pacing-bundle": "#0f766e",
+    "exact-components-bundle-structural": "#0f766e",
     "iter-lp": "#d97706",
     "eg": "#7c3aed",
     "conic-quasi": "#1d4ed8",
@@ -46,6 +48,8 @@ SHORT_LABELS = {
     "pacing-bundle": "Pacing bundle",
     "rc-structural": "RC structural",
     "bundle-structural": "Bundle structural",
+    "exact-components-pacing-bundle": "Exact bundle",
+    "exact-components-bundle-structural": "Exact bundle structural",
     "iter-lp": "IterLP",
     "eg": "EG-FW",
     "conic-quasi": "Quasi",
@@ -548,6 +552,54 @@ def replay_coverage(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return coverage
 
 
+def connectivity_coverage(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Summarize unique books by exact economic-connectivity topology."""
+    unique: dict[tuple[str, Any], dict[str, Any]] = {}
+    for row in records:
+        problem = row.get("problem", {})
+        if "exact_components" not in problem:
+            continue
+        case = row.get("case_id")
+        identity = case if case is not None else row["seed"]
+        unique.setdefault((row["experiment_id"], identity), row)
+
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for (experiment_id, _), row in unique.items():
+        grouped[experiment_id].append(row["problem"])
+
+    coverage = []
+    for experiment_id, problems in sorted(grouped.items()):
+        component_counts = [problem["exact_components"] for problem in problems]
+        market_shares = [
+            problem["largest_component_markets"] / problem["markets"]
+            for problem in problems
+            if problem["markets"] > 0
+        ]
+        order_shares = [
+            problem["largest_component_orders"] / problem["orders"]
+            for problem in problems
+            if problem["orders"] > 0
+        ]
+        mm_shares = [
+            problem["largest_component_mms"] / problem["market_makers"]
+            for problem in problems
+            if problem["market_makers"] > 0
+        ]
+        coverage.append(
+            {
+                "experiment_id": experiment_id,
+                "cases": len(problems),
+                "fragmented_cases": sum(count > 1 for count in component_counts),
+                "components_median": median(component_counts),
+                "components_max": max(component_counts),
+                "largest_market_share_median": median(market_shares),
+                "largest_order_share_median": median(order_shares),
+                "largest_mm_share_median": median(mm_shares),
+            }
+        )
+    return coverage
+
+
 def make_summary(
     protocol: dict[str, Any], metadata: dict[str, Any], records: list[dict[str, Any]], integrity: dict[str, Any]
 ) -> dict[str, Any]:
@@ -582,6 +634,7 @@ def make_summary(
             replay, ("experiment_id", "budget_scale", "solver_id")
         ),
         "replay_coverage": replay_coverage(replay),
+        "connectivity_coverage": connectivity_coverage(records),
         "experiments": aggregate(records, ("experiment_id", "solver_id")),
         "worst_cases": worst_cases(records),
     }
@@ -934,6 +987,50 @@ def write_markdown_v2(summary: dict[str, Any], output: Path) -> None:
             )
         )
 
+    if summary["connectivity_coverage"]:
+        lines.extend(["", "## Economic-connectivity coverage", ""])
+        rows = []
+        for row in summary["connectivity_coverage"]:
+            rows.append(
+                [
+                    row["experiment_id"],
+                    str(row["cases"]),
+                    f"{row['fragmented_cases']}/{row['cases']}",
+                    (
+                        f"{format_number(row['components_median'], 0)}/"
+                        f"{row['components_max']}"
+                    ),
+                    format_number(
+                        100.0 * row["largest_market_share_median"], 1
+                    ),
+                    format_number(
+                        100.0 * row["largest_order_share_median"], 1
+                    ),
+                    (
+                        format_number(
+                            100.0 * row["largest_mm_share_median"], 1
+                        )
+                        if row["largest_mm_share_median"] is not None
+                        else "—"
+                    ),
+                ]
+            )
+        lines.append(
+            markdown_table(
+                [
+                    "Experiment",
+                    "Cases",
+                    "Fragmented",
+                    "Components P50/max",
+                    "Largest cluster markets %",
+                    "Largest cluster orders %",
+                    "Largest cluster MMs %",
+                ],
+                rows,
+            )
+        )
+
+    if summary["replay"]:
         lines.extend(["", "## Replay quality by regime at its tight budget", ""])
         tight_by_experiment = {
             row["experiment_id"]: row["tight_budget_scale"]
