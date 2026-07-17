@@ -538,6 +538,22 @@ impl<'a> ObjectiveModel<'a> {
             .collect()
     }
 
+    pub(crate) fn budgets(&self) -> &[f64] {
+        &self.budgets
+    }
+
+    pub(crate) fn mm_orders(&self, mm_index: usize) -> &[usize] {
+        &self.mm_groups[mm_index]
+    }
+
+    pub(crate) fn mm_value(&self, order_index: usize) -> f64 {
+        self.mm_values[order_index]
+    }
+
+    pub(crate) fn mm_index(&self, order_index: usize) -> Option<usize> {
+        self.log_mm_by_order[order_index]
+    }
+
     pub(crate) fn objective_from_components(&self, utilities: &[f64], linear: f64) -> f64 {
         let mm = utilities
             .iter()

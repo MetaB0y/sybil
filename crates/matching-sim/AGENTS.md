@@ -30,6 +30,7 @@ Run `--help` for the current preset and flag list; do not duplicate clap's compl
 | `retained-cash` / `rfw` | Certified retained-cash generalized Frank–Wolfe; default |
 | `lp` | HiGHS LP plus budget-linearized re-solve; risk-neutral baseline |
 | `conic` | Clarabel conic modes |
+| `direct-dual-conic` | Price-side Clarabel retained-cash research reference in controlled protocols |
 | `milp` | Feature-gated SCIP reference |
 | `decomposed` | Per-group coordination experiment |
 | `all` | Compare enabled implementations |

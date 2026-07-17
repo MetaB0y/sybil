@@ -20,6 +20,7 @@ model harder variants.
 | `PacingBundleSolver` | Experimental fully corrective pacing bundle with a HiGHS oracle |
 | `LpSolver` | Low-latency risk-neutral baseline plus budget-linearized re-solve |
 | `ConicSolver` | Independent Clarabel Linear/Fisher/QuasiFisher reference |
+| `DirectDualConicSolver` | Price-side Clarabel retained-cash certificate and marginal-face research reference |
 | `MilpSolver` | Feature-gated SCIP exact/reference route with timeout |
 | `DecomposedSolver<S>` | Per-group mirror-descent coordination experiment |
 

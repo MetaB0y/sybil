@@ -151,6 +151,7 @@ All solvers take a `Problem` and return a `PipelineResult` (fills, clearing pric
 | **PacingBundleSolver** | `pacing_bundle_solver.rs` | `lp` | Experimental fully corrective pacing bundle with a certified retained-cash gap. |
 | **LpSolver** | `lp_solver.rs` | `lp` | LP via HiGHS + single-pass SLP MM budget shading; low-latency baseline. |
 | **ConicSolver** | `conic_solver.rs` | `conic` | Independent exponential-cone retained-cash reference via Clarabel. |
+| **DirectDualConicSolver** | `direct_dual_conic_solver.rs` | `conic` | Experimental price-side retained-cash certificate; integer landing remains research. |
 | **MilpSolver** | `milp.rs` | `milp` | SCIP MIQCQP. Exact optimal with timeout. |
 | **DecomposedSolver** | `decomposed.rs` | `lp` | Per-market-group decomposition with mirror descent budget coordination. |
 

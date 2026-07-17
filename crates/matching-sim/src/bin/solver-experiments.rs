@@ -22,11 +22,11 @@ use matching_scenarios::{
     generate_scenario,
 };
 use matching_solver::{
-    ConicConfig, ConicSolver, DecomposedSolver, LpConfig, LpSolver, MilpConfig, MilpSolver,
-    MmBudgetMode, ObjectiveMode, PacingBundleConfig, PacingBundleSolver, PipelineResult,
-    RetainedCashConfig, RetainedCashSolver, SolveStatus, TerminationStatus,
-    retained_cash_objective_for_fills, retained_cash_welfare_gap_bound_for_fills,
-    zero_temperature_minting_cost_for_fills,
+    ConicConfig, ConicSolver, DecomposedSolver, DirectDualConicConfig, DirectDualConicSolver,
+    LpConfig, LpSolver, MilpConfig, MilpSolver, MmBudgetMode, ObjectiveMode, PacingBundleConfig,
+    PacingBundleSolver, PipelineResult, RetainedCashConfig, RetainedCashSolver, SolveStatus,
+    TerminationStatus, retained_cash_objective_for_fills,
+    retained_cash_welfare_gap_bound_for_fills, zero_temperature_minting_cost_for_fills,
 };
 use serde::{Deserialize, Serialize};
 use sybil_verifier::verify_match;
@@ -877,6 +877,16 @@ fn execute_solver(solver: &SolverSpec, problem: &Problem) -> SolveOutput {
             conic_solver(solver, ObjectiveMode::Fisher).solve(problem),
             problem,
         ),
+        "direct-dual-conic" => pipeline_output(
+            DirectDualConicSolver::with_config(DirectDualConicConfig {
+                max_iter: required_usize(solver, "max_iterations") as u32,
+                tol: required_f64(solver, "tolerance"),
+                time_limit: required_f64(solver, "time_limit_seconds"),
+                verbose: false,
+            })
+            .solve(problem),
+            problem,
+        ),
         "decomposed-lp" => pipeline_output(
             DecomposedSolver::with_config(
                 LpSolver::new(),
@@ -1378,6 +1388,20 @@ mod tests {
                 .expect("market-like experiment")
                 .seed_start,
             19_000
+        );
+    }
+
+    #[test]
+    fn checked_in_price_pacing_development_protocol_is_valid() {
+        let bytes =
+            include_bytes!("../../../../benchmarks/solver/protocol-price-pacing-development.json");
+        let protocol: Protocol = serde_json::from_slice(bytes).expect("parse protocol");
+        validate_protocol(&protocol).expect("valid protocol");
+        assert!(
+            protocol
+                .solvers
+                .values()
+                .any(|solver| solver.kind == "direct-dual-conic")
         );
     }
 

@@ -117,6 +117,33 @@ freeze the implementation and a new untouched seed range before running it;
 changing seeds, dropping failed books, or selecting a favorable budget point
 after seeing this development matrix would invalidate that comparison.
 
+## Direct price-pacing development protocol
+
+`protocol-price-pacing-development.json` adds the exact price-side Clarabel
+dual to a compact 59-case comparison against RC-FW, pacing bundle, and the
+fill-side Clarabel reference. It reuses the market-like and tight flash
+families, adds numerical-range stress, and isolates pacing dimension at 1, 4,
+and 16 MMs. Seeds `19100..19602` are development-only.
+
+The protocol exists to separate three outcomes that an aggregate objective can
+hide: continuous certificate quality, backend availability, and loss incurred
+while selecting and landing an integer point on a degenerate optimal face.
+Full results and rejected precursor methods are recorded in
+`design/solver-experiments/price-pacing-dual.md`; the raw development artifact
+is reproducible but is not held-out evidence.
+
+Run it with:
+
+```bash
+cargo run --release -p matching-sim --all-features \
+  --bin solver-experiments -- \
+  --protocol benchmarks/solver/protocol-price-pacing-development.json \
+  --source-revision <working-or-frozen-revision> \
+  --output-dir /tmp/price-pacing-development --overwrite
+python3 scripts/benchmarks/analyze_solver_experiments.py \
+  /tmp/price-pacing-development
+```
+
 ## Protocol v2 suite structure
 
 - **Random quality:** neutral slack/tight controls and concentrated tight books,

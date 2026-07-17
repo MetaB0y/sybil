@@ -5,6 +5,7 @@
 //! - **Retained cash** (`retained_cash_solver`): certified generalized Frank--Wolfe
 //! - **Pacing bundle** (`pacing_bundle_solver`): fully corrective research solver
 //! - **Conic** (`conic_solver`): Conic EG via Clarabel
+//! - **Direct dual** (`direct_dual_conic_solver`): price-side Clarabel reference
 //! - **MILP** (`milp`): Mixed-integer via SCIP (exact with timeout)
 
 // Internal modules
@@ -20,6 +21,12 @@ mod lp_solver;
 
 #[cfg(feature = "conic")]
 pub mod conic_solver;
+
+#[cfg(feature = "conic")]
+pub mod direct_dual_conic_solver;
+
+#[cfg(feature = "conic")]
+mod price_pacing_dual;
 
 #[cfg(feature = "retained-cash")]
 pub mod retained_cash_solver;
@@ -63,6 +70,9 @@ pub use pacing_bundle_solver::{PacingBundleConfig, PacingBundleSolver};
 
 #[cfg(feature = "conic")]
 pub use conic_solver::{ConicConfig, ConicSolver, ObjectiveMode};
+
+#[cfg(feature = "conic")]
+pub use direct_dual_conic_solver::{DirectDualConicConfig, DirectDualConicSolver};
 
 #[cfg(feature = "lp")]
 pub use decomposed::DecomposedSolver;

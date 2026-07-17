@@ -1030,6 +1030,19 @@ mod conformance {
         });
         run_solver_conformance(&solver, AvailabilityPolicy::AllowExplicitResearchFailure);
     }
+
+    #[cfg(feature = "conic")]
+    #[test]
+    fn direct_dual_conic_results_conform_and_failures_are_explicit() {
+        let solver = matching_solver::DirectDualConicSolver::with_config(
+            matching_solver::DirectDualConicConfig {
+                max_iter: 100,
+                time_limit: 5.0,
+                ..Default::default()
+            },
+        );
+        run_solver_conformance(&solver, AvailabilityPolicy::AllowExplicitResearchFailure);
+    }
 }
 
 #[cfg(not(any(feature = "retained-cash", feature = "conic", feature = "milp")))]
