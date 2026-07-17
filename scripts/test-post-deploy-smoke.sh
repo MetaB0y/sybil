@@ -59,6 +59,26 @@ for onboarding_enabled in true false; do
         || { echo "FAIL: onboarding policy state enabled=$onboarding_enabled failed deploy-gate checks" >&2; exit 1; }
 done
 
+# A successful allocation with a zero/mismatched balance must block promotion
+# even when policy discovery advertised the intended fixed grant.
+reset_gate
+http() {
+    local method=$1 path=$2 body=${3:-}
+    if [[ "$method|$path" == "GET|/v1/onboarding" ]]; then
+        HTTP_CODE=200
+        HTTP_BODY='{"enabled":true,"account_capacity":1000,"accounts_allocated":10,"accounts_remaining":990,"grant_nanos":1000000000000}'
+    elif [[ "$path" == "/v1/onboarding/accounts" && "$body" == *initial_balance_nanos* ]]; then
+        HTTP_CODE=422; HTTP_BODY='{"error":"unknown field"}'
+    elif [[ "$path" == "/v1/onboarding/accounts" ]]; then
+        HTTP_CODE=200; HTTP_BODY='{"account_id":10,"balance_nanos":0}'
+    else
+        HTTP_CODE=401; HTTP_BODY='{"code":"UNAUTHORIZED"}'
+    fi
+}
+check_onboarding >/dev/null
+[[ "$FAILN" -eq 1 ]] \
+    || { echo "FAIL: onboarding balance mismatch did not block promotion" >&2; exit 1; }
+
 # One unready registry followed by a ready registry + fresh feed proves bounded
 # retries recover without weakening the final assertion.
 reset_gate

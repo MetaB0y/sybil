@@ -658,9 +658,15 @@ check_onboarding() {
     # 3c. Key-only public allocation succeeds while stock remains, or returns
     # the stable exhaustion response after all lifetime ids are consumed.
     http POST /v1/onboarding/accounts "{\"initial_key\":{\"public_key_hex\":\"$pub\"}}" none
-    local acct code; acct="$(echo "$HTTP_BODY" | jget account_id)"; code="$(echo "$HTTP_BODY" | jget code)"
-    if [[ "$enabled" =~ ^(true|True)$ ]] && is_2xx "$HTTP_CODE" && [[ -n "$acct" ]]; then
-        pass "POST /v1/onboarding/accounts (no token) -> $HTTP_CODE, account_id=$acct"
+    local acct code balance
+    acct="$(echo "$HTTP_BODY" | jget account_id)"
+    code="$(echo "$HTTP_BODY" | jget code)"
+    balance="$(echo "$HTTP_BODY" | jget balance_nanos)"
+    if [[ "$enabled" =~ ^(true|True)$ ]] && is_2xx "$HTTP_CODE" \
+       && [[ -n "$acct" && "$balance" =~ ^[0-9]+$ && "$balance" == "$grant" ]]; then
+        pass "POST /v1/onboarding/accounts (no token) -> $HTTP_CODE, account_id=$acct balance_nanos=$balance"
+    elif [[ "$enabled" =~ ^(true|True)$ ]] && is_2xx "$HTTP_CODE"; then
+        fail "POST /v1/onboarding/accounts returned balance_nanos=${balance:-missing}; advertised grant_nanos=$grant: $HTTP_BODY"
     elif [[ "$HTTP_CODE" == "409" && "$code" == "PUBLIC_ACCOUNT_CAPACITY_EXHAUSTED" ]]; then
         pass "exhausted public onboarding -> 409 PUBLIC_ACCOUNT_CAPACITY_EXHAUSTED (policy sample enabled=$enabled)"
     else
