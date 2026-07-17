@@ -49,6 +49,10 @@ log = logging.getLogger(__name__)
 # reference-backed market set on this cadence until one appears.
 MARKET_DISCOVERY_RETRY_SECONDS = 30
 REFERENCE_PRICE_REFRESH_SECONDS = 10
+# Crossing noise must never leave a resting order behind. BaseAgent deliberately
+# waits while an account has pending orders, so GTC/GTD would turn one unmatched
+# synthetic batch into a permanent actor stall.
+CROSSING_NOISE_TIME_IN_FORCE: TimeInForce = "IOC"
 STAGE1_AB_MODE = "syb-114-stage1-ab"
 STAGE1_AB_VARIANTS = (
     {
@@ -86,9 +90,6 @@ class LiveConfig:
     # Fixed across the whole synthetic cohort so increasing actor count does
     # not silently mint more load capital.
     synthetic_total_capital: float = 300_000.0
-    # Sparse aggressive flow uses IOC so unmatched noise does not accumulate or
-    # prevent an actor from participating in later blocks.
-    noise_time_in_force: TimeInForce = "IOC"
     synthetic_strategy: SyntheticStrategyConfig = field(default_factory=SyntheticStrategyConfig)
     db_path: str = ""
     metrics_host: str = "0.0.0.0"
@@ -110,6 +111,14 @@ class LiveTopology:
     analysts: list[PersonaAnalyst]
     traders: list[LiveLlmTrader]
     paired_analyst_groups: list[tuple[PersonaAnalyst, PersonaAnalyst]] = field(default_factory=list)
+
+
+def _noise_order_time_in_force(
+    crossing_enabled: bool,
+    ordinary_time_in_force: TimeInForce,
+) -> TimeInForce:
+    """Keep crossing flow ephemeral while preserving native-noise policy."""
+    return CROSSING_NOISE_TIME_IN_FORCE if crossing_enabled else ordinary_time_in_force
 
 
 def _validate_stage1_ab_config(config: LiveConfig) -> str | None:
@@ -1133,7 +1142,6 @@ async def run_live(config: LiveConfig):
                     config=noise_cfg,
                     group_members_by_market=group_members_by_market,
                 )
-                noise.time_in_force = config.noise_time_in_force
             else:
                 noise = NativeNoiseTrader(
                     client=client,
@@ -1143,14 +1151,17 @@ async def run_live(config: LiveConfig):
                     markets_info=synthetic_markets_info,
                     config=noise_cfg,
                 )
-                noise.time_in_force = config.order_time_in_force
+            noise.time_in_force = _noise_order_time_in_force(
+                crossing,
+                config.order_time_in_force,
+            )
             noise_traders.append(noise)
         log.info(
             "Attached %d fast traders and %d %s noise traders (TIF=%s) over %d selected markets with $%.0f total synthetic capital ($%.0f/account)",
             len(fast_traders),
             len(noise_traders),
             "crossing" if crossing else "native",
-            config.noise_time_in_force if crossing else config.order_time_in_force,
+            _noise_order_time_in_force(crossing, config.order_time_in_force),
             len(synthetic_markets_info),
             config.synthetic_total_capital,
             synthetic_balance_nanos / NANOS_PER_DOLLAR,
@@ -1507,10 +1518,6 @@ def main():
         crossing_enabled = _env_bool("ARENA_NOISE_CROSSING", True)
         crossing_edge = _env_float("ARENA_NOISE_CROSSING_EDGE", 0.03)
         crossing_markets_per_block = _env_int("ARENA_NOISE_MARKETS_PER_BLOCK", 4)
-        noise_tif_raw = os.environ.get("ARENA_NOISE_TIF", "IOC").strip().upper()
-        if noise_tif_raw not in ("GTC", "IOC", "GTD"):
-            raise ValueError("ARENA_NOISE_TIF must be one of: GTC, IOC, GTD")
-        noise_time_in_force: TimeInForce = noise_tif_raw  # type: ignore[assignment]
         fair_value_ttl_s = (
             args.fair_value_ttl_s
             if args.fair_value_ttl_s is not None
@@ -1573,7 +1580,6 @@ def main():
         fast_count=fast_count,
         noise_count=noise_count,
         synthetic_total_capital=synthetic_total_capital,
-        noise_time_in_force=noise_time_in_force,
         synthetic_strategy=SyntheticStrategyConfig(
             max_inventory=synthetic_max_inventory,
             quote_width=synthetic_quote_width,
