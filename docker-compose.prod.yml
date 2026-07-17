@@ -103,7 +103,9 @@ services:
       - "--mm-budget-dollars=5000"
       - "--mm-initial-balance-dollars=1000000"
       - "--mm-max-markets=0"
-      - "--mm-max-orders-per-block=64"
+      # 72 mirrors need at most 288 current quote orders (four per outcome).
+      # Use the API admission ceiling so the MM does not rotate coverage.
+      - "--mm-max-orders-per-block=512"
       - "--mapping-store-path=/data/polymarket_mapping.json"
       - "--sync-interval-secs=120"
       - "--curated-markets-path=/etc/sybil/curated_markets.json"

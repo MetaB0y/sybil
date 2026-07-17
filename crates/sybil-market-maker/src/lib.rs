@@ -36,6 +36,11 @@ pub struct PriceSnapshot {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MmProgress {
     pub tracked_markets: usize,
+    pub last_eligible_quote_markets: usize,
+    pub last_quoted_markets: usize,
+    pub last_quote_orders: usize,
+    pub quote_capacity_limited: bool,
+    pub capacity_limited_quote_cycles: u64,
     pub last_observed_block: Option<u64>,
     pub last_completed_quote_block: Option<u64>,
     pub last_successful_submission_block: Option<u64>,
@@ -458,6 +463,29 @@ impl MmActor {
         self.publish_progress();
     }
 
+    fn record_quote_selection(
+        &mut self,
+        eligible_markets: usize,
+        orders: &[OrderSpec],
+        capacity_limited: bool,
+    ) {
+        self.state.progress.last_eligible_quote_markets = eligible_markets;
+        self.state.progress.last_quoted_markets = orders
+            .iter()
+            .map(order_market_id)
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        self.state.progress.last_quote_orders = orders.len();
+        self.state.progress.quote_capacity_limited = capacity_limited;
+        if capacity_limited {
+            self.state.progress.capacity_limited_quote_cycles = self
+                .state
+                .progress
+                .capacity_limited_quote_cycles
+                .saturating_add(1);
+        }
+    }
+
     /// Stop quoting a market and free its live-set slot. Returns `true` if the
     /// market was tracked. Used by resolution untracking (PM-1 root fix) and by
     /// the batch-rejection defence below.
@@ -724,6 +752,7 @@ impl MmActor {
         let budget_nanos = self.compute_budget(&snapshot);
         if budget_nanos == 0 {
             debug!("budget exhausted (exposure at max), skipping block");
+            self.record_quote_selection(0, &[], false);
             self.complete_quote_cycle(block.height);
             return;
         }
@@ -797,7 +826,11 @@ impl MmActor {
             max_position: self.config.mm_max_position as i64,
             quote_size_dollars: self.config.mm_quote_size_dollars,
         };
-        let start_index = self.state.next_quote_index;
+        let start_index = if quote_inputs.is_empty() {
+            0
+        } else {
+            self.state.next_quote_index % quote_inputs.len()
+        };
         let (orders, next_quote_index) = select_rotating_quotes(
             &quote_inputs,
             &quote_config,
@@ -805,6 +838,17 @@ impl MmActor {
             self.config.mm_max_orders_per_block,
         );
         self.state.next_quote_index = next_quote_index;
+        let capacity_limited = !quote_inputs.is_empty() && next_quote_index != start_index;
+        self.record_quote_selection(quote_inputs.len(), &orders, capacity_limited);
+        if capacity_limited {
+            warn!(
+                eligible_markets = quote_inputs.len(),
+                quoted_markets = self.state.progress.last_quoted_markets,
+                orders = orders.len(),
+                limit = self.config.mm_max_orders_per_block,
+                "MM quote capacity limited; rotating partial market coverage"
+            );
+        }
 
         // 5. Submit (IO). A whole-batch rejection that names a non-tradeable
         //    market lets us drop the poison defensively (PM-1 defence in depth)
@@ -903,6 +947,15 @@ fn poisoned_market_from_error(err: &sybil_client::Error) -> Option<u32> {
         return None;
     }
     response.details?.market_id
+}
+
+fn order_market_id(order: &OrderSpec) -> u32 {
+    match order {
+        OrderSpec::BuyYes { market_id, .. }
+        | OrderSpec::BuyNo { market_id, .. }
+        | OrderSpec::SellYes { market_id, .. }
+        | OrderSpec::SellNo { market_id, .. } => *market_id,
+    }
 }
 
 fn now_ms() -> u64 {
@@ -1088,6 +1141,39 @@ mod tests {
             group_key: None,
             group_size: 0,
         });
+    }
+
+    #[test]
+    fn quote_selection_progress_exposes_capacity_limited_coverage() {
+        let (progress_tx, progress_rx) = watch::channel(MmProgress::default());
+        let (mut actor, _price_tx) = test_actor(progress_tx);
+        let orders = vec![
+            OrderSpec::BuyYes {
+                market_id: 7,
+                limit_price_nanos: 400_000_000,
+                quantity: 1_000,
+            },
+            OrderSpec::BuyNo {
+                market_id: 7,
+                limit_price_nanos: 400_000_000,
+                quantity: 1_000,
+            },
+            OrderSpec::BuyYes {
+                market_id: 8,
+                limit_price_nanos: 400_000_000,
+                quantity: 1_000,
+            },
+        ];
+
+        actor.record_quote_selection(5, &orders, true);
+        actor.publish_progress();
+
+        let progress = progress_rx.borrow();
+        assert_eq!(progress.last_eligible_quote_markets, 5);
+        assert_eq!(progress.last_quoted_markets, 2);
+        assert_eq!(progress.last_quote_orders, 3);
+        assert!(progress.quote_capacity_limited);
+        assert_eq!(progress.capacity_limited_quote_cycles, 1);
     }
 
     fn block_resolving(market_ids: &[u32]) -> PublicBlockResponse {

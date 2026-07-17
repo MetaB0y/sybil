@@ -125,6 +125,10 @@ struct ReadinessResponse {
     problems: Vec<&'static str>,
     tracked_tokens: usize,
     tracked_markets: usize,
+    eligible_quote_markets: usize,
+    quoted_markets: usize,
+    quote_orders: usize,
+    quote_capacity_limited: bool,
     last_sync_success_timestamp_ms: u64,
     last_feed_update_timestamp_ms: u64,
     last_mm_progress_timestamp_ms: u64,
@@ -202,6 +206,10 @@ impl MonitoringState {
             problems,
             tracked_tokens: prices.midpoints.len(),
             tracked_markets: mm.tracked_markets,
+            eligible_quote_markets: mm.last_eligible_quote_markets,
+            quoted_markets: mm.last_quoted_markets,
+            quote_orders: mm.last_quote_orders,
+            quote_capacity_limited: mm.quote_capacity_limited,
             last_sync_success_timestamp_ms: integration.sync.last_success_timestamp_ms,
             last_feed_update_timestamp_ms: last_feed_update_ms,
             last_mm_progress_timestamp_ms: mm.last_progress_timestamp_ms,
@@ -284,6 +292,38 @@ impl MonitoringState {
             "sybil_polymarket_mm_tracked_markets",
             "Markets currently tracked by the shared MM actor.",
             mm.tracked_markets.try_into().unwrap_or(u64::MAX),
+        );
+        gauge(
+            &mut out,
+            "sybil_polymarket_mm_eligible_quote_markets",
+            "Markets eligible for quotes in the latest completed MM cycle.",
+            mm.last_eligible_quote_markets
+                .try_into()
+                .unwrap_or(u64::MAX),
+        );
+        gauge(
+            &mut out,
+            "sybil_polymarket_mm_quoted_markets",
+            "Distinct markets included in the latest MM quote set.",
+            mm.last_quoted_markets.try_into().unwrap_or(u64::MAX),
+        );
+        gauge(
+            &mut out,
+            "sybil_polymarket_mm_quote_orders",
+            "Orders included in the latest MM quote set.",
+            mm.last_quote_orders.try_into().unwrap_or(u64::MAX),
+        );
+        gauge(
+            &mut out,
+            "sybil_polymarket_mm_quote_capacity_limited",
+            "Whether the latest MM cycle omitted eligible markets after reaching its order cap.",
+            u64::from(mm.quote_capacity_limited),
+        );
+        counter(
+            &mut out,
+            "sybil_polymarket_mm_quote_capacity_limited_cycles_total",
+            "MM quote cycles that rotated partial coverage after reaching the order cap.",
+            mm.capacity_limited_quote_cycles,
         );
         optional_gauge(
             &mut out,
@@ -493,12 +533,16 @@ mod tests {
         });
         let (_mm_tx, mm_rx) = watch::channel(MmProgress {
             tracked_markets: 1,
+            last_eligible_quote_markets: 1,
+            last_quoted_markets: 1,
+            last_quote_orders: 2,
             last_observed_block: Some(10),
             last_completed_quote_block: Some(10),
             last_successful_submission_block: Some(10),
             successful_submissions: 8,
             failed_submissions: 1,
             last_progress_timestamp_ms: now,
+            ..MmProgress::default()
         });
         MonitoringState::new(
             integration,
@@ -551,6 +595,10 @@ mod tests {
         assert!(metrics.contains("sybil_polymarket_ready 1"));
         assert!(metrics.contains("sybil_polymarket_sync_cycles_success_total 2"));
         assert!(metrics.contains("sybil_polymarket_feed_tracked_tokens 1"));
+        assert!(metrics.contains("sybil_polymarket_mm_eligible_quote_markets 1"));
+        assert!(metrics.contains("sybil_polymarket_mm_quoted_markets 1"));
+        assert!(metrics.contains("sybil_polymarket_mm_quote_orders 2"));
+        assert!(metrics.contains("sybil_polymarket_mm_quote_capacity_limited 0"));
         assert!(metrics.contains("sybil_polymarket_mm_submissions_success_total 8"));
         assert!(metrics.contains("sybil_polymarket_resolution_ticks_success_total 4"));
     }
