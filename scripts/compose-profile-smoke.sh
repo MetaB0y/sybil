@@ -327,13 +327,15 @@ prod_arena_service_block=$(
     ' docker-compose.prod.yml
 )
 for argument in \
-    '"--market-profile=important-news"' \
-    '"--max-markets=12"' \
+    '"--market-profile=all"' \
     '"--require-reference-prices"'; do
     grep -Fq -- "$argument" <<<"$prod_arena_service_block" \
         || fail "production arena does not pin focused reference-backed market selection ($argument)"
 done
-pass "production arena selects a bounded reference-backed news cohort"
+if grep -Fq -- '"--max-markets=' <<<"$prod_arena_service_block"; then
+    fail "production arena still hard-caps its live analyst market cohort"
+fi
+pass "production arena selects every fresh reference-backed analyst market"
 
 arena_service_block=$(
     awk '
@@ -387,6 +389,7 @@ import re
 import sys
 
 keys = (
+    "SYBIL_DEPLOYMENT_PROFILE",
     "SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS",
     "SYBIL_BLOCK_INTERVAL_MS",
     "SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS",
@@ -413,7 +416,8 @@ for key in keys:
 '
 )
 expected_retention_env=$(printf '%s\n' \
-    'SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS=0' \
+    'SYBIL_DEPLOYMENT_PROFILE=private-devnet' \
+    'SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS=1000000000000' \
     'SYBIL_BLOCK_INTERVAL_MS=10000' \
     'SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS=60480' \
     'SYBIL_ACKNOWLEDGED_PROOF_JOB_MAINTENANCE_INTERVAL_BLOCKS=60' \
@@ -422,8 +426,22 @@ expected_retention_env=$(printf '%s\n' \
     'SYBIL_CANONICAL_ARCHIVE_MAINTENANCE_INTERVAL_BLOCKS=60' \
     'SYBIL_CANONICAL_ARCHIVE_MAX_ROWS_PER_PASS=10000')
 [[ "$retention_env" == "$expected_retention_env" ]] \
-    || fail "production compose does not pin archive and acknowledged proof-job retention"
-pass "production compose pins market, archive, and acknowledged proof-job retention"
+    || fail "product compose does not pin private-devnet funding and retention"
+
+real_value_funding=$(
+    SYBIL_DEPLOYMENT_PROFILE=prod SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS=0 \
+        compose config | python3 -c '
+import sys
+import yaml
+
+environment = yaml.safe_load(sys.stdin)["services"]["sybil-api"]["environment"]
+print(environment["SYBIL_DEPLOYMENT_PROFILE"])
+print(environment["SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS"])
+'
+)
+[[ "$real_value_funding" == $'prod\n0' ]] \
+    || fail "product overlay cannot be explicitly switched to the zero-grant prod posture"
+pass "product compose pins private-devnet funding and retains an explicit real-value posture"
 
 durability_contract=$(
     compose config | python3 -c '

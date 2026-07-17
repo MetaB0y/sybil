@@ -388,6 +388,7 @@ class SybilClient:
             expiry_timestamp_ms=data.get("expiry_timestamp_ms", 0),
             created_at_ms=data.get("created_at_ms", 0),
             volume_nanos=data.get("volume_nanos", 0),
+            closed=data.get("closed", False),
         )
 
     # === Orders ===

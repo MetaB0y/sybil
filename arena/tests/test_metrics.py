@@ -28,6 +28,7 @@ def test_registry_exposes_expected_series():
     for name in (
         "sybil_arena_selected_markets",
         "sybil_arena_selected_reference_markets",
+        "sybil_arena_synthetic_markets",
         "sybil_news_feed_poll_in_progress",
         "sybil_news_feed_last_candidates",
         "sybil_news_feed_last_relevant_articles",
@@ -75,6 +76,8 @@ def test_set_market_selection_sets_gauges():
     metrics.set_market_selection(12, 7)
     assert _value(metrics, "sybil_arena_selected_markets") == 12
     assert _value(metrics, "sybil_arena_selected_reference_markets") == 7
+    metrics.set_synthetic_market_selection(206)
+    assert _value(metrics, "sybil_arena_synthetic_markets") == 206
 
 
 def test_news_poll_success_updates_counters_and_gauges():

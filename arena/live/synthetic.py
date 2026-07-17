@@ -4,7 +4,8 @@ The mirror market maker lives in ``sybil-polymarket``. These arena strategies
 are the lightweight taker flow around it:
 
 - reference-backed fast traders move Sybil prices toward Polymarket;
-- native noise traders perturb local prices around the previous Sybil batch.
+- crossing noise creates sparse opposing flow across the full live universe;
+- native-only noise remains the explicit non-crossing fallback.
 """
 
 from __future__ import annotations

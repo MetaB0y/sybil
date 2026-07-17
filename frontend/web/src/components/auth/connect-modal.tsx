@@ -31,6 +31,10 @@ import {
   useConnectModalOpen,
   useSetConnectModalOpen,
 } from "@/lib/account/use-account";
+import {
+  demoGrantCopy,
+  useOnboardingPolicy,
+} from "@/lib/account/use-onboarding-policy";
 import { isWebAuthnAvailable } from "@/lib/auth/webauthn";
 import { trapTabFocus } from "@/lib/accessibility/focus-trap";
 
@@ -311,6 +315,7 @@ function TabButton({
 
 function CreateTab() {
   const setOpen = useSetConnectModalOpen();
+  const policy = useOnboardingPolicy();
   const [mode, setMode] = useState<CreateAccountKeyMode>(
     isWebAuthnAvailable() ? "passkey" : "local_key",
   );
@@ -399,9 +404,9 @@ function CreateTab() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <p style={{ ...bodyText, margin: 0 }}>
-        Create one of the limited demo accounts. Sybil assigns the same fixed
-        play-money grant to everyone; callers cannot choose or mint a balance.
-        Use a passkey for device-backed signing, or a local key for
+        Create one of the limited demo accounts.{" "}
+        {demoGrantCopy(policy.data?.grant_nanos)} Callers cannot choose or mint
+        a balance. Use a passkey for device-backed signing, or a local key for
         browser-only testing.
       </p>
 

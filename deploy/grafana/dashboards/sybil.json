@@ -385,7 +385,9 @@
       "targets": [
         { "expr": "sybil_markets_active_total", "legendFormat": "active", "refId": "A" },
         { "expr": "sybil_markets_priced_total", "legendFormat": "priced", "refId": "B" },
-        { "expr": "sybil_markets_with_volume_total", "legendFormat": "with volume", "refId": "C" }
+        { "expr": "sybil_markets_with_volume_total", "legendFormat": "with volume", "refId": "C" },
+        { "expr": "sybil_arena_selected_markets", "legendFormat": "analyst cohort", "refId": "D" },
+        { "expr": "sybil_arena_synthetic_markets", "legendFormat": "synthetic cohort", "refId": "E" }
       ],
       "fieldConfig": {
         "defaults": { "unit": "none", "thresholds": { "steps": [{ "color": "green", "value": null }] } },

@@ -13,7 +13,10 @@ import {
 import { useMarketsIndex, type IndexMarket } from "@/lib/markets/use-markets";
 import { useEventTradersMap } from "@/lib/markets/use-event-traders";
 import { selectPricesByMarketId, useStore } from "@/lib/store";
-import { selectIndexCards } from "@/lib/markets/select-index-cards";
+import {
+  selectIndexCards,
+  summarizeIndexCards,
+} from "@/lib/markets/select-index-cards";
 import { buildIndexCards } from "@/lib/markets/build-index-cards";
 
 /** Cards (events) shown per page on the markets index. */
@@ -107,17 +110,9 @@ function MarketsPageInner({
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
-  // Header counts — same "{events} events · {markets} markets" shape whether or
-  // not a filter is active. Derived from `filtered` (≡ all cards when nothing
-  // is filtered), so picking a category just narrows both numbers instead of
-  // switching to a different "N of M cards" wording. Summing markets per card
-  // equals bundle.total when unfiltered (every market lives in exactly one card).
-  const shownEvents = filtered?.length ?? 0;
-  const shownMarkets =
-    filtered?.reduce(
-      (n, it) => n + (it.kind === "multi" ? it.markets.length : 1),
-      0,
-    ) ?? 0;
+  // One card is one market in product language. A multi-outcome market contains
+  // several independently traded outcome rows in the API.
+  const shown = summarizeIndexCards(filtered ?? []);
 
   return (
     <>
@@ -166,7 +161,7 @@ function MarketsPageInner({
           >
             {bundle == null
               ? "loading…"
-              : `${shownEvents} events · ${shownMarkets} markets`}
+              : `${shown.markets} markets · ${shown.outcomes} outcomes`}
           </p>
         </header>
 

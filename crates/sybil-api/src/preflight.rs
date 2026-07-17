@@ -8,8 +8,8 @@
 //! 1. names the active [`DeploymentProfile`] (`SYBIL_DEPLOYMENT_PROFILE`);
 //! 2. surfaces every durability/cache/prover knob whose value differs from the
 //!    prod-intended baseline in one structured startup log block; and
-//! 3. fail-closes a `prod` start when a dev-only value is wired in, mirroring
-//!    the fail-closed service-token posture in [`crate::app`]. The
+//! 3. fail-closes locked profiles when a forbidden dev-only value is wired in,
+//!    mirroring the fail-closed service-token posture in [`crate::app`]. The
 //!    `SYBIL_ALLOW_DEV_KNOBS=1` escape hatch downgrades the refusal to a loud
 //!    warning for deliberate one-off operations.
 //!
@@ -27,20 +27,25 @@ pub enum DeploymentProfile {
     Local,
     /// Public shared devnet. Dev-tuned but multi-user; no prod guarantees.
     Devnet,
-    /// Production / devnet-v2. Durable, locked-down, fail-closed.
+    /// Product-facing play-money devnet. Prod guardrails with a fixed public
+    /// grant as the sole permitted dev-only deviation.
+    PrivateDevnet,
+    /// Real-value production. Durable, locked-down, fail-closed.
     Prod,
 }
 
 impl DeploymentProfile {
     /// Parse the `SYBIL_DEPLOYMENT_PROFILE` value. Case-insensitive; accepts
-    /// `production` as an alias for `prod`.
+    /// `product-devnet` and `production` as aliases.
     pub fn parse(raw: &str) -> Result<Self, String> {
         match raw.trim().to_ascii_lowercase().as_str() {
             "local" => Ok(Self::Local),
             "devnet" => Ok(Self::Devnet),
+            "private-devnet" | "product-devnet" => Ok(Self::PrivateDevnet),
             "prod" | "production" => Ok(Self::Prod),
             other => Err(format!(
-                "unknown SYBIL_DEPLOYMENT_PROFILE '{other}' (expected local|devnet|prod)"
+                "unknown SYBIL_DEPLOYMENT_PROFILE '{other}' \
+                 (expected local|devnet|private-devnet|prod)"
             )),
         }
     }
@@ -49,8 +54,17 @@ impl DeploymentProfile {
         match self {
             Self::Local => "local",
             Self::Devnet => "devnet",
+            Self::PrivateDevnet => "private-devnet",
             Self::Prod => "prod",
         }
+    }
+
+    fn fail_closed(self) -> bool {
+        matches!(self, Self::PrivateDevnet | Self::Prod)
+    }
+
+    fn permits_deviation(self, deviation: &Deviation) -> bool {
+        self == Self::PrivateDevnet && deviation.knob == "SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS"
     }
 }
 
@@ -63,10 +77,10 @@ pub struct Deviation {
     pub value: String,
     /// The prod-intended value, rendered for logs.
     pub prod_intended: &'static str,
-    /// `true` when this value is a dev-only tradeoff that must not run in
-    /// `prod` (loses durability / opens the trust boundary). These block a
-    /// `prod` start unless explicitly overridden. `false` is an informational
-    /// deviation (logged, never blocks).
+    /// `true` when this value is unsafe in a real-value production posture
+    /// (loses durability / opens the trust boundary / mints play money).
+    /// Locked profiles block it unless explicitly permitted or overridden.
+    /// `false` is an informational deviation (logged, never blocks).
     pub dev_only: bool,
 }
 
@@ -79,15 +93,22 @@ pub struct PreflightReport {
 }
 
 impl PreflightReport {
-    /// Dev-only deviations — the subset that fail-closes a prod start.
+    /// Every deviation that is unsafe in a real-value production posture.
     pub fn violations(&self) -> Vec<&Deviation> {
         self.deviations.iter().filter(|d| d.dev_only).collect()
     }
 
-    /// Whether a `prod` start must be refused given the override flag. Fail
-    /// closed: any dev-only value on `prod` refuses unless `allow_dev_knobs`.
-    pub fn blocks_prod_start(&self, allow_dev_knobs: bool) -> bool {
-        self.profile == DeploymentProfile::Prod && !allow_dev_knobs && !self.violations().is_empty()
+    /// Deviations forbidden by the selected fail-closed posture. A private
+    /// devnet permits only its explicit fixed play-money grant.
+    pub fn blocking_violations(&self) -> Vec<&Deviation> {
+        self.violations()
+            .into_iter()
+            .filter(|deviation| !self.profile.permits_deviation(deviation))
+            .collect()
+    }
+
+    pub fn blocks_start(&self, allow_dev_knobs: bool) -> bool {
+        self.profile.fail_closed() && !allow_dev_knobs && !self.blocking_violations().is_empty()
     }
 }
 
@@ -286,9 +307,9 @@ pub fn log_report(report: &PreflightReport) {
 }
 
 /// Run the full preflight: build the report, log it, and enforce the
-/// prod fail-closed guardrail (criterion 3).
+/// locked-profile fail-closed guardrail (criterion 3).
 ///
-/// Returns `Err` with a human-readable message when a `prod` start must be
+/// Returns `Err` with a human-readable message when a locked start must be
 /// refused. On the `SYBIL_ALLOW_DEV_KNOBS=1` override, logs a loud error and
 /// returns `Ok`.
 pub fn run_preflight(config: &ApiConfig) -> Result<(), String> {
@@ -302,11 +323,20 @@ pub fn run_preflight(config: &ApiConfig) -> Result<(), String> {
     let report = build_report(config)?;
     log_report(&report);
 
-    if report.profile != DeploymentProfile::Prod {
+    if report.profile == DeploymentProfile::PrivateDevnet {
+        if config.public_account_capacity == 0 {
+            return Err("private-devnet requires SYBIL_PUBLIC_ACCOUNT_CAPACITY > 0".to_string());
+        }
+        if config.public_account_grant_nanos == 0 {
+            return Err("private-devnet requires SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS > 0".to_string());
+        }
+    }
+
+    if !report.profile.fail_closed() {
         return Ok(());
     }
 
-    let violations = report.violations();
+    let violations = report.blocking_violations();
     if violations.is_empty() {
         return Ok(());
     }
@@ -320,14 +350,16 @@ pub fn run_preflight(config: &ApiConfig) -> Result<(), String> {
     if config.allow_dev_knobs {
         tracing::error!(
             dev_only_knobs = %listed,
-            "SYBIL_ALLOW_DEV_KNOBS override active: starting prod with dev-only knobs set — NOT a safe steady state"
+            deployment_profile = report.profile.as_str(),
+            "SYBIL_ALLOW_DEV_KNOBS override active: starting a locked profile with forbidden dev-only knobs set — NOT a safe steady state"
         );
         return Ok(());
     }
 
     Err(format!(
-        "refusing to start with SYBIL_DEPLOYMENT_PROFILE=prod: dev-only knobs are set [{listed}]. \
-         Fix the configuration, or set SYBIL_ALLOW_DEV_KNOBS=1 to override (loudly, at your own risk)."
+        "refusing to start with SYBIL_DEPLOYMENT_PROFILE={}: forbidden dev-only knobs are set [{listed}]. \
+         Fix the configuration, or set SYBIL_ALLOW_DEV_KNOBS=1 to override (loudly, at your own risk).",
+        report.profile.as_str()
     ))
 }
 
@@ -369,6 +401,14 @@ mod tests {
             Ok(DeploymentProfile::Devnet)
         );
         assert_eq!(
+            DeploymentProfile::parse("private-devnet"),
+            Ok(DeploymentProfile::PrivateDevnet)
+        );
+        assert_eq!(
+            DeploymentProfile::parse("product-devnet"),
+            Ok(DeploymentProfile::PrivateDevnet)
+        );
+        assert_eq!(
             DeploymentProfile::parse("Prod"),
             Ok(DeploymentProfile::Prod)
         );
@@ -387,7 +427,7 @@ mod tests {
             "unexpected violations: {:?}",
             report.violations()
         );
-        assert!(!report.blocks_prod_start(false));
+        assert!(!report.blocks_start(false));
         assert!(run_preflight(&prod_ready_config()).is_ok());
     }
 
@@ -404,7 +444,7 @@ mod tests {
                 .iter()
                 .any(|d| d.knob == "SYBIL_DEV_MODE")
         );
-        assert!(report.blocks_prod_start(false));
+        assert!(report.blocks_start(false));
         assert!(run_preflight(&config).is_err());
     }
 
@@ -434,7 +474,7 @@ mod tests {
             service_token: String::new(),
             ..prod_ready_config()
         };
-        assert!(build_report(&config).unwrap().blocks_prod_start(false));
+        assert!(build_report(&config).unwrap().blocks_start(false));
         assert!(run_preflight(&config).is_err());
     }
 
@@ -467,7 +507,7 @@ mod tests {
                 .iter()
                 .any(|d| d.knob == "SYBIL_ADMIN_FEED_KEY_PATH")
         );
-        assert!(report.blocks_prod_start(false));
+        assert!(report.blocks_start(false));
         assert!(run_preflight(&config).is_err());
     }
 
@@ -481,7 +521,7 @@ mod tests {
         let report = build_report(&config).unwrap();
         assert!(!report.violations().is_empty());
         // The report still records the violation; only the override gates start.
-        assert!(!report.blocks_prod_start(true));
+        assert!(!report.blocks_start(true));
         assert!(run_preflight(&config).is_ok());
     }
 
@@ -499,8 +539,50 @@ mod tests {
         // Deviations are still surfaced for the log block…
         assert!(!report.violations().is_empty());
         // …but only prod fail-closes.
-        assert!(!report.blocks_prod_start(false));
+        assert!(!report.blocks_start(false));
         assert!(run_preflight(&config).is_ok());
+    }
+
+    #[test]
+    fn private_devnet_requires_and_permits_only_a_fixed_public_grant() {
+        let config = ApiConfig {
+            deployment_profile: "private-devnet".to_string(),
+            public_account_capacity: 1000,
+            public_account_grant_nanos: 1_000_000_000_000,
+            ..prod_ready_config()
+        };
+        let report = build_report(&config).unwrap();
+        assert_eq!(report.profile, DeploymentProfile::PrivateDevnet);
+        assert_eq!(report.blocking_violations(), Vec::<&Deviation>::new());
+        assert!(!report.blocks_start(false));
+        assert!(run_preflight(&config).is_ok());
+    }
+
+    #[test]
+    fn private_devnet_rejects_empty_onboarding_and_other_dev_knobs() {
+        for config in [
+            ApiConfig {
+                deployment_profile: "private-devnet".to_string(),
+                public_account_capacity: 0,
+                public_account_grant_nanos: 1,
+                ..prod_ready_config()
+            },
+            ApiConfig {
+                deployment_profile: "private-devnet".to_string(),
+                public_account_capacity: 1000,
+                public_account_grant_nanos: 0,
+                ..prod_ready_config()
+            },
+            ApiConfig {
+                deployment_profile: "private-devnet".to_string(),
+                public_account_capacity: 1000,
+                public_account_grant_nanos: 1,
+                dev_mode: true,
+                ..prod_ready_config()
+            },
+        ] {
+            assert!(run_preflight(&config).is_err());
+        }
     }
 
     #[test]

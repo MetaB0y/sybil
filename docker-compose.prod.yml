@@ -13,17 +13,17 @@ services:
     volumes:
       - sybil-data:/data
     environment:
-      # Selects the prod durability posture and arms the startup preflight
-      # guardrail (SYB-133): sybil-api refuses to boot if any dev-only knob is
-      # wired in. Override deliberately with SYBIL_ALLOW_DEV_KNOBS=1.
+      # Product devnet keeps the prod durability/trust guardrails while
+      # explicitly permitting its one play-money behavior. A real-value
+      # deployment must override profile=prod and grant=0.
       # See docs/architecture/Deployment Profiles.md.
-      SYBIL_DEPLOYMENT_PROFILE: "prod"
+      SYBIL_DEPLOYMENT_PROFILE: "${SYBIL_DEPLOYMENT_PROFILE:-private-devnet}"
       SYBIL_DEV_MODE: "false"
       SYBIL_PUBLIC_ACCOUNT_CAPACITY: "${SYBIL_PUBLIC_ACCOUNT_CAPACITY:-1000}"
-      # Real-value posture: anonymous identities start empty and must receive
-      # capital through authenticated L1 deposits. A nonzero value is a
-      # preflight-blocking dev-only override.
-      SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS: "${SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS:-0}"
+      # Fixed $1,000 of non-redeemable play money for browser onboarding.
+      # Anonymous callers cannot choose the amount. The prod profile refuses
+      # this value and requires an explicit zero override.
+      SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS: "${SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS:-1000000000000}"
       SYBIL_SERVICE_TOKEN: "${SYBIL_SERVICE_TOKEN:?Set SYBIL_SERVICE_TOKEN in /opt/sybil/.env}"
       SYBIL_CORS_ORIGINS: "${SYBIL_CORS_ORIGINS:-}"
       # A null Compose value omits the variable unless it is explicitly set in
@@ -128,11 +128,10 @@ services:
       - "--model=deepseek/deepseek-v4-flash"
       - "--db-path=/data/decisions.db"
       - "--metrics-port=9101"
-      # Keep the live bot cohort aligned with the deliberately small curated
-      # mirror. This also prevents pre-reset legacy mirror rows from silently
-      # returning to Arena after an opt-in experiment is retired.
-      - "--market-profile=important-news"
-      - "--max-markets=12"
+      # Analysts cover every fresh reference-backed mirror market. Arena routes
+      # cheap synthetic flow independently across the full public native +
+      # mirrored universe, so this selection no longer limits market activity.
+      - "--market-profile=all"
       - "--require-reference-prices"
 
     logging: *default-logging
