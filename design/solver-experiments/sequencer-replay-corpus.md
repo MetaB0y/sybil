@@ -75,13 +75,63 @@ At the captured slack budgets, LP, RC structural, and bundle structural had
 zero retained gap on all 20 cases; Clarabel retained P95/max were
 `0.1158%/0.8492%`.
 
+## Experiment SRC-003 — bundle absolute-gap sweep
+
+The worst bundle row in SRC-002 was block 10 at the tight budget. Its
+continuous retained objective was about `$0.0887`; the first certified gap was
+`858,804` nanodollars. The configured `$0.001` (`1,000,000` nanodollar)
+absolute tolerance therefore declared convergence after one atom even though
+the landed result lost `7.1449%` of the continuous objective. This was a
+scale-sensitive stopping failure, not evidence that the bundle method needed a
+different landing algorithm.
+
+The same 160-row protocol was rerun at five absolute tolerances. The table
+reports only the 20 tight-budget bundle rows; all runs were 20/20 successful
+and verifier-valid.
+
+| Absolute gap | Retained P95 / max | Landing P95 / max | P95 latency |
+|---:|---:|---:|---:|
+| `1,000,000` nanos | 2.2198% / 7.7973% | 2.2741% / 7.1449% | 23.15 ms |
+| `500,000` nanos | 0.3597% / 1.4121% | 0.4089% / 1.2341% | 23.16 ms |
+| `250,000` nanos | 0.1174% / 0.2851% | 0.2656% / 0.2851% | 22.94 ms |
+| `100,000` nanos | 0.1174% / 0.2851% | 0.1366% / 0.2851% | 25.27 ms |
+| `1,000` nanos | 0.1197% / 0.7556% | 0.1768% / 1.0888% | 23.10 ms |
+
+The sweep is non-monotone after integer landing: a tighter continuous
+certificate can select a different degenerate face and land worse. The widest
+good threshold was `100,000` nanos (`$0.0001`), so it was selected over the
+more expensive and no-better `1,000`-nano setting.
+
+As a broad control, both `1,000,000` and `100,000` nanos were run on all 630
+rows of `solver-pacing-bundle-development-v2`. Bundle availability remained
+125/126 and the retained-objective maximum remained `0.4936%`; P50/P95 runtime
+was `87.60/586.09 ms` versus `80.50/520.60 ms`, which is timing-noise-level
+evidence rather than a speed claim. Five of 126 bundle rows changed:
+
+- two large-book landings improved by `0.00074%` and `0.00307%` retained
+  objective;
+- one changed by less than `0.000004%`;
+- one gained an iteration-limit status but changed retained objective by only
+  `0.000000056%`; and
+- one large neutral book regressed by `0.01370%` after the stricter continuous
+  target landed on a worse integer face.
+
+That last row prevents calling the change a strict Pareto improvement. The
+trade is accepted for the experimental bundle because it removes a repeatable
+`7.8%` lifecycle-replay tail, preserves hard success and the broad quality
+tail, and requires only a clearer default tolerance rather than a new
+heuristic. The remaining non-monotone integer-face behavior stays visible as a
+future landing target.
+
 ## Interpretation
 
 The replay is already a useful discriminator: it found a large
-fully-corrective-bundle landing tail and an LP supporting-price residual that
-the aggregate synthetic headline did not make obvious. It also shows why one
-scalar is unsafe: Clarabel has the best tight-budget retained tail here despite
-its known availability failures on separate exponential-cone stress cases.
+fully-corrective-bundle stopping/landing tail and an LP supporting-price
+residual that the aggregate synthetic headline did not make obvious. The gap
+sweep reduced the former without hiding its broad-suite trade-off. It also
+shows why one scalar is unsafe: Clarabel has the best tight-budget retained
+tail in SRC-002 despite its known availability failures on separate
+exponential-cone stress cases.
 
 The corpus is not yet a sufficient long-horizon optimization target. Blocks are
 correlated, one synthetic policy produced them, quantities are small, and tight

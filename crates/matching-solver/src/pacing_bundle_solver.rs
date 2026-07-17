@@ -51,7 +51,11 @@ impl Default for PacingBundleConfig {
             linear_oracle: LinearOracleBackend::Highs,
             max_iterations: 100,
             max_master_iterations: 1_000,
-            gap_abs_nanos: 1_000_000.0,
+            // $0.001 let small books stop after one atom even when the
+            // certified target was far from an integer-friendly optimal face.
+            // $0.0001 removed that replay tail without changing broad-suite
+            // success or retained-objective tails.
+            gap_abs_nanos: 100_000.0,
             // Landing needs a near-stationary target, not merely a small
             // objective error: a loose supporting gap can be close in value
             // while far from the exact optimal face on degenerate books.
@@ -535,7 +539,7 @@ mod tests {
             "{:?}",
             result.diagnostics
         );
-        assert!(result.diagnostics.optimality_gap.unwrap() <= 1_000_000.0);
+        assert!(result.diagnostics.optimality_gap.unwrap() <= 100_000.0);
         let landed = crate::retained_cash_objective_for_fills(&problem, &result.result.fills);
         let upper = result.diagnostics.objective_value.unwrap()
             + result.diagnostics.optimality_gap.unwrap();

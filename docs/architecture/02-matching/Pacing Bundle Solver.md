@@ -52,6 +52,14 @@ The oracle's returned primal objective is not used as an exact upper bound.
 Floating-point LP tolerances can make that shortcut optimistic. This distinction
 is covered by regression tests and is shared with RC-FW.
 
+The default global certificate combines a `1e-8` relative gap with a
+`100,000`-nanodollar (`$0.0001`) absolute gap. The previous `$0.001` absolute
+gap could dominate the relative criterion on small books and stop after one
+atom, leaving the subsequent integer landing far from a good face. The tighter
+default was selected with a replay tolerance sweep plus the complete synthetic
+development matrix; the sweep and its non-monotone landing trade-off are
+recorded in `design/solver-experiments/sequencer-replay-corpus.md`.
+
 ## Integer landing
 
 The continuous mixture is not protocol state. A final pacing-supported LP first

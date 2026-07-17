@@ -37,7 +37,7 @@
       "max_iterations": 100,
       "max_master_iterations": 1000,
       "tolerance": 0.00000001,
-      "absolute_tolerance": 1000000.0,
+      "absolute_tolerance": 100000.0,
       "master_tolerance": 0.000000001,
       "master_absolute_tolerance": 1000.0,
       "line_search_steps": 48,
