@@ -151,7 +151,7 @@ impl LpSolver {
             }
 
             // Check MM budget violations at current prices
-            let prices = normalized_yes_prices(&sol, &ctx.markets);
+            let prices = integer_supporting_yes_prices(&sol, &oracle_orders, &ctx);
             let violated = has_mm_budget_violations(
                 &sol,
                 &oracle_orders,
@@ -743,6 +743,121 @@ pub(crate) fn normalized_yes_prices(
     prices
 }
 
+/// Land floating LP duals on integer prices that support every rounded fill.
+///
+/// HiGHS returns an approximately complementary primal/dual pair. Rounding a
+/// normalized dual to nanos can move the published price one nano across a
+/// filled order's limit even when the continuous price is feasible. Derive
+/// the exact integer interval implied by every rounded fill, clamp the dual
+/// price into it, and preserve the categorical `sum(p_yes) <= $1` constraint.
+///
+/// If a group's filled-order intervals have no jointly feasible integer point,
+/// retain the raw normalized prices so the ordinary verifier exposes the
+/// numerical inconsistency instead of silently changing the allocation.
+pub(crate) fn integer_supporting_yes_prices(
+    solution: &LpSolution,
+    orders: &[Order],
+    ctx: &SolverContext,
+) -> HashMap<MarketId, Nanos> {
+    let mut prices = normalized_yes_prices(solution, &ctx.markets);
+    let mut bounds: HashMap<MarketId, (u64, u64)> = ctx
+        .markets
+        .iter()
+        .copied()
+        .map(|market| (market, (0, NANOS_PER_DOLLAR)))
+        .collect();
+
+    for (&quantity, order) in solution.q_values.iter().zip(orders) {
+        if quantity.round() < 1.0 || order.num_markets != 1 || order.num_states != 2 {
+            continue;
+        }
+        let Some((lower, upper)) = bounds.get_mut(&order.markets[0]) else {
+            continue;
+        };
+        let limit = order.limit_price.0.min(NANOS_PER_DOLLAR);
+        if order.payoffs[0] != 0 {
+            if order.is_seller() {
+                *lower = (*lower).max(limit);
+            } else {
+                *upper = (*upper).min(limit);
+            }
+        } else {
+            let complementary_limit = NANOS_PER_DOLLAR.saturating_sub(limit);
+            if order.is_seller() {
+                *upper = (*upper).min(complementary_limit);
+            } else {
+                *lower = (*lower).max(complementary_limit);
+            }
+        }
+    }
+
+    // Independent markets have no cross-price condition.
+    for &market in &ctx.markets {
+        if ctx.market_to_group.contains_key(&market) {
+            continue;
+        }
+        let &(lower, upper) = &bounds[&market];
+        if lower <= upper {
+            let price = prices.get(&market).map_or(0, |price| price.0);
+            prices.insert(market, Nanos(price.clamp(lower, upper)));
+        }
+    }
+
+    // For grouped markets, first clamp to each fill-support interval, then
+    // remove any integer rounding overflow from the group cap. Reducing a YES
+    // price is safe down to its lower bound.
+    for group in 0..ctx.num_groups {
+        let grouped_markets: Vec<_> = ctx
+            .markets
+            .iter()
+            .copied()
+            .filter(|market| ctx.market_to_group.get(market) == Some(&group))
+            .collect();
+        let mut candidates = Vec::with_capacity(grouped_markets.len());
+        let mut feasible = true;
+        for market in grouped_markets {
+            let (lower, upper) = bounds[&market];
+            if lower > upper {
+                feasible = false;
+                break;
+            }
+            let price = prices
+                .get(&market)
+                .map_or(0, |price| price.0)
+                .clamp(lower, upper);
+            candidates.push((market, price, lower));
+        }
+        if !feasible {
+            continue;
+        }
+
+        let sum: u128 = candidates.iter().map(|(_, price, _)| *price as u128).sum();
+        let mut excess = sum.saturating_sub(NANOS_PER_DOLLAR as u128);
+        // Prefer the largest available movement, with market order providing
+        // deterministic tie-breaking.
+        candidates.sort_by(|left, right| {
+            (right.1 - right.2)
+                .cmp(&(left.1 - left.2))
+                .then_with(|| left.0.cmp(&right.0))
+        });
+        for (_, price, lower) in &mut candidates {
+            let reduction = excess.min((*price - *lower) as u128) as u64;
+            *price -= reduction;
+            excess -= reduction as u128;
+            if excess == 0 {
+                break;
+            }
+        }
+        if excess == 0 {
+            for (market, price, _) in candidates {
+                prices.insert(market, Nanos(price));
+            }
+        }
+    }
+
+    prices
+}
+
 /// Collect all unique markets from active orders.
 pub(crate) fn collect_markets(orders: &[Order]) -> Vec<MarketId> {
     let mut seen = HashSet::new();
@@ -762,12 +877,12 @@ pub(crate) fn collect_markets(orders: &[Order]) -> Vec<MarketId> {
 pub(crate) fn extract_result(
     solution: &LpSolution,
     orders: &[Order],
-    markets: &[MarketId],
+    ctx: &SolverContext,
 ) -> (MatchingResult, HashMap<MarketId, Vec<Nanos>>) {
     let mut result = MatchingResult::new();
 
     // Derive clearing prices from LP duals (YES and NO per market)
-    let yes_prices = normalized_yes_prices(solution, markets);
+    let yes_prices = integer_supporting_yes_prices(solution, orders, ctx);
     let clearing_prices: HashMap<MarketId, Vec<Nanos>> = yes_prices
         .iter()
         .map(|(&m, &p_yes)| {
@@ -1171,7 +1286,7 @@ pub(crate) fn finalize_result(
 ) -> PipelineResult {
     let orders = &problem.orders;
     let order_map: HashMap<u64, &Order> = orders.iter().map(|o| (o.id, o)).collect();
-    let (mut result, prices) = extract_result(solution, orders, &ctx.markets);
+    let (mut result, prices) = extract_result(solution, orders, ctx);
 
     trim_mm_budget_overflows(&mut result, &problem.mm_constraints, &ctx.mm_order_info);
     trim_zero_price_minting(&mut result, &order_map, &prices);
@@ -1266,7 +1381,7 @@ pub(crate) fn project_and_finalize_with_objective(
             );
         };
 
-        let prices = normalized_yes_prices(&final_sol, &ctx.markets);
+        let prices = integer_supporting_yes_prices(&final_sol, &projected_orders, ctx);
         if !has_mm_budget_violations(
             &final_sol,
             &projected_orders,
@@ -1377,7 +1492,7 @@ pub(crate) fn support_and_finalize_target_on_face(
             );
         };
 
-        let prices = normalized_yes_prices(&price_solution, &ctx.markets);
+        let prices = integer_supporting_yes_prices(&price_solution, &capped_orders, ctx);
         let primary_allocation = price_solution.q_values.clone();
         let round_at_primary_prices = |allocation: &[f64]| {
             allocation
@@ -1428,8 +1543,7 @@ pub(crate) fn support_and_finalize_target_on_face(
             // the fixed-point loop had a chance to add its budget row. The
             // zero-price cleanup is retained because it is independent of MM
             // budgets and is also applied to the eventual landed result.
-            let (mut preview, clearing_prices) =
-                extract_result(&price_solution, orders, &ctx.markets);
+            let (mut preview, clearing_prices) = extract_result(&price_solution, orders, ctx);
             recompute_welfare(&mut preview, &order_map);
             let raw_zero_temperature =
                 crate::retained_cash_solver::zero_temperature_minting_cost_for_fills(
@@ -1563,6 +1677,66 @@ mod tests {
             Some(1),
             "ties prefer lower support gap and stable candidate order"
         );
+    }
+
+    #[test]
+    fn integer_price_landing_respects_every_filled_side_at_a_rounding_boundary() {
+        let mut problem = Problem::new("integer_price_support");
+        let market = problem.markets.add_binary("market");
+        let yes_limit = 317_674_412;
+        let no_limit = NANOS_PER_DOLLAR - yes_limit;
+        problem.orders.extend([
+            matching_engine::simple_yes_buy(&problem.markets, 1, market, yes_limit, 1),
+            matching_engine::outcome_sell(&problem.markets, 2, market, 0, yes_limit, 1),
+            matching_engine::simple_no_buy(&problem.markets, 3, market, no_limit, 1),
+            matching_engine::outcome_sell(&problem.markets, 4, market, 1, no_limit, 1),
+        ]);
+        let ctx = build_solver_context(&problem);
+        let solution = LpSolution {
+            q_values: vec![1.0; 4],
+            dual_yes: HashMap::from([(market, yes_limit as f64 + 0.6)]),
+            dual_no: HashMap::from([(market, no_limit as f64 - 0.4)]),
+            objective_upper_bound_dollars: None,
+            objective_value_dollars: 0.0,
+        };
+
+        assert_eq!(
+            normalized_yes_prices(&solution, &ctx.markets)[&market],
+            Nanos(yes_limit + 1),
+            "ordinary nearest-integer dual landing reproduces the one-nano overshoot"
+        );
+        assert_eq!(
+            integer_supporting_yes_prices(&solution, &problem.orders, &ctx)[&market],
+            Nanos(yes_limit),
+        );
+    }
+
+    #[test]
+    fn integer_price_landing_preserves_the_group_price_cap() {
+        let mut problem = Problem::new("integer_group_price_support");
+        let market_a = problem.markets.add_binary("a");
+        let market_b = problem.markets.add_binary("b");
+        let mut group = matching_engine::MarketGroup::new("group");
+        group.add_market(market_a);
+        group.add_market(market_b);
+        problem.add_market_group(group);
+        problem.orders.extend([
+            matching_engine::outcome_sell(&problem.markets, 1, market_a, 0, 600_000_000, 1),
+            matching_engine::outcome_sell(&problem.markets, 2, market_b, 0, 399_000_000, 1),
+        ]);
+        let ctx = build_solver_context(&problem);
+        let solution = LpSolution {
+            q_values: vec![1.0; 2],
+            dual_yes: HashMap::from([(market_a, 600_000_001.0), (market_b, 400_000_001.0)]),
+            dual_no: HashMap::from([(market_a, 399_999_999.0), (market_b, 599_999_999.0)]),
+            objective_upper_bound_dollars: None,
+            objective_value_dollars: 0.0,
+        };
+
+        let prices = integer_supporting_yes_prices(&solution, &problem.orders, &ctx);
+        assert_eq!(prices[&market_a].0 + prices[&market_b].0, NANOS_PER_DOLLAR,);
+        assert!(prices[&market_a].0 >= 600_000_000);
+        assert!(prices[&market_b].0 >= 399_000_000);
     }
 
     #[test]

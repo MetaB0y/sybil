@@ -46,8 +46,10 @@ capacity. Complementary-slackness intervals recover a matching primal point.
 This structural price sweep is exact only for the zero-RHS matching oracle;
 budget rows, supporting-face projection, and integer landing remain general
 HiGHS problems. Balance-constraint duals become [[LP Duality and Clearing
-Prices|clearing prices]] and minting stationarity produces price coherence;
-the verifier still checks the landed integer result.
+Prices|clearing prices]] and minting stationarity produces price coherence.
+The final protocol boundary clamps approximate floating duals to the exact
+integer price interval supporting every rounded fill and preserves the
+categorical group cap; the verifier still checks the landed integer result.
 
 ## Key Properties
 - Variables: `q_i` (fills), free signed `mint_m` (per-market creation/burning), nonnegative `gmint_g` (group creation) — all continuous, bounded

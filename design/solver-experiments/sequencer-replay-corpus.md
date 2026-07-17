@@ -185,6 +185,22 @@ availability, iteration caps, continuous quality, integer landing, budget
 stress, and latency. The analyzer therefore reports coverage and quality per
 regime as well as the aggregate, and keeps failures in each denominator.
 
+## Experiment SRC-005 — integer supporting-price recovery
+
+The two Clarabel verifier failures in SRC-004 were traced to Sybil's shared
+floating-dual-to-integer conversion, not the conic core. Nearest rounding
+published `317,674,413` nanos while five filled orders had a
+`317,674,412`-nano limit. Recovering the exact integer interval implied by
+rounded fills repaired both cases without changing any replay allocation,
+welfare, retained objective, MM utilization, or minting cost.
+
+Clarabel replay availability improved from 142/144 to 144/144. Broader
+development controls also repaired three pre-existing bundle
+supporting-price failures while preserving the known Clarabel core and
+retained-cash budget-fixed-point failures. The implementation, four protocol
+runs, and limitations are recorded in
+`design/solver-experiments/integer-price-recovery.md`.
+
 ## Interpretation
 
 Replay is already a useful discriminator. It found a large

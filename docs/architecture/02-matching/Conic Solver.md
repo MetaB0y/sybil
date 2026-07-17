@@ -37,7 +37,10 @@ Clarabel uses a conservative `0.8` maximum interior-point step. This improved
 development-sweep availability, but it does not turn every ill-scaled generated
 book into a solved instance. Non-solved statuses remain visible with iteration,
 objective-gap, and residual diagnostics; they are never replaced by an LP
-allocation.
+allocation. Solved continuous allocations pass through the shared supporting
+LP and [[LP Duality and Clearing Prices|integer supporting-price recovery]];
+this prevents one-nano order-limit violations from floating dual rounding
+without hiding genuine Clarabel convergence failures.
 
 ## Key Properties
 - Clarabel interior-point solver (Rust-native, conic)

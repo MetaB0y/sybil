@@ -1175,7 +1175,7 @@ mod tests {
     #[test]
     #[cfg(feature = "lp")]
     fn supported_wide_range_landings_preserve_minting_duality() {
-        for seed in [16_200, 16_201, 16_202, 16_204] {
+        for seed in [16_200, 16_201, 16_202, 16_203, 16_204] {
             let problem = wide_range_problem(seed);
             let result = crate::PacingBundleSolver::with_config(crate::PacingBundleConfig {
                 max_iterations: 200,
@@ -1205,34 +1205,6 @@ mod tests {
                 duality_gap / NANOS_PER_DOLLAR as f64,
             );
         }
-    }
-
-    #[test]
-    #[cfg(feature = "lp")]
-    fn unsupported_wide_range_integer_face_fails_explicitly() {
-        let problem = wide_range_problem(16_203);
-        let result = crate::PacingBundleSolver::with_config(crate::PacingBundleConfig {
-            max_iterations: 200,
-            gap_rel: 1e-8,
-            ..Default::default()
-        })
-        .solve(&problem);
-
-        assert_eq!(
-            result.diagnostics.status,
-            TerminationStatus::PostProcessingFailure
-        );
-        assert_eq!(result.diagnostics.algorithm, "target-support-lp");
-        assert!(
-            result
-                .diagnostics
-                .message
-                .as_deref()
-                .is_some_and(|message| message
-                    .contains("no integer candidate was supported by primary minting prices")),
-            "unexpected diagnostic: {:?}",
-            result.diagnostics,
-        );
     }
 
     #[test]
