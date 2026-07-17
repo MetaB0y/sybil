@@ -287,6 +287,8 @@ bundle.
    the next held-out comparison.
 8. Clarabel setting and linear-solver isolation: **rejected and removed**
    (PPD-006).
+9. Exact Kelley and stabilized bundle-level pacing cuts: **rejected and
+   removed** (PPD-007).
 
 ## Experiment PPD-006 — Clarabel failure-layer isolation
 
@@ -359,3 +361,120 @@ for seed `19400`, confirming the failure with upstream, and identifying a
 small, reviewable asymmetric-cone change that improves a broad conic corpus.
 Before that, reformulating this single cone block or eliminating it through
 market-specific dual structure has much better expected value.
+
+## Experiment PPD-007 — exact nonsmooth pacing cuts
+
+- Date: 2026-07-17
+- Status: rejected and removed; results retained here
+- Hypothesis: exact fixed-pacing structural price sweeps can be coupled by a
+  low-dimensional nonsmooth dual master, avoiding Clarabel's exponential-cone
+  path while retaining global upper/lower certificates.
+- Source: transient jj change `zxtprvlv`; the approximately 600-line candidate
+  and its runner integration were removed after measurement.
+- Development data:
+  `benchmarks/solver/protocol-price-pacing-development.json`, 59 cases per
+  solver across market-like, two-sided flash, numerical-range, and 1/4/16-MM
+  workloads. No held-out seeds at or above `50000`.
+
+For pacing vector `alpha`, the structural price oracle evaluates the convex
+joint dual
+
+```text
+F(alpha) = h(alpha) - sum_k B_k ln(alpha_k)
+```
+
+and returns an optimal allocation with subgradient
+`U_k(q_alpha) - B_k / alpha_k`. Each evaluation therefore gives a global
+Kelley cut. The candidate solved their epigraph with a tiny HiGHS LP containing
+one variable per potentially paced MM. Its evaluated allocations entered the
+existing fully corrective primal atom master; the best dual value minus that
+feasible mixture remained a genuine retained-cash certificate.
+
+### PPD-007a — raw Kelley outer approximation
+
+Command shape:
+
+```bash
+cargo run --release -p matching-sim --all-features \
+  --bin solver-experiments -- \
+  --protocol <(jq '<add Kelley solver to every experiment>' \
+    benchmarks/solver/protocol-price-pacing-development.json) \
+  --source-revision kelley-working-copy \
+  --output-dir /tmp/kelley-price-pacing-development --overwrite
+python3 scripts/benchmarks/analyze_solver_experiments.py \
+  /tmp/kelley-price-pacing-development
+```
+
+The low-dimensional cases were strong: all flash-budget cases landed at the
+best retained objective, one-MM cases converged in 12--14 price sweeps, and the
+overall median runtime was `71.9 ms`. Plain Kelley nevertheless had the
+expected corner-hopping tail:
+
+| Metric | Raw Kelley |
+|---|---:|
+| Successful/verifier-valid | 53/59 |
+| Median / P95 / max runtime | 71.9 / 558.1 / 1268.0 ms |
+| Four-MM success | 2/3 |
+| Sixteen-MM success | 1/3 |
+
+The 4-MM seed `19500` needed 71 cuts. Two 16-MM cases failed integer
+post-processing after the 100-cut cap; the third landed with a `0.7664%`
+retained-objective gap. Three numerical-range cases and one 4-MM case localized
+the dual minimizer but repeated the same pacing vector before the primal atom
+mixture had closed its gap. Raw Kelley is therefore not a robust solver.
+
+### PPD-007b — stabilized bundle-level cuts
+
+The second variant retained the global Kelley lower model but chose trial
+points with a bundle-level LP: minimize the L-infinity distance from the best
+dual point subject to the cut model reaching the midpoint between its lower
+bound and the best evaluated upper bound. When the dual location was already
+localized, the primal mixture's pacing vector supplied a face-recovery query.
+Objective shifting kept the tiny LP independent of large book-wide constants.
+
+The stabilization fixed the availability tail:
+
+| Metric | Stabilized | Existing pacing bundle |
+|---|---:|---:|
+| Successful/verifier-valid | 59/59 | 59/59 |
+| Converged / at 100-call cap | 55 / 4 | 55 / 4 |
+| Median / P95 runtime | 150.1 / 712.9 ms | 122.8 / 654.9 ms |
+| One-MM price sweeps | 12--14 | 12--15 |
+| Four-MM price sweeps | 31--36 | 18--25 |
+| Sixteen-MM price sweeps | 100 | 100--101 |
+
+The two implementations produced effectively the same landed economics:
+across paired cases, stabilized cuts had 45 exact retained-objective ties,
+seven wins, and seven losses versus the pacing bundle; the mean difference was
+only `+$0.0249`, with a `-$0.3248` minimum and `+$1.5108` maximum. Its paired
+median runtime ratio was `1.313x`. The stabilized route was about 11% faster
+on the market-like slice but slower on every other slice, including `2.30x`
+on flash, `1.57x` on 4-MM, and `1.30x` on 16-MM books. These timing ratios came
+from consecutive same-machine development runs rather than interleaved
+samples, so they are directional; the absence of a quality or complexity win
+already decides the experiment.
+
+The remaining four capped cases were numerical seed `19301` at `0.25x` and all
+three 16-MM seeds. Their continuous certificate gaps were `$0.0147` and
+`$0.3714/$0.0290/$0.0047`, respectively. All outputs passed the verifier. The
+worst landing loss, `$20.3090` on numerical seed `19301`, was a degenerate
+integer-face selection problem also present in the existing pacing bundle,
+not a failure of the continuous dual bound.
+
+Decision: reject and remove both variants. The stabilized method achieved
+robustness but added a second LP master, approximately 600 lines, and no broad
+Pareto improvement over the simpler existing structural pacing bundle. Do not
+retry raw Kelley, generic trust-region tuning, or more cut-count increases
+without new evidence.
+
+What the experiment did establish:
+
+- exact native price/pacing optimization is feasible without a general conic
+  library;
+- the structural price sweep is the successful owned numerical primitive
+  (median exact-oracle time was below one millisecond);
+- coupling many MMs and selecting integer-friendly points on degenerate faces,
+  not fixed-pacing price optimization, are the hard parts;
+- future effort should improve the shared primal bundle/landing path or use a
+  one-MM specialization only if production replay data shows that regime is
+  dominant enough to justify another solver.
