@@ -1760,6 +1760,39 @@ mod tests {
     }
 
     #[test]
+    fn checked_in_bundle_promotion_protocol_is_frozen() {
+        let bytes =
+            include_bytes!("../../../../benchmarks/solver/protocol-bundle-promotion-v1.json");
+        let protocol: Protocol = serde_json::from_slice(bytes).expect("parse protocol");
+        validate_protocol(&protocol).expect("valid protocol");
+        assert_eq!(protocol.schema_version, 2);
+        assert_eq!(
+            protocol.protocol_id,
+            "solver-bundle-promotion-evaluation-v1"
+        );
+        assert_eq!(
+            protocol
+                .experiments
+                .iter()
+                .map(|experiment| {
+                    experiment.seed_count
+                        * experiment.budget_scales.len()
+                        * experiment.solvers.len()
+                })
+                .sum::<usize>(),
+            136
+        );
+        let seeds = protocol
+            .experiments
+            .iter()
+            .flat_map(|experiment| {
+                experiment.seed_start..experiment.seed_start + experiment.seed_count as u64
+            })
+            .collect::<Vec<_>>();
+        assert!(seeds.iter().all(|seed| (70_000..=71_002).contains(seed)));
+    }
+
+    #[test]
     fn evaluation_smoke_uses_disjoint_development_seeds() {
         let bytes = include_bytes!("../../../../benchmarks/solver/protocol-v2.json");
         let protocol: Protocol = serde_json::from_slice(bytes).expect("parse protocol");

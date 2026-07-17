@@ -115,3 +115,48 @@ parallelism through approximate shared-budget coordination.
 Revisit when deployed or multi-seed captures establish a real distribution of
 component balance, or when per-component setup/landing cost changes
 materially.
+
+## Experiment ECD-002 — broad production-candidate comparison
+
+### Hypothesis
+
+The exact router should remove the monolithic bundle's balanced-component
+scaling tail while preserving its stronger retained-objective convergence.
+If so, `ExactComponentSolver<PacingBundleSolver>` is a credible replacement
+candidate for production RC-FW, subject to a separately frozen untouched-seed
+evaluation.
+
+### Development result
+
+Source revision `6b4248f4a3c6` was evaluated on all 126 cases from the pacing
+development protocol. The paired matrix compared RC-FW, the monolithic bundle,
+and the exact-component bundle for 378 complete, fingerprint-consistent rows:
+
+```bash
+cargo run --release -p matching-sim --all-features \
+  --bin solver-experiments -- \
+  --protocol /tmp/protocol-bundle-production-candidate.json \
+  --source-revision bundle-production-candidate-main-6b4248f4 \
+  --output-dir /tmp/bundle-production-candidate --overwrite
+python3 scripts/benchmarks/analyze_solver_experiments.py \
+  /tmp/bundle-production-candidate
+```
+
+| Metric | RC-FW | Monolithic bundle | Exact bundle |
+|---|---:|---:|---:|
+| Success | 125/126 | 126/126 | 126/126 |
+| Iteration caps | 28 | 6 | 2 |
+| P50 / P95 / max | 124 / 455 / 2,214 ms | 80 / 553 / 2,244 ms | 29 / 469 / 1,724 ms |
+| Retained gap P95 / max | 0.078 / 20.871% | 0 / 0.0027% | 0 / 0.0002% |
+| Landing L1 max | 41.530% | 3.069% | 3.069% |
+
+The balanced 10,000-order slice fell from `1.725 / 2.240 s` bundle P50/P95
+to `0.413 / 0.623 s`; the 16-component slice fell from `215 / 218 ms` to
+`14 / 15 ms`. Connected numerical-range cases remained the important tail and
+were essentially unchanged. Exact bundle P95 was 3% slower than RC-FW, so the
+result is a broad Pareto judgment, not strict dominance.
+
+Decision: promote the exact bundle to the preferred production candidate, but
+do not change the default from development evidence. Freeze
+`benchmarks/solver/protocol-bundle-promotion-v1.json` and the implementation
+before evaluating its untouched seeds once.
