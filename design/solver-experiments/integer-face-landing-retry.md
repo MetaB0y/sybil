@@ -133,3 +133,52 @@ replay retries that were ultimately rejected, but it could also suppress the
 availability recoveries, and the current one-basis-point rule is simple and
 auditable. Revisit a face-opportunity gate or reuse of the primary LP model if
 paired production-like latency shows that the extra tail solve is material.
+
+## Experiment IFL-002 — bypass nearest-face landing for a certified target
+
+### Hypothesis
+
+The pacing bundle's 10,000-order core spends only about `0.24 s` in repeated
+matching-oracle calls, while total solve time is `1.2`–`2.2 s`. Its landed
+allocation moves only about `1e-9` in relative L1. If the certified target is
+already an integer point on its supporting tangent face, a primary price solve
+might safely bypass the auxiliary L1 nearest-face model.
+
+Two increasingly general disposable fast paths were tested on the four
+predeclared `orders-10000` seeds, paired with RC-FW for eight complete records:
+
+1. require every target coordinate to be within `1e-6` of an integer;
+2. allow arbitrary rounding, but independently require the candidate to match
+   the primary tangent optimum, retain the bundle objective within
+   `$0.0001` / `1e-8`, preserve fills through zero-price cleanup, have at most
+   a one-microdollar minting-support residual, and satisfy every MM budget.
+
+Both used the ordinary primary HiGHS price solve and the unchanged verifier.
+
+### Result
+
+All records landed and verified with unchanged economics, but neither variant
+accepted a fast-path candidate on any bundle row.
+
+| Landing path | Bundle P50 / P95 / max |
+|---|---:|
+| Existing nearest face | 1.708 / 2.200 / 2.202 s |
+| Integral-coordinate probe | 1.729 / 2.214 / 2.215 s |
+| Fully gated rounded-target probe | 1.829 / 2.355 / 2.361 s |
+
+The first trigger was false even though relative target movement was tiny:
+large share-unit coordinates can be fractionally far from integers while their
+aggregate normalized L1 is negligible. The general candidate then failed at
+least one exact-face, price-support, retained-objective, or budget gate. Its
+extra cold primary solve became pure overhead.
+
+Decision: reject and remove both variants. Do not infer integer-face membership
+from a small relative landing distance, and do not bypass the lexicographic
+selector merely because a continuous certificate is tight. The target
+represents a nonlinear optimum; its coordinate-wise rounding need not remain
+on the exact tangent face.
+
+Revisit the 10,000-order tail through model reuse, a smaller distance
+formulation, or an LP backend capability that adds/removes the auxiliary face
+and distance rows cheaply. Those preserve the lexicographic problem instead of
+trying to predict its answer.
