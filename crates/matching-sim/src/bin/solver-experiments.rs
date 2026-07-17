@@ -18,7 +18,8 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use clap::Parser;
 use matching_engine::{Fill, MarketId, NANOS_PER_DOLLAR, Nanos, Problem, Qty, notional_nanos};
 use matching_scenarios::{
-    FlashLiquidityConfig, ScenarioConfig, generate_flash_liquidity_scenario, generate_scenario,
+    FlashLiquidityConfig, MmQuoteStyle, ScenarioConfig, generate_flash_liquidity_scenario,
+    generate_scenario,
 };
 use matching_solver::{
     ConicConfig, ConicSolver, DecomposedSolver, LpConfig, LpSolver, MilpConfig, MilpSolver,
@@ -113,12 +114,14 @@ struct ProfileSpec {
     liquidity_scarcity: f64,
     hot_market_fraction: f64,
     hot_order_probability: f64,
+    market_activity_power: Option<f64>,
     liquidity_depth_levels: usize,
     liquidity_dispersion: f64,
     mm_spread_bps: u32,
     mm_capacity_multiplier: u64,
     mm_market_coverage_fraction: f64,
     mm_market_coverage_max: usize,
+    mm_quote_style: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -453,11 +456,13 @@ fn selected_experiments(protocol: &Protocol, smoke: bool) -> Vec<ExperimentSpec>
             if smoke {
                 experiment.seed_count = 1;
                 experiment.budget_scales.truncate(1);
-                if protocol.schema_version >= 2 {
+                if protocol.schema_version >= 2 && experiment.seed_start >= 50_000 {
                     // V2 keeps preregistered evaluation seeds untouched. Smoke
                     // mode maps 50000+ evaluation ranges onto the disjoint
                     // 20000+ development ranges used while tuning plumbing.
-                    experiment.seed_start = experiment.seed_start.saturating_sub(30_000);
+                    // Development protocols already declare their own safe
+                    // seed ranges and must not all collapse to seed zero.
+                    experiment.seed_start -= 30_000;
                 }
             }
             experiment
@@ -491,6 +496,7 @@ fn build_scenario(seed: u64, scale: &ScaleSpec, profile: &ProfileSpec) -> Scenar
         liquidity_scarcity: profile.liquidity_scarcity,
         hot_market_fraction: profile.hot_market_fraction,
         hot_order_probability: profile.hot_order_probability,
+        market_activity_power: profile.market_activity_power.unwrap_or(0.0),
         liquidity_depth_levels: profile.liquidity_depth_levels,
         liquidity_dispersion: profile.liquidity_dispersion,
         num_mms: scale.num_mms,
@@ -500,6 +506,11 @@ fn build_scenario(seed: u64, scale: &ScaleSpec, profile: &ProfileSpec) -> Scenar
         mm_capacity_multiplier: profile.mm_capacity_multiplier,
         mm_market_coverage_fraction: profile.mm_market_coverage_fraction,
         mm_market_coverage_max: profile.mm_market_coverage_max,
+        mm_quote_style: match profile.mm_quote_style.as_deref().unwrap_or("ladder") {
+            "ladder" => MmQuoteStyle::Ladder,
+            "live_flash" => MmQuoteStyle::LiveFlash,
+            other => panic!("unknown MM quote style {other}"),
+        },
     }
 }
 
@@ -1350,6 +1361,31 @@ mod tests {
         let bytes = include_bytes!("../../../../benchmarks/solver/protocol-v2.json");
         let protocol: Protocol = serde_json::from_slice(bytes).expect("parse protocol");
         validate_protocol(&protocol).expect("valid protocol");
+    }
+
+    #[test]
+    fn checked_in_pacing_development_protocol_is_valid() {
+        let bytes =
+            include_bytes!("../../../../benchmarks/solver/protocol-pacing-development.json");
+        let protocol: Protocol = serde_json::from_slice(bytes).expect("parse protocol");
+        validate_protocol(&protocol).expect("valid protocol");
+
+        let smoke = selected_experiments(&protocol, true);
+        assert_eq!(
+            smoke
+                .iter()
+                .find(|experiment| experiment.id == "market-like-snapshot")
+                .expect("market-like experiment")
+                .seed_start,
+            19_000
+        );
+    }
+
+    #[test]
+    fn evaluation_smoke_uses_disjoint_development_seeds() {
+        let bytes = include_bytes!("../../../../benchmarks/solver/protocol-v2.json");
+        let protocol: Protocol = serde_json::from_slice(bytes).expect("parse protocol");
+        assert_eq!(selected_experiments(&protocol, true)[0].seed_start, 20_000);
     }
 
     #[test]

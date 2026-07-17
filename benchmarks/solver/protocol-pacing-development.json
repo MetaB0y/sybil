@@ -81,6 +81,15 @@
       "mm_budget_min_dollars": 2500,
       "mm_budget_max_dollars": 12500
     },
+    "market-like": {
+      "num_markets": 32,
+      "num_orders": 2500,
+      "num_mms": 1,
+      "order_size_min": 1,
+      "order_size_max": 250,
+      "mm_budget_min_dollars": 1000,
+      "mm_budget_max_dollars": 1001
+    },
     "numerical": {
       "num_markets": 30,
       "num_orders": 3000,
@@ -227,6 +236,23 @@
       "mm_market_coverage_fraction": 1.0,
       "mm_market_coverage_max": 30
     },
+    "market-like": {
+      "generator": "random",
+      "market_group_probability": 0.65,
+      "order_size_power": 2.8,
+      "retail_buy_probability": 0.65,
+      "liquidity_scarcity": 0.4,
+      "hot_market_fraction": 0.0,
+      "hot_order_probability": 0.0,
+      "market_activity_power": 1.15,
+      "liquidity_depth_levels": 5,
+      "liquidity_dispersion": 0.9,
+      "mm_spread_bps": 400,
+      "mm_capacity_multiplier": 6,
+      "mm_market_coverage_fraction": 1.0,
+      "mm_market_coverage_max": 32,
+      "mm_quote_style": "live_flash"
+    },
     "flash-ladder": {
       "generator": "flash_ladder",
       "market_group_probability": 0.0,
@@ -264,6 +290,17 @@
       "seed_count": 5,
       "budget_scales": [0.5],
       "budget_basis": "lp_limit_value",
+      "solvers": ["lp-unconstrained", "lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
+    },
+    {
+      "id": "market-like-snapshot",
+      "suite": "market_like",
+      "profile": "market-like",
+      "scale": "market-like",
+      "seed_start": 19000,
+      "seed_count": 5,
+      "budget_scales": [0.5, 1.0, 2.0],
+      "budget_basis": "generated",
       "solvers": ["lp-unconstrained", "lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
     },
     {

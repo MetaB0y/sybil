@@ -1,128 +1,123 @@
-//! Divan benchmarks for matching solver components.
+//! Solver microbenchmarks over compact structural workloads.
 //!
-//! Benchmarks the LP/EG/Conic solvers on generated scenarios of various sizes.
+//! `market-like` mirrors the book shape presented to Sybil's production
+//! solver: a long-tailed resting retail book plus one-shot, dollar-sized,
+//! two-sided MM quotes. `shared-capital` remains the deliberately adversarial
+//! control for pacing behavior. Publishable quality claims still belong in the
+//! preregistered `benchmarks/solver` protocol.
 
-use matching_scenarios::{ScenarioConfig, generate_scenario};
+use std::fmt;
+use std::hint::black_box;
+use std::sync::OnceLock;
+
+use matching_engine::Problem;
+use matching_scenarios::{
+    FlashLiquidityConfig, ScenarioConfig, generate_flash_liquidity_scenario, generate_scenario,
+};
 
 fn main() {
     divan::main();
 }
 
-// ============================================================================
-// Scenario Generation Benchmarks
-// ============================================================================
-
-#[divan::bench]
-fn bench_scenario_generation_small() {
-    let _ = generate_scenario(ScenarioConfig::small());
+#[derive(Clone, Copy, Debug)]
+enum Workload {
+    SmallControl,
+    MarketLike,
+    SharedCapital,
 }
 
-#[divan::bench]
-fn bench_scenario_generation_medium() {
-    let _ = generate_scenario(ScenarioConfig::medium());
+impl fmt::Display for Workload {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::SmallControl => "small-control",
+            Self::MarketLike => "market-like",
+            Self::SharedCapital => "shared-capital",
+        })
+    }
 }
 
-#[divan::bench]
-fn bench_scenario_generation_large() {
-    let _ = generate_scenario(ScenarioConfig::large());
+const WORKLOADS: &[Workload] = &[
+    Workload::SmallControl,
+    Workload::MarketLike,
+    Workload::SharedCapital,
+];
+
+fn generate(workload: Workload) -> Problem {
+    match workload {
+        Workload::SmallControl => generate_scenario(ScenarioConfig::small()),
+        Workload::MarketLike => generate_scenario(ScenarioConfig::market_like()),
+        Workload::SharedCapital => generate_flash_liquidity_scenario(FlashLiquidityConfig {
+            seed: 7_302,
+            num_markets: 20,
+            opportunities_per_market: 10,
+            num_mms: 2,
+            quantity_min_shares: 10,
+            quantity_max_shares: 100,
+            initial_budget_dollars: 2_500,
+        }),
+    }
 }
 
-// ============================================================================
-// LP Solver Benchmarks
-// ============================================================================
+fn problem(workload: Workload) -> &'static Problem {
+    static SMALL: OnceLock<Problem> = OnceLock::new();
+    static MARKET_LIKE: OnceLock<Problem> = OnceLock::new();
+    static SHARED_CAPITAL: OnceLock<Problem> = OnceLock::new();
+    match workload {
+        Workload::SmallControl => SMALL.get_or_init(|| generate(workload)),
+        Workload::MarketLike => MARKET_LIKE.get_or_init(|| generate(workload)),
+        Workload::SharedCapital => SHARED_CAPITAL.get_or_init(|| generate(workload)),
+    }
+}
+
+#[divan::bench(args = WORKLOADS)]
+fn scenario_generation(workload: Workload) {
+    black_box(generate(workload));
+}
 
 #[cfg(feature = "lp")]
 mod lp {
-    use divan::Bencher;
-    use matching_engine::Problem;
-    use matching_scenarios::{ScenarioConfig, generate_scenario};
+    use super::*;
     use matching_solver::LpSolver;
-    use std::sync::OnceLock;
 
-    #[divan::bench]
-    fn bench_lp_small() {
-        static PROBLEM: OnceLock<Problem> = OnceLock::new();
-        let problem = PROBLEM.get_or_init(|| generate_scenario(ScenarioConfig::small()));
+    #[divan::bench(args = WORKLOADS)]
+    fn solve(workload: Workload) {
         let solver = LpSolver::new();
-        let _ = solver.solve(problem);
-    }
-
-    #[divan::bench]
-    fn bench_lp_medium() {
-        static PROBLEM: OnceLock<Problem> = OnceLock::new();
-        let problem = PROBLEM.get_or_init(|| generate_scenario(ScenarioConfig::medium()));
-        let solver = LpSolver::new();
-        let _ = solver.solve(problem);
-    }
-
-    #[divan::bench]
-    fn bench_lp_medium_hot_markets(bencher: Bencher) {
-        static PROBLEM: OnceLock<Problem> = OnceLock::new();
-        let problem = PROBLEM.get_or_init(|| {
-            let mut config = ScenarioConfig::medium();
-            config.hot_market_fraction = 0.3;
-            generate_scenario(config)
-        });
-
-        bencher.bench_local(|| {
-            let solver = LpSolver::new();
-            solver.solve(problem)
-        });
+        black_box(solver.solve(black_box(problem(workload))));
     }
 }
-
-// ============================================================================
-// Retained-cash Solver Benchmarks
-// ============================================================================
 
 #[cfg(feature = "retained-cash")]
 mod retained_cash {
-    use matching_engine::Problem;
-    use matching_scenarios::{ScenarioConfig, generate_scenario};
+    use super::*;
     use matching_solver::RetainedCashSolver;
-    use std::sync::OnceLock;
 
-    #[divan::bench]
-    fn bench_retained_cash_small() {
-        static PROBLEM: OnceLock<Problem> = OnceLock::new();
-        let problem = PROBLEM.get_or_init(|| generate_scenario(ScenarioConfig::small()));
+    #[divan::bench(args = WORKLOADS)]
+    fn solve(workload: Workload) {
         let solver = RetainedCashSolver::new();
-        let _ = solver.solve(problem);
-    }
-
-    #[divan::bench]
-    fn bench_retained_cash_medium() {
-        static PROBLEM: OnceLock<Problem> = OnceLock::new();
-        let problem = PROBLEM.get_or_init(|| generate_scenario(ScenarioConfig::medium()));
-        let solver = RetainedCashSolver::new();
-        let _ = solver.solve(problem);
+        black_box(solver.solve(black_box(problem(workload))));
     }
 }
 
-// ============================================================================
-// Conic Solver Benchmarks
-// ============================================================================
+#[cfg(feature = "lp")]
+mod pacing_bundle {
+    use super::*;
+    use matching_solver::PacingBundleSolver;
+
+    #[divan::bench(args = WORKLOADS)]
+    fn solve(workload: Workload) {
+        let solver = PacingBundleSolver::new();
+        black_box(solver.solve(black_box(problem(workload))));
+    }
+}
 
 #[cfg(feature = "conic")]
 mod conic {
-    use matching_engine::Problem;
-    use matching_scenarios::{ScenarioConfig, generate_scenario};
+    use super::*;
     use matching_solver::ConicSolver;
-    use std::sync::OnceLock;
 
-    #[divan::bench]
-    fn bench_conic_small() {
-        static PROBLEM: OnceLock<Problem> = OnceLock::new();
-        let problem = PROBLEM.get_or_init(|| generate_scenario(ScenarioConfig::small()));
+    #[divan::bench(args = WORKLOADS)]
+    fn solve(workload: Workload) {
         let solver = ConicSolver::new();
-        let _ = solver.solve(problem);
-    }
-
-    #[divan::bench]
-    fn bench_conic_medium() {
-        static PROBLEM: OnceLock<Problem> = OnceLock::new();
-        let problem = PROBLEM.get_or_init(|| generate_scenario(ScenarioConfig::medium()));
-        let solver = ConicSolver::new();
-        let _ = solver.solve(problem);
+        black_box(solver.solve(black_box(problem(workload))));
     }
 }

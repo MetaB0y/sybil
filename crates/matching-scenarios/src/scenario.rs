@@ -10,8 +10,19 @@ use rand_chacha::ChaCha8Rng;
 
 use matching_engine::{
     MarketGroup, MarketId, MmConstraint, MmId, MmSide, NANOS_PER_DOLLAR, Nanos, Order, Problem,
-    outcome_buy, outcome_sell, price_to_nanos, shares_to_qty,
+    SHARE_SCALE, outcome_buy, outcome_sell, price_to_nanos, shares_to_qty,
 };
+
+/// Shape of synthetic MM liquidity.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum MmQuoteStyle {
+    /// Three price levels of YES bids and inventory-backed YES asks.
+    #[default]
+    Ladder,
+    /// One dollar-sized YES bid and complementary NO bid per covered market,
+    /// matching the repository's live one-shot MM when inventory is empty.
+    LiveFlash,
+}
 
 /// Unified configuration for scenario generation.
 #[derive(Clone, Debug)]
@@ -45,6 +56,9 @@ pub struct ScenarioConfig {
     pub hot_market_fraction: f64,
     /// Probability that a retail order selects from the hot-market set.
     pub hot_order_probability: f64,
+    /// Zipf exponent for cross-market order activity. `0.0` retains the
+    /// hot/uniform model; positive values produce a long-tailed market mix.
+    pub market_activity_power: f64,
     /// Number of price levels on each side of each synthetic background book.
     pub liquidity_depth_levels: usize,
     /// Log-normal cross-market dispersion of background depth. `0.0` gives
@@ -66,6 +80,8 @@ pub struct ScenarioConfig {
     /// `mm_market_coverage_max`.
     pub mm_market_coverage_fraction: f64,
     pub mm_market_coverage_max: usize,
+    /// Quote shape used for market-maker orders.
+    pub mm_quote_style: MmQuoteStyle,
 }
 
 impl Default for ScenarioConfig {
@@ -82,6 +98,7 @@ impl Default for ScenarioConfig {
             liquidity_scarcity: 0.5,
             hot_market_fraction: 0.0,
             hot_order_probability: 0.6,
+            market_activity_power: 0.0,
             liquidity_depth_levels: 3,
             liquidity_dispersion: 0.0,
             num_mms: 2,
@@ -91,6 +108,7 @@ impl Default for ScenarioConfig {
             mm_capacity_multiplier: 10,
             mm_market_coverage_fraction: 1.0,
             mm_market_coverage_max: 20,
+            mm_quote_style: MmQuoteStyle::Ladder,
         }
     }
 }
@@ -131,6 +149,41 @@ impl ScenarioConfig {
             num_mms: 2,
             liquidity_scarcity: 0.5,
             ..Default::default()
+        }
+    }
+
+    /// Stylized snapshot of the book presented to the production solver.
+    ///
+    /// This combines a long-tailed resting retail book with the same
+    /// one-shot, dollar-sized quote shape used by the live Polymarket MM. It
+    /// is deliberately a structural workload, not a claim of replay
+    /// calibration.
+    pub fn market_like() -> Self {
+        Self {
+            seed: 7_301,
+            num_markets: 32,
+            market_group_probability: 0.65,
+            num_orders: 2_500,
+            order_size_min: 1,
+            order_size_max: 250,
+            order_size_power: 2.8,
+            retail_buy_probability: 0.65,
+            liquidity_scarcity: 0.4,
+            hot_market_fraction: 0.0,
+            hot_order_probability: 0.0,
+            market_activity_power: 1.15,
+            liquidity_depth_levels: 5,
+            liquidity_dispersion: 0.9,
+            num_mms: 1,
+            mm_budget_min: 1_000,
+            mm_budget_max: 1_001,
+            mm_spread_bps: 400,
+            // $1,000 budget × 6 / (32 markets × 2 sides) ≈ $94/quote,
+            // close to the live integration's current $100/side default.
+            mm_capacity_multiplier: 6,
+            mm_market_coverage_fraction: 1.0,
+            mm_market_coverage_max: 32,
+            mm_quote_style: MmQuoteStyle::LiveFlash,
         }
     }
 
@@ -255,6 +308,7 @@ pub fn generate_scenario(config: ScenarioConfig) -> Problem {
     let mut hot_markets: Vec<MarketId> = market_info.iter().map(|(id, _)| *id).collect();
     hot_markets.shuffle(&mut rng);
     hot_markets.truncate(num_hot);
+    let activity_cdf = market_activity_cdf(&market_info, config.market_activity_power, &mut rng);
 
     // Add liquidity based on scarcity
     add_liquidity(&mut problem, &market_info, &hot_markets, &config, &mut rng);
@@ -269,6 +323,7 @@ pub fn generate_scenario(config: ScenarioConfig) -> Problem {
             &mut order_id,
             &market_info,
             &hot_markets,
+            activity_cdf.as_deref(),
             &config,
         );
         problem.orders.push(order);
@@ -386,13 +441,18 @@ fn generate_simple_order(
     order_id: &mut u64,
     market_info: &[(MarketId, f64)],
     hot_markets: &[MarketId],
+    activity_cdf: Option<&[f64]>,
     config: &ScenarioConfig,
 ) -> Order {
     let id = *order_id;
     *order_id += 1;
 
     // Bias towards hot markets if any
-    let market_idx = if !hot_markets.is_empty()
+    let market_idx = if let Some(cdf) = activity_cdf {
+        let draw = rng.random_range(0.0..cdf[cdf.len() - 1]);
+        cdf.partition_point(|&cumulative| cumulative <= draw)
+            .min(market_info.len() - 1)
+    } else if !hot_markets.is_empty()
         && rng.random_bool(config.hot_order_probability.clamp(0.0, 1.0))
     {
         let hot_id = hot_markets[rng.random_range(0..hot_markets.len())];
@@ -452,6 +512,33 @@ fn generate_simple_order(
     }
 }
 
+fn market_activity_cdf(
+    market_info: &[(MarketId, f64)],
+    power: f64,
+    rng: &mut ChaCha8Rng,
+) -> Option<Vec<f64>> {
+    if power <= 0.0 || market_info.is_empty() {
+        return None;
+    }
+
+    let mut ranked_indices: Vec<_> = (0..market_info.len()).collect();
+    ranked_indices.shuffle(rng);
+    let mut weights = vec![0.0; market_info.len()];
+    for (rank, market_index) in ranked_indices.into_iter().enumerate() {
+        weights[market_index] = 1.0 / (rank as f64 + 1.0).powf(power);
+    }
+    let mut total = 0.0;
+    Some(
+        weights
+            .into_iter()
+            .map(|weight| {
+                total += weight;
+                total
+            })
+            .collect(),
+    )
+}
+
 fn generate_mm_constraints(
     problem: &mut Problem,
     market_info: &[(MarketId, f64)],
@@ -478,14 +565,26 @@ fn generate_mm_constraints(
         selected_markets.shuffle(rng);
         selected_markets.truncate(markets_to_cover);
 
-        // MMs post on both sides of each market but only one side fills per market
-        // (whichever side the clearing price moves to). Total notional can exceed
-        // budget since most orders won't fill.
         let total_capacity = budget_dollars * config.mm_capacity_multiplier;
-        let qty_per_market = (total_capacity / markets_to_cover as u64).max(100);
-
         let half_spread = config.mm_spread_bps as f64 / 10_000.0 / 2.0;
 
+        if config.mm_quote_style == MmQuoteStyle::LiveFlash {
+            add_live_flash_quotes(
+                problem,
+                &mut constraint,
+                &selected_markets,
+                &fair_prices,
+                total_capacity,
+                half_spread,
+                order_id,
+            );
+            problem.mm_constraints.push(constraint);
+            continue;
+        }
+
+        // Ladder MMs post on both sides of each market but only one side fills
+        // per market. Total notional can exceed the shared budget.
+        let qty_per_market = (total_capacity / markets_to_cover as u64).max(100);
         for market_id in selected_markets {
             let fair_price = fair_prices.get(&market_id).copied().unwrap_or(0.5);
 
@@ -528,6 +627,88 @@ fn generate_mm_constraints(
 
         problem.mm_constraints.push(constraint);
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_live_flash_quotes(
+    problem: &mut Problem,
+    constraint: &mut MmConstraint,
+    selected_markets: &[MarketId],
+    fair_prices: &HashMap<MarketId, f64>,
+    total_capacity_dollars: u64,
+    half_spread: f64,
+    order_id: &mut u64,
+) {
+    let quote_dollars = total_capacity_dollars as f64 / (2 * selected_markets.len().max(1)) as f64;
+    let market_to_group: HashMap<_, _> = problem
+        .market_groups
+        .iter()
+        .enumerate()
+        .flat_map(|(group, spec)| {
+            spec.markets
+                .iter()
+                .map(move |&market| (market, (group, spec.markets.len())))
+        })
+        .collect();
+    let mut group_buy_no_market = HashMap::new();
+    let mut group_buy_yes_count = HashMap::<usize, usize>::new();
+
+    for &market_id in selected_markets {
+        let fair_price = fair_prices.get(&market_id).copied().unwrap_or(0.5);
+        let yes_bid = (fair_price - half_spread).clamp(0.02, 0.98);
+        let no_bid = (1.0 - fair_price - half_spread).clamp(0.02, 0.98);
+        let group = market_to_group.get(&market_id).copied();
+
+        // The live quote selector tries NO before YES and avoids quoting a
+        // complete mutually-exclusive group from one shared balance.
+        let allow_no = group.is_none_or(|(group, _)| {
+            !group_buy_no_market.contains_key(&group)
+                && group_buy_yes_count.get(&group).copied().unwrap_or(0) == 0
+        });
+        if allow_no {
+            let quantity = dollar_sized_quantity(quote_dollars, no_bid);
+            problem.orders.push(outcome_buy(
+                &problem.markets,
+                *order_id,
+                market_id,
+                1,
+                price_to_nanos(no_bid).0,
+                quantity,
+            ));
+            constraint.add_order(*order_id, MmSide::BuyNo);
+            if let Some((group, _)) = group {
+                group_buy_no_market.insert(group, market_id);
+            }
+            *order_id += 1;
+        }
+
+        let allow_yes = group.is_none_or(|(group, size)| {
+            group_buy_no_market.get(&group).copied() != Some(market_id)
+                && group_buy_yes_count.get(&group).copied().unwrap_or(0) + 1 < size
+        });
+        if allow_yes {
+            let quantity = dollar_sized_quantity(quote_dollars, yes_bid);
+            problem.orders.push(outcome_buy(
+                &problem.markets,
+                *order_id,
+                market_id,
+                0,
+                price_to_nanos(yes_bid).0,
+                quantity,
+            ));
+            constraint.add_order(*order_id, MmSide::BuyYes);
+            if let Some((group, _)) = group {
+                *group_buy_yes_count.entry(group).or_default() += 1;
+            }
+            *order_id += 1;
+        }
+    }
+}
+
+fn dollar_sized_quantity(notional_dollars: f64, price: f64) -> u64 {
+    ((notional_dollars / price) * SHARE_SCALE as f64)
+        .round()
+        .clamp(1.0, u64::MAX as f64) as u64
 }
 
 #[cfg(test)]
@@ -613,6 +794,66 @@ mod tests {
                 / 2_000.0
         };
         assert!(retail_mean(&small_heavy) < retail_mean(&uniform) * 0.8);
+    }
+
+    #[test]
+    fn market_like_snapshot_has_skewed_flow_and_live_flash_quotes() {
+        let config = ScenarioConfig::market_like();
+        let retail_orders = config.num_orders;
+        let problem = generate_scenario(config);
+        let mut activity = HashMap::<MarketId, usize>::new();
+        for order in problem
+            .orders
+            .iter()
+            .filter(|order| order.id <= retail_orders as u64)
+        {
+            *activity.entry(order.markets[0]).or_default() += 1;
+        }
+        let mut counts: Vec<_> = activity.into_values().collect();
+        counts.sort_unstable();
+        assert!(counts[counts.len() - 1] > counts[counts.len() / 2] * 5);
+
+        let sides: Vec<_> = problem
+            .mm_constraints
+            .iter()
+            .flat_map(|mm| mm.order_sides.values().copied())
+            .collect();
+        assert!(sides.contains(&MmSide::BuyYes));
+        assert!(sides.contains(&MmSide::BuyNo));
+        assert!(
+            sides
+                .iter()
+                .all(|side| matches!(side, MmSide::BuyYes | MmSide::BuyNo))
+        );
+        let orders: HashMap<_, _> = problem
+            .orders
+            .iter()
+            .map(|order| (order.id, order))
+            .collect();
+        assert!(problem.mm_constraints.iter().any(|mm| {
+            mm.order_ids
+                .iter()
+                .any(|id| orders[id].max_fill.0 % SHARE_SCALE != 0)
+        }));
+        for mm in &problem.mm_constraints {
+            for group in &problem.market_groups {
+                let mut buy_yes = 0;
+                let mut buy_no = 0;
+                for order_id in &mm.order_ids {
+                    let order = orders[order_id];
+                    if !group.markets.contains(&order.markets[0]) {
+                        continue;
+                    }
+                    match mm.order_sides[order_id] {
+                        MmSide::BuyYes => buy_yes += 1,
+                        MmSide::BuyNo => buy_no += 1,
+                        _ => unreachable!("market-like MMs only submit buys"),
+                    }
+                }
+                assert!(buy_yes < group.markets.len());
+                assert!(buy_no <= 1);
+            }
+        }
     }
 
     #[test]

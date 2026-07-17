@@ -23,7 +23,7 @@ pub mod scenario;
 pub use matching_engine::{Problem, ProblemSummary};
 
 // Re-export unified scenario generator (primary API)
-pub use scenario::{ScenarioConfig, generate_scenario};
+pub use scenario::{MmQuoteStyle, ScenarioConfig, generate_scenario};
 
 pub use flash_liquidity::{FlashLiquidityConfig, generate_flash_liquidity_scenario};
 

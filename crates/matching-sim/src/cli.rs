@@ -14,6 +14,7 @@ enum Preset {
     Quick,
     Small,
     Medium,
+    MarketLike,
     Large,
     Extreme,
     #[cfg(feature = "milp")]
@@ -27,6 +28,7 @@ impl Preset {
             Self::Quick => ScenarioConfig::quick(),
             Self::Small => ScenarioConfig::small(),
             Self::Medium => ScenarioConfig::medium(),
+            Self::MarketLike => ScenarioConfig::market_like(),
             Self::Large => ScenarioConfig::large(),
             Self::Extreme => ScenarioConfig::extreme(),
             #[cfg(feature = "milp")]

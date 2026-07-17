@@ -16,6 +16,7 @@
 just sim-quick
 just sim-small
 just compare
+cargo run --release -p matching-sim -- --preset market-like --solver retained-cash
 cargo run --release -p matching-sim --features milp -- --preset small --solver milp --milp-timeout 60 --mm-mode exact
 cargo run --release -p matching-sim --bin solver-experiments -- --output-dir /tmp/solver-smoke --smoke --overwrite
 ```

@@ -3,7 +3,7 @@ tags: [solver, crate, fisher-market, market-maker]
 layer: solver
 crate: matching-solver
 status: current
-last_verified: 2026-07-16
+last_verified: 2026-07-17
 ---
 
 # Retained cash solver
@@ -23,15 +23,19 @@ psi_B(U) = U                         when U <= B
 Its derivative is the pacing factor `alpha_k = min(1, B_k / U_k)`. At each
 iteration the solver shades every order of one MM by this common factor and
 asks HiGHS for the best feasible direction. Retail welfare and signed
-complete-set mint/burn cost stay inside the oracle. Exact concave line search
-updates the allocation, and the generalized Frank--Wolfe gap supplies the
-stopping certificate.
+complete-set mint/burn cost stay inside the oracle. Exact piecewise-concave
+line search updates the allocation, including changes in the active
+zero-temperature minting outcome, and the generalized Frank--Wolfe gap
+supplies the stopping certificate.
 
 The feasible LP matrix is built once per batch. Objective costs change as the
 pacing factors move, while HiGHS re-optimizes from the previous basis. This is
 an implementation optimization only: it leaves the oracle problem and
 Frank--Wolfe certificate unchanged, while avoiding repeated sparse-model setup
 and cold simplex starts in the latency tail.
+Each returned allocation is summarized once into MM utilities, non-mint
+welfare, and per-outcome demands; line search then works in that compact space
+instead of rescanning every order at each derivative evaluation.
 
 ## MM buys and sells
 

@@ -287,8 +287,7 @@ struct BundleAtom {
 
 impl BundleAtom {
     fn from_allocation(model: &ObjectiveModel<'_>, allocation: Vec<f64>) -> Self {
-        let utilities = model.utilities(&allocation);
-        let linear_component = model.linear_component(&allocation);
+        let (utilities, linear_component) = model.allocation_components(&allocation);
         Self {
             allocation,
             utilities,

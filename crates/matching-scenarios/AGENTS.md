@@ -29,6 +29,7 @@ Preset sizes below are defaults from `scenario.rs`; the source is authoritative.
 | `quick()` | ~50 | 5 | 0 | Unit tests, rapid iteration |
 | `small()` | ~300 | 10 | 1 | Local development |
 | `medium()` | ~3000 | 30 | 2 | Integration tests, CI |
+| `market_like()` | ~2500 | 32 | 1 | Production-shaped solver latency |
 | `large()` | ~10k | 50 | 3 | Performance benchmarks |
 | `extreme()` | ~100k | 200 | 10 | Scaling limits |
 | `milp_killer()` | ~5k | 50 | 0 | Force MILP timeout |
@@ -50,6 +51,7 @@ Preset sizes below are defaults from `scenario.rs`; the source is authoritative.
 - `liquidity_scarcity` (0.0-1.0) — lower = scarcer = tighter matching
 - `hot_market_fraction` — markets receiving extra demand
 - `hot_order_probability` — concentration of flow in hot markets
+- `market_activity_power` — optional long-tailed market popularity
 - `liquidity_depth_levels` — background-book levels per outcome and side
 - `liquidity_dispersion` — log-normal cross-market depth heterogeneity
 
@@ -59,6 +61,7 @@ Preset sizes below are defaults from `scenario.rs`; the source is authoritative.
 - `mm_spread_bps` — spread in basis points
 - `mm_capacity_multiplier` — quote capacity relative to budget
 - `mm_market_coverage_fraction/max` — breadth of each MM's quote set
+- `mm_quote_style` — synthetic ladder or live-shaped one-shot flash quotes
 
 ## Generation Process
 
@@ -66,7 +69,7 @@ Preset sizes below are defaults from `scenario.rs`; the source is authoritative.
 2. Group a configurable share into mutually exclusive sets
 3. Add configurable, optionally heterogeneous background-book depth
 4. Generate single-market orders (buy/sell YES/NO)
-5. Add partially overlapping MM quote ladders and capital constraints
+5. Add partially overlapping MM ladders or live-shaped flash quotes and capital constraints
 6. Shuffle orders to avoid order-dependent solver behavior
 
 ## Reproducibility

@@ -19,8 +19,9 @@ empirical claims, not for criterion-style microbenchmarks or a single ad-hoc
   approximation metric.
 - Development protocols are checked in when they define a reusable stress
   design, but their rows are never promoted to held-out evidence. In
-  particular, `protocol-pacing-development.json` uses seeds 16000--18403 and
-  was used while implementing and diagnosing the pacing bundle.
+  particular, `protocol-pacing-development.json` uses seeds 16000--19004:
+  16000--18403 supported pacing-bundle development, while the later
+  19000--19004 range is reserved for the market-like snapshot workload.
 - LP is a production reference, not asserted to be a global optimum under the
   exact bilinear MM-budget model. MILP is called exact only when SCIP reports a
   proven optimum.
@@ -79,6 +80,8 @@ rather than confound them:
 - pacing dimension grows from 1 to 16 market makers with 2,000 orders;
 - tight two-sided flash ladders exercise both MM bids and complementary-buy
   reductions of MM asks;
+- a market-like snapshot combines long-tailed resting flow with the live
+  integration's dollar-sized, group-safe Buy YES/Buy NO flash quotes;
 - random, concentrated, heavy-tailed numerical, and tiny reference books keep
   the structural stress from becoming one hand-picked family.
 

@@ -96,7 +96,8 @@ impl RetainedCashSolver {
         // Zero is feasible, avoids the no-cash log singularity, and has the
         // economically correct slack-capital gradient alpha=1 for B>0.
         let mut q = vec![0.0; problem.orders.len()];
-        let mut objective = model.objective(&q);
+        let mut summary = model.allocation_summary(&q);
+        let mut objective = summary.objective(&model);
         let mut last_gap = f64::INFINITY;
         let mut oracle_calls = 0usize;
         let mut oracle_time = Duration::ZERO;
@@ -122,8 +123,7 @@ impl RetainedCashSolver {
         };
 
         for iteration in 0..=self.config.max_iterations {
-            let u_q = model.utilities(&q);
-            let alpha_q = model.pacing_factors(&u_q);
+            let alpha_q = model.pacing_factors(&summary.utilities);
             let oracle_objective = model.oracle_coefficients_from_alpha(&alpha_q);
 
             let oracle_started = Instant::now();
@@ -136,9 +136,11 @@ impl RetainedCashSolver {
             oracle_calls += 1;
 
             let s = &oracle_solution.q_values;
-            let g_q = model.linear_component(&q);
-            let g_s = model.linear_component(s);
-            let current_score = model.affine_score(&u_q, g_q, &alpha_q);
+            let current_score = model.affine_score(
+                &summary.utilities,
+                summary.linear_component(&model),
+                &alpha_q,
+            );
             let Some(oracle_upper_bound) = oracle_solution.objective_upper_bound_dollars else {
                 oracle_failed = true;
                 break;
@@ -159,48 +161,25 @@ impl RetainedCashSolver {
                 break;
             }
 
-            let u_s = model.utilities(s);
-            let delta_u: Vec<f64> = u_s
-                .iter()
-                .zip(&u_q)
-                .map(|(right, left)| right - left)
-                .collect();
-            let delta_g = g_s - g_q;
-            let derivative = |gamma: f64| {
-                let mut value = delta_g;
-                for k in 0..u_q.len() {
-                    let u = u_q[k] + gamma * delta_u[k];
-                    value += model.pacing_factor(k, u) * delta_u[k];
-                }
-                value
-            };
-
-            // Concavity makes the directional derivative non-increasing.
-            // Unlike the legacy EG path, a non-positive derivative at zero is
-            // a stopping condition; it is never replaced by a forced step.
-            let mut gamma = if derivative(0.0) <= 0.0 {
-                converged = true;
-                last_gap = 0.0;
+            let oracle_summary = model.allocation_summary(s);
+            let mut gamma = model.allocation_segment_argmax(
+                &summary,
+                &oracle_summary,
+                1.0,
+                self.config.line_search_steps,
+            );
+            if gamma <= 1e-15 {
+                // The certified gap above is still authoritative. Do not turn
+                // a numerically stalled line search into a false zero-gap
+                // convergence result.
+                oracle_failed = true;
                 break;
-            } else if derivative(1.0) >= 0.0 {
-                1.0
-            } else {
-                let mut low = 0.0;
-                let mut high = 1.0;
-                for _ in 0..self.config.line_search_steps {
-                    let mid = (low + high) / 2.0;
-                    if derivative(mid) > 0.0 {
-                        low = mid;
-                    } else {
-                        high = mid;
-                    }
-                }
-                (low + high) / 2.0
-            };
+            }
 
             let previous_objective = objective;
             let mut candidate = convex_combination(&q, s, gamma);
-            let mut candidate_objective = model.objective(&candidate);
+            let mut candidate_summary = summary.interpolate(&oracle_summary, gamma);
+            let mut candidate_objective = candidate_summary.objective(&model);
 
             // Protect monotonicity against floating-point bisection noise. This
             // is an Armijo-style step reduction within the same algorithm, not
@@ -211,7 +190,8 @@ impl RetainedCashSolver {
                 }
                 gamma /= 2.0;
                 candidate = convex_combination(&q, s, gamma);
-                candidate_objective = model.objective(&candidate);
+                candidate_summary = summary.interpolate(&oracle_summary, gamma);
+                candidate_objective = candidate_summary.objective(&model);
             }
             if candidate_objective + 1e-6 < previous_objective {
                 oracle_failed = true;
@@ -219,6 +199,7 @@ impl RetainedCashSolver {
             }
 
             q = candidate;
+            summary = candidate_summary;
             objective = candidate_objective;
             updates += 1;
         }
@@ -237,8 +218,7 @@ impl RetainedCashSolver {
         // verifier-supported point inside those caps. This LP is the explicit
         // integer-grid/pricing epilogue, not an alternative core solver.
         let mut result = if converged && !oracle_failed {
-            let final_utilities = model.utilities(&q);
-            let final_alpha = model.pacing_factors(&final_utilities);
+            let final_alpha = model.pacing_factors(&summary.utilities);
             let projection_objective = model.oracle_coefficients_from_alpha(&final_alpha);
             support_and_finalize_target_with_objective(
                 &q,
@@ -308,6 +288,10 @@ impl crate::Solver for RetainedCashSolver {
 }
 
 fn convex_combination(left: &[f64], right: &[f64], gamma: f64) -> Vec<f64> {
+    interpolate_values(left, right, gamma)
+}
+
+fn interpolate_values(left: &[f64], right: &[f64], gamma: f64) -> Vec<f64> {
     left.iter()
         .zip(right)
         .map(|(l, r)| (1.0 - gamma) * l + gamma * r)
@@ -426,6 +410,32 @@ pub(crate) struct ObjectiveModel<'a> {
     market_index: HashMap<matching_engine::MarketId, usize>,
 }
 
+struct AllocationSummary {
+    utilities: Vec<f64>,
+    non_mint_linear: f64,
+    yes: Vec<f64>,
+    no: Vec<f64>,
+}
+
+impl AllocationSummary {
+    fn linear_component(&self, model: &ObjectiveModel<'_>) -> f64 {
+        self.non_mint_linear - model.minting_cost_from_demands(&self.yes, &self.no)
+    }
+
+    fn objective(&self, model: &ObjectiveModel<'_>) -> f64 {
+        model.objective_from_components(&self.utilities, self.linear_component(model))
+    }
+
+    fn interpolate(&self, other: &Self, gamma: f64) -> Self {
+        Self {
+            utilities: interpolate_values(&self.utilities, &other.utilities, gamma),
+            non_mint_linear: (1.0 - gamma) * self.non_mint_linear + gamma * other.non_mint_linear,
+            yes: interpolate_values(&self.yes, &other.yes, gamma),
+            no: interpolate_values(&self.no, &other.no, gamma),
+        }
+    }
+}
+
 impl<'a> ObjectiveModel<'a> {
     pub(crate) fn new(problem: &'a Problem, ctx: &'a SolverContext) -> Self {
         let welfare_weights = welfare_weights(&problem.orders);
@@ -487,12 +497,7 @@ impl<'a> ObjectiveModel<'a> {
     }
 
     pub(crate) fn utilities(&self, q: &[f64]) -> Vec<f64> {
-        self.mm_groups
-            .iter()
-            .map(|group| {
-                group.iter().map(|&i| self.mm_values[i] * q[i]).sum::<f64>() / SHARE_SCALE as f64
-            })
-            .collect()
+        self.allocation_summary(q).utilities
     }
 
     pub(crate) fn pacing_factor(&self, mm_index: usize, utility: f64) -> f64 {
@@ -533,10 +538,6 @@ impl<'a> ObjectiveModel<'a> {
             .collect()
     }
 
-    pub(crate) fn objective(&self, q: &[f64]) -> f64 {
-        self.objective_from_components(&self.utilities(q), self.linear_component(q))
-    }
-
     pub(crate) fn objective_from_components(&self, utilities: &[f64], linear: f64) -> f64 {
         let mm = utilities
             .iter()
@@ -546,26 +547,46 @@ impl<'a> ObjectiveModel<'a> {
         mm + linear
     }
 
-    pub(crate) fn linear_component(&self, q: &[f64]) -> f64 {
-        self.non_mint_linear_component(q) - self.minting_cost(q)
+    pub(crate) fn allocation_components(&self, q: &[f64]) -> (Vec<f64>, f64) {
+        let summary = self.allocation_summary(q);
+        let linear = summary.linear_component(self);
+        (summary.utilities, linear)
     }
 
-    fn non_mint_linear_component(&self, q: &[f64]) -> f64 {
-        let retail = self
-            .welfare_weights
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| self.log_mm_by_order[*i].is_none())
-            .map(|(i, weight)| weight * q[i] / SHARE_SCALE as f64)
-            .sum::<f64>();
-        let sell_reduction_correction = self
-            .welfare_weights
-            .iter()
-            .enumerate()
-            .filter(|(i, weight)| self.log_mm_by_order[*i].is_some() && **weight < 0.0)
-            .map(|(i, _)| NANOS_PER_DOLLAR as f64 * q[i] / SHARE_SCALE as f64)
-            .sum::<f64>();
-        retail - sell_reduction_correction
+    fn allocation_summary(&self, q: &[f64]) -> AllocationSummary {
+        let mut utility_numerators = vec![0.0; self.mm_groups.len()];
+        let mut retail = 0.0;
+        let mut sell_reduction_correction = 0.0;
+        let mut yes = vec![0.0; self.ctx.markets.len()];
+        let mut no = vec![0.0; self.ctx.markets.len()];
+
+        for (i, order) in self.problem.orders.iter().enumerate() {
+            let quantity = q[i];
+            if let Some(mm_index) = self.log_mm_by_order[i] {
+                utility_numerators[mm_index] += self.mm_values[i] * quantity;
+                if self.welfare_weights[i] < 0.0 {
+                    sell_reduction_correction +=
+                        NANOS_PER_DOLLAR as f64 * quantity / SHARE_SCALE as f64;
+                }
+            } else {
+                retail += self.welfare_weights[i] * quantity / SHARE_SCALE as f64;
+            }
+
+            if let Some(&market_index) = self.market_index.get(&order.markets[0]) {
+                yes[market_index] += order.payoffs[0] as f64 * quantity;
+                no[market_index] += order.payoffs[1] as f64 * quantity;
+            }
+        }
+
+        AllocationSummary {
+            utilities: utility_numerators
+                .into_iter()
+                .map(|value| value / SHARE_SCALE as f64)
+                .collect(),
+            non_mint_linear: retail - sell_reduction_correction,
+            yes,
+            no,
+        }
     }
 
     pub(crate) fn objective_for_landed_fills(
@@ -573,15 +594,16 @@ impl<'a> ObjectiveModel<'a> {
         q: &[f64],
         fills: &[matching_engine::Fill],
     ) -> f64 {
-        let mm = self
-            .utilities(q)
+        let summary = self.allocation_summary(q);
+        let mm = summary
+            .utilities
             .iter()
             .enumerate()
             .map(|(k, &utility)| retained_cash_utility(self.budgets[k], utility))
             .sum::<f64>();
         let protocol_minting_cost =
             matching_engine::minting_cost_from_fills(self.problem.orders.iter(), fills) as f64;
-        mm + self.non_mint_linear_component(q) - protocol_minting_cost
+        mm + summary.non_mint_linear - protocol_minting_cost
     }
 
     pub(crate) fn affine_score(&self, utilities: &[f64], linear: f64, alpha: &[f64]) -> f64 {
@@ -634,17 +656,91 @@ impl<'a> ObjectiveModel<'a> {
         (low + high) / 2.0
     }
 
-    fn minting_cost(&self, q: &[f64]) -> f64 {
-        let mut yes = vec![0.0; self.ctx.markets.len()];
-        let mut no = vec![0.0; self.ctx.markets.len()];
-        for (i, order) in self.problem.orders.iter().enumerate() {
-            let Some(&market_index) = self.market_index.get(&order.markets[0]) else {
-                continue;
-            };
-            yes[market_index] += order.payoffs[0] as f64 * q[i];
-            no[market_index] += order.payoffs[1] as f64 * q[i];
+    /// Maximize the retained-cash objective on a segment in allocation space.
+    ///
+    /// The retained-cash terms are smooth along the segment, but the
+    /// zero-temperature minting cost is a maximum of affine outcome demands.
+    /// Its active outcome can change between the endpoints. Using only
+    /// `C(to) - C(from)` therefore optimizes a conservative epigraph chord,
+    /// not the actual projected objective. Aggregating each outcome's affine
+    /// demand once keeps the bisection cost proportional to markets rather
+    /// than orders while handling those kinks exactly.
+    fn allocation_segment_argmax(
+        &self,
+        from: &AllocationSummary,
+        to: &AllocationSummary,
+        max_step: f64,
+        line_search_steps: usize,
+    ) -> f64 {
+        if max_step <= 0.0 {
+            return 0.0;
         }
 
+        let yes_delta: Vec<_> = to
+            .yes
+            .iter()
+            .zip(&from.yes)
+            .map(|(to, from)| to - from)
+            .collect();
+        let no_delta: Vec<_> = to
+            .no
+            .iter()
+            .zip(&from.no)
+            .map(|(to, from)| to - from)
+            .collect();
+        let delta_utilities: Vec<_> = to
+            .utilities
+            .iter()
+            .zip(&from.utilities)
+            .map(|(to, from)| to - from)
+            .collect();
+        let non_mint_delta = to.non_mint_linear - from.non_mint_linear;
+        let mint_scale = NANOS_PER_DOLLAR as f64 / SHARE_SCALE as f64;
+
+        let derivative = |gamma: f64, side: SegmentSide| {
+            let retained_cash_slope = from
+                .utilities
+                .iter()
+                .zip(&delta_utilities)
+                .enumerate()
+                .map(|(k, (&utility, &delta))| {
+                    self.pacing_factor(k, utility + gamma * delta) * delta
+                })
+                .sum::<f64>();
+            let minting_slope =
+                self.minting_segment_slope(&from.yes, &from.no, &yes_delta, &no_delta, gamma, side);
+            non_mint_delta + retained_cash_slope - mint_scale * minting_slope
+        };
+
+        // A concave function's one-sided derivative is non-increasing. At a
+        // kink, the maximizer is where the left derivative is non-negative
+        // and the right derivative is non-positive.
+        if derivative(0.0, SegmentSide::Right) <= 0.0 {
+            return 0.0;
+        }
+        if derivative(max_step, SegmentSide::Left) >= 0.0 {
+            return max_step;
+        }
+
+        let mut low = 0.0;
+        let mut high = max_step;
+        for _ in 0..line_search_steps {
+            let mid = (low + high) / 2.0;
+            if derivative(mid, SegmentSide::Right) > 0.0 {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+        (low + high) / 2.0
+    }
+
+    fn minting_cost(&self, q: &[f64]) -> f64 {
+        let summary = self.allocation_summary(q);
+        self.minting_cost_from_demands(&summary.yes, &summary.no)
+    }
+
+    fn minting_cost_from_demands(&self, yes: &[f64], no: &[f64]) -> f64 {
         let mut mint_quantity = 0.0;
         let mut group_max_diff = vec![0.0_f64; self.ctx.num_groups];
         for (index, market) in self.ctx.markets.iter().enumerate() {
@@ -660,6 +756,90 @@ impl<'a> ObjectiveModel<'a> {
         }
 
         mint_quantity * NANOS_PER_DOLLAR as f64 / SHARE_SCALE as f64
+    }
+
+    fn minting_segment_slope(
+        &self,
+        yes: &[f64],
+        no: &[f64],
+        yes_delta: &[f64],
+        no_delta: &[f64],
+        gamma: f64,
+        side: SegmentSide,
+    ) -> f64 {
+        let mut slope = 0.0;
+        let mut group_value = vec![0.0_f64; self.ctx.num_groups];
+        let mut group_slope = vec![0.0_f64; self.ctx.num_groups];
+
+        for (index, market) in self.ctx.markets.iter().enumerate() {
+            let yes_value = yes[index] + gamma * yes_delta[index];
+            let no_value = no[index] + gamma * no_delta[index];
+            if let Some(&group) = self.ctx.market_to_group.get(market) {
+                slope += no_delta[index];
+                update_active_affine(
+                    &mut group_value[group],
+                    &mut group_slope[group],
+                    yes_value - no_value,
+                    yes_delta[index] - no_delta[index],
+                    side,
+                );
+            } else {
+                slope += active_affine_slope(
+                    yes_value,
+                    yes_delta[index],
+                    no_value,
+                    no_delta[index],
+                    side,
+                );
+            }
+        }
+
+        slope + group_slope.into_iter().sum::<f64>()
+    }
+}
+
+#[derive(Clone, Copy)]
+enum SegmentSide {
+    Left,
+    Right,
+}
+
+fn active_affine_slope(
+    left_value: f64,
+    left_slope: f64,
+    right_value: f64,
+    right_slope: f64,
+    side: SegmentSide,
+) -> f64 {
+    match left_value.total_cmp(&right_value) {
+        std::cmp::Ordering::Greater => left_slope,
+        std::cmp::Ordering::Less => right_slope,
+        std::cmp::Ordering::Equal => match side {
+            SegmentSide::Left => left_slope.min(right_slope),
+            SegmentSide::Right => left_slope.max(right_slope),
+        },
+    }
+}
+
+fn update_active_affine(
+    active_value: &mut f64,
+    active_slope: &mut f64,
+    candidate_value: f64,
+    candidate_slope: f64,
+    side: SegmentSide,
+) {
+    match candidate_value.total_cmp(active_value) {
+        std::cmp::Ordering::Greater => {
+            *active_value = candidate_value;
+            *active_slope = candidate_slope;
+        }
+        std::cmp::Ordering::Equal => {
+            *active_slope = match side {
+                SegmentSide::Left => active_slope.min(candidate_slope),
+                SegmentSide::Right => active_slope.max(candidate_slope),
+            };
+        }
+        std::cmp::Ordering::Less => {}
     }
 }
 
@@ -797,6 +977,7 @@ mod tests {
             liquidity_scarcity: 0.4,
             hot_market_fraction: 0.1,
             hot_order_probability: 0.75,
+            market_activity_power: 0.0,
             liquidity_depth_levels: 6,
             liquidity_dispersion: 1.5,
             num_mms: 2,
@@ -806,6 +987,7 @@ mod tests {
             mm_capacity_multiplier: 50,
             mm_market_coverage_fraction: 1.0,
             mm_market_coverage_max: 30,
+            mm_quote_style: matching_scenarios::MmQuoteStyle::Ladder,
         });
         calibrate_budgets_from_unconstrained_lp(&mut problem, 0.25);
         problem
@@ -817,6 +999,56 @@ mod tests {
         assert_eq!(retained_cash_utility(budget, 4.0), 4.0);
         assert_eq!(retained_cash_utility(budget, budget), budget);
         assert!(retained_cash_utility(budget, 20.0) < 20.0);
+    }
+
+    #[test]
+    fn allocation_line_search_finds_a_minting_face_change() {
+        let mut problem = Problem::new("minting_face_line_search");
+        let market = problem.markets.add_binary("market");
+        problem.orders.extend([
+            simple_yes_buy(&problem.markets, 1, market, 500_000_000, 10),
+            simple_no_buy(&problem.markets, 2, market, 500_000_000, 10),
+        ]);
+        let ctx = build_solver_context(&problem);
+        let model = ObjectiveModel::new(&problem, &ctx);
+        let from = [0.0, 10.0];
+        let to = [10.0, 0.0];
+        let from_summary = model.allocation_summary(&from);
+        let to_summary = model.allocation_summary(&to);
+        let gamma = model.allocation_segment_argmax(&from_summary, &to_summary, 1.0, 48);
+
+        assert!((gamma - 0.5).abs() <= 1e-12, "gamma={gamma}");
+        let midpoint = convex_combination(&from, &to, gamma);
+        let midpoint_objective = model.allocation_summary(&midpoint).objective(&model);
+        assert!(midpoint_objective > from_summary.objective(&model));
+        assert!(midpoint_objective > to_summary.objective(&model));
+    }
+
+    #[test]
+    fn allocation_line_search_finds_a_group_minting_face_change() {
+        let mut problem = Problem::new("group_minting_face_line_search");
+        let markets = [
+            problem.markets.add_binary("a"),
+            problem.markets.add_binary("b"),
+            problem.markets.add_binary("c"),
+        ];
+        let mut group = matching_engine::MarketGroup::new("group");
+        for market in markets {
+            group.add_market(market);
+        }
+        problem.add_market_group(group);
+        problem.orders.extend([
+            simple_yes_buy(&problem.markets, 1, markets[0], 500_000_000, 10),
+            simple_yes_buy(&problem.markets, 2, markets[1], 500_000_000, 10),
+        ]);
+
+        let ctx = build_solver_context(&problem);
+        let model = ObjectiveModel::new(&problem, &ctx);
+        let from = model.allocation_summary(&[10.0, 0.0]);
+        let to = model.allocation_summary(&[0.0, 10.0]);
+        let gamma = model.allocation_segment_argmax(&from, &to, 1.0, 48);
+
+        assert!((gamma - 0.5).abs() <= 1e-12, "gamma={gamma}");
     }
 
     #[test]
