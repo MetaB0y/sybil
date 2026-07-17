@@ -30,13 +30,17 @@ Clear each batch as an **Eisenberg–Gale convex program** — i.e. compute a
 budgeted MMs use affine-to-log retained-cash utility; outcome shares are the
 goods; and the program's **dual variables are the clearing prices**. Coherence
 across composed markets is not imposed by side-constraints — it *emerges* from
-solving one joint program. The production clearer is `RetainedCashSolver`
-(`matching-solver`, `features=["lp"]`), a generalized Frank--Wolfe solve of the
-quasilinear retained-cash program with a certified continuous gap. LP-SLP is the
-low-latency risk-neutral baseline, Conic QuasiFisher is the independent convex
-reference. The former `EgSolver` and `IterLpSolver` names were removed because
-they selected the same retained-cash implementation and obscured which
-algorithm actually ran.
+solving one joint program. The production clearer is `ProductionSolver`
+(`matching-solver`, `features=["retained-cash"]`): exact economic-connectivity
+routing around a fully corrective pacing bundle for the quasilinear
+retained-cash program, with a certified continuous gap. The independent
+`RetainedCashSolver` generalized Frank--Wolfe implementation remains a
+reference and injectable alternative. LP-SLP is the low-latency risk-neutral
+baseline; Conic QuasiFisher is the independent convex reference. The production
+algorithm selection is backed by the frozen
+`solver-bundle-promotion-evaluation-v1` artifact. The former `EgSolver` and
+`IterLpSolver` names were removed because they obscured which algorithm
+actually ran.
 
 Rationale and the LMSR-equivalence proof: the canonical math papers in
 `~/github/prediction-markets-are-fisher-markets/` — `paper.typ`

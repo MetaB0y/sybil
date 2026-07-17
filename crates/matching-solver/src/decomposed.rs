@@ -29,10 +29,7 @@ use rayon::prelude::*;
 
 use matching_engine::{MarketGroup, MarketId, MarketSet, MmConstraint, Nanos, Order, Problem};
 
-use crate::MatchingResult;
-use crate::result::{
-    PipelineResult, PipelineTimings, PriceDiscoveryResult, SolverDiagnostics, TerminationStatus,
-};
+use crate::result::{PipelineResult, SolverDiagnostics, TerminationStatus};
 
 // ============================================================================
 // DecomposedSolver
@@ -161,7 +158,8 @@ impl<S: crate::Solver> DecomposedSolver<S> {
             ));
         }
 
-        let mut result = assemble_final(problem, outcome.results);
+        let mut result =
+            crate::component_assembly::assemble_component_results(problem, outcome.results);
         result.total_time_secs = start.elapsed().as_secs_f64();
         result.diagnostics = SolverDiagnostics {
             algorithm: format!("decomposed-{}", self.inner.name().to_lowercase()),
@@ -919,89 +917,6 @@ fn check_convergence(
     }
 
     true
-}
-
-// ============================================================================
-// Result aggregation
-// ============================================================================
-
-/// Aggregate component results, then enforce global MM budgets and recompute
-/// welfare. Per-component LP budget enforcement is imperfect (linearized +
-/// rounded), so small overruns compound across components and must be trimmed
-/// against the real global budget here.
-pub(crate) fn assemble_final(
-    problem: &Problem,
-    component_results: Vec<PipelineResult>,
-) -> PipelineResult {
-    let mut result = aggregate_results(component_results);
-
-    let mm_order_info = crate::lp_solver::build_mm_order_info(problem);
-    let order_map_full: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
-    let empty_prices = HashMap::new();
-    let clearing_prices = result
-        .price_discovery
-        .as_ref()
-        .map(|price_discovery| &price_discovery.prices)
-        .unwrap_or(&empty_prices);
-
-    if !problem.mm_constraints.is_empty() {
-        crate::lp_solver::trim_mm_budget_overflows(
-            &mut result.result,
-            &problem.mm_constraints,
-            &mm_order_info,
-        );
-    }
-
-    crate::lp_solver::trim_zero_price_minting(&mut result.result, &order_map_full, clearing_prices);
-    crate::lp_solver::recompute_welfare(&mut result.result, &order_map_full);
-    if let Some(price_discovery) = result.price_discovery.as_mut() {
-        price_discovery.total_fills = result.result.fills.len();
-        price_discovery.total_welfare = result.result.total_welfare();
-    }
-
-    result
-}
-
-/// Merge results from all components into a unified PipelineResult.
-fn aggregate_results(component_results: Vec<PipelineResult>) -> PipelineResult {
-    let mut merged = MatchingResult::new();
-    let mut prices: HashMap<MarketId, Vec<Nanos>> = HashMap::new();
-    let mut total_solve_time = 0.0f64;
-
-    for result in &component_results {
-        // Merge fills (disjoint order sets → no conflicts)
-        for fill in &result.result.fills {
-            merged.fills.push(fill.clone());
-        }
-        merged.gross_welfare += result.result.gross_welfare;
-        merged.minting_cost += result.result.minting_cost;
-        merged.orders_filled += result.result.orders_filled;
-        merged.orders_unfilled_liquidity += result.result.orders_unfilled_liquidity;
-        merged.total_quantity_filled += result.result.total_quantity_filled;
-
-        // Merge prices (disjoint market sets)
-        if let Some(ref pd) = result.price_discovery {
-            for (market_id, market_prices) in &pd.prices {
-                prices.insert(*market_id, market_prices.clone());
-            }
-        }
-
-        total_solve_time += result.total_time_secs;
-    }
-
-    let mut pipeline_result = PipelineResult::empty();
-    pipeline_result.result = merged;
-    pipeline_result.price_discovery = Some(PriceDiscoveryResult {
-        total_welfare: pipeline_result.result.total_welfare(),
-        total_fills: pipeline_result.result.fills.len(),
-        prices,
-    });
-    pipeline_result.phase_times = PipelineTimings {
-        price_discovery_secs: total_solve_time,
-        ..Default::default()
-    };
-
-    pipeline_result
 }
 
 // ============================================================================

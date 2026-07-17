@@ -9,18 +9,19 @@ last_verified: 2026-07-17
 # Solver landscape
 
 > [!summary] In one paragraph
-> Solver implementations share one interface and integer trust boundary. The supported matching core is a fast LP; shared MM capital introduces endogenous price×quantity coupling. [[Retained Cash Solver|`RetainedCashSolver`]] remains the production default. Its repeated fixed-pacing matching oracle can use reusable HiGHS or an experimental exact structural price sweep, while all production-default and integer-landing paths retain HiGHS. The experimental [[Pacing Bundle Solver|`PacingBundleSolver`]] solves the same convex retained-cash program through a lower-dimensional pacing dual and a fully corrective primal bundle. [[Exact Component Solver|`ExactComponentSolver<S>`]] routes balanced, economically disconnected books through independent instances of any inner solver. [[Direct Price-Pacing Dual Solver|`DirectDualConicSolver`]] is an independent price-side certificate/reference whose continuous fill recovery is not yet robust enough for production integer landing.
+> Solver implementations share one interface and integer trust boundary. The supported matching core is a fast LP; shared MM capital introduces endogenous price×quantity coupling. `ProductionSolver` is a named facade over [[Exact Component Solver|exact economic-connectivity routing]] and the fully corrective [[Pacing Bundle Solver|pacing bundle]]. The independent [[Retained Cash Solver|`RetainedCashSolver`]] generalized Frank--Wolfe path remains a certified reference and injectable alternative. [[Direct Price-Pacing Dual Solver|`DirectDualConicSolver`]] is an independent price-side certificate/reference whose continuous fill recovery is not robust enough for production integer landing.
 
 | Solver | Feature | MM-budget approach | Role |
 |---|---|---|---|
-| [[Retained Cash Solver|`RetainedCashSolver`]] | `retained-cash` | Generalized Frank--Wolfe on affine-to-log MM utility | Production default |
-| [[Pacing Bundle Solver|`PacingBundleSolver`]] | `lp` | Fully corrective primal atoms from the convex pacing dual | Research candidate |
+| `ProductionSolver` | `retained-cash` | Exact components around a fully corrective pacing bundle | Production default |
+| [[Retained Cash Solver|`RetainedCashSolver`]] | `retained-cash` | Generalized Frank--Wolfe on affine-to-log MM utility | Certified reference / alternative |
+| [[Pacing Bundle Solver|`PacingBundleSolver`]] | `retained-cash` | Fully corrective primal atoms from the convex pacing dual | Production core |
 | [[LP Solver|`LpSolver`]] | `lp` | Solve, linearize budgets at discovered prices, re-solve once by default | Low-latency baseline |
 | [[Conic Solver|`ConicSolver`]] | `conic` | Clarabel exponential-cone formulation, then projection LP | Interior-point reference |
 | [[Direct Price-Pacing Dual Solver|`DirectDualConicSolver`]] | `conic` | Price/pacing hinge dual; fill quantities from hinge-row multipliers | Certificate and marginal-face research reference |
 | [[MILP Solver|`MilpSolver`]] | `milp` | SCIP MIQCQP or McCormick mode with timeout | Exact/reference route when optimal |
 | [[Decomposed Solver|`DecomposedSolver<S>`]] | `lp` | Component solves with proportional-response MM budget coordination | Scaling experiment |
-| [[Exact Component Solver|`ExactComponentSolver<S>`]] | `lp` | Exact split on groups, spanning/conditional orders, and shared MM budgets | Scaling router |
+| [[Exact Component Solver|`ExactComponentSolver<S>`]] | `retained-cash` | Exact split on groups, spanning/conditional orders, and shared MM budgets | Production routing primitive |
 
 The removed IterLP damped fixed point and forced-step EG implementation did not
 have the claimed convergence semantics. Their public types and CLI variants
@@ -54,12 +55,13 @@ integer validity: convergence, a configured iteration cap, backend failure,
 and projection failure are not interchangeable. `matching-sim` compares
 results; `sybil-verifier` decides validity.
 
-The production sequencer enables only `retained-cash`. The `lp` feature adds
-the public LP baseline, pacing-bundle solver, and decomposition experiments;
-`conic` includes that research surface because its reference implementation
-reuses the same LP projection utilities. This build boundary keeps production
-coupled to the certified solver it actually invokes without deleting research
-implementations.
+The production sequencer enables only `retained-cash`, which contains the named
+production facade, its pacing-bundle/exact-component implementation, RC-FW,
+and private HiGHS machinery. The `lp` feature adds the public risk-neutral LP
+baseline and approximate `DecomposedSolver`; `conic` includes that research
+surface because its reference implementation reuses LP projection utilities.
+This boundary keeps production coupled to the solver it invokes without
+exposing unrelated experimental policies at its call sites.
 
 ## Important boundaries
 

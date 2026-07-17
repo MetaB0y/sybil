@@ -556,10 +556,12 @@ impl<'a> ObjectiveModel<'a> {
         &self.budgets
     }
 
+    #[cfg(feature = "conic")]
     pub(crate) fn mm_orders(&self, mm_index: usize) -> &[usize] {
         &self.mm_groups[mm_index]
     }
 
+    #[cfg(feature = "conic")]
     pub(crate) fn mm_value(&self, order_index: usize) -> f64 {
         self.mm_values[order_index]
     }
@@ -577,7 +579,6 @@ impl<'a> ObjectiveModel<'a> {
         mm + linear
     }
 
-    #[cfg(feature = "lp")]
     pub(crate) fn allocation_components(&self, q: &[f64]) -> (Vec<f64>, f64) {
         let summary = self.allocation_summary(q);
         let linear = summary.linear_component(self);
@@ -646,7 +647,6 @@ impl<'a> ObjectiveModel<'a> {
                 .sum::<f64>()
     }
 
-    #[cfg(feature = "lp")]
     pub(crate) fn segment_argmax(
         &self,
         utilities: &[f64],

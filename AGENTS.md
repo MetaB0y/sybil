@@ -147,14 +147,15 @@ All solvers take a `Problem` and return a `PipelineResult` (fills, clearing pric
 
 | Solver | File | Feature | Description |
 |--------|------|---------|-------------|
-| **RetainedCashSolver** | `retained_cash_solver.rs` | `lp` | Certified generalized Frank--Wolfe on the affine-to-log retained-cash objective. **Production default.** |
-| **PacingBundleSolver** | `pacing_bundle_solver.rs` | `lp` | Experimental fully corrective pacing bundle with a certified retained-cash gap. |
+| **ProductionSolver** | `production_solver.rs` | `retained-cash` | **Production default:** exact-connectivity routing around the fully corrective pacing bundle. |
+| **RetainedCashSolver** | `retained_cash_solver.rs` | `retained-cash` | Independent certified generalized Frank--Wolfe reference. |
+| **PacingBundleSolver** | `pacing_bundle_solver.rs` | `retained-cash` | Fully corrective retained-cash core with a certified gap. |
 | **LpSolver** | `lp_solver.rs` | `lp` | LP via HiGHS + single-pass SLP MM budget shading; low-latency baseline. |
 | **ConicSolver** | `conic_solver.rs` | `conic` | Independent exponential-cone retained-cash reference via Clarabel. |
 | **DirectDualConicSolver** | `direct_dual_conic_solver.rs` | `conic` | Experimental price-side retained-cash certificate; integer landing remains research. |
 | **MilpSolver** | `milp.rs` | `milp` | SCIP MIQCQP. Exact optimal with timeout. |
 | **DecomposedSolver** | `decomposed.rs` | `lp` | Per-market-group decomposition with mirror descent budget coordination. |
-| **ExactComponentSolver** | `exact_components.rs` | `lp` | Exact economic-connectivity decomposition around another solver. |
+| **ExactComponentSolver** | `exact_components.rs` | `retained-cash` | Exact economic-connectivity decomposition around another solver. |
 
 ### Key Design Decisions
 

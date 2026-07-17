@@ -9,7 +9,7 @@ last_verified: 2026-07-14
 # LP solver
 
 > [!summary] In one paragraph
-> `LpSolver` is the low-latency risk-neutral baseline. It asks HiGHS for the welfare-maximizing supported allocation, reads clearing prices from balance-constraint duals, linearizes MM capital usage at those prices, and re-solves with budget rows. The default permits one budget-aware re-solve. The floating solution is rounded, trimmed for integer MM compliance, and judged by `sybil-verifier`. [[Retained Cash Solver]] is the production default when shared MM capital is present.
+> `LpSolver` is the low-latency risk-neutral baseline. It asks HiGHS for the welfare-maximizing supported allocation, reads clearing prices from balance-constraint duals, linearizes MM capital usage at those prices, and re-solves with budget rows. The default permits one budget-aware re-solve. The floating solution is rounded, trimmed for integer MM compliance, and judged by `sybil-verifier`. The retained-cash [[Solver Landscape|`ProductionSolver`]] is the production default when shared MM capital is present.
 
 ```mermaid
 flowchart LR

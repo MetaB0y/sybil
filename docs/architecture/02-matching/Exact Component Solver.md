@@ -9,7 +9,7 @@ last_verified: 2026-07-17
 # Exact component solver
 
 > [!summary] In one paragraph
-> `ExactComponentSolver<S>` finds economically independent liquidity clusters and solves each with the same inner solver. Markets are joined by a market group, a spanning or conditional order, or an MM budget shared by orders on both markets. The retained-cash objective and all matching constraints are additive after this coarsening, so the split changes neither the mathematical problem nor any budget. Connected and strongly unbalanced books delegate directly to avoid setup and landing overhead.
+> `ExactComponentSolver<S>` finds economically independent liquidity clusters and solves each with the same inner solver. Markets are joined by a market group, a spanning or conditional order, or an MM budget shared by orders on both markets. The retained-cash objective and all matching constraints are additive after this coarsening, so the split changes neither the mathematical problem nor any budget. `ProductionSolver` composes it with [[Pacing Bundle Solver|`PacingBundleSolver`]]; connected and strongly unbalanced books delegate directly to avoid setup and landing overhead.
 
 The component graph is built with union-find over markets. It adds one
 hyperedge for each:
@@ -21,12 +21,14 @@ hyperedge for each:
 Every order and MM constraint therefore belongs wholly to one resulting
 component. Unlike [[Decomposed Solver]], the exact route never splits an MM
 budget, drops a spanning order, or runs a coordination fixed point. Each
-component crosses the normal integer landing boundary independently; the
-combined result is then checked against the original problem and global MM
-budgets.
+component crosses the normal integer landing boundary independently. Assembly
+then canonicalizes fills by admitted order ID, rechecks the original global MM
+budgets, and recomputes integer welfare. Canonical ordering is consensus
+relevant: component numbering must not leak hash-map iteration order into
+account event digests.
 
 Multiple solver setup and landing phases can cost more than they save on a
-tiny detached tail. The current research router splits only when the largest
+tiny detached tail. The production router splits only when the largest
 component contains at most 80% of all orders. This threshold affects execution
 cost only: delegation solves the original monolithic problem and preserves the
 same semantics. Under the `parallel` feature, selected components run through
@@ -39,7 +41,9 @@ scaling.
 
 ## Where this lives
 
-> `crates/matching-solver/src/exact_components.rs`
+> `crates/matching-solver/src/exact_components.rs`  
+> `crates/matching-solver/src/production_solver.rs`  
+> `crates/matching-solver/src/component_assembly.rs`
 
 ## See also
 

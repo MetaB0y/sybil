@@ -48,8 +48,8 @@ required-features = ["conic"]
 [features]
 default = []
 milp = ["dep:russcip"]  # MIQCQP solver via SCIP
-retained-cash = ["dep:highs"] # Production retained-cash solver and its private HiGHS oracle
-lp = ["retained-cash"]  # Research LP, pacing-bundle, and decomposition surfaces
+retained-cash = ["dep:highs"] # Production retained-cash policy, RC-FW reference, and private HiGHS core
+lp = ["retained-cash"]  # Public LP baseline and approximate decomposition surface
 conic = ["dep:clarabel", "lp"] # Conic EG solver via Clarabel (reuses LP utilities)
 parallel = ["dep:rayon"] # Parallel decomposed solves
 

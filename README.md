@@ -70,16 +70,17 @@ All solvers take a `Problem` and return a `PipelineResult` (fills, clearing pric
 
 | Solver | Backend | Description |
 |--------|---------|-------------|
-| **LpSolver** | HiGHS | LP + single-pass SLP MM budget shading. Production default. |
-| **IterLpSolver** | HiGHS | Damped fixed-point on the Eisenberg-Gale budget multiplier; better under tight MM budgets. |
-| **EgSolver** | HiGHS | Eisenberg-Gale / Fisher market formulation (Frank-Wolfe). |
-| **ConicSolver** | Clarabel | Interior-point solver with configurable objective (Linear, Fisher, QuasiFisher). |
+| **ProductionSolver** | HiGHS | Exact-connectivity routing around the certified fully corrective retained-cash bundle. Production default. |
+| **RetainedCashSolver** | HiGHS | Independent certified generalized Frank--Wolfe retained-cash reference. |
+| **LpSolver** | HiGHS | Risk-neutral LP + single-pass SLP MM budget shading baseline. |
+| **ConicSolver** | Clarabel | Independent interior-point retained-cash reference. |
 | **MilpSolver** | SCIP | Mixed-integer exact optimal with timeout. Feature-gated (`milp`). |
-| **DecomposedSolver** | (wraps any) | Per-market-group decomposition with mirror descent budget coordination. |
+| **DecomposedSolver** | (wraps any) | Approximate per-market-group decomposition with budget coordination. |
 
-The **LpSolver** is the production default. Benchmark results are workload- and
-revision-dependent; see [the benchmark notes](design/solver-benchmarks.md) and
-rerun the repository benchmarks before quoting numbers.
+`ProductionSolver` is the production default. The frozen promotion result and
+its complete rows live under
+[`benchmarks/solver/results/2026-07-17-bundle-promotion-v1/`](benchmarks/solver/results/2026-07-17-bundle-promotion-v1/);
+other benchmark claims remain workload- and revision-dependent.
 
 ## License
 

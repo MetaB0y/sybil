@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use matching_engine::{MarketId, NANOS_PER_DOLLAR, Order, SHARE_SCALE};
 
+#[cfg(feature = "conic")]
 use crate::retained_cash_solver::ObjectiveModel;
 
 #[derive(Clone, Copy, Debug)]
@@ -481,6 +482,7 @@ impl<'a> PriceDualOracle<'a> {
         Some(objective)
     }
 
+    #[cfg(feature = "conic")]
     pub(crate) fn project_prices(&self, yes_prices: &mut [f64]) -> Option<()> {
         if yes_prices.len() != self.markets.len() {
             return None;
@@ -491,6 +493,7 @@ impl<'a> PriceDualOracle<'a> {
         Some(())
     }
 
+    #[cfg(feature = "conic")]
     pub(crate) fn joint_objective_at(
         &self,
         model: &ObjectiveModel<'_>,
@@ -503,6 +506,7 @@ impl<'a> PriceDualOracle<'a> {
     }
 }
 
+#[cfg(feature = "conic")]
 fn joint_objective(
     model: &ObjectiveModel<'_>,
     fixed_price_objective: f64,
@@ -521,6 +525,7 @@ fn joint_objective(
     Some(objective)
 }
 
+#[cfg(feature = "conic")]
 fn project_capped_simplex(point: &mut [f64], indices: &[usize]) {
     for &index in indices {
         point[index] = point[index].max(0.0);

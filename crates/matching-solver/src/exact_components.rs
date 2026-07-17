@@ -15,7 +15,7 @@ use rayon::prelude::*;
 
 use matching_engine::{MarketGroup, MarketId, MarketSet, MmConstraint, Problem};
 
-use crate::decomposed::assemble_final;
+use crate::component_assembly::assemble_component_results;
 use crate::result::{PipelineResult, SolverDiagnostics, TerminationStatus};
 
 /// Compact topology summary used by solver experiments and routing decisions.
@@ -137,7 +137,7 @@ impl<S: crate::Solver> ExactComponentSolver<S> {
         });
 
         let solved_components = component_results.len();
-        let mut result = assemble_final(
+        let mut result = assemble_component_results(
             problem,
             component_results
                 .into_iter()
@@ -277,7 +277,8 @@ struct ComponentPartition {
 
 impl ComponentPartition {
     fn new(problem: &Problem) -> Option<Self> {
-        let markets: Vec<_> = problem.markets.iter().map(|market| market.id).collect();
+        let mut markets: Vec<_> = problem.markets.iter().map(|market| market.id).collect();
+        markets.sort_unstable();
         if markets.is_empty() {
             return None;
         }

@@ -2,9 +2,10 @@
 //!
 //! Solves the welfare-maximizing order matching problem via convex programs:
 //! - **LP** (`lp_solver`): Linear program via HiGHS with MM budget shading
-//! - **Retained cash** (`retained_cash_solver`): certified generalized Frank--Wolfe
-//! - **Pacing bundle** (`pacing_bundle_solver`): fully corrective research solver
-//! - **Exact components** (`exact_components`): connectivity-aware solver router
+//! - **Production** (`production_solver`): exact-component fully corrective retained cash
+//! - **RC-FW** (`retained_cash_solver`): independent certified reference
+//! - **Pacing bundle** (`pacing_bundle_solver`): fully corrective retained-cash core
+//! - **Exact components** (`exact_components`): exact connectivity-aware router
 //! - **Conic** (`conic_solver`): Conic EG via Clarabel
 //! - **Direct dual** (`direct_dual_conic_solver`): price-side Clarabel reference
 //! - **MILP** (`milp`): Mixed-integer via SCIP (exact with timeout)
@@ -20,6 +21,9 @@ pub mod milp;
 #[cfg(feature = "retained-cash")]
 mod lp_solver;
 
+#[cfg(feature = "retained-cash")]
+mod component_assembly;
+
 #[cfg(feature = "conic")]
 pub mod conic_solver;
 
@@ -32,14 +36,17 @@ mod price_pacing_dual;
 #[cfg(feature = "retained-cash")]
 pub mod retained_cash_solver;
 
-#[cfg(feature = "lp")]
+#[cfg(feature = "retained-cash")]
 pub mod pacing_bundle_solver;
 
 #[cfg(feature = "lp")]
 pub mod decomposed;
 
-#[cfg(feature = "lp")]
+#[cfg(feature = "retained-cash")]
 pub mod exact_components;
+
+#[cfg(feature = "retained-cash")]
+mod production_solver;
 
 #[cfg(all(test, feature = "retained-cash"))]
 pub(crate) mod test_fixtures;
@@ -72,8 +79,11 @@ pub use retained_cash_solver::{
     retained_cash_welfare_gap_bound_for_fills, zero_temperature_minting_cost_for_fills,
 };
 
-#[cfg(feature = "lp")]
+#[cfg(feature = "retained-cash")]
 pub use pacing_bundle_solver::{PacingBundleConfig, PacingBundleSolver};
+
+#[cfg(feature = "retained-cash")]
+pub use production_solver::ProductionSolver;
 
 #[cfg(feature = "conic")]
 pub use conic_solver::{ConicConfig, ConicSolver, ObjectiveMode};
@@ -84,7 +94,7 @@ pub use direct_dual_conic_solver::{DirectDualConicConfig, DirectDualConicSolver}
 #[cfg(feature = "lp")]
 pub use decomposed::DecomposedSolver;
 
-#[cfg(feature = "lp")]
+#[cfg(feature = "retained-cash")]
 pub use exact_components::{ExactComponentSolver, ExactComponentStats, exact_component_stats};
 
 use serde::ser::SerializeStruct;

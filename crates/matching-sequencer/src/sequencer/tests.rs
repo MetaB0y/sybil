@@ -38,6 +38,12 @@ fn make_sequencer(balance: i64) -> (BlockSequencer, AccountId) {
     )
 }
 
+#[test]
+fn default_solver_is_the_promoted_production_facade() {
+    let (sequencer, _) = make_sequencer(0);
+    assert_eq!(sequencer.solver().name(), "ProductionRetainedCash");
+}
+
 fn fresh_public_key() -> crate::crypto::PublicKey {
     let signing_key =
         <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(

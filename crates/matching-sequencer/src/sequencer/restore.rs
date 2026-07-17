@@ -59,20 +59,23 @@ impl BlockSequencer {
     }
 
     /// Create with the production default solver:
-    /// [`matching_solver::RetainedCashSolver`].
+    /// [`matching_solver::ProductionSolver`].
     ///
     /// This is the solver that actually settles blocks in production (reached
     /// via `sybil-api`'s startup and [`BlockSequencer::restore`]). It runs a
-    /// generalized Frank--Wolfe on the paper's exact retained-cash objective.
-    /// Each iteration calls the HiGHS matching oracle; termination uses a
-    /// certified continuous objective gap rather than iterate stability.
+    /// fully corrective pacing-bundle solve of the paper's exact retained-cash
+    /// objective, routed across balanced economically independent components.
+    /// HiGHS supplies matching-oracle atoms and a certified continuous gap;
+    /// every route crosses the same integer landing and verifier boundary.
     ///
     /// - `LpSolver` remains the low-latency risk-neutral baseline. Its SLP MM
     ///   budget rows are a capped fixed-point heuristic, so it is no longer the
     ///   default when shared capital can bind after prices move.
     /// - `ConicSolver` in QuasiFisher mode solves the same convex objective by
     ///   exponential cones and is retained as an independent reference.
-    /// - A configured Frank--Wolfe cap can return a valid landed allocation
+    /// - `RetainedCashSolver` remains the independent generalized
+    ///   Frank--Wolfe reference and an injectable operational alternative.
+    /// - A configured iteration cap can return a valid landed allocation
     ///   before meeting the requested certificate. Diagnostics preserve that
     ///   distinction; the verifier remains the settlement authority.
     ///
@@ -88,7 +91,7 @@ impl BlockSequencer {
             accounts,
             markets,
             market_groups,
-            Arc::new(matching_solver::RetainedCashSolver::new()),
+            Arc::new(matching_solver::ProductionSolver::new()),
             config,
         )
     }
@@ -107,7 +110,7 @@ impl BlockSequencer {
         state: RestoredState,
         config: SequencerConfig,
     ) -> Result<Self, SequencerRestoreError> {
-        let solver: Arc<dyn Solver> = Arc::new(matching_solver::RetainedCashSolver::new());
+        let solver: Arc<dyn Solver> = Arc::new(matching_solver::ProductionSolver::new());
         let mut lifecycle = MarketLifecycle::new();
         for (market_id, status) in state.market_statuses {
             lifecycle.set_market_status(market_id, status);

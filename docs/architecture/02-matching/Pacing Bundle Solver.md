@@ -9,7 +9,7 @@ last_verified: 2026-07-17
 # Pacing bundle solver
 
 > [!summary] In one paragraph
-> `PacingBundleSolver` is a research implementation of the same zero-temperature retained-cash program as [[Retained Cash Solver|`RetainedCashSolver`]]. It uses the variational pacing representation to work in one effective dimension per market maker, retains matching-LP optima as primal atoms, and fully corrects their convex weights. A HiGHS dual bound gives a genuine continuous retained-cash certificate. Development evidence is promising, but this is not yet the production default or held-out paper evidence.
+> `PacingBundleSolver` is the fully corrective core of the production retained-cash clearer and solves the same zero-temperature program as [[Retained Cash Solver|`RetainedCashSolver`]]. It uses the variational pacing representation to work in one effective dimension per market maker, retains matching-LP optima as primal atoms, and fully corrects their convex weights. A HiGHS dual bound gives a genuine continuous retained-cash certificate. `ProductionSolver` wraps it in exact economic-connectivity routing.
 
 For budget `B > 0` and MM weighted fill `U`, the shifted retained-cash utility
 satisfies
@@ -108,14 +108,16 @@ permits no capital consumption.
 
 ## Evidence boundary
 
-The checked-in pacing protocol uses development seeds and was observed while
-the algorithm and landing were being repaired. It tests order-count and
-market-maker-count scaling separately and retains every cap and failure. Its
-results can guide engineering and the design of a future preregistration; they
-cannot be called held out. [[Retained Cash Solver|RC-FW]] remains the production
-default until a frozen comparison on untouched instances justifies a change.
-The current dated interpretation is
-`design/pacing-bundle-landing-tail-study-2026-07-14.md`.
+The broad pacing protocol remains development evidence because its seeds were
+observed while the algorithm and landing were repaired. Production promotion
+instead used the separately frozen
+`benchmarks/solver/protocol-bundle-promotion-v1.json`: 136 complete rows on
+previously untouched seeds, with 68 verifier-valid results per solver. The
+exact bundle improved the landed retained-cash objective in 49 paired cases,
+tied 19, and regressed in none; iteration caps fell from 22 to 2 and P99
+latency from 2,317 ms to 477 ms. The immutable result is
+`benchmarks/solver/results/2026-07-17-bundle-promotion-v1/`; the full decision
+record is `design/solver-experiments/exact-component-decomposition.md`.
 
 ## Where this lives
 

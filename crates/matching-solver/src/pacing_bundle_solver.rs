@@ -23,7 +23,7 @@ use crate::lp_solver::{
 use crate::result::{PipelineResult, SolverDiagnostics, TerminationStatus};
 use crate::retained_cash_solver::{ObjectiveModel, landed_quantities, landing_l1_ratio};
 
-/// Configuration for the experimental fully corrective pacing-bundle solver.
+/// Configuration for the fully corrective pacing-bundle solver.
 #[derive(Clone, Debug)]
 pub struct PacingBundleConfig {
     /// Fixed-pacing matching oracle.
@@ -67,7 +67,7 @@ impl Default for PacingBundleConfig {
     }
 }
 
-/// Experimental low-dimensional solver over one pacing factor per MM.
+/// Low-dimensional retained-cash solver over one pacing factor per MM.
 pub struct PacingBundleSolver {
     config: PacingBundleConfig,
 }
@@ -105,7 +105,7 @@ impl PacingBundleSolver {
         let ctx = build_solver_context(problem);
         let model = ObjectiveModel::new(problem, &ctx);
         if !model.has_reduced_form_orders() {
-            let mut result = crate::LpSolver::new().solve(problem);
+            let mut result = crate::lp_solver::LpSolver::new().solve(problem);
             result.diagnostics.algorithm = "pacing-bundle".to_string();
             result.diagnostics.status = TerminationStatus::Delegated;
             result.diagnostics.message =

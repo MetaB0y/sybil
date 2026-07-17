@@ -217,3 +217,25 @@ depend conceptually on the approximate `DecomposedSolver`.
 Do not retune or rerun this protocol. Future changes need new seeds and a new
 versioned promotion protocol. The checked-in rows remain the immutable
 baseline for this decision.
+
+### Production follow-through
+
+The promoted composition is exposed as `ProductionSolver`; sequencer creation
+and restore use that facade rather than spelling
+`ExactComponentSolver<PacingBundleSolver>` at call sites. The pacing bundle,
+exact router, and their private HiGHS machinery now belong to the
+`retained-cash` feature. The broader `lp` feature adds only the public
+risk-neutral LP baseline and approximate coordinated decomposition.
+
+The first full sequencer test exposed one consensus-relevant integration bug:
+component IDs inherited randomized `MarketSet` hash iteration, and component
+results were concatenated in that incidental order. Identical independently
+constructed books could therefore emit the same economic fills in a different
+sequence, changing account event digests and state roots. The implementation
+now sorts markets before assigning component IDs and sorts merged fills by
+admitted order ID. The minimized `state_root_determinism` property and the
+complete 11-test sequencer invariant target pass after the repair.
+
+Shared result aggregation also moved out of `decomposed.rs` into the neutral
+`component_assembly.rs`. Exact production decomposition no longer depends
+conceptually or structurally on the approximate proportional-response solver.
