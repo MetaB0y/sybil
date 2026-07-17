@@ -160,3 +160,60 @@ Decision: promote the exact bundle to the preferred production candidate, but
 do not change the default from development evidence. Freeze
 `benchmarks/solver/protocol-bundle-promotion-v1.json` and the implementation
 before evaluating its untouched seeds once.
+
+## Experiment ECD-003 — frozen production-promotion evaluation
+
+### Protocol
+
+`benchmarks/solver/protocol-bundle-promotion-v1.json` and the unchanged
+candidate implementation were frozen and pushed at
+`c9fb939d521f92fd23e099208f15c931ddb51352` before any evaluation seed was
+run. The declared `70000..71002` range was then evaluated exactly once. The
+checked-in artifact at
+`benchmarks/solver/results/2026-07-17-bundle-promotion-v1/` is complete:
+136/136 rows, no duplicates, and no cross-solver fingerprint mismatch.
+
+### Result
+
+Both solvers returned verifier-valid allocations on all 68 books. Pairing by
+book and budget, the exact bundle had a higher landed retained-cash objective
+in 49 cases and tied RC-FW in 19; it was lower in none.
+
+| Metric | RC-FW | Exact bundle |
+|---|---:|---:|
+| Verifier-valid availability | 68/68 | 68/68 |
+| Iteration caps | 22 | 2 |
+| P50 / P95 / P99 / max | 191 / 462 / 2,317 / 2,334 ms | 176 / 425 / 477 / 478 ms |
+| Retained gap P50 / P95 / max | 0.0004 / 0.0818 / 17.5966% | 0 / 0 / 0% |
+| Certificate relative gap P95 | 0.141580% | 0.00000035% |
+| Landing loss P95 / max | `$0.620` / `$82.993` | `$0.00000003` / `$0.646` |
+| Allocation L1 P95 / max | 0.422 / 38.542% | 0.012 / 0.281% |
+| Oracle calls P50 / P95 | 22 / 101 | 14 / 101 |
+
+The most important held-out counterexample was the 80-order balanced
+fragmented slice. RC-FW hit its iteration cap in two of three cases and lost
+16.5--17.6% of the retained objective during integer landing; the exact bundle
+converged in all three, had zero measured retained gap, and ran about four
+times faster. At 10,000 orders its median runtime was `412 ms` versus
+`2,309 ms`. At 16 independent MM components it was `14 ms` versus `158 ms`.
+
+The candidate is structurally more involved than a single generalized
+Frank--Wolfe loop: it adds an exact connectivity router and a fully corrective
+restricted master. That source complexity is a real cost, not hidden by the
+runtime result. Operationally, however, the landed path is simpler: it reached
+the iteration cap ten times less often, retained a median of three and at most
+30 active atoms, and eliminated the quality failure tail that otherwise
+requires diagnosing continuous convergence and lossy landing together.
+
+### Decision
+
+The frozen promotion rule passes. Promote the exact-component pacing bundle
+behind one named production-solver facade, retain RC-FW as an independent
+certified reference and fallback implementation, and keep experimental solver
+composition out of sequencer call sites. Move shared assembly/landing support
+to objective-oriented internal modules while doing so; production should not
+depend conceptually on the approximate `DecomposedSolver`.
+
+Do not retune or rerun this protocol. Future changes need new seeds and a new
+versioned promotion protocol. The checked-in rows remain the immutable
+baseline for this decision.

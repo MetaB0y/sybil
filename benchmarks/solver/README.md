@@ -215,12 +215,12 @@ iteration policy is in `benchmarks/solver/research-loop.md`.
 
 ## Frozen bundle-promotion evaluation
 
-`protocol-bundle-promotion-v1.json` is the one-use promotion gate between the
-current production RC-FW solver and the exact-component pacing bundle. It
-declares 68 untouched generated books/budget points (136 rows) across random
-shape, market-like flow, numerical range, tight flash budgets, order-count
-scaling, and pacing-dimension scaling. Seeds `70000..71002` must not be used
-for tuning.
+`protocol-bundle-promotion-v1.json` was the one-use promotion gate between
+production RC-FW and the exact-component pacing bundle. It declares 68
+generated books/budget points (136 rows) across random shape, market-like
+flow, numerical range, tight flash budgets, order-count scaling, and
+pacing-dimension scaling. Seeds `70000..71002` were untouched before the
+protocol was frozen at `c9fb939d521f` and have now been consumed.
 
 Freeze and push the protocol plus unchanged candidate implementation before
 running it. Then use that immutable revision exactly once:
@@ -230,15 +230,23 @@ cargo run --release -p matching-sim --all-features \
   --bin solver-experiments -- \
   --protocol benchmarks/solver/protocol-bundle-promotion-v1.json \
   --source-revision <frozen-protocol-commit> \
-  --output-dir benchmarks/solver/results/<date>-bundle-promotion-v1 \
-  --overwrite
+  --output-dir benchmarks/solver/results/<date>-bundle-promotion-v1
 python3 scripts/benchmarks/analyze_solver_experiments.py \
   benchmarks/solver/results/<date>-bundle-promotion-v1
 ```
 
-The hard gates and broad Pareto promotion rule are embedded in the protocol.
-Do not alter seeds, tolerances, cases, or acceptance policy after observing
-the output. The profiles are generated and only test generalization within the
+This command is retained as provenance, not an invitation to rerun v1. The
+complete immutable result is checked in at
+`results/2026-07-17-bundle-promotion-v1/`: 136/136 complete and
+fingerprint-consistent rows, 68/68 verifier-valid results per solver, and no
+paired retained-objective regression from the exact bundle. The exact bundle
+improved 49 pairs and tied 19, cut iteration caps from 22 to 2, and reduced
+P95/P99 runtime from `462/2,317 ms` to `425/477 ms`.
+
+The hard gates and broad Pareto promotion rule are embedded in the protocol
+and passed. Do not alter or rerun its seeds, tolerances, cases, or acceptance
+policy. A future promotion claim requires a newly versioned protocol and
+untouched range. These generated profiles only test generalization within the
 declared scenario families; public-flow and sequencer replay remain separate
 development evidence.
 

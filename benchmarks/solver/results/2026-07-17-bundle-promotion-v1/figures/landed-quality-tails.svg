@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="450" viewBox="0 0 980 450">
+<rect width="100%" height="100%" fill="white"/>
+<style>text{font-family:Inter,Arial,sans-serif;fill:#111827}.axis{stroke:#9ca3af;stroke-width:1}.grid{stroke:#e5e7eb;stroke-width:1}.small{font-size:11px}.tiny{font-size:9px}</style>
+<text x="490.0" y="24.0" font-size="17" text-anchor="middle" font-weight="bold">Landed economic-quality tails</text>
+<text x="275.0" y="45.0" font-size="12" text-anchor="middle" font-weight="bold">Observed-best net-welfare gap</text>
+<line class="axis" x1="70" y1="60" x2="70" y2="345"/>
+<line class="axis" x1="70" y1="345" x2="480" y2="345"/>
+<line class="grid" x1="70" y1="345.0" x2="480" y2="345.0"/>
+<text x="63.0" y="349.0" font-size="9" text-anchor="end" font-weight="normal">10^-6%</text>
+<line class="grid" x1="70" y1="309.375" x2="480" y2="309.375"/>
+<text x="63.0" y="313.4" font-size="9" text-anchor="end" font-weight="normal">10^-5%</text>
+<line class="grid" x1="70" y1="273.75" x2="480" y2="273.75"/>
+<text x="63.0" y="277.8" font-size="9" text-anchor="end" font-weight="normal">10^-4%</text>
+<line class="grid" x1="70" y1="238.125" x2="480" y2="238.125"/>
+<text x="63.0" y="242.1" font-size="9" text-anchor="end" font-weight="normal">10^-3%</text>
+<line class="grid" x1="70" y1="202.5" x2="480" y2="202.5"/>
+<text x="63.0" y="206.5" font-size="9" text-anchor="end" font-weight="normal">10^-2%</text>
+<line class="grid" x1="70" y1="166.875" x2="480" y2="166.875"/>
+<text x="63.0" y="170.9" font-size="9" text-anchor="end" font-weight="normal">10^-1%</text>
+<line class="grid" x1="70" y1="131.25" x2="480" y2="131.25"/>
+<text x="63.0" y="135.2" font-size="9" text-anchor="end" font-weight="normal">10^0%</text>
+<line class="grid" x1="70" y1="95.625" x2="480" y2="95.625"/>
+<text x="63.0" y="99.6" font-size="9" text-anchor="end" font-weight="normal">10^1%</text>
+<line class="grid" x1="70" y1="60.0" x2="480" y2="60.0"/>
+<text x="63.0" y="64.0" font-size="9" text-anchor="end" font-weight="normal">10^2%</text>
+<text x="172.5" y="364.0" font-size="9" text-anchor="middle" font-weight="normal">RC-FW</text>
+<circle cx="172.5" cy="225.52597153019786" r="4" fill="#7c3aed" fill-opacity="0.55"/>
+<circle cx="172.5" cy="138.58743058481312" r="5" fill="#7c3aed" fill-opacity="0.8"/>
+<circle cx="172.5" cy="76.45061630671199" r="6" fill="#7c3aed" fill-opacity="1.0"/>
+<line x1="172.5" y1="225.52597153019786" x2="172.5" y2="76.45061630671199" stroke="#7c3aed" stroke-width="2"/>
+<text x="377.5" y="364.0" font-size="9" text-anchor="middle" font-weight="normal">Exact bundle</text>
+<circle cx="377.5" cy="345.0" r="4" fill="#0f766e" fill-opacity="0.55"/>
+<circle cx="377.5" cy="199.04472552613515" r="5" fill="#0f766e" fill-opacity="0.8"/>
+<circle cx="377.5" cy="174.0128954345923" r="6" fill="#0f766e" fill-opacity="1.0"/>
+<line x1="377.5" y1="345.0" x2="377.5" y2="174.0128954345923" stroke="#0f766e" stroke-width="2"/>
+<text x="760.0" y="45.0" font-size="12" text-anchor="middle" font-weight="bold">Observed-best retained-objective gap</text>
+<line class="axis" x1="555" y1="60" x2="555" y2="345"/>
+<line class="axis" x1="555" y1="345" x2="965" y2="345"/>
+<line class="grid" x1="555" y1="345.0" x2="965" y2="345.0"/>
+<text x="548.0" y="349.0" font-size="9" text-anchor="end" font-weight="normal">10^-6%</text>
+<line class="grid" x1="555" y1="309.375" x2="965" y2="309.375"/>
+<text x="548.0" y="313.4" font-size="9" text-anchor="end" font-weight="normal">10^-5%</text>
+<line class="grid" x1="555" y1="273.75" x2="965" y2="273.75"/>
+<text x="548.0" y="277.8" font-size="9" text-anchor="end" font-weight="normal">10^-4%</text>
+<line class="grid" x1="555" y1="238.125" x2="965" y2="238.125"/>
+<text x="548.0" y="242.1" font-size="9" text-anchor="end" font-weight="normal">10^-3%</text>
+<line class="grid" x1="555" y1="202.5" x2="965" y2="202.5"/>
+<text x="548.0" y="206.5" font-size="9" text-anchor="end" font-weight="normal">10^-2%</text>
+<line class="grid" x1="555" y1="166.875" x2="965" y2="166.875"/>
+<text x="548.0" y="170.9" font-size="9" text-anchor="end" font-weight="normal">10^-1%</text>
+<line class="grid" x1="555" y1="131.25" x2="965" y2="131.25"/>
+<text x="548.0" y="135.2" font-size="9" text-anchor="end" font-weight="normal">10^0%</text>
+<line class="grid" x1="555" y1="95.625" x2="965" y2="95.625"/>
+<text x="548.0" y="99.6" font-size="9" text-anchor="end" font-weight="normal">10^1%</text>
+<line class="grid" x1="555" y1="60.0" x2="965" y2="60.0"/>
+<text x="548.0" y="64.0" font-size="9" text-anchor="end" font-weight="normal">10^2%</text>
+<text x="657.5" y="364.0" font-size="9" text-anchor="middle" font-weight="normal">RC-FW</text>
+<circle cx="657.5" cy="251.74086150716485" r="4" fill="#7c3aed" fill-opacity="0.55"/>
+<circle cx="657.5" cy="169.98339692349194" r="5" fill="#7c3aed" fill-opacity="0.8"/>
+<circle cx="657.5" cy="86.88161656181296" r="6" fill="#7c3aed" fill-opacity="1.0"/>
+<line x1="657.5" y1="251.74086150716485" x2="657.5" y2="86.88161656181296" stroke="#7c3aed" stroke-width="2"/>
+<text x="862.5" y="364.0" font-size="9" text-anchor="middle" font-weight="normal">Exact bundle</text>
+<circle cx="862.5" cy="345.0" r="4" fill="#0f766e" fill-opacity="0.55"/>
+<circle cx="862.5" cy="345.0" r="5" fill="#0f766e" fill-opacity="0.8"/>
+<circle cx="862.5" cy="345.0" r="6" fill="#0f766e" fill-opacity="1.0"/>
+<line x1="862.5" y1="345.0" x2="862.5" y2="345.0" stroke="#0f766e" stroke-width="2"/>
+<text x="70.0" y="415.0" font-size="10" text-anchor="start" font-weight="normal">Marker size: P50, P95, maximum. Zeroes are placed at the 10^-6% floor.</text>
+</svg>
