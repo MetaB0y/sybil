@@ -2,7 +2,7 @@
 tags: [arena]
 layer: arena
 status: current
-last_verified: 2026-07-15
+last_verified: 2026-07-17
 ---
 
 The bot framework is a Python base class pattern for building trading agents. Every bot extends `BaseAgent` and implements a single method: `on_block(block: Block) -> list[OrderSpec]`. When a new block arrives via the [[WebSocket Block Stream]], the framework calls `on_block()` and submits any returned orders via the [[Python SDK]]. This event-driven design means bots are reactive — they make decisions in response to market state changes.
@@ -46,6 +46,17 @@ than minting capital. Crossing-noise choices are deterministic from
 same block decision. Each actor emits at most one order per selected market;
 for core mutually-exclusive MarketGroups it also suppresses the final YES buy
 that would complete every group outcome in one account submission.
+
+Market discovery has two deliberately separate outputs. The analyst/sizer
+cohort contains every active, unexpired mirrored market with a fresh external
+reference under the configured news profile; it may be narrowed explicitly for
+an experiment. Cheap synthetic flow is never narrowed by that LLM cohort. It
+covers every active, unexpired native market plus every active mirrored market
+with a fresh reference, and excludes untagged smoke fixtures. Fast traders
+remain reference-only inside that universe, while crossing-noise traders can
+participate in both native and mirrored markets. The production Compose profile
+has no fixed market-count cap. `sybil_arena_selected_markets` and
+`sybil_arena_synthetic_markets` expose both cardinalities independently.
 
 ## Key Properties
 - `BaseAgent.on_block(block) -> list[OrderSpec]` — the core interface

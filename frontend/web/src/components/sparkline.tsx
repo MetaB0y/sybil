@@ -12,6 +12,38 @@ type Props = {
   tone?: "yes" | "no" | "auto";
 };
 
+const PROBABILITY_MAX_NANOS = 1_000_000_000;
+
+/** Keep small price moves visually proportional on compact market cards. */
+export const CARD_SPARKLINE_MIN_SPAN_NANOS = 200_000_000;
+
+export function sparklineDomain(
+  values: readonly number[],
+  minSpan = CARD_SPARKLINE_MIN_SPAN_NANOS,
+): [number, number] {
+  const observedMin = Math.min(...values);
+  const observedMax = Math.max(...values);
+  const boundedMinSpan = Math.min(
+    PROBABILITY_MAX_NANOS,
+    Math.max(1, minSpan),
+  );
+  if (observedMax - observedMin >= boundedMinSpan) {
+    return [observedMin, observedMax];
+  }
+
+  const center = (observedMin + observedMax) / 2;
+  let min = center - boundedMinSpan / 2;
+  let max = center + boundedMinSpan / 2;
+  if (min < 0) {
+    min = 0;
+    max = boundedMinSpan;
+  } else if (max > PROBABILITY_MAX_NANOS) {
+    max = PROBABILITY_MAX_NANOS;
+    min = max - boundedMinSpan;
+  }
+  return [min, max];
+}
+
 /**
  * Inline SVG area sparkline driven by yes_price_nanos. Pure presentational —
  * doesn't fetch, doesn't subscribe. Hand it a points array.
@@ -32,9 +64,8 @@ export function Sparkline({
     );
     const first = values[0]!;
     const last = values[values.length - 1]!;
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const range = max - min || 1;
+    const [min, max] = sparklineDomain(values);
+    const range = max - min;
     const stepX = width / (values.length - 1);
     const pad = 2;
     const h = height - pad * 2;

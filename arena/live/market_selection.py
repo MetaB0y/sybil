@@ -30,6 +30,7 @@ class MarketLike(Protocol):
     volume_nanos: int
     volume_dollars: float
     expiry_timestamp_ms: int
+    closed: bool
 
 
 INCLUDE_TAGS = {
@@ -187,6 +188,7 @@ def select_markets(
             for m in markets
             if "polymarket" in {_normalize_tag(t) for t in m.tags}
             and m.status.lower() == "active"
+            and not getattr(m, "closed", False)
             and not _is_expired(m)
             and (not require_reference_price or _has_reference_price(m))
         ]
@@ -195,8 +197,10 @@ def select_markets(
     active = [
         m
         for m in markets
-        if "polymarket" in m.tags
+        if "polymarket" in {_normalize_tag(t) for t in m.tags}
         and m.status.lower() == "active"
+        and not getattr(m, "closed", False)
+        and not _is_expired(m)
         and (not require_reference_price or _has_reference_price(m))
     ]
     return _select_diverse(
@@ -208,6 +212,31 @@ def select_markets(
         group_by_size=True,
         prefer_uncertain_group_members=True,
     )
+
+
+def select_synthetic_markets(markets: list[MarketLike]) -> list[MarketLike]:
+    """Return the full public universe suitable for cheap synthetic flow.
+
+    Native catalog markets are chain-owned and remain eligible while active.
+    Mirrored markets additionally need a fresh external reference: if a
+    condition leaves the curated mirror, its reference expires and synthetic
+    flow stops without relying on an old persistent mapping row. Internal smoke
+    fixtures have neither provenance tag and therefore stay out automatically.
+    """
+
+    selected = []
+    for market in markets:
+        tags = {_normalize_tag(tag) for tag in market.tags}
+        is_native = "native" in tags
+        is_fresh_mirror = "polymarket" in tags and _has_reference_price(market)
+        if (
+            (is_native or is_fresh_mirror)
+            and market.status.lower() == "active"
+            and not getattr(market, "closed", False)
+            and not _is_expired(market)
+        ):
+            selected.append(market)
+    return sorted(selected, key=lambda market: market.id)
 
 
 def is_important_news_market(market: MarketLike) -> bool:

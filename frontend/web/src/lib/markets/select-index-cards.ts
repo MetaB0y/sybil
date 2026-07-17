@@ -46,6 +46,16 @@ export function sizeOf(item: CardItem): number {
   return item.kind === "multi" ? item.markets.length : 1;
 }
 
+/** User-facing cards are markets; each card can contain one or more outcomes. */
+export function summarizeIndexCards(
+  items: readonly CardItem[],
+): { markets: number; outcomes: number } {
+  return {
+    markets: items.length,
+    outcomes: items.reduce((total, item) => total + sizeOf(item), 0),
+  };
+}
+
 /** Trader count for sorting: per-market for binary, event union for multi. */
 export function traderCountOf(
   item: CardItem,

@@ -223,11 +223,12 @@ The Python arena and web frontend use the same public interfaces. The Rust clien
 
 ## 10. Deployment and trust boundary
 
-`SYBIL_DEPLOYMENT_PROFILE` distinguishes local, devnet, and prod postures.
-Production preflight fail-closes dangerous combinations such as dev mode,
-missing service/history tokens, missing history URL, or missing persistent
-sequencer data directory. The current public devnet is intentionally not the
-production trust posture.
+`SYBIL_DEPLOYMENT_PROFILE` distinguishes local, devnet, private-devnet, and
+prod postures. Private devnet keeps the locked persistence and authentication
+guardrails but requires its bounded fixed play-money grant; prod requires that
+grant to be zero. Both locked profiles fail-close dangerous combinations such
+as dev mode, missing service/history tokens, missing history URL, or missing
+persistent sequencer data.
 
 Before real value, operators must deploy the pinned real verifier, eliminate mock/unsafe acceptance, retain DA payloads, exercise backup/import/withdrawal/escape drills, operate and independently review the unanimous finalized-provider set, drill checkpoint/source-integrity recovery, and protect admin/feed/verifier keys under the chosen governance policy. See [[Threat Model]], [[L1 Settlement and Vault]], and [[Deployment Profiles]].
 

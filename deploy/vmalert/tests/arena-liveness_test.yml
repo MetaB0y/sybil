@@ -71,3 +71,34 @@ tests:
             exp_annotations:
               summary: "One or more reference-price tokens expired"
               description: "At least one stored reference price exceeded the API per-market TTL for 2m (expired tokens: 2). Public market reads now omit those values, and Arena reference-required selection cannot use them."
+
+  - interval: 1m
+    input_series:
+      - series: 'sybil_markets_active_total{job="sybil-api"}'
+        values: "207+0x20"
+      - series: 'sybil_arena_synthetic_markets{job="sybil-arena"}'
+        values: "12+0x20"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: ArenaSyntheticCoverageLow
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: ArenaSyntheticCoverageLow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: arena
+            exp_annotations:
+              summary: "Arena synthetic flow covers too little of the live market universe"
+              description: "The selected synthetic cohort is below 90% of active outcome rows for 15m. A stale selection cap, lifecycle filter, or missing market provenance may be leaving most product markets inert."
+
+  - interval: 1m
+    input_series:
+      - series: 'sybil_markets_active_total{job="sybil-api"}'
+        values: "207+0x20"
+      - series: 'sybil_arena_synthetic_markets{job="sybil-arena"}'
+        values: "206+0x20"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ArenaSyntheticCoverageLow
+        exp_alerts: []

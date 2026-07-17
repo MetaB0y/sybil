@@ -27,7 +27,7 @@ from .analyst import (
 )
 from .db import DecisionDB
 from .fair_value_bus import FairValueBus
-from .market_selection import MarketProfile, select_markets
+from .market_selection import MarketProfile, select_markets, select_synthetic_markets
 from .metrics import ArenaMetrics, start_metrics_server
 from .news_feed import NewsFeed, PairedNewsBatchBarrier
 from .outcomes import DEFAULT_OUTCOME_RECORD_INTERVAL_S, record_outcomes_loop
@@ -961,7 +961,7 @@ async def run_live(config: LiveConfig):
         # 1. Discover markets. When reference prices are required, arena may
         # start before the Polymarket mirror has published any; retry instead of
         # exiting so a cold start self-heals once the mirror catches up.
-        _all_markets, active = await _discover_markets_until_ready(
+        all_markets, active = await _discover_markets_until_ready(
             client,
             config,
             experiment_id,
@@ -986,13 +986,13 @@ async def run_live(config: LiveConfig):
 
         markets_info = {m.id: m for m in active}
         market_ids = [m.id for m in active]
-        # Fast/noise flow belongs to the same explicit selection boundary as
-        # the analysts and sizers. Native-market liquidity is supplied by the
-        # Rust mirror process; feeding every server market to Arena made a
-        # focused profile cosmetic and revived stale pre-reset mirror rows.
-        synthetic_markets = list(active)
-        synthetic_markets_info = markets_info
+        # Analysts consume the configured news/reference cohort. Cheap
+        # synthetic flow independently covers every current public market so a
+        # focused LLM profile cannot leave the rest of the product inert.
+        synthetic_markets = select_synthetic_markets(all_markets)
+        synthetic_markets_info = {m.id: m for m in synthetic_markets}
         synthetic_market_ids = [m.id for m in synthetic_markets]
+        metrics.set_synthetic_market_selection(len(synthetic_markets))
         selected_synthetic_ids = set(synthetic_market_ids)
         group_members_by_market: dict[int, frozenset[int]] = {}
         for group in await client.list_market_groups():
@@ -1076,10 +1076,10 @@ async def run_live(config: LiveConfig):
             analysts = topology.analysts
             traders = topology.traders
 
-        # 3. Create synthetic fast/noise traders. Fast traders only act on
-        # reference-backed mirror markets; noise traders only act on native
-        # no-reference markets. Both consume the same config shape with per-bot
-        # seed offsets for deterministic but non-identical streams.
+        # 3. Create the independent synthetic cohort. Fast traders act only
+        # where this shared universe has a fresh external reference. Crossing
+        # noise covers the entire universe, including native markets; its
+        # per-bot seed offsets make streams deterministic but non-identical.
         fast_traders = []
         for i in range(config.fast_count):
             name = f"Fast-{i}"
@@ -1179,12 +1179,14 @@ async def run_live(config: LiveConfig):
 
         # 5. Run everything
         log.info(
-            "Starting live trading with %d analysts + %d sizers + %d fast + %d noise traders on %d selected markets",
+            "Starting live trading with %d analysts + %d sizers on %d analyst markets; "
+            "%d fast + %d noise traders cover %d synthetic markets",
             len(analysts),
             len(traders),
+            len(active),
             len(fast_traders),
             len(noise_traders),
-            len(active),
+            len(synthetic_markets),
         )
 
         runtime_id = db.activate_runtime(
@@ -1205,7 +1207,7 @@ async def run_live(config: LiveConfig):
             tasks = await _start_live_tasks(
                 client,
                 feed,
-                [markets_info],
+                [markets_info, synthetic_markets_info],
                 analysts,
                 traders,
                 fast_traders,

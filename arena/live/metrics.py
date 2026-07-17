@@ -108,6 +108,11 @@ class ArenaMetrics:
             "Selected arena markets that have an external reference price.",
             registry=self.registry,
         )
+        self.synthetic_markets = Gauge(
+            "sybil_arena_synthetic_markets",
+            "Active public markets covered by Arena synthetic traders.",
+            registry=self.registry,
+        )
         # -- News feed poll health (arena-only: feed internals) --
         self.news_feed_poll_in_progress = Gauge(
             "sybil_news_feed_poll_in_progress",
@@ -191,6 +196,12 @@ class ArenaMetrics:
             self.selected_reference_markets.set(reference_markets)
         except Exception:  # pragma: no cover - defensive
             log.debug("set_market_selection metrics update failed", exc_info=True)
+
+    def set_synthetic_market_selection(self, selected_markets: int) -> None:
+        try:
+            self.synthetic_markets.set(selected_markets)
+        except Exception:  # pragma: no cover - defensive
+            log.debug("set_synthetic_market_selection metrics update failed", exc_info=True)
 
     def record_news_poll_start(self) -> None:
         try:

@@ -92,14 +92,17 @@ groups:
         expr: |
           sum(increase(sybil_order_submissions_total{result="accepted"}[30m])) >= 1000
           and
-          count(increase(sybil_market_fills_total[30m]) > 0) < 3
+          max(sybil_arena_synthetic_markets) >= 20
+          and
+          count(increase(sybil_market_fills_total[30m]) > 0)
+            < 0.1 * max(sybil_arena_synthetic_markets)
         for: 30m
         labels:
           severity: warning
           component: arena
         annotations:
           summary: "Fills are concentrated in very few markets"
-          description: "Fewer than 3 markets filled over 30m despite at least 1000 accepted submissions. The demo may look narrow even if total fill count is nonzero."
+          description: "Fewer than 10% of the synthetic cohort filled over 30m despite at least 1000 accepted submissions. The demo may look narrow even if total fill count is nonzero."
 
       - alert: PendingOrderBookHigh
         expr: sybil_pending_orders > 250
@@ -632,6 +635,20 @@ groups:
         annotations:
           summary: "No selected arena market has a reference price"
           description: "The arena selected markets, but none carry an external Polymarket reference price for 15m. Edge estimation degrades to yes_price only; the mirror may not be publishing references."
+
+      - alert: ArenaSyntheticCoverageLow
+        expr: |
+          max(sybil_markets_active_total) >= 20
+          and
+          max(sybil_arena_synthetic_markets)
+            < 0.9 * max(sybil_markets_active_total)
+        for: 15m
+        labels:
+          severity: warning
+          component: arena
+        annotations:
+          summary: "Arena synthetic flow covers too little of the live market universe"
+          description: "The selected synthetic cohort is below 90% of active outcome rows for 15m. A stale selection cap, lifecycle filter, or missing market provenance may be leaving most product markets inert."
 
       - alert: NewsFeedStale
         expr: |

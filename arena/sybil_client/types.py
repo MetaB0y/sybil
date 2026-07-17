@@ -68,6 +68,7 @@ class Market:
     expiry_timestamp_ms: int = 0
     created_at_ms: int = 0
     volume_nanos: int = 0
+    closed: bool = False
 
     @property
     def yes_price(self) -> float:

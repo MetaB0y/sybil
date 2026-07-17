@@ -3,22 +3,22 @@ tags: [infrastructure, operations, deployment]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-16
+last_verified: 2026-07-17
 ---
 
-Sybil runs the same API/history images in three very different postures. The
+Sybil runs the same API/history images in four different postures. The
 public 2 GB devnet box is deliberately tuned with dev-only tradeoffs —
 `SYBIL_DEV_MODE=true`, bounded hot serving state, same-host storage — and nothing used to
-stop those tradeoffs from silently leaking into a production / devnet-v2
+stop those tradeoffs from silently leaking into a locked product or real-value
 deploy. This note is the source of truth for which durability, cache, and
 prover knob is meant to hold which value in each profile, and it documents the
-startup guardrail (SYB-133) that fail-closes a `prod` boot when a dev-only knob
-is wired in. See [[REST API]] for the endpoints these knobs feed and
+startup guardrail (SYB-133) that fail-closes locked profiles when a forbidden
+dev-only knob is wired in. See [[REST API]] for the endpoints these knobs feed and
 [[Sybil Architecture]] for the system overview.
 
 ## Deployment profiles
 
-`SYBIL_DEPLOYMENT_PROFILE` (`local` | `devnet` | `prod`, process default
+`SYBIL_DEPLOYMENT_PROFILE` (`local` | `devnet` | `private-devnet` | `prod`, process default
 `local`) names the intended posture and drives the preflight guardrail.
 
 - **local** — developer laptop / CI. `docker compose up` (base + override)
@@ -28,9 +28,15 @@ is wired in. See [[REST API]] for the endpoints these knobs feed and
   explicitly selected service profiles). Dev-tuned but multi-user; no
   production guarantees. Base Compose explicitly selects `devnet`, so its
   startup log cannot silently self-label as local.
-- **prod** — production / devnet-v2 (base + `docker-compose.prod.yml`). Durable,
-  locked down, fail-closed. `docker-compose.prod.yml` sets
-  `SYBIL_DEPLOYMENT_PROFILE=prod`.
+- **private-devnet** — the product-facing play-money network (base +
+  `docker-compose.prod.yml`). It keeps the production persistence, service
+  authentication, WebAuthn pins, and fail-closed guardrails, while explicitly
+  requiring a bounded fixed public account grant. The product overlay selects
+  this profile by default.
+- **prod** — real-value posture (the same product overlay with explicit
+  `SYBIL_DEPLOYMENT_PROFILE=prod` and
+  `SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS=0`). It permits no play-money minting and
+  fail-closes every dev-only deviation.
 
 Compose service profiles are deliberately separate from the process posture
 above. The unprofiled default is the core: `sybil-api`, `sybil-history`, and
@@ -60,13 +66,15 @@ coupled state and starts the validity topology from fresh genesis.
 ## Profile matrix
 
 Values are the effective settings after Compose overrides. "current devnet"
-reflects base `docker-compose.yml`; "prod" reflects base + `docker-compose.prod.yml`.
+reflects base `docker-compose.yml`; "private devnet" reflects the default
+base + `docker-compose.prod.yml` product stack. The real-value `prod` posture
+uses that same overlay with the two explicit funding overrides above.
 
 ### Trust boundary
 
-| Knob | local | current devnet | prod (intended) | Dev-only in prod? |
+| Knob | local | current devnet | private devnet / prod | Dev-only in locked profiles? |
 | --- | --- | --- | --- | --- |
-| `SYBIL_DEPLOYMENT_PROFILE` | `local` | `devnet` | `prod` | — |
+| `SYBIL_DEPLOYMENT_PROFILE` | `local` | `devnet` | `private-devnet` / `prod` | — |
 | `SYBIL_DEV_MODE` | `true` | `true` | `false` | **yes — blocks** |
 | `SYBIL_SERVICE_TOKEN` | unset | unset | **set** (required) | **yes — blocks** |
 | `SYBIL_HISTORY_URL` | compose service | compose service | `http://sybil-history:3003` | **yes — blocks** |
@@ -79,7 +87,7 @@ reflects base `docker-compose.yml`; "prod" reflects base + `docker-compose.prod.
 
 ### Durability / persistence
 
-| Knob | local | current devnet | prod (intended) | Dev-only in prod? |
+| Knob | local | current devnet | private devnet / prod | Dev-only in locked profiles? |
 | --- | --- | --- | --- | --- |
 | `SYBIL_DATA_DIR` | `/data` in Compose; unset for direct `cargo run` | `/data` (redb) | `/data` (redb) | **yes — blocks** |
 | `SYBIL_MARKET_REF_DATA_PATH` | unset (volatile) | unset (volatile) | `/data/market_ref_data.json` | no (degraded) |
@@ -91,7 +99,7 @@ reflects base `docker-compose.yml`; "prod" reflects base + `docker-compose.prod.
 
 ### Cache / history caps
 
-| Knob | default | current devnet | prod (intended) | Dev-only in prod? |
+| Knob | default | current devnet | private devnet / prod | Dev-only in locked profiles? |
 | --- | --- | --- | --- | --- |
 | `SYBIL_RECENT_BLOCK_CACHE_CAPACITY` | `100` | `100` | `100` | no |
 | `SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS` | `0` (no prune) | `0` | `60480` (7 days at 10s/block) | no |
@@ -106,7 +114,7 @@ reflects base `docker-compose.yml`; "prod" reflects base + `docker-compose.prod.
 | `SYBIL_WS_CLIENT_IDLE_TIMEOUT_MS` | `90000` | `90000` | `90000` | no |
 | `SYBIL_REFERENCE_PRICE_TTL_MS` | `60000` | `60000` | `60000` | no |
 | `SYBIL_PUBLIC_ACCOUNT_CAPACITY` | `1000` | `1000` | `1000` (override deliberately) | no |
-| `SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS` | `1000000000000` ($1,000 play money) | same | `0` | **yes — blocks when nonzero** |
+| `SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS` | `1000000000000` ($1,000 play money) | same | `1000000000000` / `0` | **private devnet exception; blocks prod when nonzero** |
 | `SYBIL_HTTP_ONBOARDING_GLOBAL_RPS` / `BURST` | `5` / `20` | `5` / `20` | `5` / `20` | no |
 | `SYBIL_HTTP_ONBOARDING_CLIENT_RPS` / `BURST` | `1` / `3` | `1` / `3` | `1` / `3` | no |
 
@@ -135,10 +143,12 @@ callers. With the Compose defaults, anonymous demo minting is bounded to 1,000
 accounts × $1,000 = $1,000,000 of non-redeemable play money. Service-authenticated
 account creation remains a trusted operator bypass and is therefore not an
 anti-compromise control. Account ids are never reclaimed or reused. A real-value
-profile sets the public grant to zero; a nonzero override blocks startup unless
-the loud dev-knob escape hatch is used. Real-value identity funding must arrive
-through the capital-backed path, with monitoring retained for total stock and
-remaining public capacity.
+`prod` profile sets the public grant to zero; a nonzero override blocks startup
+unless the loud dev-knob escape hatch is used. Conversely,
+`private-devnet` requires both nonzero account capacity and a nonzero fixed
+grant, so a product deployment cannot silently present an unfunded demo-account
+flow again. Real-value identity funding must arrive through the capital-backed
+path, with monitoring retained for total stock and remaining public capacity.
 
 ### Prover
 
@@ -168,21 +178,22 @@ At boot, before opening the store or binding the socket,
 
 1. **Logs one structured block** — the active profile plus every knob whose
    value diverges from the prod-intended baseline, tagged `DEV-ONLY` when the
-   value is a prod-blocking tradeoff (`deployment profile preflight` info line).
+   value is unsafe in a real-value posture (`deployment profile preflight` info line).
    This runs on **every** profile, so a `local` or `devnet` box still surfaces
    its deltas.
-2. **Fail-closes a `prod` start** when any dev-only knob is set:
+2. **Fail-closes locked starts.** `prod` rejects every dev-only knob:
    `SYBIL_DEV_MODE=true`, service/history token unset, history URL unset,
    `SYBIL_DATA_DIR` unset, `SYBIL_ADMIN_FEED_KEY_PATH` unset, or
-   `SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS` nonzero. The process exits non-zero with a
-   message naming the offending knobs. This mirrors the existing fail-closed
-   service-token posture in `service_auth`
+   `SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS` nonzero. `private-devnet` applies the same
+   list except that its fixed play-money grant is permitted and required. The
+   process exits non-zero with a message naming the offending knobs. This
+   mirrors the existing fail-closed service-token posture in `service_auth`
    (`crates/sybil-api/src/app.rs`), promoted from request-time to startup.
 3. **Override**: `SYBIL_ALLOW_DEV_KNOBS=1` downgrades the refusal to a loud
    `tracing::error!` and lets the process start — a fail-open escape hatch for
    deliberate one-off operations, never steady state.
 
-`local` and `devnet` never block; only `prod` fail-closes.
+`local` and `devnet` never block. `private-devnet` and `prod` fail closed.
 
 ## L1 indexer finality and cursor policy
 

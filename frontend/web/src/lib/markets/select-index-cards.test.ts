@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { selectIndexCards, type CardItem } from "./select-index-cards";
+import {
+  selectIndexCards,
+  summarizeIndexCards,
+  type CardItem,
+} from "./select-index-cards";
 import type { Market } from "./use-markets";
 
 function mk(partial: Partial<Market> & { market_id: number }): Market {
@@ -64,6 +68,17 @@ function ids(out: CardItem[]): number[] {
 }
 
 describe("selectIndexCards", () => {
+  it("counts one user-facing market per card and preserves outcome totals", () => {
+    const event = {
+      ...multi("event"),
+      markets: [mk({ market_id: 2 }), mk({ market_id: 3 })],
+    };
+    expect(summarizeIndexCards([binary(1), event])).toEqual({
+      markets: 2,
+      outcomes: 3,
+    });
+  });
+
   it("hides closed cards by default (showClosed=false)", () => {
     const items = [binary(1, { closed: false }), binary(2, { closed: true })];
     expect(

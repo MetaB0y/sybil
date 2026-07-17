@@ -6,6 +6,7 @@ from live.market_selection import (
     DEFAULT_IMPORTANT_NEWS_MARKETS,
     is_important_news_market,
     select_markets,
+    select_synthetic_markets,
 )
 from live.runner import _select_markets_resilient
 from sybil_client.types import NANOS_PER_DOLLAR
@@ -20,8 +21,10 @@ class FakeMarket:
     yes_price_value: float = 0.5
     category: str = ""
     status: str = "active"
+    closed: bool = False
     expiry_timestamp_ms: int = 0
     reference_price_nanos: int | None = None
+    reference_price_expires_at_ms: int | None = None
     volume_nanos: int = field(init=False)
 
     def __post_init__(self):
@@ -103,13 +106,47 @@ def test_important_news_profile_limits_repeated_standalone_templates():
     assert len(selected) == 3
 
 
-def test_all_profile_preserves_current_broad_active_selection_behavior():
+def test_all_profile_excludes_expired_markets():
     expired = market("Will the US and Iran sign a peace deal by January 1, 2000?", id=1)
     expired.expiry_timestamp_ms = int(time.time() * 1000) - 1
 
     selected = select_markets([expired], max_n=0, profile="all")
 
-    assert [m.id for m in selected] == [1]
+    assert selected == []
+
+
+def test_selection_excludes_closed_markets():
+    closed = market("Closed market", "Politics", id=1)
+    closed.closed = True
+
+    assert select_markets([closed], max_n=0, profile="all") == []
+    assert select_markets([closed], max_n=10, profile="important-news") == []
+
+
+def test_synthetic_selection_covers_native_and_fresh_mirror_only():
+    native = FakeMarket(id=1, name="Native", tags=["native"])
+    mirror = market("Mirror", "Politics", id=2)
+    mirror.reference_price_nanos = 500_000_000
+    fixture = FakeMarket(
+        id=3,
+        name="SYB-247 deterministic crossing v1 run 1",
+        tags=[],
+    )
+    stale_mirror = market("Stale mirror", "Politics", id=4)
+    stale_mirror.reference_price_nanos = 500_000_000
+    stale_mirror.reference_price_expires_at_ms = int(time.time() * 1000) - 1
+    closed_native = FakeMarket(
+        id=5,
+        name="Closed native",
+        tags=["native"],
+        closed=True,
+    )
+
+    selected = select_synthetic_markets(
+        [stale_mirror, fixture, mirror, closed_native, native]
+    )
+
+    assert [m.id for m in selected] == [1, 2]
 
 
 def test_selection_skips_expired_markets():
