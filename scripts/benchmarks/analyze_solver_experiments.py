@@ -28,6 +28,8 @@ COLORS = {
     "lp": "#111827",
     "retained-cash-fw": "#7c3aed",
     "pacing-bundle": "#ea580c",
+    "rc-structural": "#6d28d9",
+    "bundle-structural": "#c2410c",
     "iter-lp": "#d97706",
     "eg": "#7c3aed",
     "conic-quasi": "#1d4ed8",
@@ -42,6 +44,8 @@ SHORT_LABELS = {
     "lp": "LP",
     "retained-cash-fw": "RC-FW",
     "pacing-bundle": "Pacing bundle",
+    "rc-structural": "RC structural",
+    "bundle-structural": "Bundle structural",
     "iter-lp": "IterLP",
     "eg": "EG-FW",
     "conic-quasi": "Quasi",
@@ -514,6 +518,7 @@ def make_summary(
     ablation = [row for row in records if row["suite"] == "ablation"]
     order_scaling = [row for row in records if row["suite"] == "order_scaling"]
     mm_scaling = [row for row in records if row["suite"] == "mm_scaling"]
+    replay = [row for row in records if row["suite"] == "replay"]
     return {
         "schema_version": protocol.get("schema_version", 1),
         "protocol_id": protocol["protocol_id"],
@@ -530,6 +535,7 @@ def make_summary(
         "ablation": aggregate(ablation, ("budget_scale", "solver_id")),
         "order_scaling": aggregate(order_scaling, ("scale", "solver_id")),
         "mm_scaling": aggregate(mm_scaling, ("scale", "solver_id")),
+        "replay": aggregate(replay, ("budget_scale", "solver_id")),
         "experiments": aggregate(records, ("experiment_id", "solver_id")),
         "worst_cases": worst_cases(records),
     }
@@ -828,6 +834,48 @@ def write_markdown_v2(summary: dict[str, Any], output: Path) -> None:
         )
     )
 
+    if summary["replay"]:
+        lines.extend(["", "## Sequencer-boundary replay", ""])
+        rows = []
+        for row in summary["replay"]:
+            rows.append(
+                [
+                    f"{row['budget_scale']:g}×",
+                    SHORT_LABELS.get(row["solver_id"], row["solver_id"]),
+                    f"{row['successful']}/{row['declared']}",
+                    str(row["termination_counts"].get("iteration_limit", 0)),
+                    format_number(row["runtime_median_seconds"] * 1_000, 2)
+                    if row["runtime_median_seconds"] is not None
+                    else "—",
+                    format_number(row["runtime_p95_seconds"] * 1_000, 2)
+                    if row["runtime_p95_seconds"] is not None
+                    else "—",
+                    format_number(row["retained_gap_p95_percent"], 4),
+                    format_number(row["retained_gap_max_percent"], 4),
+                    format_number(row["integer_landing_relative_p95_percent"], 4),
+                    format_number(row["minting_duality_relative_p95_percent"], 6),
+                    format_number(row["max_mm_utilization_max"], 3),
+                ]
+            )
+        lines.append(
+            markdown_table(
+                [
+                    "Budget",
+                    "Solver",
+                    "Success",
+                    "At cap",
+                    "P50 ms",
+                    "P95 ms",
+                    "Retained P95 %",
+                    "Retained max %",
+                    "Landing P95 %",
+                    "Mint duality P95 %",
+                    "Max B use",
+                ],
+                rows,
+            )
+        )
+
     lines.extend(["", "## Random-book quality", ""])
     rows = []
     for row in summary["quality"]:
@@ -1094,6 +1142,7 @@ def write_csv(summary: dict[str, Any], output: Path) -> None:
         "ablation",
         "order_scaling",
         "mm_scaling",
+        "replay",
         "experiments",
     ):
         for row in summary[section]:

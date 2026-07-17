@@ -10,13 +10,16 @@ name = "sybil-sim"
 path = "src/bin/sybil_sim.rs"
 
 [dependencies]
+blake3 = { workspace = true }
 matching-engine = { path = "../matching-engine" }
+matching-scenarios = { path = "../matching-scenarios" }
 matching-sequencer = { path = "../matching-sequencer" }
 sybil-oracle = { path = "../sybil-oracle" }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 comfy-table = "7"
+rmp-serde = { workspace = true }
 
 [lints.clippy]
 # f64 ban is scoped to the consensus crates (matching-engine, matching-sequencer);

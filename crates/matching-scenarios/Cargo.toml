@@ -9,6 +9,7 @@ description = "Scenario generators for prediction market matching"
 matching-engine = { path = "../matching-engine" }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 
 [lints.clippy]
 # f64 ban is scoped to the consensus crates (matching-engine, matching-sequencer);

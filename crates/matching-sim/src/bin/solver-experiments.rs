@@ -11,15 +11,15 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use clap::Parser;
 use matching_engine::{Fill, MarketId, NANOS_PER_DOLLAR, Nanos, Problem, Qty, notional_nanos};
 use matching_scenarios::{
-    FlashLiquidityConfig, MmQuoteStyle, ScenarioConfig, generate_flash_liquidity_scenario,
-    generate_scenario,
+    FlashLiquidityConfig, MmQuoteStyle, ScenarioConfig, SolverReplayCorpusV1,
+    generate_flash_liquidity_scenario, generate_scenario,
 };
 use matching_solver::{
     ConicConfig, ConicSolver, DecomposedSolver, DirectDualConicConfig, DirectDualConicSolver,
@@ -65,15 +65,27 @@ struct Protocol {
     solvers: BTreeMap<String, SolverSpec>,
     scales: BTreeMap<String, ScaleSpec>,
     profiles: BTreeMap<String, ProfileSpec>,
+    #[serde(default)]
+    corpora: BTreeMap<String, CorpusSpec>,
     experiments: Vec<ExperimentSpec>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct WarmupSpec {
-    profile: String,
-    scale: String,
+    #[serde(default)]
+    profile: Option<String>,
+    #[serde(default)]
+    scale: Option<String>,
+    #[serde(default)]
+    corpus: Option<String>,
     seed: u64,
     budget_scale: f64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct CorpusSpec {
+    path: PathBuf,
+    blake3: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -134,6 +146,8 @@ struct ExperimentSpec {
     seed_count: usize,
     budget_scales: Vec<f64>,
     budget_basis: Option<String>,
+    #[serde(default)]
+    corpus: Option<String>,
     solvers: Vec<String>,
 }
 
@@ -192,6 +206,7 @@ struct RunRecord {
     profile: String,
     scale: String,
     seed: u64,
+    case_id: Option<String>,
     budget_scale: f64,
     scenario_fingerprint_blake3: String,
     solver_id: String,
@@ -282,8 +297,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let protocol_bytes = fs::read(&args.protocol)?;
     let protocol: Protocol = serde_json::from_slice(&protocol_bytes)?;
     validate_protocol(&protocol)?;
+    let corpora = load_corpora(&protocol, &args.protocol)?;
+    validate_corpus_ranges(&protocol, &corpora)?;
     prepare_output_dir(&args.output_dir, args.overwrite)?;
     fs::write(args.output_dir.join("protocol.json"), &protocol_bytes)?;
+    copy_corpora(&protocol, &args.protocol, &args.output_dir)?;
 
     let start_unix = unix_seconds();
     let selected = selected_experiments(&protocol, args.smoke);
@@ -301,25 +319,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         expected_records
     );
 
-    run_warmups(&protocol, &selected)?;
+    run_warmups(&protocol, &selected, &corpora)?;
 
     let results_path = args.output_dir.join("results.jsonl");
     let mut output = BufWriter::new(File::create(&results_path)?);
     let mut records_written = 0usize;
 
     for experiment in &selected {
-        let profile = protocol
-            .profiles
-            .get(&experiment.profile)
-            .ok_or_else(|| format!("missing profile {}", experiment.profile))?;
-        let scale = protocol
-            .scales
-            .get(&experiment.scale)
-            .ok_or_else(|| format!("missing scale {}", experiment.scale))?;
+        let generated = if experiment.corpus.is_none() {
+            let profile = protocol
+                .profiles
+                .get(&experiment.profile)
+                .ok_or_else(|| format!("missing profile {}", experiment.profile))?;
+            let scale = protocol
+                .scales
+                .get(&experiment.scale)
+                .ok_or_else(|| format!("missing scale {}", experiment.scale))?;
+            Some((profile, scale))
+        } else {
+            None
+        };
 
         for seed_offset in 0..experiment.seed_count {
             let seed = experiment.seed_start + seed_offset as u64;
-            let base_problem = generate_problem(seed, scale, profile);
+            let (base_problem, case_id, declared_retail_orders) =
+                if let Some(corpus_id) = &experiment.corpus {
+                    let case = &corpora[corpus_id].cases[seed as usize];
+                    let problem = case.to_problem()?;
+                    let declared_retail_orders = retail_order_count(&problem);
+                    (problem, Some(case.id.clone()), declared_retail_orders)
+                } else {
+                    let (profile, scale) = generated.expect("generated source was validated");
+                    (
+                        generate_problem(seed, scale, profile),
+                        None,
+                        scale.num_orders,
+                    )
+                };
             let calibrated_budgets = match experiment.budget_basis.as_deref() {
                 Some("lp_limit_value") => Some(unconstrained_lp_limit_values(&base_problem)),
                 None | Some("generated") => None,
@@ -343,20 +379,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .solvers
                         .get(solver_id)
                         .ok_or_else(|| format!("missing solver {solver_id}"))?;
-                    eprintln!(
-                        "[{}/{}] {} seed={} budget={} solver={}",
-                        records_written + group_runs.len() + 1,
-                        expected_records,
-                        experiment.id,
-                        seed,
-                        budget_scale,
-                        solver_id
-                    );
+                    if let Some(case_id) = &case_id {
+                        eprintln!(
+                            "[{}/{}] {} case={} budget={} solver={}",
+                            records_written + group_runs.len() + 1,
+                            expected_records,
+                            experiment.id,
+                            case_id,
+                            budget_scale,
+                            solver_id
+                        );
+                    } else {
+                        eprintln!(
+                            "[{}/{}] {} seed={} budget={} solver={}",
+                            records_written + group_runs.len() + 1,
+                            expected_records,
+                            experiment.id,
+                            seed,
+                            budget_scale,
+                            solver_id
+                        );
+                    }
                     group_runs.push(run_one(
                         &protocol,
                         experiment,
-                        scale,
                         seed,
+                        case_id.as_deref(),
+                        declared_retail_orders,
                         budget_scale,
                         &fingerprint,
                         solver_id,
@@ -390,6 +439,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "elapsed_seconds": end_unix.saturating_sub(start_unix),
         "expected_records": expected_records,
         "records_written": records_written,
+        "corpora": protocol.corpora.iter().map(|(id, spec)| {
+            (id.clone(), serde_json::json!({"path": spec.path, "blake3": spec.blake3}))
+        }).collect::<serde_json::Map<_, _>>(),
         "rustc": command_output("rustc", &["-Vv"]),
         "cargo": command_output("cargo", &["-V"]),
         "os": command_output("uname", &["-a"]),
@@ -409,7 +461,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn validate_protocol(protocol: &Protocol) -> Result<(), Box<dyn std::error::Error>> {
-    if !matches!(protocol.schema_version, 1 | 2) {
+    if !matches!(protocol.schema_version, 1..=3) {
         return Err(format!("unsupported protocol schema {}", protocol.schema_version).into());
     }
     if protocol.experiments.is_empty() {
@@ -420,15 +472,47 @@ fn validate_protocol(protocol: &Protocol) -> Result<(), Box<dyn std::error::Erro
             return Err(format!("solver {solver_id} enables a forbidden LP fallback").into());
         }
     }
+    for (corpus_id, corpus) in &protocol.corpora {
+        if corpus.path.is_absolute()
+            || corpus
+                .path
+                .components()
+                .any(|component| !matches!(component, Component::Normal(_)))
+        {
+            return Err(
+                format!("corpus {corpus_id} path must be a normalized relative path").into(),
+            );
+        }
+    }
     for experiment in &protocol.experiments {
         if experiment.seed_count == 0 || experiment.budget_scales.is_empty() {
             return Err(format!("experiment {} has an empty dimension", experiment.id).into());
         }
-        if !protocol.profiles.contains_key(&experiment.profile) {
-            return Err(format!("experiment {} has unknown profile", experiment.id).into());
-        }
-        if !protocol.scales.contains_key(&experiment.scale) {
-            return Err(format!("experiment {} has unknown scale", experiment.id).into());
+        if let Some(corpus) = &experiment.corpus {
+            if protocol.schema_version < 3 {
+                return Err(format!(
+                    "experiment {} uses replay before protocol schema 3",
+                    experiment.id
+                )
+                .into());
+            }
+            if !protocol.corpora.contains_key(corpus) {
+                return Err(format!("experiment {} has unknown corpus", experiment.id).into());
+            }
+            if experiment.budget_basis.as_deref() == Some("lp_limit_value") {
+                return Err(format!(
+                    "experiment {} cannot recalibrate captured budgets",
+                    experiment.id
+                )
+                .into());
+            }
+        } else {
+            if !protocol.profiles.contains_key(&experiment.profile) {
+                return Err(format!("experiment {} has unknown profile", experiment.id).into());
+            }
+            if !protocol.scales.contains_key(&experiment.scale) {
+                return Err(format!("experiment {} has unknown scale", experiment.id).into());
+            }
         }
         for solver in &experiment.solvers {
             if !protocol.solvers.contains_key(solver) {
@@ -442,6 +526,110 @@ fn validate_protocol(protocol: &Protocol) -> Result<(), Box<dyn std::error::Erro
             None | Some("generated") | Some("lp_limit_value")
         ) {
             return Err(format!("experiment {} has unknown budget basis", experiment.id).into());
+        }
+    }
+
+    if let Some(corpus) = &protocol.warmup.corpus {
+        if !protocol.corpora.contains_key(corpus) {
+            return Err("warmup has unknown corpus".into());
+        }
+    } else {
+        let profile = protocol
+            .warmup
+            .profile
+            .as_deref()
+            .ok_or("generated warmup has no profile")?;
+        let scale = protocol
+            .warmup
+            .scale
+            .as_deref()
+            .ok_or("generated warmup has no scale")?;
+        if !protocol.profiles.contains_key(profile) || !protocol.scales.contains_key(scale) {
+            return Err("generated warmup has an unknown profile or scale".into());
+        }
+    }
+    Ok(())
+}
+
+fn load_corpora(
+    protocol: &Protocol,
+    protocol_path: &Path,
+) -> Result<BTreeMap<String, SolverReplayCorpusV1>, Box<dyn std::error::Error>> {
+    let protocol_dir = protocol_path.parent().unwrap_or_else(|| Path::new("."));
+    let mut loaded = BTreeMap::new();
+    for (id, spec) in &protocol.corpora {
+        let path = if spec.path.is_absolute() {
+            spec.path.clone()
+        } else {
+            protocol_dir.join(&spec.path)
+        };
+        let bytes = fs::read(&path)?;
+        let actual_hash = blake3::hash(&bytes).to_hex().to_string();
+        if actual_hash != spec.blake3 {
+            return Err(format!(
+                "corpus {id} hash mismatch: expected {}, got {actual_hash}",
+                spec.blake3
+            )
+            .into());
+        }
+        let corpus: SolverReplayCorpusV1 = rmp_serde::from_slice(&bytes)?;
+        corpus.validate()?;
+        if corpus.corpus_id != *id {
+            return Err(format!(
+                "corpus key {id} does not match embedded id {}",
+                corpus.corpus_id
+            )
+            .into());
+        }
+        loaded.insert(id.clone(), corpus);
+    }
+    Ok(loaded)
+}
+
+fn copy_corpora(
+    protocol: &Protocol,
+    protocol_path: &Path,
+    output_dir: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let protocol_dir = protocol_path.parent().unwrap_or_else(|| Path::new("."));
+    for spec in protocol.corpora.values() {
+        let destination = output_dir.join(&spec.path);
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(protocol_dir.join(&spec.path), destination)?;
+    }
+    Ok(())
+}
+
+fn validate_corpus_ranges(
+    protocol: &Protocol,
+    corpora: &BTreeMap<String, SolverReplayCorpusV1>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for experiment in &protocol.experiments {
+        let Some(corpus_id) = &experiment.corpus else {
+            continue;
+        };
+        let corpus = &corpora[corpus_id];
+        let end = experiment
+            .seed_start
+            .checked_add(experiment.seed_count as u64)
+            .ok_or("replay case range overflow")?;
+        if end > corpus.cases.len() as u64 {
+            return Err(format!(
+                "experiment {} selects replay cases {}..{} from a {}-case corpus",
+                experiment.id,
+                experiment.seed_start,
+                end,
+                corpus.cases.len()
+            )
+            .into());
+        }
+    }
+    if let Some(corpus_id) = &protocol.warmup.corpus {
+        let corpus = &corpora[corpus_id];
+        if protocol.warmup.seed >= corpus.cases.len() as u64 {
+            return Err("warmup replay case is outside its corpus".into());
         }
     }
     Ok(())
@@ -568,16 +756,31 @@ fn unconstrained_lp_limit_values(problem: &Problem) -> Vec<u64> {
 fn run_warmups(
     protocol: &Protocol,
     experiments: &[ExperimentSpec],
+    corpora: &BTreeMap<String, SolverReplayCorpusV1>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let profile = protocol
-        .profiles
-        .get(&protocol.warmup.profile)
-        .ok_or("warmup profile missing")?;
-    let scale = protocol
-        .scales
-        .get(&protocol.warmup.scale)
-        .ok_or("warmup scale missing")?;
-    let mut problem = generate_problem(protocol.warmup.seed, scale, profile);
+    let mut problem = if let Some(corpus_id) = &protocol.warmup.corpus {
+        corpora[corpus_id].cases[protocol.warmup.seed as usize].to_problem()?
+    } else {
+        let profile_id = protocol
+            .warmup
+            .profile
+            .as_deref()
+            .ok_or("warmup profile missing")?;
+        let scale_id = protocol
+            .warmup
+            .scale
+            .as_deref()
+            .ok_or("warmup scale missing")?;
+        let profile = protocol
+            .profiles
+            .get(profile_id)
+            .ok_or("warmup profile missing")?;
+        let scale = protocol
+            .scales
+            .get(scale_id)
+            .ok_or("warmup scale missing")?;
+        generate_problem(protocol.warmup.seed, scale, profile)
+    };
     apply_mm_budgets(&mut problem, protocol.warmup.budget_scale, None);
 
     let solver_ids: BTreeSet<_> = experiments
@@ -599,8 +802,9 @@ fn run_warmups(
 fn run_one(
     protocol: &Protocol,
     experiment: &ExperimentSpec,
-    scale: &ScaleSpec,
     seed: u64,
+    case_id: Option<&str>,
+    declared_retail_orders: usize,
     budget_scale: f64,
     fingerprint: &str,
     solver_id: &str,
@@ -608,7 +812,7 @@ fn run_one(
     position: usize,
     problem: &Problem,
 ) -> InternalRun {
-    let problem_metrics = problem_metrics(problem, scale.num_orders);
+    let problem_metrics = problem_metrics(problem, declared_retail_orders);
     let started = Instant::now();
     let attempted = catch_unwind(AssertUnwindSafe(|| execute_solver(solver, problem)));
     let wall_time = started.elapsed().as_secs_f64();
@@ -618,6 +822,7 @@ fn run_one(
             protocol,
             experiment,
             seed,
+            case_id,
             budget_scale,
             fingerprint,
             solver_id,
@@ -637,6 +842,7 @@ fn run_one(
                 profile: experiment.profile.clone(),
                 scale: experiment.scale.clone(),
                 seed,
+                case_id: case_id.map(str::to_string),
                 budget_scale,
                 scenario_fingerprint_blake3: fingerprint.to_string(),
                 solver_id: solver_id.to_string(),
@@ -697,6 +903,7 @@ fn record_solve(
     protocol: &Protocol,
     experiment: &ExperimentSpec,
     seed: u64,
+    case_id: Option<&str>,
     budget_scale: f64,
     fingerprint: &str,
     solver_id: &str,
@@ -775,6 +982,7 @@ fn record_solve(
             profile: experiment.profile.clone(),
             scale: experiment.scale.clone(),
             seed,
+            case_id: case_id.map(str::to_string),
             budget_scale,
             scenario_fingerprint_blake3: fingerprint.to_string(),
             solver_id: solver_id.to_string(),
@@ -1198,6 +1406,19 @@ fn problem_metrics(problem: &Problem, declared_retail_orders: usize) -> ProblemM
     }
 }
 
+fn retail_order_count(problem: &Problem) -> usize {
+    let mm_order_ids: BTreeSet<_> = problem
+        .mm_constraints
+        .iter()
+        .flat_map(|constraint| constraint.order_ids.iter().copied())
+        .collect();
+    problem
+        .orders
+        .iter()
+        .filter(|order| !mm_order_ids.contains(&order.id))
+        .count()
+}
+
 fn mm_utilization(problem: &Problem, fills: &[Fill]) -> Vec<MmUtilization> {
     let mut fill_map: HashMap<u64, (Nanos, Qty)> = HashMap::new();
     for fill in fills {
@@ -1433,6 +1654,23 @@ mod tests {
                 "protocol omitted {kind}"
             );
         }
+    }
+
+    #[test]
+    fn checked_in_replay_development_protocol_is_valid() {
+        let bytes =
+            include_bytes!("../../../../benchmarks/solver/protocol-replay-development.json");
+        let protocol: Protocol = serde_json::from_slice(bytes).expect("parse protocol");
+        validate_protocol(&protocol).expect("valid protocol");
+        let protocol_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../benchmarks/solver/protocol-replay-development.json");
+        let corpora = load_corpora(&protocol, &protocol_path).expect("load pinned corpus");
+        validate_corpus_ranges(&protocol, &corpora).expect("valid replay ranges");
+        assert_eq!(protocol.schema_version, 3);
+        assert_eq!(
+            protocol.experiments[0].corpus.as_deref(),
+            Some("sequencer-sim-standard-s27182-v1")
+        );
     }
 
     #[test]

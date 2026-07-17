@@ -2,7 +2,7 @@
 tags: [infrastructure]
 layer: core
 status: current
-last_verified: 2026-07-14
+last_verified: 2026-07-17
 ---
 
 The Rust workspace is organized as a directed acyclic graph (DAG) of crates.
@@ -11,7 +11,7 @@ client, L1 protocol, and tooling crates can remain independent of it when they
 do not need domain types. Dependencies point inward: the engine knows nothing
 about solvers or the API.
 
-The dependency DAG flows in three tiers. **Foundation**: `matching-engine` defines the domain model with zero solver logic. **Middle tier**: `matching-solver` (optimization algorithms), `sybil-oracle` (resolution decisions), `sybil-verifier` (block verification and commitment schemas), and `matching-scenarios` (test data generation) all depend on the engine but not on each other. **Top tier**: `matching-sequencer` composes solver + oracle + verifier into the block production pipeline. `sybil-api` wraps the sequencer as an HTTP server. `matching-sim` pulls from scenarios + solver + verifier for benchmarking. `sequencer-sim` is a dev-only harness that drives the sequencer over many batches with synthetic agents (the `sybil-sim` binary); it depends on `matching-sequencer` so that the sequencer library itself ships no simulation code to `sybil-api`.
+The dependency DAG flows in three tiers. **Foundation**: `matching-engine` defines the domain model with zero solver logic. **Middle tier**: `matching-solver` (optimization algorithms), `sybil-oracle` (resolution decisions), `sybil-verifier` (block verification and commitment schemas), and `matching-scenarios` (test data generation) all depend on the engine but not on each other. **Top tier**: `matching-sequencer` composes solver + oracle + verifier into the block production pipeline. `sybil-api` wraps the sequencer as an HTTP server. `matching-sim` pulls from scenarios + solver + verifier for benchmarking. `sequencer-sim` is a dev-only harness that drives the sequencer over many batches with synthetic agents (the `sybil-sim` binary); it depends on `matching-sequencer` so that the sequencer library itself ships no simulation code to `sybil-api`, and on `matching-scenarios` only for the privacy-safe solver replay envelope.
 
 The ZK boundary is deliberately split from block production. `sybil-zk`
 depends on `sybil-verifier` with native qMDB runtime features disabled and
@@ -77,6 +77,7 @@ graph TB
     HISTTYPES --> API
     API -.->|"private HTTP"| HIST
     SEQ --> SEQSIM["sequencer-sim<br/>dev-only · sybil-sim bin"]
+    SCENARIOS --> SEQSIM
     API -.->|"HTTP"| ARENA["arena/ · Python"]
     LOADTEST["sybil-loadtest<br/>Goose · read-only"] -.->|"public HTTP"| API
 
@@ -141,7 +142,7 @@ graph TB
   `sybil-custody` is the user-side retention/reconstruction/proving client
 - Arena connects via HTTP only — no Rust compilation required
 - `matching-sim` is a dev tool that cross-cuts multiple crates for benchmarking
-- `sequencer-sim` is a dev-only crate: it depends on `matching-sequencer` so the sequencer library stays free of simulation/agent code (nothing `sybil-api` links pulls it in)
+- `sequencer-sim` is a dev-only crate: it depends on `matching-sequencer` so the sequencer library stays free of simulation/agent code (nothing `sybil-api` links pulls it in), and on `matching-scenarios` only for the solver replay envelope
 - `sybil-loadtest` has no in-process exchange dependency; it tests deployed
   boundaries through read-only public HTTP and the shared Rust WebSocket client
 

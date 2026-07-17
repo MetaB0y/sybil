@@ -24,6 +24,7 @@ clap = { workspace = true, features = ["derive"] }
 comfy-table = "7"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+rmp-serde = { workspace = true }
 
 [features]
 default = ["lp", "conic"]

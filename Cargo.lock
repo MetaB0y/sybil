@@ -4166,6 +4166,7 @@ dependencies = [
  "matching-engine",
  "rand 0.10.2",
  "rand_chacha 0.10.0",
+ "serde",
 ]
 
 [[package]]
@@ -4218,6 +4219,7 @@ dependencies = [
  "matching-engine",
  "matching-scenarios",
  "matching-solver",
+ "rmp-serde",
  "serde",
  "serde_json",
  "sybil-verifier",
@@ -6159,12 +6161,15 @@ dependencies = [
 name = "sequencer-sim"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "clap",
  "comfy-table",
  "matching-engine",
+ "matching-scenarios",
  "matching-sequencer",
  "rand 0.10.2",
  "rand_chacha 0.10.0",
+ "rmp-serde",
  "sybil-oracle",
 ]
 

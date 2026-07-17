@@ -17,6 +17,7 @@
 
 pub mod flash_liquidity;
 pub mod random;
+pub mod replay;
 pub mod scenario;
 
 // Re-export Problem from matching-engine
@@ -26,6 +27,9 @@ pub use matching_engine::{Problem, ProblemSummary};
 pub use scenario::{MmQuoteStyle, ScenarioConfig, generate_scenario};
 
 pub use flash_liquidity::{FlashLiquidityConfig, generate_flash_liquidity_scenario};
+pub use replay::{
+    ReplayMmConstraintV1, SOLVER_REPLAY_SCHEMA_V1, SolverReplayCaseV1, SolverReplayCorpusV1,
+};
 
 // Re-export simple random generator
 pub use random::{RandomConfig, generate_random_scenario};

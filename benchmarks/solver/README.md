@@ -29,8 +29,9 @@ empirical claims, not for criterion-style microbenchmarks or a single ad-hoc
   explicit delegation remains possible only when the requested objective
   reduces to LP, such as a no-MM problem or Conic `Linear` mode.
 - Synthetic profiles are structural stress tests. They are not described as
-  calibrated real order flow; the repository currently has no frozen replay
-  dataset suitable for that claim.
+  calibrated real order flow. Protocol v3 can also pin compact solver-boundary
+  replay corpora, but the first checked-in corpus is explicitly agent-generated
+  sequencer traffic, not a substitute for redacted production captures.
 
 ## Run
 
@@ -173,6 +174,34 @@ python3 scripts/benchmarks/analyze_solver_experiments.py \
 The exact derivation, rejected marginal-face selectors, counterexample seed,
 and current development result are recorded in
 `design/solver-experiments/structural-price-sweep-oracle.md`.
+
+## Sequencer-boundary replay development protocol
+
+`protocol-replay-development.json` replays 20 consecutive solver inputs from a
+deterministic run of the real multi-batch sequencer. Unlike the independent
+scenario generator, these books contain the accepted order sequence after
+admission plus carried resting liquidity. The MessagePack corpus is a
+solver-only projection: it omits accounts, signatures, balances, market names,
+and solver output; the protocol pins its BLAKE3 digest.
+
+The corpus is still synthetic and its blocks are correlated. It is useful for
+catching lifecycle-shaped and landing regressions, not for estimating live
+traffic distributions. The protocol runs both captured MM budgets and a tight
+budget counterfactual because the simulated maker budgets are otherwise slack.
+
+```bash
+cargo run --release -p matching-sim --all-features \
+  --bin solver-experiments -- \
+  --protocol benchmarks/solver/protocol-replay-development.json \
+  --source-revision <working-or-frozen-revision> \
+  --output-dir /tmp/solver-replay-development --overwrite
+python3 scripts/benchmarks/analyze_solver_experiments.py \
+  /tmp/solver-replay-development
+```
+
+The corpus design, capture limitation, and first 160-row result are recorded in
+`design/solver-experiments/sequencer-replay-corpus.md`. The guarded autonomous
+iteration policy is in `benchmarks/solver/research-loop.md`.
 
 ## Protocol v2 suite structure
 

@@ -2,8 +2,10 @@ use clap::Parser;
 use comfy_table::{Cell, Color, Table, modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL};
 
 use matching_engine::NANOS_PER_DOLLAR;
+use matching_scenarios::SolverReplayCorpusV1;
 use sequencer_sim::scenario::Scenario;
 use sequencer_sim::simulation::SimulationRunner;
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(name = "sybil-sim", about = "Agent-based prediction market simulation")]
@@ -35,9 +37,13 @@ struct Cli {
     /// Verbose output
     #[arg(short, long)]
     verbose: bool,
+
+    /// Write compact MessagePack solver inputs for every produced batch.
+    #[arg(long)]
+    solver_corpus_output: Option<PathBuf>,
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     let mut scenario = match cli.scenario.as_str() {
@@ -93,8 +99,28 @@ fn main() {
     println!("Seed: {}", scenario.seed);
     println!();
 
-    let mut runner = SimulationRunner::from_scenario(&scenario);
+    let mut runner = SimulationRunner::from_scenario_with_debug_verification(
+        &scenario,
+        cli.solver_corpus_output.is_none(),
+    );
     let result = runner.run(num_batches);
+
+    if let Some(path) = &cli.solver_corpus_output {
+        let corpus = SolverReplayCorpusV1::new(
+            format!("sequencer-sim-{}-s{}-v1", scenario.name, scenario.seed),
+            "sequencer-sim",
+            result.solver_replay_cases.clone(),
+        );
+        corpus.validate()?;
+        let bytes = rmp_serde::to_vec(&corpus)?;
+        std::fs::write(path, &bytes)?;
+        eprintln!(
+            "wrote {} replay cases to {} (blake3={})",
+            corpus.cases.len(),
+            path.display(),
+            blake3::hash(&bytes).to_hex()
+        );
+    }
 
     // Print per-batch summary
     if cli.verbose {
@@ -109,6 +135,7 @@ fn main() {
     print_event_price_discovery(&result, &result.scenario, &result.event_map);
 
     print_summary(&result);
+    Ok(())
 }
 
 fn print_batch_table(result: &sequencer_sim::SimulationResult) {

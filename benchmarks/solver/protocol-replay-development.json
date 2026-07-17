@@ -1,0 +1,77 @@
+{
+  "schema_version": 3,
+  "protocol_id": "solver-sequencer-replay-development-v1",
+  "title": "Development-only lifecycle-shaped solver replay",
+  "analysis_policy": {
+    "evidence_status": "development-only sequencer simulation; not real order flow or held-out evidence",
+    "primary_unit": "one solver-boundary replay case, budget ratio, and solver",
+    "hard_gates": "no panic, solver failure, timeout, or verifier-invalid landed result",
+    "soft_metrics": "wall-time median and tails; retained-cash objective and welfare gaps; certificate and landing tails; allocation and price distance; MM utilization",
+    "selection_policy": "prefer Pareto improvements; do not collapse quality, robustness, latency, and simplicity into one score",
+    "corpus_policy": "cases preserve accepted-order sequence across a real multi-batch sequencer lifecycle while omitting accounts, signatures, balances, names, and solver output"
+  },
+  "warmup": {
+    "corpus": "sequencer-sim-standard-s27182-v1",
+    "seed": 0,
+    "budget_scale": 1.0
+  },
+  "solvers": {
+    "lp": {
+      "kind": "lp",
+      "label": "Production LP-SLP plus visible landing trim",
+      "max_iterations": 5,
+      "fallback_to_lp": false
+    },
+    "rc-structural": {
+      "kind": "retained-cash-structural",
+      "label": "Certified retained-cash FW with structural oracle",
+      "max_iterations": 100,
+      "tolerance": 0.00001,
+      "absolute_tolerance": 1000000.0,
+      "line_search_steps": 48,
+      "fallback_to_lp": false
+    },
+    "bundle-structural": {
+      "kind": "pacing-bundle-structural",
+      "label": "Fully corrective pacing bundle with structural oracle",
+      "max_iterations": 100,
+      "max_master_iterations": 1000,
+      "tolerance": 0.00000001,
+      "absolute_tolerance": 1000000.0,
+      "master_tolerance": 0.000000001,
+      "master_absolute_tolerance": 1000.0,
+      "line_search_steps": 48,
+      "fallback_to_lp": false
+    },
+    "conic-quasi": {
+      "kind": "conic-quasi",
+      "label": "Independent Clarabel retained-cash reference",
+      "max_iterations": 200,
+      "tolerance": 0.00000001,
+      "time_limit_seconds": 20.0,
+      "fallback_to_lp": false
+    }
+  },
+  "scales": {},
+  "profiles": {},
+  "corpora": {
+    "sequencer-sim-standard-s27182-v1": {
+      "path": "corpora/sequencer-sim-standard-s27182-v1.msgpack",
+      "blake3": "9aa3fd354b88876addb206859babf88769e74791c1e07ba7d62afade86bc124f"
+    }
+  },
+  "experiments": [
+    {
+      "id": "sequencer-lifecycle",
+      "suite": "replay",
+      "profile": "agent-flow",
+      "scale": "growing-resting-book",
+      "corpus": "sequencer-sim-standard-s27182-v1",
+      "seed_start": 0,
+      "seed_count": 20,
+      "budget_scales": [0.0001, 1.0],
+      "budget_basis": "generated",
+      "solvers": ["lp", "rc-structural", "bundle-structural", "conic-quasi"]
+    }
+  ]
+}

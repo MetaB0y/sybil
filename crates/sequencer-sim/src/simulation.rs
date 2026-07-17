@@ -1,6 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use matching_engine::{MarketGroup, MarketId, MarketSet, MmId, NANOS_PER_DOLLAR, Nanos};
+use matching_engine::{
+    Market, MarketGroup, MarketId, MarketSet, MmId, NANOS_PER_DOLLAR, Nanos, Problem,
+};
+use matching_scenarios::SolverReplayCaseV1;
 use rand::RngExt;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
@@ -31,6 +34,7 @@ pub struct SimulationRunner {
     pending_resolutions: Vec<(usize, usize, usize)>,
     resolved_markets: HashSet<MarketId>,
     scenario: Scenario,
+    solver_replay_cases: Vec<SolverReplayCaseV1>,
 }
 
 /// Results of the full simulation.
@@ -43,11 +47,26 @@ pub struct SimulationResult {
     pub price_history: Vec<HashMap<MarketId, Vec<Nanos>>>,
     pub scenario: Scenario,
     pub event_map: EventMarketMap,
+    /// Privacy-safe projections of the exact solver inputs for each batch.
+    pub solver_replay_cases: Vec<SolverReplayCaseV1>,
 }
 
 impl SimulationRunner {
     /// Create a simulation from a scenario definition.
     pub fn from_scenario(scenario: &Scenario) -> Self {
+        Self::from_scenario_with_debug_verification(scenario, true)
+    }
+
+    /// Create a simulation with optional expensive full-account verification.
+    ///
+    /// Production's mandatory block invariants remain enabled either way.
+    /// Solver-input corpus capture can disable the additional debug verifier
+    /// because it projects the problem before settlement and does not retain
+    /// or assess simulated account state.
+    pub fn from_scenario_with_debug_verification(
+        scenario: &Scenario,
+        debug_verify_full: bool,
+    ) -> Self {
         let mut rng = ChaCha8Rng::seed_from_u64(scenario.seed);
         let mut accounts = AccountStore::new();
         let mut markets = MarketSet::new();
@@ -156,7 +175,7 @@ impl SimulationRunner {
             agents.push(Box::new(agent));
         }
         let config = SequencerConfig {
-            debug_verify_full: true,
+            debug_verify_full,
             ..SequencerConfig::default()
         };
         let sequencer =
@@ -175,6 +194,7 @@ impl SimulationRunner {
             pending_resolutions,
             resolved_markets: HashSet::new(),
             scenario: scenario.clone(),
+            solver_replay_cases: Vec::new(),
         }
     }
 
@@ -318,6 +338,7 @@ impl SimulationRunner {
             price_history: self.price_history.clone(),
             scenario: self.scenario.clone(),
             event_map: self.event_map.clone(),
+            solver_replay_cases: self.solver_replay_cases.clone(),
         }
     }
 
@@ -358,6 +379,38 @@ impl SimulationRunner {
 
         // Produce the block
         let bp = self.sequencer.produce_block(submissions, 0);
+        let mut replay_problem = Problem::new("solver-boundary");
+        for snapshot in &bp.witness.state_sidecar.markets {
+            replay_problem
+                .markets
+                .add_market(Market::new(snapshot.market_id, snapshot.name.clone()));
+        }
+        replay_problem.orders = bp
+            .witness
+            .orders
+            .iter()
+            .map(|witness_order| witness_order.order.clone())
+            .collect();
+        replay_problem.mm_constraints = bp.witness.mm_constraints.clone();
+        replay_problem.market_groups = bp.witness.market_groups.clone();
+
+        let mut traits = vec!["sequencer-boundary".to_string(), "agent-flow".to_string()];
+        if bp.flow_metrics.carried_resting_orders > 0 {
+            traits.push("resting-liquidity".to_string());
+        }
+        if replay_problem.mm_constraints.len() > 1 {
+            traits.push("multiple-mms".to_string());
+        }
+        if !replay_problem.market_groups.is_empty() {
+            traits.push("market-groups".to_string());
+        }
+        self.solver_replay_cases
+            .push(SolverReplayCaseV1::from_problem(
+                format!("{}-s{}-b{batch:03}", self.scenario.name, self.scenario.seed),
+                traits,
+                &replay_problem,
+            ));
+
         let result = batch_result_from_block(&bp.block, &bp.analytics, bp.pipeline);
 
         // Record metrics
