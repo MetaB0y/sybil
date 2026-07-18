@@ -211,8 +211,8 @@ Account fill history is served by `GET /v1/accounts/{id}/fills`. New clients
 tail with `after=<cursor>&limit=N`. The response envelope includes the
 compatibility retention fields plus `indexed_through_height` and
 `history_complete_from_height`; forward rows are oldest-to-newest and each has
-a stable cursor. The older `offset` query remains compatibility-only and pages
-newest-first.
+a stable cursor. A request without `after` returns the newest page; continued
+traversal uses the stable cursor rather than an offset scan.
 
 `GET /v1/accounts/{id}/events` uses the analogous `events`/`next_before`
 envelope. Equity responses carry the same projector checkpoint/completeness

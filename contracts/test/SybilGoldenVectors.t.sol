@@ -192,6 +192,72 @@ contract SybilGoldenVectorsTest {
         );
     }
 
+    function testWithdrawalNullifierMatchesRustGoldenVector() public view {
+        bytes32 nullifier = keccak256(
+            abi.encode(
+                "sybil/withdrawal-nullifier/v1",
+                goldenUint(".withdrawal_nullifier.chain_id"),
+                goldenAddress(".withdrawal_nullifier.vault_address"),
+                goldenUint(".withdrawal_nullifier.withdrawal_id"),
+                goldenUint(".withdrawal_nullifier.account_id"),
+                goldenAddress(".withdrawal_nullifier.recipient"),
+                goldenAddress(".withdrawal_nullifier.token_address"),
+                goldenUint(".withdrawal_nullifier.amount_token_units")
+            )
+        );
+        require(
+            nullifier == goldenBytes32(".withdrawal_nullifier.nullifier"), "withdrawal nullifier"
+        );
+    }
+
+    function testContractSelectorsAndEventTopicsMatchRustAlloyBindings() public view {
+        require(
+            SybilSettlement.submitStateRoot.selector
+                == goldenSelector(".l1_abi.settlement.submit_state_root_selector"),
+            "settlement submit selector"
+        );
+        require(
+            bytes4(keccak256("latestHeight()"))
+                == goldenSelector(".l1_abi.settlement.latest_height_selector"),
+            "settlement latest selector"
+        );
+        require(
+            bytes4(keccak256("rootAt(uint64)"))
+                == goldenSelector(".l1_abi.settlement.root_at_selector"),
+            "settlement root selector"
+        );
+        require(
+            bytes4(keccak256("depositRootByCount(uint64)"))
+                == goldenSelector(".l1_abi.vault.deposit_root_by_count_selector"),
+            "vault deposit root selector"
+        );
+        require(
+            SybilVault.escapeClaim.selector
+                == goldenSelector(".l1_abi.vault.escape_claim_selector"),
+            "vault escape selector"
+        );
+        require(
+            SybilVault.DepositReceived.selector
+                == goldenBytes32(".l1_abi.vault.deposit_received_topic0"),
+            "vault deposit topic"
+        );
+        require(
+            SybilVault.WithdrawalQueued.selector
+                == goldenBytes32(".l1_abi.vault.withdrawal_queued_topic0"),
+            "vault withdrawal queued topic"
+        );
+        require(
+            SybilVault.WithdrawalFinalized.selector
+                == goldenBytes32(".l1_abi.vault.withdrawal_finalized_topic0"),
+            "vault withdrawal finalized topic"
+        );
+        require(
+            SybilVault.WithdrawalCancelled.selector
+                == goldenBytes32(".l1_abi.vault.withdrawal_cancelled_topic0"),
+            "vault withdrawal cancelled topic"
+        );
+    }
+
     function testEscapeClaimPublicInputHashMatchesRustGoldenVector() public view {
         SybilTypes.EscapeClaimPublicInputs memory inputs = SybilTypes.EscapeClaimPublicInputs({
             stateRoot: goldenBytes32(".escape_claim_public_inputs.state_root"),
@@ -261,6 +327,16 @@ contract SybilGoldenVectorsTest {
         string memory path
     ) private view returns (bytes32) {
         return vm.parseJsonBytes32(golden, path);
+    }
+
+    function goldenSelector(
+        string memory path
+    ) private view returns (bytes4 selector) {
+        bytes memory encoded = goldenBytes(path);
+        require(encoded.length == 4, "golden selector length");
+        assembly ("memory-safe") {
+            selector := mload(add(encoded, 32))
+        }
     }
 
     function goldenUint(

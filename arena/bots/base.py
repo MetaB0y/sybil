@@ -233,7 +233,7 @@ class BaseAgent(ABC):
         the canonical snapshot after choosing that boundary. Future fills continue
         normally from the new cursor.
         """
-        latest = await self.client.get_account_fills(self.account_id, limit=1, offset=0)
+        latest = await self.client.get_account_fills(self.account_id, limit=1)
         if latest:
             cursor = latest[0].cursor
         else:

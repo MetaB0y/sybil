@@ -86,46 +86,30 @@ The program is deliberately repository-aware and validation-heavy:
 | Error, panic, and recovery boundaries | Audited and strengthened; service-create identity and file fault matrix open | [`code-quality-audit-error-recovery-2026-07-17.md`](code-quality-audit-error-recovery-2026-07-17.md), GitHub #188/#189 and existing #129 |
 | Static lint, dead code, and unsafe-code policy | Audited, fixed, and enforced | [`code-quality-audit-static-lint-unsafe-2026-07-18.md`](code-quality-audit-static-lint-unsafe-2026-07-18.md); zero authored unsafe and strict feature/standalone gates |
 | Dependency and build supply chain | Audited and remediated; three upstream exceptions open | [`code-quality-audit-dependency-supply-chain-2026-07-18.md`](code-quality-audit-dependency-supply-chain-2026-07-18.md), GitHub #194/#195 plus existing #65/#118 |
-| Performance and algorithmic complexity | Queued | Allocation/copy hotspots, serialization amplification, non-solver worst cases, query indexes, benchmark regression gates |
-| Documentation, API, and implementation drift | Queued | Route/OpenAPI pins, generated clients, config/runbook drift, architecture freshness and link gates |
+| Performance and algorithmic complexity | Audited and fixed; history capacity policy open | [`code-quality-audit-performance-2026-07-18.md`](code-quality-audit-performance-2026-07-18.md), GitHub #90 |
+| Documentation, API, and implementation drift | Audited and fixed | [`code-quality-audit-documentation-drift-2026-07-18.md`](code-quality-audit-documentation-drift-2026-07-18.md) |
 | Python/Arena data and experiment correctness | Audited and fixed | [`code-quality-audit-arena-correctness-2026-07-18.md`](code-quality-audit-arena-correctness-2026-07-18.md), GitHub #192/#193 |
 | Frontend semantic correctness and accessibility | Audited and fixed; broader integer/WebSocket generation policy open | [`code-quality-audit-frontend-correctness-2026-07-18.md`](code-quality-audit-frontend-correctness-2026-07-18.md), GitHub #191 fixed; #177/#183 retained |
-| Solidity/L1 differential semantics | **Next** | Rust/Solidity hash/ABI parity, invariant tests, reorg/finality assumptions, mutation/fuzz campaigns |
+| Solidity/L1 differential semantics | Audited and strengthened; production trust work open | [`code-quality-audit-l1-differential-2026-07-18.md`](code-quality-audit-l1-differential-2026-07-18.md), GitHub #55–#57, #88, #89, and #92 |
 
-## Next-cluster charter: Solidity/L1 differential semantics
+## Program completion — 2026-07-18
 
-The next cluster should answer one question: do Rust, Solidity, ABI bindings,
-and the indexer agree exactly on every L1 hash, amount, identity, lifecycle, and
-finality transition that can move or release value?
+Every cluster queued in this program has now been investigated, fixed where the
+win was bounded and unambiguous, and given a durable dated report. The ledger
+still shows active or partially reconciled work where the remaining choice is a
+product, economic, security, retention, or governance decision. Those items
+are owned by the linked GitHub Issues and are not unfinished audit inventory.
 
-Initial scope:
+The final L1 pass added independent Rust/Alloy/Solidity parity for normal
+withdrawal nullifiers and ABI selectors/topics, removed duplicate encoder
+ownership, and tightened event decoding. The performance pass removed unstable
+linear fill offsets, exposed real block-production phase latency, and retained
+only evidence-dependent index/benchmark choices. The drift pass regenerated
+clients and corrected current documentation.
 
-- Rust/Solidity bridge hash-domain and known-answer vector parity;
-- generated ABI bindings versus deployed contract interfaces and selectors;
-- deposit, withdrawal, root, nullifier, escape, and adapter lifecycle
-  invariants;
-- confirmation, provider-quorum, reorg, cursor, and idempotency assumptions;
-- Foundry invariant/fuzz coverage and Rust differential tests; and
-- deployment pins, manifests, unsafe mock boundaries, and runbook semantics.
-
-Method:
-
-1. Inventory each value-moving hash and ABI field across Rust and Solidity.
-2. Prefer one shared checked-in vector corpus exercised independently by both
-   runtimes.
-3. Mutate domain tags, ordering, widths, and lifecycle conditions to challenge
-   existing oracles.
-4. Use Anvil only as a disposable local boundary; do not call public providers,
-   submit a live transaction, or generate a proof.
-5. Separate real-value security requirements from explicitly unsafe devnet
-   adapters without allowing mock acceptance into the real submission type.
-6. Fix bounded discrepancies and file only coherent governance or economic
-   trade-offs after deduplicating GitHub Issues.
-
-Completion requires a dated cross-runtime inventory, independent differential
-vectors, Foundry/Rust boundary gates, reviewed indexer/finality assumptions,
-deployment-pin validation, deduplicated issues, and explicit unresolved
-security/governance choices.
+Further repository audit should begin from a new observed defect, dependency
+change, architecture change, production trace, or explicit issue—not by
+replaying this completed queue.
 
 ## Reusable review prompt
 

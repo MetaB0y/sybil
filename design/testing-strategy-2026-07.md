@@ -7,8 +7,13 @@ date: 2026-07-07
 
 # Bulletproof Testing — strategy
 
-> **Status note (2026-07-11):** test counts and named gaps are dated. The
-> architectural principles remain useful; rebuild the inventory before acting.
+> **Status note (2026-07-18):** test counts and named gaps below are a historical
+> proposal, not the current backlog. Several items have since been implemented
+> or superseded, including the shared generated Rust/Solidity golden corpus,
+> L1 indexer tests, and Arena property tests. Rebuild any inventory before
+> acting; use the
+> [code-quality audit program](code-quality-audit-program-2026-07.md) and GitHub
+> Issues for current disposition.
 
 Companion to the descriptive vault note [[Testing Strategy]]. That note says what
 exists; this says **how testing becomes bulletproof for a validity-critical system** and

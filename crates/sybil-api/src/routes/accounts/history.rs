@@ -90,7 +90,6 @@ pub async fn get_portfolio(
         ("market_id" = Option<u32>, Query, description = "Filter by market ID"),
         ("after" = Option<String>, Query, description = "Stable cursor returned as `cursor` on each fill. When present, returns fills strictly after this cursor in ascending order. Use `0.0` to start from the beginning."),
         ("limit" = Option<usize>, Query, description = "Result limit (default 100, cap 500)"),
-        ("offset" = Option<usize>, Query, deprecated, description = "Deprecated offset-from-newest pagination. Ignored when `after` is present."),
     ),
     responses(
         (status = 200, description = "Retained account fill history", body = AccountFillPageResponse),
@@ -129,18 +128,15 @@ pub async fn get_account_fills(
                     order_id: cursor.order_id,
                 }),
                 limit: request_limit,
-                offset: 0,
             })
             .await?
     } else {
-        let offset = params.offset.unwrap_or(0);
         history
             .fills(&FillQuery {
                 account_id: id,
                 market_id: market_id.map(|market_id| market_id.0),
                 after: None,
                 limit: request_limit,
-                offset,
             })
             .await?
     };
@@ -311,11 +307,11 @@ pub async fn get_account_history(
 }
 
 #[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AccountFillParams {
     pub market_id: Option<u32>,
     pub after: Option<String>,
     pub limit: Option<usize>,
-    pub offset: Option<usize>,
 }
 
 pub(super) fn account_fill_query_limit(limit: Option<usize>) -> usize {

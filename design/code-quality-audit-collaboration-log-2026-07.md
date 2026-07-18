@@ -533,3 +533,85 @@ that needed a single classification owner.
 - No proof generation, deployment, protocol-byte, or solver-policy change
   occurred.
 - The next cluster is Solidity/L1 differential semantics.
+
+## 2026-07-18T13:50:00+01:00 — Solidity/L1 differential semantics
+
+### Primary-reviewer method and reusable handoff
+
+- Make protocol-owned Rust signatures/encoders, generated Alloy bindings, and
+  compiled Solidity expressions consume one checked-in corpus while computing
+  their own bytes independently.
+- A typed event parser must validate the complete canonical ABI shape, including
+  dynamic data it intentionally omits from the returned product type.
+- Keep value-moving hash domains in `sybil-l1-protocol`; sequencer consumers do
+  not mint private ABI encoders.
+- Separate source/binding parity from public-chain finality and proof soundness.
+
+### Findings and decisions
+
+- Fixed prefix-only withdrawal event decoding and added malformed fixed/dynamic
+  payload tests.
+- Removed the sequencer's duplicate withdrawal-nullifier ABI encoder.
+- Extended golden schema version 7 with withdrawal nullifier, Alloy call
+  selectors, and event topics; Foundry and the protocol crate check them
+  independently.
+- Reviewed and retained the indexer's quorum/finality/reorg latch and contract
+  money-path states.
+- Deduplicated residual work against #55–#57, #88, #89, and #92.
+
+### Result
+
+- Report:
+  [`code-quality-audit-l1-differential-2026-07-18.md`](code-quality-audit-l1-differential-2026-07-18.md)
+- Rust L1 packages, golden regeneration, and all 81 Foundry tests pass.
+- No provider, transaction, proof generation, deployment, guest-commitment, or
+  deployment-pin change occurred. The additive golden schema and its generated
+  documentation pin advanced to version 7.
+
+## 2026-07-18T14:05:00+01:00 — performance and algorithmic complexity
+
+### Primary-reviewer method and reusable handoff
+
+- Prove complexity from the actual index and loop; do not label copying or
+  allocation a finding without its rollback/ownership purpose.
+- Prefer stable keyset cursors to row offsets for mutable retained histories.
+- Measure solver, prepare, persistence, and end-to-end production separately;
+  do not infer storage latency from solver duration.
+- Do not set regression thresholds before defining a representative workload.
+
+### Findings and decisions
+
+- Removed deprecated fill-history offsets across history, API, generated
+  clients, Arena, and frontend; unknown offset requests now fail explicitly.
+- Added prepare, persist, and complete successful block-production phase
+  metrics and corrected dashboard/runbook semantics.
+- Removed a scheduler race from a manually driven history-outbox test.
+- Retained clone-before-persist atomicity and current ordered history indexes.
+- Left product-history capacity to existing #90 and classified additional
+  market/equity indexes and SLO thresholds as evidence-dependent trade-offs.
+
+### Result
+
+- Report:
+  [`code-quality-audit-performance-2026-07-18.md`](code-quality-audit-performance-2026-07-18.md)
+- History/API/Arena/frontend regressions and monitoring gates pass.
+
+## 2026-07-18T14:20:00+01:00 — documentation and program closure
+
+### Findings and decisions
+
+- Corrected solver-versus-production latency ownership.
+- Clarified that the sequencer enriches solver fills with account identity
+  before settlement and removed a duplicate architecture link.
+- Marked the dated testing proposal's completed gaps as historical and linked
+  the current audit program.
+- Regenerated both client surfaces and passed route/OpenAPI/documentation drift
+  checks.
+- Replaced all queued/next cluster states with dated dispositions. Remaining
+  work is explicitly issue-owned or ambiguous, not an unfinished audit queue.
+
+### Result
+
+- Report:
+  [`code-quality-audit-documentation-drift-2026-07-18.md`](code-quality-audit-documentation-drift-2026-07-18.md)
+- The July code-quality audit program is complete.

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use alloy::sol_types::{SolCall, SolEvent};
 use matching_engine::{
     ConditionDir, Fill, MarketGroup, MarketId, MmConstraint, MmId, MmSide, Nanos, Order,
     OrderDirection, PriceCondition, Qty,
@@ -9,9 +10,10 @@ use matching_engine::{
 use serde::Serialize;
 use sha2::{Digest as _, Sha256};
 use sha3::Keccak256;
+use sybil_l1_abi::{SybilSettlement, SybilVault};
 use sybil_l1_protocol::{
     DepositLeaf, append_deposit_frontier, deposit_leaf, deposit_prefix_roots, deposit_tree_leaf,
-    empty_deposit_frontier, empty_deposit_root,
+    empty_deposit_frontier, empty_deposit_root, withdrawal_nullifier,
 };
 use sybil_verifier::commitments::{event_schema, hash_header, state_schema, witness_schema};
 use sybil_verifier::{
@@ -40,6 +42,8 @@ struct GoldenVectors {
     key_op_block: KeyOpBlockVector,
     quarantine_claim_block: QuarantineClaimBlockVector,
     deposits: DepositVectors,
+    l1_abi: L1AbiVector,
+    withdrawal_nullifier: WithdrawalNullifierVector,
     state_transition_public_inputs: PublicInputVector,
     epoch_transition_public_inputs: EpochPublicInputVector,
     escape_claim_public_inputs: EscapeClaimPublicInputVector,
@@ -143,6 +147,41 @@ struct HighDepositVector {
     amount_token_units: u64,
     leaf: String,
     tree_leaf: String,
+}
+
+#[derive(Serialize)]
+struct WithdrawalNullifierVector {
+    chain_id: u64,
+    vault_address: String,
+    withdrawal_id: u64,
+    account_id: u64,
+    recipient: String,
+    token_address: String,
+    amount_token_units: u64,
+    nullifier: String,
+}
+
+#[derive(Serialize)]
+struct L1AbiVector {
+    settlement: SettlementAbiVector,
+    vault: VaultAbiVector,
+}
+
+#[derive(Serialize)]
+struct SettlementAbiVector {
+    submit_state_root_selector: String,
+    latest_height_selector: String,
+    root_at_selector: String,
+}
+
+#[derive(Serialize)]
+struct VaultAbiVector {
+    deposit_root_by_count_selector: String,
+    escape_claim_selector: String,
+    deposit_received_topic0: String,
+    withdrawal_queued_topic0: String,
+    withdrawal_finalized_topic0: String,
+    withdrawal_cancelled_topic0: String,
 }
 
 #[derive(Serialize)]
@@ -274,6 +313,13 @@ fn render() -> Result<String, String> {
     }
 
     let high_deposit = high_deposit_fixture();
+    let withdrawal_chain_id = 31_337;
+    let withdrawal_vault = [0x11; 20];
+    let withdrawal_id = 9;
+    let withdrawal_account_id = 1_001;
+    let withdrawal_recipient = [0x73; 20];
+    let withdrawal_token = [0x22; 20];
+    let withdrawal_amount = 9_876_543_210;
     let public_inputs = StateTransitionPublicInputs {
         previous_height: 41,
         new_height: 42,
@@ -327,7 +373,7 @@ fn render() -> Result<String, String> {
 
     let vectors = GoldenVectors {
         _comment: COMMENT,
-        schema_version: 5,
+        schema_version: 7,
         header: HeaderVector {
             fixture: HeaderFixture {
                 height: witness.header.height,
@@ -440,6 +486,51 @@ fn render() -> Result<String, String> {
                 leaf: hex_bytes(&deposit_leaf(&high_deposit)),
                 tree_leaf: hex_bytes(&deposit_tree_leaf(&high_deposit)),
             },
+        },
+        l1_abi: L1AbiVector {
+            settlement: SettlementAbiVector {
+                submit_state_root_selector: hex_bytes(
+                    &SybilSettlement::submitStateRootCall::SELECTOR,
+                ),
+                latest_height_selector: hex_bytes(&SybilSettlement::latestHeightCall::SELECTOR),
+                root_at_selector: hex_bytes(&SybilSettlement::rootAtCall::SELECTOR),
+            },
+            vault: VaultAbiVector {
+                deposit_root_by_count_selector: hex_bytes(
+                    &SybilVault::depositRootByCountCall::SELECTOR,
+                ),
+                escape_claim_selector: hex_bytes(&SybilVault::escapeClaimCall::SELECTOR),
+                deposit_received_topic0: hex_bytes(
+                    SybilVault::DepositReceived::SIGNATURE_HASH.as_slice(),
+                ),
+                withdrawal_queued_topic0: hex_bytes(
+                    SybilVault::WithdrawalQueued::SIGNATURE_HASH.as_slice(),
+                ),
+                withdrawal_finalized_topic0: hex_bytes(
+                    SybilVault::WithdrawalFinalized::SIGNATURE_HASH.as_slice(),
+                ),
+                withdrawal_cancelled_topic0: hex_bytes(
+                    SybilVault::WithdrawalCancelled::SIGNATURE_HASH.as_slice(),
+                ),
+            },
+        },
+        withdrawal_nullifier: WithdrawalNullifierVector {
+            chain_id: withdrawal_chain_id,
+            vault_address: hex_bytes(&withdrawal_vault),
+            withdrawal_id,
+            account_id: withdrawal_account_id,
+            recipient: hex_bytes(&withdrawal_recipient),
+            token_address: hex_bytes(&withdrawal_token),
+            amount_token_units: withdrawal_amount,
+            nullifier: hex_bytes(&withdrawal_nullifier(
+                withdrawal_chain_id,
+                withdrawal_vault,
+                withdrawal_id,
+                withdrawal_account_id,
+                withdrawal_recipient,
+                withdrawal_token,
+                withdrawal_amount,
+            )),
         },
         state_transition_public_inputs: PublicInputVector {
             previous_height: public_inputs.previous_height,

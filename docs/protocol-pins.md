@@ -14,7 +14,7 @@ status: current
 |---|---:|
 | Witness format | `11` |
 | Empty canonical witness length | `1631` bytes |
-| Golden-vector schema | `5` |
+| Golden-vector schema | `7` |
 | Canonical witness vector length | `3984` bytes |
 | Canonical witness length-prefixed SHA-256 | `0x4609379c38ec46b129c7bc3e3bf8f47f5095d07b9afe11df604b0c5022faf2a3` |
 | Transition public-input hash | `0x42197d0dff7bc2f86a6e359f187adda163fc9b4ffaa0e7cfb9845561bb744830` |

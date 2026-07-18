@@ -20,7 +20,6 @@ def _get_kwargs(
     market_id: int | Unset = UNSET,
     after: str | Unset = UNSET,
     limit: int | Unset = UNSET,
-    offset: int | Unset = UNSET,
 
 ) -> dict[str, Any]:
     
@@ -34,8 +33,6 @@ def _get_kwargs(
     params["after"] = after
 
     params["limit"] = limit
-
-    params["offset"] = offset
 
 
     params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
@@ -98,7 +95,6 @@ def sync_detailed(
     market_id: int | Unset = UNSET,
     after: str | Unset = UNSET,
     limit: int | Unset = UNSET,
-    offset: int | Unset = UNSET,
 
 ) -> Response[AccountFillPageResponse | Any]:
     """ GET /v1/accounts/{id}/fills
@@ -108,7 +104,6 @@ def sync_detailed(
         market_id (int | Unset):
         after (str | Unset):
         limit (int | Unset):
-        offset (int | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -124,7 +119,6 @@ def sync_detailed(
 market_id=market_id,
 after=after,
 limit=limit,
-offset=offset,
 
     )
 
@@ -141,7 +135,6 @@ def sync(
     market_id: int | Unset = UNSET,
     after: str | Unset = UNSET,
     limit: int | Unset = UNSET,
-    offset: int | Unset = UNSET,
 
 ) -> AccountFillPageResponse | Any | None:
     """ GET /v1/accounts/{id}/fills
@@ -151,7 +144,6 @@ def sync(
         market_id (int | Unset):
         after (str | Unset):
         limit (int | Unset):
-        offset (int | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -168,7 +160,6 @@ client=client,
 market_id=market_id,
 after=after,
 limit=limit,
-offset=offset,
 
     ).parsed
 
@@ -179,7 +170,6 @@ async def asyncio_detailed(
     market_id: int | Unset = UNSET,
     after: str | Unset = UNSET,
     limit: int | Unset = UNSET,
-    offset: int | Unset = UNSET,
 
 ) -> Response[AccountFillPageResponse | Any]:
     """ GET /v1/accounts/{id}/fills
@@ -189,7 +179,6 @@ async def asyncio_detailed(
         market_id (int | Unset):
         after (str | Unset):
         limit (int | Unset):
-        offset (int | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -205,7 +194,6 @@ async def asyncio_detailed(
 market_id=market_id,
 after=after,
 limit=limit,
-offset=offset,
 
     )
 
@@ -222,7 +210,6 @@ async def asyncio(
     market_id: int | Unset = UNSET,
     after: str | Unset = UNSET,
     limit: int | Unset = UNSET,
-    offset: int | Unset = UNSET,
 
 ) -> AccountFillPageResponse | Any | None:
     """ GET /v1/accounts/{id}/fills
@@ -232,7 +219,6 @@ async def asyncio(
         market_id (int | Unset):
         after (str | Unset):
         limit (int | Unset):
-        offset (int | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -249,6 +235,5 @@ client=client,
 market_id=market_id,
 after=after,
 limit=limit,
-offset=offset,
 
     )).parsed

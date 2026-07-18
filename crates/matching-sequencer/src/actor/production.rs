@@ -109,6 +109,7 @@ impl SequencerActorState {
         if self.pause_count > 0 {
             return Ok(BlockTickOutcome::Paused);
         }
+        let production_started = Instant::now();
         let timestamp_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -124,6 +125,7 @@ impl SequencerActorState {
             ));
         }
 
+        let prepare_started = Instant::now();
         let prepared = match self.sequencer.prepare_block(Vec::new(), timestamp_ms) {
             Ok(prepared) => prepared,
             Err(error) => {
@@ -132,6 +134,8 @@ impl SequencerActorState {
                 return Ok(BlockTickOutcome::Halted(outcome_error));
             }
         };
+        metrics::histogram!("sybil_block_prepare_duration_seconds")
+            .record(prepare_started.elapsed().as_secs_f64());
         tracing::Span::current().record("height", prepared.production().block.header.height);
 
         #[cfg(test)]
@@ -144,7 +148,11 @@ impl SequencerActorState {
         #[cfg(test)]
         self.await_next_tick_hold_for_test().await;
 
-        if let Err(error) = self.persist_block(&prepared).await {
+        let persist_started = Instant::now();
+        let persist_result = self.persist_block(&prepared).await;
+        metrics::histogram!("sybil_block_persist_duration_seconds")
+            .record(persist_started.elapsed().as_secs_f64());
+        if let Err(error) = persist_result {
             metrics::counter!("sybil_persistence_failures").increment(1);
             // The live sequencer still holds the pending bundles — the drain
             // happened on the clone. The next tick will retry, and the
@@ -178,6 +186,8 @@ impl SequencerActorState {
         }
 
         self.record_metrics(&bp, pending_bundles);
+        metrics::histogram!("sybil_block_production_duration_seconds")
+            .record(production_started.elapsed().as_secs_f64());
         let sealed = bp.sealed_block();
         self.push_to_history(sealed.clone());
         let _ = self.block_broadcast.send(sealed.clone());

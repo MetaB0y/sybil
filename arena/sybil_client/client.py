@@ -197,15 +197,12 @@ class SybilClient:
         account_id: int,
         market_id: int | None = None,
         limit: int = 100,
-        offset: int | None = None,
         after: str | None = None,
     ) -> list[AccountFill]:
         """Get fill history for an account."""
         params: dict[str, Any] = {"limit": limit}
         if after is not None:
             params["after"] = after
-        elif offset is not None:
-            params["offset"] = offset
         if market_id is not None:
             params["market_id"] = market_id
         data = await self._request("GET", f"/v1/accounts/{account_id}/fills", params=params)

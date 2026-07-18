@@ -337,15 +337,10 @@ impl HistoryStore {
                 }
             }
         } else {
-            let mut skipped = 0usize;
             for entry in table.range::<&[u8]>(lo.as_slice()..=hi.as_slice())?.rev() {
                 let (_, value) = entry?;
                 let fact: AccountFillFact = rmp_serde::from_slice(value.value())?;
                 if !fill_matches_market(&fact, query.market_id) {
-                    continue;
-                }
-                if skipped < query.offset {
-                    skipped += 1;
                     continue;
                 }
                 items.push(fact);
@@ -865,7 +860,6 @@ mod tests {
                 market_id: Some(3),
                 after: None,
                 limit: 10,
-                offset: 0,
             })
             .expect("fills");
         assert_eq!(
@@ -885,7 +879,6 @@ mod tests {
                     order_id: 100,
                 }),
                 limit: 10,
-                offset: 0,
             })
             .expect("fills after cursor");
         assert_eq!(fills_after.items[0].block_height, 11);

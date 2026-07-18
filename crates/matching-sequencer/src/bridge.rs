@@ -340,18 +340,15 @@ pub fn withdrawal_nullifier(
     token_address: EthAddress,
     amount_token_units: u64,
 ) -> Bytes32 {
-    keccak256(&abi_encode_domain_and_words(
-        b"sybil/withdrawal-nullifier/v1",
-        &[
-            AbiWord::Uint(chain_id),
-            AbiWord::Address(vault_address),
-            AbiWord::Uint(withdrawal_id),
-            AbiWord::Uint(account_id.0),
-            AbiWord::Address(recipient),
-            AbiWord::Address(token_address),
-            AbiWord::Uint(amount_token_units),
-        ],
-    ))
+    sybil_l1_protocol::withdrawal_nullifier(
+        chain_id,
+        vault_address,
+        withdrawal_id,
+        account_id.0,
+        recipient,
+        token_address,
+        amount_token_units,
+    )
 }
 
 pub fn withdrawal_leaf_bytes(leaf: &WithdrawalLeaf) -> Vec<u8> {
@@ -414,48 +411,6 @@ fn keccak256(bytes: &[u8]) -> Bytes32 {
     let mut hasher = Keccak256::new();
     hasher.update(bytes);
     hasher.finalize().into()
-}
-
-enum AbiWord {
-    Uint(u64),
-    Address(EthAddress),
-}
-
-fn abi_encode_domain_and_words(domain: &[u8], words: &[AbiWord]) -> Vec<u8> {
-    let head_words = 1 + words.len();
-    let mut out = Vec::with_capacity(head_words * 32 + 32 + padded_len(domain.len()));
-    out.extend_from_slice(&abi_usize_word(head_words * 32));
-    for word in words {
-        match word {
-            AbiWord::Uint(value) => out.extend_from_slice(&abi_u64_word(*value)),
-            AbiWord::Address(address) => {
-                let mut encoded = [0u8; 32];
-                encoded[12..].copy_from_slice(address);
-                out.extend_from_slice(&encoded);
-            }
-        }
-    }
-
-    out.extend_from_slice(&abi_usize_word(domain.len()));
-    out.extend_from_slice(domain);
-    out.resize(out.len() + padded_len(domain.len()) - domain.len(), 0);
-    out
-}
-
-fn abi_u64_word(value: u64) -> Bytes32 {
-    let mut out = [0u8; 32];
-    out[24..].copy_from_slice(&value.to_be_bytes());
-    out
-}
-
-fn abi_usize_word(value: usize) -> Bytes32 {
-    let mut out = [0u8; 32];
-    out[24..].copy_from_slice(&(value as u64).to_be_bytes());
-    out
-}
-
-fn padded_len(len: usize) -> usize {
-    len.div_ceil(32) * 32
 }
 
 #[cfg(test)]

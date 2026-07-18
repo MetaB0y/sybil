@@ -6789,6 +6789,7 @@ dependencies = [
 name = "sybil-golden-vectors"
 version = "0.1.0"
 dependencies = [
+ "alloy",
  "blake3",
  "hex",
  "matching-engine",
@@ -6796,6 +6797,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "sha3 0.12.0",
+ "sybil-l1-abi",
  "sybil-l1-protocol",
  "sybil-verifier",
  "sybil-zk",

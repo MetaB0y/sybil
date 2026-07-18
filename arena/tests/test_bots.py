@@ -173,7 +173,6 @@ class _StreamingClient:
         account_id: int,
         limit: int,
         after: str | None = None,
-        offset: int | None = None,
     ):
         return []
 
@@ -397,7 +396,7 @@ async def test_base_agent_reconciles_expired_fill_cursor_then_resumes_tailing(ca
     assert agent.balance_history == [49.0]
     assert agent._fill_history == []
     assert "reconciled from canonical account state" in caplog.text
-    client.get_account_fills.assert_any_await(7, limit=1, offset=0)
+    client.get_account_fills.assert_any_await(7, limit=1)
 
     await agent._update_state(block)
 

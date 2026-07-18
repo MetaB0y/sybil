@@ -3664,7 +3664,11 @@ mod tests {
         let path = temp_store_path("price-history");
         let store = Arc::new(crate::store::Store::open(&path).unwrap());
         let config = SequencerConfig {
-            block_interval: Duration::from_secs(60),
+            // This test drives every block explicitly. Keep the autonomous
+            // scheduler outside even heavily contended CI runs so it cannot
+            // insert an unrelated fourth block while a debug build links or
+            // executes slowly.
+            block_interval: Duration::from_secs(60 * 60),
             min_resting_order_notional_nanos: 0,
             ..SequencerConfig::default()
         };

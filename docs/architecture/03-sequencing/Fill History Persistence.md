@@ -3,7 +3,7 @@ tags: [infrastructure, storage]
 layer: sequencer
 crate: sybil-history
 status: current
-last_verified: 2026-07-13
+last_verified: 2026-07-18
 ---
 
 # Fill history persistence
@@ -34,8 +34,9 @@ same-height content conflicts fail closed.
 
 `sybil-api` first authorizes the account owner, then sends an account-scoped
 query to the private history service with a dedicated service credential.
-Forward cursor pages are ascending; default/offset pages remain newest-first
-for compatibility. Market filtering checks the fill's position deltas.
+Forward cursor pages are ascending; the default first page is newest-first.
+Market filtering checks the fill's position deltas. There is no offset scan:
+continuation uses the stable `(block_height, order_id)` cursor.
 
 The response exposes the projector's `indexed_through_height` and
 `history_complete_from_height`. History service failure is a typed unavailable

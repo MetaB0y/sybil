@@ -369,7 +369,6 @@ pub struct FillQuery {
     pub market_id: Option<u32>,
     pub after: Option<FillCursor>,
     pub limit: usize,
-    pub offset: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

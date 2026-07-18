@@ -2260,16 +2260,15 @@ async fn fills_paginated_correctly() {
     let (_, body) = get(app.clone(), "/v1/accounts/0/fills?limit=0").await;
     assert!(parse_json(&body)["fills"].as_array().unwrap().is_empty());
 
-    // Paginate: offset=1, limit=1
-    let (_, body) = get(app.clone(), "/v1/accounts/0/fills?offset=1&limit=1").await;
-    let page2 = parse_json(&body);
-    assert_eq!(page2["fills"].as_array().unwrap().len(), 1);
-
-    // Pages should be different fills
-    assert_ne!(page1["fills"][0]["order_id"], page2["fills"][0]["order_id"],);
+    let (status, _) = get(app.clone(), "/v1/accounts/0/fills?offset=1").await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "removed offset pagination must not be silently ignored"
+    );
 
     // Cursor pagination: after=0.0 returns oldest-first, then strictly after
-    // the returned cursor advances without offset-from-newest shifting.
+    // the returned cursor advances without a shifting row index.
     let (_, body) = get(app.clone(), "/v1/accounts/0/fills?after=0.0&limit=1").await;
     let first_forward = parse_json(&body);
     assert_eq!(first_forward["fills"].as_array().unwrap().len(), 1);

@@ -43,11 +43,28 @@ pub enum L1ProtocolError {
     },
     #[error("unexpected vault event topic0")]
     UnexpectedVaultEventTopic0,
-    #[error("unexpected {event} data length: expected at least {expected_min} bytes, got {actual}")]
+    #[error("unexpected {event} data length: expected {expected} bytes, got {actual}")]
     UnexpectedEventDataLength {
         event: &'static str,
-        expected_min: usize,
+        expected: usize,
         actual: usize,
+    },
+    #[error("unexpected {event} {field} offset: expected {expected}, got {actual}")]
+    UnexpectedDynamicOffset {
+        event: &'static str,
+        field: &'static str,
+        expected: u64,
+        actual: u64,
+    },
+    #[error("{event} {field} length overflows the host address space")]
+    DynamicLengthOverflow {
+        event: &'static str,
+        field: &'static str,
+    },
+    #[error("{event} {field} has non-zero ABI padding")]
+    NonZeroDynamicPadding {
+        event: &'static str,
+        field: &'static str,
     },
     #[error("ABI word for {field} has non-zero high bytes")]
     NonZeroHighBytes { field: &'static str },
@@ -256,14 +273,13 @@ pub fn parse_withdrawal_cancelled(
     topics: &[Bytes32],
     data: &[u8],
 ) -> Result<WithdrawalCancelled, L1ProtocolError> {
-    ensure_event_shape(
+    ensure_event_header(
         "WithdrawalCancelled",
         topics,
-        data,
         withdrawal_cancelled_topic0(),
         3,
-        128,
     )?;
+    ensure_canonical_string_tail("WithdrawalCancelled", data, 3, "reason")?;
     Ok(WithdrawalCancelled {
         nullifier: topics[1],
         recipient: decode_address_word(&topics[2], "recipient")?,
@@ -446,7 +462,24 @@ fn ensure_event_shape(
     data: &[u8],
     topic0: Bytes32,
     expected_topics: usize,
-    expected_min_data_len: usize,
+    expected_data_len: usize,
+) -> Result<(), L1ProtocolError> {
+    ensure_event_header(event, topics, topic0, expected_topics)?;
+    if data.len() != expected_data_len {
+        return Err(L1ProtocolError::UnexpectedEventDataLength {
+            event,
+            expected: expected_data_len,
+            actual: data.len(),
+        });
+    }
+    Ok(())
+}
+
+fn ensure_event_header(
+    event: &'static str,
+    topics: &[Bytes32],
+    topic0: Bytes32,
+    expected_topics: usize,
 ) -> Result<(), L1ProtocolError> {
     if topics.len() != expected_topics {
         return Err(L1ProtocolError::UnexpectedEventTopicCount {
@@ -458,12 +491,61 @@ fn ensure_event_shape(
     if topics[0] != topic0 {
         return Err(L1ProtocolError::UnexpectedVaultEventTopic0);
     }
-    if data.len() < expected_min_data_len {
+    Ok(())
+}
+
+fn ensure_canonical_string_tail(
+    event: &'static str,
+    data: &[u8],
+    static_words_before_offset: usize,
+    field: &'static str,
+) -> Result<(), L1ProtocolError> {
+    let offset_word = static_words_before_offset;
+    let offset = (offset_word + 1) * 32;
+    let tail_header_end = offset + 32;
+    if data.len() < tail_header_end {
         return Err(L1ProtocolError::UnexpectedEventDataLength {
             event,
-            expected_min: expected_min_data_len,
+            expected: tail_header_end,
             actual: data.len(),
         });
+    }
+
+    let actual_offset = decode_u64_word(data_word(data, offset_word), field)?;
+    let expected_offset = u64::try_from(offset).expect("ABI head offset fits in u64");
+    if actual_offset != expected_offset {
+        return Err(L1ProtocolError::UnexpectedDynamicOffset {
+            event,
+            field,
+            expected: expected_offset,
+            actual: actual_offset,
+        });
+    }
+
+    let dynamic_len = decode_u64_word(data_word(data, offset / 32), field)?;
+    let dynamic_len = usize::try_from(dynamic_len)
+        .map_err(|_| L1ProtocolError::DynamicLengthOverflow { event, field })?;
+    let padded_dynamic_len = dynamic_len
+        .checked_add(31)
+        .map(|len| len / 32 * 32)
+        .ok_or(L1ProtocolError::DynamicLengthOverflow { event, field })?;
+    let expected_data_len = tail_header_end
+        .checked_add(padded_dynamic_len)
+        .ok_or(L1ProtocolError::DynamicLengthOverflow { event, field })?;
+    if data.len() != expected_data_len {
+        return Err(L1ProtocolError::UnexpectedEventDataLength {
+            event,
+            expected: expected_data_len,
+            actual: data.len(),
+        });
+    }
+
+    let padding_start = tail_header_end + dynamic_len;
+    if data[padding_start..expected_data_len]
+        .iter()
+        .any(|byte| *byte != 0)
+    {
+        return Err(L1ProtocolError::NonZeroDynamicPadding { event, field });
     }
     Ok(())
 }
@@ -711,6 +793,101 @@ mod tests {
                 amount_token_units: 1_000_000,
                 cancelled_at_unix: 1_700_000_100,
                 executable_at_unix: 1_700_086_400,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_non_canonical_fixed_withdrawal_event_lengths() {
+        let recipient = topic_address(address(0x33));
+        let mut queued = vec![0; 193];
+        assert_eq!(
+            parse_withdrawal_queued(
+                &[withdrawal_queued_topic0(), bytes32(0xab), recipient],
+                &queued
+            ),
+            Err(L1ProtocolError::UnexpectedEventDataLength {
+                event: "WithdrawalQueued",
+                expected: 192,
+                actual: 193,
+            })
+        );
+
+        queued.truncate(96);
+        queued.push(0);
+        assert_eq!(
+            parse_withdrawal_finalized(
+                &[withdrawal_finalized_topic0(), bytes32(0xab), recipient],
+                &queued
+            ),
+            Err(L1ProtocolError::UnexpectedEventDataLength {
+                event: "WithdrawalFinalized",
+                expected: 96,
+                actual: 97,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_non_canonical_withdrawal_cancellation_reason_encoding() {
+        let topics = [
+            withdrawal_cancelled_topic0(),
+            bytes32(0xab),
+            topic_address(address(0x33)),
+        ];
+        let canonical = || {
+            let mut data = Vec::new();
+            data.extend_from_slice(&abi_u64_word(1_000_000));
+            data.extend_from_slice(&abi_u64_word(1_700_000_100));
+            data.extend_from_slice(&abi_u64_word(1_700_086_400));
+            data.extend_from_slice(&abi_u64_word(128));
+            data.extend_from_slice(&abi_u64_word(5));
+            data.extend_from_slice(b"fraud");
+            data.resize(192, 0);
+            data
+        };
+
+        let mut wrong_offset = canonical();
+        wrong_offset[127] = 96;
+        assert_eq!(
+            parse_withdrawal_cancelled(&topics, &wrong_offset),
+            Err(L1ProtocolError::UnexpectedDynamicOffset {
+                event: "WithdrawalCancelled",
+                field: "reason",
+                expected: 128,
+                actual: 96,
+            })
+        );
+
+        let mut wrong_length = canonical();
+        wrong_length[159] = 33;
+        assert_eq!(
+            parse_withdrawal_cancelled(&topics, &wrong_length),
+            Err(L1ProtocolError::UnexpectedEventDataLength {
+                event: "WithdrawalCancelled",
+                expected: 224,
+                actual: 192,
+            })
+        );
+
+        let mut trailing_data = canonical();
+        trailing_data.push(0);
+        assert_eq!(
+            parse_withdrawal_cancelled(&topics, &trailing_data),
+            Err(L1ProtocolError::UnexpectedEventDataLength {
+                event: "WithdrawalCancelled",
+                expected: 192,
+                actual: 193,
+            })
+        );
+
+        let mut non_zero_padding = canonical();
+        non_zero_padding[191] = 1;
+        assert_eq!(
+            parse_withdrawal_cancelled(&topics, &non_zero_padding),
+            Err(L1ProtocolError::NonZeroDynamicPadding {
+                event: "WithdrawalCancelled",
+                field: "reason",
             })
         );
     }
@@ -968,15 +1145,92 @@ mod tests {
         );
     }
 
+    #[test]
+    fn withdrawal_nullifier_matches_solidity_twin_golden_vector() {
+        let vectors = golden_vectors();
+        let fixture = vectors
+            .pointer("/withdrawal_nullifier")
+            .expect("withdrawal nullifier golden fixture must exist");
+        let chain_id = golden_u64(fixture, "chain_id");
+        let vault_address = golden_array::<20>(fixture, "vault_address");
+        let withdrawal_id = golden_u64(fixture, "withdrawal_id");
+        let account_id = golden_u64(fixture, "account_id");
+        let recipient = golden_array::<20>(fixture, "recipient");
+        let token_address = golden_array::<20>(fixture, "token_address");
+        let amount_token_units = golden_u64(fixture, "amount_token_units");
+
+        assert_eq!(
+            prefixed_hex(&withdrawal_nullifier(
+                chain_id,
+                vault_address,
+                withdrawal_id,
+                account_id,
+                recipient,
+                token_address,
+                amount_token_units,
+            )),
+            fixture["nullifier"]
+                .as_str()
+                .expect("withdrawal nullifier must be a hex string"),
+            "withdrawal nullifier differs from the shared Rust/Solidity golden vector"
+        );
+    }
+
+    #[test]
+    fn protocol_event_topics_and_getter_selector_match_alloy_binding_goldens() {
+        assert_eq!(
+            prefixed_hex(&deposit_received_topic0()),
+            golden_hex("/l1_abi/vault/deposit_received_topic0")
+        );
+        assert_eq!(
+            prefixed_hex(&withdrawal_queued_topic0()),
+            golden_hex("/l1_abi/vault/withdrawal_queued_topic0")
+        );
+        assert_eq!(
+            prefixed_hex(&withdrawal_finalized_topic0()),
+            golden_hex("/l1_abi/vault/withdrawal_finalized_topic0")
+        );
+        assert_eq!(
+            prefixed_hex(&withdrawal_cancelled_topic0()),
+            golden_hex("/l1_abi/vault/withdrawal_cancelled_topic0")
+        );
+        assert_eq!(
+            prefixed_hex(&deposit_root_by_count_calldata(0)[..4]),
+            golden_hex("/l1_abi/vault/deposit_root_by_count_selector")
+        );
+    }
+
+    fn golden_vectors() -> serde_json::Value {
+        serde_json::from_str(include_str!("../../../golden/golden-vectors.json"))
+            .expect("committed golden-vectors.json must be valid JSON")
+    }
+
     fn golden_hex(pointer: &str) -> String {
-        let vectors: serde_json::Value =
-            serde_json::from_str(include_str!("../../../golden/golden-vectors.json"))
-                .expect("committed golden-vectors.json must be valid JSON");
-        vectors
+        golden_vectors()
             .pointer(pointer)
             .and_then(serde_json::Value::as_str)
             .unwrap_or_else(|| panic!("golden vector {pointer} must be a hex string"))
             .to_string()
+    }
+
+    fn golden_u64(fixture: &serde_json::Value, field: &str) -> u64 {
+        fixture[field]
+            .as_u64()
+            .unwrap_or_else(|| panic!("{field} must be a u64"))
+    }
+
+    fn golden_array<const N: usize>(fixture: &serde_json::Value, field: &str) -> [u8; N] {
+        let hex = fixture[field]
+            .as_str()
+            .unwrap_or_else(|| panic!("{field} must be a hex string"))
+            .strip_prefix("0x")
+            .unwrap_or_else(|| panic!("{field} must start with 0x"));
+        hex::decode(hex)
+            .unwrap_or_else(|error| panic!("{field} must contain valid hex: {error}"))
+            .try_into()
+            .unwrap_or_else(|bytes: Vec<u8>| {
+                panic!("{field} must be {N} bytes, got {}", bytes.len())
+            })
     }
 
     fn prefixed_hex(bytes: &[u8]) -> String {

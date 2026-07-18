@@ -4151,11 +4151,6 @@ export interface operations {
         after?: string;
         /** @description Result limit (default 100, cap 500) */
         limit?: number;
-        /**
-         * @deprecated
-         * @description Deprecated offset-from-newest pagination. Ignored when `after` is present.
-         */
-        offset?: number;
       };
       header?: never;
       path: {

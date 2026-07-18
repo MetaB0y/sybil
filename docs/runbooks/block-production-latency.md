@@ -1,12 +1,12 @@
 ---
 tags: [runbook, sequencing, latency]
 status: current
-last_verified: 2026-07-11
+last_verified: 2026-07-18
 ---
 
 # Block-production latency
 
-> **Executive summary:** page immediately if blocks stop. If p99 pipeline time
+> **Executive summary:** page immediately if blocks stop. If p99 solve time
 > rises while blocks still advance, first distinguish solver load from storage
 > and host saturation; shed nonessential mirror/arena load before restarting,
 > and preserve diagnostics before touching persistent state.
@@ -35,16 +35,29 @@ default 500ms; the prod/dev compose set 10000ms) or blocks slip.
   solve time crossing 100ms. The p99 alerts above are the tail-aware SLA; a p99
   alert without a matching average alert means a small fraction of heavy blocks.
 
-### Metric shape (important)
+### Metric shape and phase ownership (important)
 
 `sybil_solve_time_seconds` is recorded in
 `crates/matching-sequencer/src/actor/production.rs`
-as a metrics-rs `histogram!`. The Prometheus exporter
+from the solver's `PipelineResult`; it does **not** include witness assembly,
+native verification, persistence, or actor publication. The actor separately
+records:
+
+- `sybil_block_prepare_duration_seconds` for the complete in-memory prepare
+  phase, including the solve, settlement, witness assembly, and configured
+  verification;
+- `sybil_block_persist_duration_seconds` for the fenced canonical store commit;
+  and
+- `sybil_block_production_duration_seconds` for a successful tick from prepare
+  start through persistence and in-memory commit.
+
+All four are metrics-rs histograms. The Prometheus exporter
 (`metrics-exporter-prometheus`) is installed with no custom buckets, so it renders
 **summaries**: p99 is published directly as
 `sybil_solve_time_seconds{quantile="0.99"}` (a rolling 60s window), with `_sum`
-and `_count` for the average. **There is no `_bucket` series** — use the
-`quantile` label, not `histogram_quantile()`.
+and `_count` for the average. The phase metrics use the same shape. **There is
+no `_bucket` series** — use the `quantile` label, not
+`histogram_quantile()`.
 
 ---
 
@@ -57,6 +70,12 @@ and `_count` for the average. **There is no `_bucket` series** — use the
    - `sequencer:solve_time_seconds:p99` — how far over SLA, and trending?
    - `sequencer:solve_time_seconds:avg5m` vs p99 — is the whole distribution slow
      (mean high) or just the tail (mean fine, p99 high)?
+   - `sybil_block_prepare_duration_seconds{quantile="0.99"}` versus
+     `sybil_solve_time_seconds{quantile="0.99"}` — is time outside the solver
+     growing?
+   - `sybil_block_persist_duration_seconds{quantile="0.99"}` and
+     `sybil_block_production_duration_seconds{quantile="0.99"}` — is the store
+     commit or complete actor path consuming the cadence?
    - `sequencer:blocks_produced:rate2m` — are blocks still being produced?
    - `sequencer:orders_per_block:p99` — is this a genuine load spike?
 2. **Check the sequencer is up and producing:**
@@ -83,9 +102,10 @@ and `_count` for the average. **There is no `_bucket` series** — use the
   block can dominate p99 while the mean stays low.
 - **redb / persistence stalls (SYB-169).** Block commit runs storage work on
   `spawn_blocking`; if that pool backs up (slow disk, fsync contention, large
-  analytics deltas) the per-block wall-time — reflected in `sybil_solve_time_seconds`
-  — climbs even when the solver itself is fast. Signs: `ActorMailboxQueueHigh`,
-  growing `sequencer` queue depth, outbox backlog, and high host I/O.
+  analytics deltas), `sybil_block_persist_duration_seconds` and the complete
+  production duration climb while solver time can remain flat. Signs:
+  `ActorMailboxQueueHigh`, growing sequencer queue depth, outbox backlog, and
+  high host I/O.
 - **Disk full / near-full.** redb writes stall or fail as the volume fills.
   Check `df -h` on the host and the `sybil-data` / `arena-data` volumes. This has
   taken down block production before; a full disk also blocks logging and metrics.

@@ -17,19 +17,14 @@ export type AccountFill = components["schemas"]["AccountFillResponse"];
  */
 export function useAccountFills(
   accountId: number | null,
-  opts: { marketId?: number; limit?: number; offset?: number } = {},
+  opts: { marketId?: number; limit?: number } = {},
 ) {
   const qc = useQueryClient();
   const latest = useStore(selectLatestBlock);
   const wsLive = useStore(selectWsLive);
-  const { marketId, limit = 50, offset = 0 } = opts;
+  const { marketId, limit = 50 } = opts;
 
-  const key = [
-    "account",
-    accountId,
-    "fills",
-    { marketId, limit, offset },
-  ] as const;
+  const key = ["account", accountId, "fills", { marketId, limit }] as const;
 
   useEffect(() => {
     if (accountId === null) return;
@@ -47,7 +42,6 @@ export function useAccountFills(
           query: {
             ...(marketId !== undefined ? { market_id: marketId } : {}),
             limit,
-            offset,
           },
         },
       });

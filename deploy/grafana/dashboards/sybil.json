@@ -214,9 +214,12 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [
-        { "expr": "max(sybil_solve_time_seconds{quantile=\"0.5\"})", "legendFormat": "p50", "refId": "A" },
-        { "expr": "max(sybil_solve_time_seconds{quantile=\"0.95\"})", "legendFormat": "p95", "refId": "B" },
-        { "expr": "sequencer:solve_time_seconds:p99", "legendFormat": "p99", "refId": "C" }
+        { "expr": "max(sybil_solve_time_seconds{quantile=\"0.5\"})", "legendFormat": "solve p50", "refId": "A" },
+        { "expr": "max(sybil_solve_time_seconds{quantile=\"0.95\"})", "legendFormat": "solve p95", "refId": "B" },
+        { "expr": "max(sybil_block_prepare_duration_seconds{quantile=\"0.95\"})", "legendFormat": "prepare p95", "refId": "C" },
+        { "expr": "max(sybil_block_persist_duration_seconds{quantile=\"0.95\"})", "legendFormat": "persist p95", "refId": "D" },
+        { "expr": "max(sybil_block_production_duration_seconds{quantile=\"0.95\"})", "legendFormat": "total p95", "refId": "E" },
+        { "expr": "sequencer:solve_time_seconds:p99", "legendFormat": "solve p99", "refId": "F" }
       ],
       "fieldConfig": {
         "defaults": {
