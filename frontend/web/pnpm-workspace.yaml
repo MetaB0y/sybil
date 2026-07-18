@@ -1,6 +1,11 @@
 minimumReleaseAge: 10080
+minimumReleaseAgeExclude:
+  # Security fix for GHSA-fx2h-pf6j-xcff and GHSA-v6wh-96g9-6wx3.
+  # Keep the exception version-specific so later Vite releases age normally.
+  - vite@8.0.16
 overrides:
   postcss: 8.5.16
+  vite: 8.0.16
 allowBuilds:
   msw: false
   sharp: false

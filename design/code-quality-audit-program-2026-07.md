@@ -85,10 +85,10 @@ The program is deliberately repository-aware and validation-heavy:
 | Actor lifecycle, cancellation, and supervision | Audited and strengthened; sequencer admission/escalation/blocking ownership open | [`code-quality-audit-actor-lifecycle-2026-07-17.md`](code-quality-audit-actor-lifecycle-2026-07-17.md), GitHub #184–#187 |
 | Error, panic, and recovery boundaries | Audited and strengthened; service-create identity and file fault matrix open | [`code-quality-audit-error-recovery-2026-07-17.md`](code-quality-audit-error-recovery-2026-07-17.md), GitHub #188/#189 and existing #129 |
 | Static lint, dead code, and unsafe-code policy | Audited, fixed, and enforced | [`code-quality-audit-static-lint-unsafe-2026-07-18.md`](code-quality-audit-static-lint-unsafe-2026-07-18.md); zero authored unsafe and strict feature/standalone gates |
-| Dependency and build supply chain | **Next** | Advisories, license/source policy, pinned tools, generated artifacts, lockfiles, reproducibility, feature unification |
+| Dependency and build supply chain | Audited and remediated; three upstream exceptions open | [`code-quality-audit-dependency-supply-chain-2026-07-18.md`](code-quality-audit-dependency-supply-chain-2026-07-18.md), GitHub #194/#195 plus existing #65/#118 |
 | Performance and algorithmic complexity | Partially covered by DoS audit | Allocation/copy hotspots, serialization amplification, solver worst cases, query indexes, benchmark regression gates |
 | Documentation, API, and implementation drift | Partially covered | Route/OpenAPI pins, generated clients, config/runbook drift, architecture freshness and link gates |
-| Python/Arena data and experiment correctness | Queued | Time semantics, leakage, determinism, fixture realism, result persistence, bot isolation |
+| Python/Arena data and experiment correctness | **Next** | Time semantics, leakage, determinism, fixture realism, result persistence, bot isolation |
 | Frontend semantic correctness and accessibility | Queued | Exact-domain conversions, cache invalidation, async races, keyboard/screen-reader flows, failure-state UX |
 | Solidity/L1 differential semantics | Queued | Rust/Solidity hash/ABI parity, invariant tests, reorg/finality assumptions, mutation/fuzz campaigns |
 

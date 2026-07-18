@@ -25,6 +25,12 @@ feature-lint:
     cargo hack -p matching-solver -p matching-sim -p sybil-api-types -p sybil-prover --each-feature clippy --all-targets -- -D warnings -F unsafe-code
     cargo hack -p sybil-verifier --each-feature clippy --all-targets -- -D warnings -F unsafe-code
 
+# Query current RustSec, PyPA, and npm advisory databases for every maintained
+# lockfile. Kept separate from the deterministic build gate because it is
+# intentionally network- and current-date-dependent.
+audit-dependencies:
+    ./scripts/check-dependency-advisories.sh
+
 # Compile every target in the normal workspace build.
 workspace-check:
     cargo check --workspace --all-targets
@@ -388,7 +394,7 @@ frontend-check:
     #!/usr/bin/env bash
     set -euo pipefail
     if ! command -v pnpm >/dev/null 2>&1; then
-        echo "SKIP frontend-check: pnpm not found (install pnpm@10 to run frontend/web checks)"
+        echo "SKIP frontend-check: pnpm not found (install pnpm@11 to run frontend/web checks)"
         exit 0
     fi
     cd frontend/web

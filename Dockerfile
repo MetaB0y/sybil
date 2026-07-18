@@ -4,7 +4,7 @@
 # not need handwritten dummy source files.
 FROM rust:1.97-bookworm AS chef
 
-RUN cargo install cargo-chef --locked
+RUN cargo install cargo-chef --version 0.1.77 --locked
 
 WORKDIR /app
 

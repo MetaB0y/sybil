@@ -400,3 +400,45 @@ that needed a single classification owner.
 - No proof generation, deployment, protocol-byte, or solver-policy change
   occurred.
 - The next cluster is dependency and build supply chain.
+
+## 2026-07-18T11:13:57+01:00 — dependency and build supply chain
+
+### Primary-reviewer method and reusable handoff
+
+- Audit lockfiles with current advisory databases, but keep the command outside
+  deterministic compilation gates because the answer changes with time.
+- Trace every advisory to its feature, build, host, guest, or runtime consumer
+  before choosing update, removal, or an explicit exception.
+- Prefer an upstream upgrade over a local vendor fork. An exception must name
+  the unreachable affected API and have an issue that removes it.
+- Keep emergency security releases able to bypass package-age quarantine by
+  exact version only.
+
+### Findings and decisions
+
+- Removed fuzz's unsound dependency, two frontend Vite advisories, 40 Arena
+  advisory records, and 36 visualization advisory records through lock
+  refreshes. The unreachable SCIP and Ark R1CS advisories remain explicit.
+- Added one current-advisory command covering all Cargo, pnpm, and uv locks.
+- Pinned `cargo-chef` and the Arena uv build image instead of resolving
+  `latest` during each Docker build.
+- Retained and documented only the SCIP build-only `time`, Ark R1CS
+  `tracing-subscriber`, and OpenVM proc-macro `lru::IterMut` exceptions; none
+  of the affected APIs is called. A Commonware 2026.7 trial was rejected when
+  the guest-fingerprint gate proved it required closure-source changes.
+- Aligned the root and fuzz locks on Commonware 2026.5 and made the advisory
+  gate assert that parity. The fingerprinted validity manifests remain
+  untouched.
+- Opened #194 for upstream removal and #195 for immutable Actions plus
+  automated refresh. Existing #65 owns deployed image digests and #118 owns
+  generated SDK packaging.
+
+### Result
+
+- Report:
+  [`code-quality-audit-dependency-supply-chain-2026-07-18.md`](code-quality-audit-dependency-supply-chain-2026-07-18.md)
+- Current RustSec, npm, and PyPA scans pass under the three named exceptions;
+  root all-target/all-feature compilation, Arena's 318 tests, and frontend
+  gates validate the refreshed graphs.
+- No proof generation or deployment occurred.
+- The next cluster is Python/Arena data and experiment correctness.
