@@ -11,6 +11,8 @@ This project uses **jj (Jujutsu)** for version control, NOT git.
 - `jj diff --git` instead of `git diff`
 - `jj new` to create new changes
 - `jj describe` to set commit messages
+- Keep every logical change in its own `jj` change; start a new change at each boundary.
+- Do not squash distinct changes without a concrete, stated reason.
 
 ## Issue Tracking
 
