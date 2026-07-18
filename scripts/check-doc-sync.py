@@ -6,6 +6,7 @@ from __future__ import annotations
 import re
 import sys
 import tomllib
+import urllib.parse
 from pathlib import Path
 
 
@@ -19,6 +20,50 @@ ADDITIONAL_INSTRUCTION_ROOTS = (
     Path("fuzz"),
     Path("zk"),
 )
+EXCLUDED_AGENT_PARTS = {".git", ".jj", ".next", ".venv", "node_modules", "target"}
+WIKI_LINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
+MARKDOWN_LINK_RE = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
+
+
+def agent_files() -> list[Path]:
+    return sorted(
+        path
+        for path in ROOT.rglob("AGENTS.md")
+        if not EXCLUDED_AGENT_PARTS.intersection(path.relative_to(ROOT).parts)
+    )
+
+
+def check_agent_links(paths: list[Path]) -> list[str]:
+    errors: list[str] = []
+    note_names = {
+        path.stem for path in (ROOT / "docs/architecture").rglob("*.md")
+    }
+    for path in paths:
+        relative = path.relative_to(ROOT)
+        text = path.read_text(encoding="utf-8")
+        for raw_target in WIKI_LINK_RE.findall(text):
+            target = raw_target.split("|", 1)[0].split("#", 1)[0].strip()
+            if target and target not in note_names:
+                errors.append(f"{relative}: unknown architecture note [[{target}]]")
+
+        for raw_target in MARKDOWN_LINK_RE.findall(text):
+            target = raw_target.strip()
+            if target.startswith("<") and target.endswith(">"):
+                target = target[1:-1]
+            else:
+                target = target.split(maxsplit=1)[0]
+            parsed = urllib.parse.urlsplit(target)
+            if parsed.scheme or parsed.netloc or not parsed.path:
+                continue
+            candidate = (path.parent / urllib.parse.unquote(parsed.path)).resolve()
+            try:
+                candidate.relative_to(ROOT)
+            except ValueError:
+                errors.append(f"{relative}: link escapes repository: {raw_target}")
+                continue
+            if not candidate.exists():
+                errors.append(f"{relative}: missing linked path: {raw_target}")
+    return errors
 
 
 def main() -> int:
@@ -33,6 +78,8 @@ def main() -> int:
     for member in instruction_roots:
         if not (ROOT / member / "AGENTS.md").is_file():
             errors.append(f"{member}/AGENTS.md is missing")
+    instructions = agent_files()
+    errors.extend(check_agent_links(instructions))
 
     for member in members:
         if not member.parts or member.parts[0] != "crates":
@@ -57,7 +104,7 @@ def main() -> int:
 
     print(
         f"doc sync clean: {len(instruction_roots)} instruction roots, "
-        f"{len(members)} workspace crates, and "
+        f"{len(instructions)} instruction files, {len(members)} workspace crates, and "
         f"{len(list((ROOT / 'design').glob('*.md')))} top-level design files"
     )
     return 0
