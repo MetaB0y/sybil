@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This file provides guidance to Claude Code when working with code in this repository.
+This file provides repository-wide guidance for coding agents.
 
 ## Version Control
 
@@ -35,7 +35,7 @@ update Linear issues.
 sybil/
 ├── crates/                        # Rust workspace
 │   ├── matching-engine/           # Core types: orders, fills, markets, payoff vectors, MM constraints
-│   ├── matching-solver/           # Solver implementations (retained-cash, LP, Conic, MILP, Decomposed)
+│   ├── matching-solver/           # Welfare-clearing solver implementations
 │   ├── matching-scenarios/        # Test scenario generators (order mixes, spreads)
 │   ├── matching-sim/              # CLI simulation tool with presets and solver comparison
 │   ├── matching-sequencer/        # Multi-batch block sequencer (production lib; linked by sybil-api)
@@ -143,22 +143,6 @@ cd fuzz && cargo fuzz run fuzz_settlement
 
 Sybil is a **prediction market matching engine** built on Frequent Batch Auctions (FBA). It solves the welfare-maximizing clearing problem via convex programs.
 
-### Solvers (matching-solver)
-
-All solvers take a `Problem` and return a `PipelineResult` (fills, clearing prices, welfare, timing). Feature-gated.
-
-| Solver | File | Feature | Description |
-|--------|------|---------|-------------|
-| **ProductionSolver** | `production_solver.rs` | `retained-cash` | **Production default:** monolithic fully corrective pacing bundle. |
-| **RetainedCashSolver** | `retained_cash_solver.rs` | `retained-cash` | Independent certified generalized Frank--Wolfe reference. |
-| **PacingBundleSolver** | `pacing_bundle_solver.rs` | `retained-cash` | Fully corrective retained-cash core with a certified gap. |
-| **LpSolver** | `lp_solver.rs` | `lp` | LP via HiGHS + single-pass SLP MM budget shading; low-latency baseline. |
-| **ConicSolver** | `conic_solver.rs` | `conic` | Independent exponential-cone retained-cash reference via Clarabel. |
-| **DirectDualConicSolver** | `direct_dual_conic_solver.rs` | `conic` | Experimental price-side retained-cash certificate; integer landing remains research. |
-| **MilpSolver** | `milp.rs` | `milp` | SCIP MIQCQP. Exact optimal with timeout. |
-| **DecomposedSolver** | `decomposed.rs` | `lp` | Per-market-group decomposition with mirror descent budget coordination. |
-| **ExactComponentSolver** | `exact_components.rs` | `retained-cash` | Opt-in exact economic-connectivity decomposition around another solver. |
-
 ### Key Design Decisions
 
 - **Payoff vectors**: Orders are represented as payoff vectors over market states, enabling unified handling of simple orders, spreads, and conditionals.
@@ -178,19 +162,6 @@ An Obsidian vault at `docs/architecture/` is the canonical architectural spec. I
 **When to read**: Before modifying any crate, read the notes listed in that crate's AGENTS.md under "Architecture Notes". This gives you the design context and invariants you need to preserve.
 
 **When to update**: After significant architectural changes (new solver, new crate, changed data flow), update the relevant note(s) and run `just docs-check` to validate.
-
-### Quick Reference
-
-| Topic | Notes |
-|-------|-------|
-| Core model | Payoff Vectors, Binary Markets and Market Groups, Nanos and Integer Arithmetic, Order Types |
-| Solvers | Solver Landscape, Retained Cash Solver, LP Solver, Conic Solver, MILP Solver, Decomposed Solver, Exact Component Solver, The LP Core |
-| Sequencer | Block Lifecycle, Order Admission, Settlement, Pending Orders and TTL |
-| API | REST API, WebSocket Block Stream, P256 Authentication |
-| Oracle | Market Resolution |
-| Verification | Four-Layer Verification, Block Witness, ZK Integration Path |
-| Economics | Welfare Maximization, Welfare vs Volume, MM Budget Constraint, LP Duality and Clearing Prices, Minting |
-| Arena | Bot Framework, LLM Trader, Python SDK |
 
 ### Vault Commands
 
