@@ -12,9 +12,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 ADDITIONAL_INSTRUCTION_ROOTS = (
     Path("arena"),
+    Path("benchmarks/solver"),
     Path("contracts"),
     Path("deploy"),
     Path("frontend"),
+    Path("fuzz"),
     Path("zk"),
 )
 
