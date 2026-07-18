@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import Path
 
-from sybil_client import SybilClient
+from sybil_client import SybilClient, SybilClientError
 from sybil_client.types import NANOS_PER_DOLLAR, Market, TimeInForce
 
 from .analyst import (
@@ -525,12 +525,14 @@ async def _resolve_bot_account(
             await client.get_account(existing)
             log.info("Reattached %s to existing account %d", bot_name, existing)
             return existing
-        except Exception as e:
+        except SybilClientError as exc:
+            if exc.status_code != 404:
+                raise
             log.warning(
-                "Persisted account %d for %s is unusable (%s); creating a new one",
+                "Persisted account %d for %s is absent on the current chain; "
+                "creating a new one",
                 existing,
                 bot_name,
-                e,
             )
 
     account = await client.create_account(initial_balance_nanos)
@@ -967,6 +969,11 @@ async def run_live(config: LiveConfig):
         log.info("Arena read API listening on %s:%d", config.read_api_host, config.read_api_port)
 
     async with SybilClient(config.sybil_url) as client:
+        order_admission_policy = await client.get_order_admission_policy()
+        log.info(
+            "Order admission policy: minimum ordinary notional=%d nanos",
+            order_admission_policy.min_order_notional_nanos,
+        )
         # 1. Discover markets. When reference prices are required, arena may
         # start before the Polymarket mirror has published any; retry instead of
         # exiting so a cold start self-heals once the mirror catches up.
@@ -1175,6 +1182,9 @@ async def run_live(config: LiveConfig):
             require_reference_prices=config.require_reference_prices,
             metrics=metrics,
         )
+        for trader in [*traders, *fast_traders, *noise_traders]:
+            trader.order_admission_policy = order_admission_policy
+            trader.metrics = metrics
 
         # Wire feed into analysts (news subscription) and sizers (price cache
         # only). Each analyst registers its own subscriber view of the feed so

@@ -2,7 +2,7 @@
 tags: [arena]
 layer: arena
 status: current
-last_verified: 2026-07-17
+last_verified: 2026-07-18
 ---
 
 The bot framework is a Python base class pattern for building trading agents. Every bot extends `BaseAgent` and implements a single method: `on_block(block: Block) -> list[OrderSpec]`. When a new block arrives via the [[WebSocket Block Stream]], the framework calls `on_block()` and submits any returned orders via the [[Python SDK]]. This event-driven design means bots are reactive — they make decisions in response to market state changes.
@@ -11,6 +11,23 @@ Reconnect replay is observational, not a new trading cadence. `BaseAgent`
 updates canonical account/fill state for replayed block events but calls
 `on_block()` only after the SDK's replay-complete boundary. Historical blocks
 therefore cannot resubmit strategy work after a transient disconnect.
+
+Every live strategy decision also starts from a successful canonical account
+and fill refresh and a successful pending-order read. Either read failing
+suppresses the decision for that block; Arena never guesses that stale cash,
+positions, or reservations are safe. Only API-accepted submissions count
+toward `max_blocks` and accepted-order telemetry. A failure in the
+post-acceptance observation hook cannot retroactively turn that accepted write
+into a rejection.
+
+At startup, live Arena fetches `GET /v1/orders/policy` once and attaches the
+typed policy to every account-holding agent. `BaseAgent` computes the same
+integer ceil-price-times-quantity notional as sequencer admission and
+suppresses ordinary dust locally. It deliberately does not enlarge an order:
+doing so could exceed cash, remaining inventory, or a strategy exposure limit.
+Suppression is visible as `below_min_notional` in durable sizer decisions,
+status output, Prometheus metrics, and the operations dashboard. One-shot
+flash-liquidity/MM bundles remain governed by their separate budget semantics.
 
 Several reference bots demonstrate the pattern. `SimpleMarketMaker` quotes both sides of each market with a configurable spread. `RandomTrader` generates noise flow for testing. `InformedTrader` has a private model of true probabilities and trades when the edge (model price minus market price) exceeds a threshold. `MomentumTrader` follows price trends. All bots accept `market_ids: list[int] | None` to restrict which markets they trade on, enabling focused strategies in multi-market simulations.
 
@@ -72,6 +89,8 @@ has no fixed market-count cap. `sybil_arena_selected_markets` and
 - Explicit, heartbeating live cohort separates scored competitors from load/noise
 - Native MM anchors do not learn recursively from provenance-free internal clears
 - Synthetic load uses durable accounts, fixed aggregate capital, and block-keyed decisions
+- Canonical refresh and pending-order reads fail closed before strategy side effects
+- Server-advertised admission policy suppresses dust without silently changing risk
 - Adding a bot: extend BaseAgent, implement on_block, export, configure
 
 ## Where This Lives

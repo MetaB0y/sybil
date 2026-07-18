@@ -1,6 +1,6 @@
 """Tests for trading bots."""
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -15,7 +15,9 @@ from sybil_client.types import (
     BlockStreamReplayCompleteEvent,
     BuyNo,
     BuyYes,
+    OrderAdmissionPolicy,
     Position,
+    SellYes,
 )
 
 
@@ -151,8 +153,10 @@ class _FailsOnceAgent(BaseAgent):
 
 
 class _StreamingClient:
-    def __init__(self, blocks: list[Block]):
+    def __init__(self, blocks: list[Block], accepted: list[bool] | None = None):
         self.blocks = blocks
+        self.accepted = list(accepted or [])
+        self.submit_calls = 0
 
     def stream_block_events(self):
         async def _stream():
@@ -175,6 +179,25 @@ class _StreamingClient:
 
     async def get_pending_orders(self, account_id: int):
         return []
+
+    async def submit_orders(self, account_id: int, orders, **kwargs):
+        self.submit_calls += 1
+        return self.accepted.pop(0) if self.accepted else True
+
+
+class _OrderAgent(BaseAgent):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.on_block_calls = 0
+
+    async def on_block(self, block: Block):
+        self.on_block_calls += 1
+        return [BuyYes.at_price(0, 0.55, 1)]
+
+
+class _HookFailsAgent(_OrderAgent):
+    async def on_orders_submitted(self, block: Block, orders) -> None:
+        raise RuntimeError("observer failed")
 
 
 @pytest.mark.anyio
@@ -488,3 +511,194 @@ async def test_base_agent_observes_replay_without_running_strategy():
     # the strategy, the live block would have been a second call.
     assert agent.on_block_calls == 1
     assert len(agent.balance_history) == 2
+
+
+@pytest.mark.anyio
+async def test_base_agent_skips_strategy_when_canonical_refresh_fails():
+    blocks = [
+        Block(
+            height=height,
+            parent_hash="",
+            state_root="",
+            fills=[],
+            clearing_prices={},
+            total_welfare=0,
+            total_volume=0,
+            orders_filled=0,
+        )
+        for height in (1, 2)
+    ]
+
+    class Client(_StreamingClient):
+        async def get_account(self, account_id: int):
+            if not hasattr(self, "_refresh_failed"):
+                self._refresh_failed = True
+                raise ConnectionError("account API unavailable")
+            return await super().get_account(account_id)
+
+    client = Client(blocks)
+    agent = _OrderAgent(client=client, account_id=7)
+
+    await agent.run()
+
+    assert agent.on_block_calls == 1
+    assert client.submit_calls == 1
+    assert agent.block_log[0][0] == 2
+
+
+@pytest.mark.anyio
+async def test_base_agent_fails_closed_when_pending_status_is_unknown():
+    blocks = [
+        Block(
+            height=height,
+            parent_hash="",
+            state_root="",
+            fills=[],
+            clearing_prices={},
+            total_welfare=0,
+            total_volume=0,
+            orders_filled=0,
+        )
+        for height in (1, 2)
+    ]
+
+    class Client(_StreamingClient):
+        async def get_pending_orders(self, account_id: int):
+            if not hasattr(self, "_pending_failed"):
+                self._pending_failed = True
+                raise ConnectionError("orders API unavailable")
+            return []
+
+    client = Client(blocks)
+    agent = _OrderAgent(client=client, account_id=7)
+
+    await agent.run()
+
+    assert agent.on_block_calls == 1
+    assert client.submit_calls == 1
+    assert agent.block_log[0][0] == 2
+
+
+@pytest.mark.anyio
+async def test_base_agent_counts_only_accepted_blocks_toward_max_blocks():
+    blocks = [
+        Block(
+            height=height,
+            parent_hash="",
+            state_root="",
+            fills=[],
+            clearing_prices={},
+            total_welfare=0,
+            total_volume=0,
+            orders_filled=0,
+        )
+        for height in (1, 2, 3)
+    ]
+    client = _StreamingClient(blocks, accepted=[False, True, True])
+    agent = _OrderAgent(client=client, account_id=7, max_blocks=1)
+
+    await agent.run()
+
+    assert agent.on_block_calls == 2
+    assert client.submit_calls == 2
+    assert agent.total_orders_submitted == 1
+    assert [height for height, _ in agent.block_log] == [2]
+
+
+@pytest.mark.anyio
+async def test_base_agent_keeps_acceptance_when_post_submission_hook_fails(caplog):
+    block = Block(
+        height=1,
+        parent_hash="",
+        state_root="",
+        fills=[],
+        clearing_prices={},
+        total_welfare=0,
+        total_volume=0,
+        orders_filled=0,
+    )
+    client = _StreamingClient([block])
+    agent = _HookFailsAgent(client=client, account_id=7, max_blocks=1)
+
+    await agent.run()
+
+    assert agent.total_orders_submitted == 1
+    assert len(agent.block_log) == 1
+    assert "Post-submission hook failed after API acceptance" in caplog.text
+
+
+def test_order_admission_policy_keeps_exact_minimum_and_suppresses_dust():
+    agent = _DummyAgent(client=AsyncMock(), account_id=7, name="Policy")
+    agent.order_admission_policy = OrderAdmissionPolicy(
+        min_order_notional_nanos=1_000_000,
+        share_scale=1_000,
+    )
+    exact_minimum = BuyYes(
+        market_id=1,
+        limit_price_nanos=1_000_000,
+        quantity=1,
+    )
+    low_price_buy = BuyYes(
+        market_id=2,
+        limit_price_nanos=999_999,
+        quantity=1,
+    )
+    tiny_remaining_sell = SellYes(
+        market_id=3,
+        limit_price_nanos=500_000_000,
+        quantity=0.001,
+    )
+
+    accepted, suppressed = agent.apply_order_admission_policy(
+        [low_price_buy, exact_minimum, tiny_remaining_sell]
+    )
+
+    assert accepted == [exact_minimum]
+    assert suppressed == [low_price_buy, tiny_remaining_sell]
+    assert agent.orders_suppressed_count == 2
+
+
+def test_order_admission_policy_does_not_enlarge_an_unaffordable_order():
+    metrics = Mock()
+    agent = _DummyAgent(client=AsyncMock(), account_id=7, name="Conservative")
+    agent.order_admission_policy = OrderAdmissionPolicy(
+        min_order_notional_nanos=1_000_000,
+        share_scale=1_000,
+    )
+    agent.metrics = metrics
+    agent.balance_history = [0.0004]
+    proposed = BuyYes(
+        market_id=1,
+        limit_price_nanos=500_000,
+        quantity=1,
+    )
+
+    accepted, suppressed = agent.apply_order_admission_policy([proposed])
+
+    assert accepted == []
+    assert suppressed == [proposed]
+    assert proposed.quantity == 1
+    metrics.record_order_suppressed.assert_called_once_with(
+        "Conservative",
+        "below_min_notional",
+        1,
+    )
+
+
+def test_order_admission_policy_exempts_flash_liquidity_bundles():
+    agent = _DummyAgent(client=AsyncMock(), account_id=7)
+    agent.order_admission_policy = OrderAdmissionPolicy(
+        min_order_notional_nanos=1_000_000,
+        share_scale=1_000,
+    )
+    agent.mm_budget_nanos = 10_000_000
+    proposed = BuyYes(
+        market_id=1,
+        limit_price_nanos=1,
+        quantity=0.001,
+    )
+
+    accepted, suppressed = agent.apply_order_admission_policy([proposed])
+
+    assert accepted == [proposed]
+    assert suppressed == []

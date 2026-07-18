@@ -2338,6 +2338,25 @@ async fn health_endpoint_is_an_atomic_chain_snapshot_and_fails_closed() {
 }
 
 #[tokio::test]
+async fn order_policy_exposes_the_active_admission_floor() {
+    let (app, _) = test_app_with_config(ApiConfig {
+        min_resting_order_notional_nanos: 1_234_567,
+        ..ApiConfig::default()
+    })
+    .await;
+
+    let (status, body) = get(app, "/v1/orders/policy").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        parse_json(&body),
+        json!({
+            "min_order_notional_nanos": "1234567",
+            "share_scale": 1000,
+        })
+    );
+}
+
+#[tokio::test]
 async fn recent_blocks_returns_newest_first() {
     let (app, handle) = test_app(true).await;
 

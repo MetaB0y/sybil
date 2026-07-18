@@ -19,6 +19,7 @@ from ._generated.models import (
 from ._generated.types import Unset
 from .types import (
     NANOS_PER_DOLLAR,
+    SHARE_SCALE,
     Account,
     AccountFill,
     Block,
@@ -30,6 +31,7 @@ from .types import (
     Fill,
     Market,
     MarketGroup,
+    OrderAdmissionPolicy,
     OrderSpec,
     PendingOrder,
     Portfolio,
@@ -128,6 +130,22 @@ class SybilClient:
         """Get current state root hash."""
         data = await self._request("GET", "/v1/state-root")
         return data["state_root"]
+
+    async def get_order_admission_policy(self) -> OrderAdmissionPolicy:
+        """Fetch public constraints used to construct admissible orders."""
+        data = await self._request("GET", "/v1/orders/policy")
+        policy = OrderAdmissionPolicy(
+            min_order_notional_nanos=_nanos_int(data["min_order_notional_nanos"]),
+            share_scale=int(data["share_scale"]),
+        )
+        if policy.share_scale != SHARE_SCALE:
+            raise ValueError(
+                "server/client share scale mismatch: "
+                f"server={policy.share_scale} client={SHARE_SCALE}"
+            )
+        if policy.min_order_notional_nanos < 0:
+            raise ValueError("minimum order notional cannot be negative")
+        return policy
 
     # === Accounts ===
 

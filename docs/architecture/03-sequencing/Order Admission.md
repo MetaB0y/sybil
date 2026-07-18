@@ -3,7 +3,7 @@ tags: [infrastructure]
 layer: sequencer
 crate: matching-sequencer
 status: current
-last_verified: 2026-07-15
+last_verified: 2026-07-18
 ---
 
 # Order admission
@@ -40,6 +40,10 @@ Admission has lightweight backpressure before either path mutates state:
   1,000,000 nanodollars ($0.001), exactly one minimum quantity unit at a $1
   limit. One-shot MM quotes do not create resting state and retain the existing
   shape rules.
+- `GET /v1/orders/policy` publishes the active minimum and quantity scale so
+  clients can reject dust before submission without copying deployment
+  defaults. This is construction guidance, not an alternate admission source;
+  the sequencer remains authoritative.
 - Deferred bundles have both total and per-account caps.
 - A per-submission order-count cap prevents request amplification.
 - [[Actor Mailbox Monitoring]] exposes sequencer mailbox pressure after those admission checks, so coordinated floods that still enqueue faster than the actor drains become visible before latency or memory are the first symptoms.

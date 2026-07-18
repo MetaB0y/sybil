@@ -6,8 +6,12 @@ Usage:
 """
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.request import urlopen
+
+from prometheus_client.parser import text_string_to_metric_families
 
 try:
     from . import queries
@@ -17,7 +21,57 @@ except ImportError:
     from sqlite_utils import connect_reader  # type: ignore[no-redef]
 
 
-def run(db_path: str | None = None, hours: int = 24):
+def _parse_provider_health(metrics_text: str) -> dict[str, dict]:
+    states: dict[str, dict] = {}
+    for family in text_string_to_metric_families(metrics_text):
+        for sample in family.samples:
+            component = sample.labels.get("component")
+            if component is None or not sample.name.startswith(
+                "sybil_arena_llm_provider_"
+            ):
+                continue
+            state = states.setdefault(component, {"failures": {}})
+            if sample.name == "sybil_arena_llm_provider_degraded":
+                state["degraded"] = bool(sample.value)
+            elif sample.name == "sybil_arena_llm_provider_last_success_timestamp_seconds":
+                state["last_success"] = float(sample.value)
+            elif sample.name == "sybil_arena_llm_provider_backoff_until_timestamp_seconds":
+                state["backoff_until"] = float(sample.value)
+            elif sample.name == "sybil_arena_llm_provider_failures_total":
+                state["failures"][sample.labels["kind"]] = float(sample.value)
+    return states
+
+
+def _parse_order_suppressions(metrics_text: str) -> dict[str, float]:
+    suppressions: dict[str, float] = {}
+    for family in text_string_to_metric_families(metrics_text):
+        for sample in family.samples:
+            if sample.name != "sybil_arena_orders_suppressed_total":
+                continue
+            reason = sample.labels.get("reason", "unknown")
+            suppressions[reason] = suppressions.get(reason, 0.0) + float(sample.value)
+    return suppressions
+
+
+def _load_metrics(metrics_url: str) -> str:
+    try:
+        with urlopen(metrics_url, timeout=0.75) as response:  # noqa: S310
+            return response.read().decode()
+    except (OSError, UnicodeError, ValueError):
+        return ""
+
+
+def _format_metric_timestamp(value: float) -> str:
+    if value <= 0:
+        return "never"
+    return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
+
+
+def run(
+    db_path: str | None = None,
+    hours: int = 24,
+    metrics_url: str | None = None,
+):
     if db_path is None:
         db_path = "/data/decisions.db" if Path("/data").exists() else str(Path(__file__).parent / "decisions.db")
     if not Path(db_path).exists():
@@ -30,6 +84,46 @@ def run(db_path: str | None = None, hours: int = 24):
     now = now_dt.strftime("%Y-%m-%d %H:%M")
 
     print(f"=== Sybil Arena Status ({now} UTC, last {hours}h) ===\n")
+
+    metrics_text = _load_metrics(
+        metrics_url
+        or os.environ.get("ARENA_METRICS_URL", "http://127.0.0.1:9101/metrics")
+    )
+    provider_health = _parse_provider_health(metrics_text)
+    if provider_health:
+        print("--- LLM Provider Capability ---")
+        for component, state in sorted(provider_health.items()):
+            label = "DEGRADED" if state.get("degraded") else "healthy"
+            backoff_until = state.get("backoff_until", 0.0)
+            backoff = (
+                _format_metric_timestamp(backoff_until)
+                if backoff_until > datetime.now(timezone.utc).timestamp()
+                else "none"
+            )
+            failures = ", ".join(
+                f"{kind}={count:g}"
+                for kind, count in sorted(state.get("failures", {}).items())
+                if count
+            ) or "none"
+            print(
+                f"  {component}: {label}"
+                f"  last-success={_format_metric_timestamp(state.get('last_success', 0.0))}"
+                f"  backoff-until={backoff}  failures={failures}"
+            )
+        print(
+            "  Note: local per-analyst budget remaining is independent of provider credit."
+        )
+        print()
+
+    order_suppressions = _parse_order_suppressions(metrics_text)
+    if order_suppressions:
+        values = ", ".join(
+            f"{reason}={count:g}"
+            for reason, count in sorted(order_suppressions.items())
+            if count
+        )
+        if values:
+            print(f"--- Local Order Suppression ---\n  {values}\n")
 
     experiments = queries.get_live_experiment_status(conn)
     if experiments:

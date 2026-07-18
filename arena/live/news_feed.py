@@ -16,6 +16,7 @@ Usage (standalone test):
 import asyncio
 import logging
 import os
+import re
 import time
 import urllib.parse
 from collections import Counter, defaultdict, deque
@@ -31,6 +32,7 @@ import trafilatura
 from sybil_client.types import NANOS_PER_DOLLAR, Market
 
 from .metrics import ArenaMetrics
+from .provider_health import ProviderCircuit
 
 log = logging.getLogger(__name__)
 
@@ -188,28 +190,24 @@ async def llm_gate_batch(
         f'Reply with ONLY the numbers of relevant headlines, comma-separated. '
         f'If none are relevant, reply NONE.'
     )
-    try:
-        resp = await llm_client.chat.completions.create(
-            model=GATE_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.0,
-            max_tokens=100,
-        )
-        answer = (resp.choices[0].message.content or "").strip().upper()
-        if "NONE" in answer:
-            return [False] * len(headlines)
+    resp = await llm_client.chat.completions.create(
+        model=GATE_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.0,
+        max_tokens=100,
+    )
+    answer = (resp.choices[0].message.content or "").strip().upper()
+    if answer == "NONE":
+        return [False] * len(headlines)
 
-        # Parse comma-separated numbers
-        import re as _re
-        nums = {int(n) for n in _re.findall(r"\d+", answer)}
-        return [(i + 1) in nums for i in range(len(headlines))]
-    except Exception as e:
-        log.warning("LLM gate error: %s", e)
-        # Retrieval must not fail closed: URLs are marked seen before this call,
-        # so rejecting on a transient model/provider error would discard the
-        # evidence permanently. The analyst can still ignore an irrelevant
-        # headline if the gate temporarily fails.
-        return [True] * len(headlines)
+    # This is a lossy evidence gate, so malformed model output must fail open
+    # at the caller instead of being interpreted as "reject every headline".
+    if not re.fullmatch(r"\d+(?:\s*,\s*\d+)*", answer):
+        raise ValueError(f"invalid relevance-gate response: {answer!r}")
+    nums = {int(n) for n in re.findall(r"\d+", answer)}
+    if any(index < 1 or index > len(headlines) for index in nums):
+        raise ValueError(f"relevance-gate index outside batch: {answer!r}")
+    return [(i + 1) in nums for i in range(len(headlines))]
 
 
 # --------------------------------------------------------------------------- #
@@ -271,6 +269,23 @@ class NewsSubscription:
             queue.clear()
         return articles
 
+    async def requeue_front(self, market_id: int, articles: list[LiveArticle]) -> None:
+        """Restore a failed analysis batch ahead of newer pending evidence."""
+        if not articles:
+            return
+        async with self._feed._lock:
+            queue = self._pending[market_id]
+            queue.extendleft(reversed(articles))
+            while len(queue) > self._max_queue:
+                dropped = queue.pop()
+                log.warning(
+                    "Subscriber %s queue for market %d full while retrying; "
+                    "dropping newest article %r",
+                    self.name or id(self),
+                    market_id,
+                    dropped.title[:60],
+                )
+
 
 @dataclass(frozen=True)
 class PairedNewsBatch:
@@ -287,10 +302,18 @@ class PairedNewsBatchView:
 
     async def drain(self, market_id: int) -> list[LiveArticle]:
         batch = await self.drain_batch(market_id)
+        if batch is not None:
+            await self.ack_batch(market_id)
         return batch.articles if batch is not None else []
 
     async def drain_batch(self, market_id: int) -> PairedNewsBatch | None:
         return await self._barrier.drain_batch(self.name, market_id)
+
+    async def ack_batch(self, market_id: int) -> None:
+        await self._barrier.ack_batch(self.name, market_id)
+
+    async def retry_batch(self, market_id: int) -> None:
+        await self._barrier.retry_batch(self.name, market_id)
 
 
 class PairedNewsBatchBarrier:
@@ -315,7 +338,7 @@ class PairedNewsBatchBarrier:
         self.subscription = subscription
         self.arm_names = frozenset(arm_names)
         self.fresh_reference_price = fresh_reference_price
-        self._active: dict[int, tuple[PairedNewsBatch, set[str]]] = {}
+        self._active: dict[int, tuple[PairedNewsBatch, set[str], set[str]]] = {}
         self._lock = asyncio.Lock()
 
     def view(self, arm_name: str) -> PairedNewsBatchView:
@@ -340,16 +363,31 @@ class PairedNewsBatchBarrier:
                 articles = await self.subscription.drain(market_id)
                 if not articles:
                     return None
-                active = (PairedNewsBatch(articles, float(fresh)), set())
+                active = (PairedNewsBatch(articles, float(fresh)), set(), set())
                 self._active[market_id] = active
 
-            batch, consumed = active
-            if arm_name in consumed:
+            batch, acknowledged, leased = active
+            if arm_name in acknowledged or arm_name in leased:
                 return None
-            consumed.add(arm_name)
-            if consumed == self.arm_names:
-                del self._active[market_id]
+            leased.add(arm_name)
             return batch
+
+    async def ack_batch(self, arm_name: str, market_id: int) -> None:
+        async with self._lock:
+            active = self._active.get(market_id)
+            if active is None:
+                return
+            _, acknowledged, leased = active
+            leased.discard(arm_name)
+            acknowledged.add(arm_name)
+            if acknowledged == self.arm_names:
+                del self._active[market_id]
+
+    async def retry_batch(self, arm_name: str, market_id: int) -> None:
+        async with self._lock:
+            active = self._active.get(market_id)
+            if active is not None:
+                active[2].discard(arm_name)
 
 
 # --------------------------------------------------------------------------- #
@@ -395,6 +433,7 @@ class NewsFeed:
 
         # LLM client for the headline relevance gate.
         self._llm_client: openai.AsyncOpenAI | None = None
+        self.provider = ProviderCircuit("news-gate", metrics)
         if api_key:
             self._llm_client = openai.AsyncOpenAI(
                 base_url="https://openrouter.ai/api/v1",
@@ -562,12 +601,30 @@ class NewsFeed:
             headlines = [e["title"] for e in entries]
 
             if self._llm_client:
-                results = await llm_gate_batch(
-                    self._llm_client, headlines, market.name,
-                )
-                passed = [(e, r) for e, r in zip(entries, results) if r]
-                gate_yes += len(passed)
-                gate_no += len(entries) - len(passed)
+                if self.provider.can_attempt():
+                    try:
+                        results = await llm_gate_batch(
+                            self._llm_client, headlines, market.name,
+                        )
+                        self.provider.record_success()
+                        passed = [(e, r) for e, r in zip(entries, results) if r]
+                        gate_yes += len(passed)
+                        gate_no += len(entries) - len(passed)
+                    except Exception as exc:
+                        failure = self.provider.record_failure(exc)
+                        log.error(
+                            "LLM relevance gate provider failure "
+                            "(kind=%s, backoff=%.0fs): %s",
+                            failure.kind,
+                            failure.backoff_seconds,
+                            exc,
+                        )
+                        # Candidate URLs were marked seen before the call. Pass
+                        # them through so provider failure cannot destroy
+                        # evidence; the analyst remains the semantic gate.
+                        passed = [(e, True) for e in entries]
+                else:
+                    passed = [(e, True) for e in entries]
             else:
                 # No API key → pass everything (testing mode)
                 passed = [(e, True) for e in entries]

@@ -11,6 +11,8 @@ order helpers) by pinning:
 import asyncio
 import importlib
 
+import pytest
+
 from sybil_client import Portfolio, SybilClient
 from sybil_client.types import NANOS_PER_DOLLAR, SHARE_SCALE, quantity_units_to_shares
 
@@ -132,6 +134,39 @@ def test_get_portfolio_preserves_nanos_above_javascript_safe_range(monkeypatch):
 
     portfolio = asyncio.run(client.get_portfolio(42))
     assert portfolio.balance_nanos == 9_007_199_254_740_993
+
+
+def test_order_admission_policy_preserves_exact_nanos(monkeypatch):
+    client = SybilClient("http://example.invalid")
+
+    async def fake_request(method, path, **kwargs):
+        assert method == "GET"
+        assert path == "/v1/orders/policy"
+        return {
+            "min_order_notional_nanos": "9007199254740993",
+            "share_scale": SHARE_SCALE,
+        }
+
+    monkeypatch.setattr(client, "_request", fake_request)
+
+    policy = asyncio.run(client.get_order_admission_policy())
+    assert policy.min_order_notional_nanos == 9_007_199_254_740_993
+    assert policy.share_scale == SHARE_SCALE
+
+
+def test_order_admission_policy_rejects_server_client_scale_drift(monkeypatch):
+    client = SybilClient("http://example.invalid")
+
+    async def fake_request(method, path, **kwargs):
+        return {
+            "min_order_notional_nanos": "1000000",
+            "share_scale": SHARE_SCALE + 1,
+        }
+
+    monkeypatch.setattr(client, "_request", fake_request)
+
+    with pytest.raises(ValueError, match="share scale mismatch"):
+        asyncio.run(client.get_order_admission_policy())
 
 
 class TestUnitConversionSymmetry:

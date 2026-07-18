@@ -498,7 +498,7 @@ class LiveLlmTrader(BaseAgent):
         # Drain fair-value updates published by this persona's analyst. Each
         # update is recorded per-sizer (matching the pre-split per-trader
         # decision row) so sybil-api's per-trader_name reader is unchanged.
-        for market_id in list(self.market_ids or []):
+        for market_id in sorted(self.market_ids or []):
             updates = await self.fv_sub.drain(market_id) if self.fv_sub else []
             if not updates:
                 continue
@@ -535,6 +535,11 @@ class LiveLlmTrader(BaseAgent):
             or self._last_rebalance == 0
         ):
             rebalance_orders = self._rebalance_all(block, now)
+            rebalance_orders, suppressed_orders = self.apply_order_admission_policy(
+                rebalance_orders
+            )
+            for order in suppressed_orders:
+                self._latest_rejection_reasons[order.market_id] = "below_min_notional"
             if rebalance_orders:
                 order_desc = ", ".join(_describe_order(o) for o in rebalance_orders)
                 log.info("[%s] %s rebalance: %s", self.name, self.strategy.name, order_desc)

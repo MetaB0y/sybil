@@ -85,6 +85,19 @@ pub struct OnboardingPolicyResponse {
     pub grant_nanos: u64,
 }
 
+/// Public constraints needed to construct orders that admission can accept.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct OrderAdmissionPolicyResponse {
+    /// Minimum ceil(limit_price * quantity / 1000) for ordinary non-MM orders.
+    /// Integer nanodollars; 1_000_000_000 = $1.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
+    pub min_order_notional_nanos: u64,
+    /// Integer quantity units per user-facing share.
+    pub share_scale: u64,
+}
+
 /// A registered signing key with SYB-60 management metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

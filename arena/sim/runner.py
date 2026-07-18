@@ -7,11 +7,13 @@ Usage:
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 from dotenv import load_dotenv
 
@@ -46,22 +48,39 @@ def _load_market_config(market_name: str):
     return mod.get_config()
 
 
-def _lookup_polymarket_price(prices_file: Path, date_str: str) -> float | None:
-    """Look up the Polymarket YES price at the start of a given date (YYYYMMDD)."""
-    import json
+def _lookup_polymarket_price(prices_file: Path, at: datetime) -> float | None:
+    """Return the latest valid Polymarket YES price observed at or before ``at``."""
     if not prices_file.exists():
         return None
+
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)
+    else:
+        at = at.astimezone(timezone.utc)
+
     try:
-        with open(prices_file) as f:
-            prices = json.load(f)
-        # Format: [{"timestamp": "2026-01-26T00:00:36+00:00", "yes_price": 0.585}, ...]
-        target = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
-        for entry in prices:
-            if entry["timestamp"].startswith(target):
-                return entry["yes_price"]
-    except Exception:
-        pass
-    return None
+        prices = json.loads(prices_file.read_text())
+        if not isinstance(prices, list):
+            raise ValueError("price history must be a JSON list")
+
+        candidates: list[tuple[datetime, float]] = []
+        for index, entry in enumerate(prices):
+            if not isinstance(entry, dict):
+                raise ValueError(f"price history entry {index} must be an object")
+            timestamp = datetime.fromisoformat(str(entry["timestamp"]).replace("Z", "+00:00"))
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            timestamp = timestamp.astimezone(timezone.utc)
+            price = float(entry["yes_price"])
+            if not 0 < price < 1:
+                raise ValueError(f"price history entry {index} has invalid YES price {price}")
+            if timestamp <= at:
+                candidates.append((timestamp, price))
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+        log.warning("Ignoring invalid Polymarket price history %s: %s", prices_file, exc)
+        return None
+
+    return max(candidates, default=(at, None), key=lambda item: item[0])[1]
 
 
 def _resolve_phase1_path(market_config, bot_key: str, date: str | None = None) -> str:
@@ -117,6 +136,45 @@ class SimulationConfig:
     mm_strategy: str = "balanced"  # "balanced" or "fast-anchor"
 
 
+async def _wait_until_or_task_failure(
+    clock: SimulatedClock,
+    sim_end: datetime,
+    tasks: list[asyncio.Task],
+) -> None:
+    """Wait for the simulated deadline while surfacing background failures."""
+    deadline = asyncio.create_task(clock.sleep_until(sim_end), name="simulation-deadline")
+    active = set(tasks)
+    try:
+        while not deadline.done():
+            done, _ = await asyncio.wait(
+                {deadline, *active},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if deadline in done:
+                return
+            for task in done:
+                active.remove(task)
+                if task.cancelled():
+                    raise RuntimeError(f"simulation task {task.get_name()} was cancelled")
+                failure = task.exception()
+                if failure is not None:
+                    raise RuntimeError(
+                        f"simulation task {task.get_name()} failed"
+                    ) from failure
+    finally:
+        if not deadline.done():
+            deadline.cancel()
+        await asyncio.gather(deadline, return_exceptions=True)
+
+
+async def _cancel_tasks(tasks: list[asyncio.Task]) -> None:
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
 async def run_simulation(config: SimulationConfig) -> None:
     async with SybilClient(config.base_url) as client:
         # === ONE-TIME SETUP ===
@@ -164,7 +222,10 @@ async def run_simulation(config: SimulationConfig) -> None:
             noise_accounts.append(acct)
 
         trader_state: dict[str, dict] = {}
-        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_id = (
+            datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+            + f"-{uuid4().hex}"
+        )
 
         dates = config.dates
         if not dates:
@@ -210,6 +271,8 @@ async def run_simulation(config: SimulationConfig) -> None:
             sim_start = datetime(article_date.year, article_date.month, article_date.day, h, m)
             h_end, m_end = (int(x) for x in config.sim_end_hour.split(":"))
             sim_end = datetime(article_date.year, article_date.month, article_date.day, h_end, m_end)
+            if sim_end <= sim_start:
+                raise ValueError("simulation end must be later than simulation start")
 
             clock = SimulatedClock(
                 sim_start=sim_start,
@@ -281,16 +344,20 @@ async def run_simulation(config: SimulationConfig) -> None:
                 continue
 
             # Record starting block so results only include this day's blocks
-            day_start_block = (await client.get_latest_block()).height
+            day_after_block = (await client.get_latest_block()).height
 
             clock.start()
             all_bots = [mm, *noise_bots, *traders]
-            tasks = [asyncio.create_task(bot.run()) for bot in all_bots]
+            tasks = [
+                asyncio.create_task(bot.run(), name=f"bot:{bot.name}")
+                for bot in all_bots
+            ]
 
             rebalance_task = None
             if config.rebalance_interval > 0 and traders:
                 rebalance_task = asyncio.create_task(
-                    run_rebalancer(traders, clock, client, config.rebalance_interval)
+                    run_rebalancer(traders, clock, client, config.rebalance_interval),
+                    name="simulation-rebalancer",
                 )
 
             sim_span = sim_end - sim_start
@@ -320,16 +387,28 @@ async def run_simulation(config: SimulationConfig) -> None:
                     except Exception:
                         pass
 
-            monitor_task = asyncio.create_task(_monitor())
-            await clock.sleep_until(sim_end)
-            monitor_task.cancel()
+            monitor_task = asyncio.create_task(_monitor(), name="simulation-monitor")
+            critical_tasks = [*tasks]
             if rebalance_task is not None:
-                rebalance_task.cancel()
-
-            print(f"\n  Stopping bots (day {day_label})...")
-            for bot in all_bots:
-                bot.stop()
-            await asyncio.gather(*tasks, return_exceptions=True)
+                critical_tasks.append(rebalance_task)
+            try:
+                await _wait_until_or_task_failure(clock, sim_end, critical_tasks)
+            finally:
+                await _cancel_tasks([monitor_task])
+                if rebalance_task is not None:
+                    await _cancel_tasks([rebalance_task])
+                print(f"\n  Stopping bots (day {day_label})...")
+                for bot in all_bots:
+                    bot.stop()
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                failures = [
+                    result
+                    for result in results
+                    if isinstance(result, BaseException)
+                    and not isinstance(result, asyncio.CancelledError)
+                ]
+                if failures:
+                    raise ExceptionGroup("simulation bot task failures", failures)
 
             # Wait for pending orders to settle (TTL up to 5 blocks × 2s)
             await asyncio.sleep(12)
@@ -342,7 +421,7 @@ async def run_simulation(config: SimulationConfig) -> None:
                 runs_dir=runs_dir,
                 day_label=date_str,
                 run_id=run_id,
-                min_block=day_start_block,
+                after_block=day_after_block,
             )
 
 
@@ -391,7 +470,14 @@ def main():
     # Auto-lookup Polymarket price for the first sim date if available
     first_date = (args.dates or [args.date])[0] if (args.dates or args.date) else None
     if args.initial_price is None and first_date and market_config.polymarket_prices_file:
-        poly_price = _lookup_polymarket_price(market_config.polymarket_prices_file, first_date)
+        lookup_at = datetime.strptime(
+            f"{first_date} {args.sim_start}",
+            "%Y%m%d %H:%M",
+        ).replace(tzinfo=timezone.utc)
+        poly_price = _lookup_polymarket_price(
+            market_config.polymarket_prices_file,
+            lookup_at,
+        )
         if poly_price is not None:
             initial_price = poly_price
             print(f"  Initial price from Polymarket: {initial_price:.4f} (date {first_date})")

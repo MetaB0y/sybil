@@ -70,6 +70,7 @@ from .onboard_account_request import OnboardAccountRequest
 from .onboarding_policy_response import OnboardingPolicyResponse
 from .open_batch_response import OpenBatchResponse
 from .order_accepted_response import OrderAcceptedResponse
+from .order_admission_policy_response import OrderAdmissionPolicyResponse
 from .order_spec_type_0 import OrderSpecType0
 from .order_spec_type_0_type import OrderSpecType0Type
 from .order_spec_type_1 import OrderSpecType1
@@ -231,6 +232,7 @@ __all__ = (
     "OnboardingPolicyResponse",
     "OpenBatchResponse",
     "OrderAcceptedResponse",
+    "OrderAdmissionPolicyResponse",
     "OrderSpecType0",
     "OrderSpecType0Type",
     "OrderSpecType1",

@@ -20,7 +20,7 @@ from live.analyst import (
 )
 from live.fair_value_bus import FairValueBus, FairValueUpdate, analysis_batch_id
 from live.metrics import ArenaMetrics
-from live.news_feed import LiveArticle
+from live.news_feed import LiveArticle, NewsFeed
 from live.trader import LiveLlmTrader
 from sybil_client.types import Block
 
@@ -254,6 +254,96 @@ async def test_analyst_llm_budget_allows_one_call_per_elapsed_interval():
     analyst._last_llm_call = 0.0  # interval elapsed
     await analyst.on_block(_block())
     assert analyst._call_llm.call_count == 2
+
+
+async def test_analyst_provider_failure_requeues_evidence_until_success():
+    class CreditError(Exception):
+        status_code = 402
+
+    market = MagicMock()
+    market.id = 7
+    market.name = "Market 7"
+    market.description = ""
+    market.resolution_criteria = ""
+    market.reference_price_nanos = None
+    feed = NewsFeed([market], api_key=None)
+    metrics = ArenaMetrics()
+    bus = FairValueBus("test")
+    analyst = PersonaAnalyst(
+        client=MagicMock(),
+        news_feed=feed,
+        bus=bus,
+        api_key="test",
+        persona="Test",
+        persona_key="test",
+        market_ids=[7],
+        markets_info={7: market},
+        min_llm_interval_s=0,
+        name="Test (Analyst)",
+        metrics=metrics,
+    )
+    analyst._observed_first_block = True
+    article = _article()
+    async with feed._lock:
+        analyst.news_sub._deliver(7, article)
+    block = _block()
+    block.clearing_prices[7] = (550_000_000, 450_000_000)
+
+    analyst._call_llm = AsyncMock(side_effect=CreditError("insufficient credit"))
+    await analyst.on_block(block)
+
+    assert list(analyst.news_sub._pending[7]) == [article]
+    assert metrics.registry.get_sample_value(
+        "sybil_arena_llm_provider_degraded",
+        {"component": "Test (Analyst)"},
+    ) == 1
+
+    analyst.provider._retry_at = 0
+    analyst._call_llm = AsyncMock(
+        return_value=("FAIR_VALUE: 0.60\nMOTIVATION: m\nANALYSIS: a", 0.1)
+    )
+    await analyst.on_block(block)
+
+    assert list(analyst.news_sub._pending[7]) == []
+    assert metrics.registry.get_sample_value(
+        "sybil_arena_llm_provider_degraded",
+        {"component": "Test (Analyst)"},
+    ) == 0
+
+
+async def test_transient_provider_failure_obeys_normal_call_interval():
+    market = MagicMock()
+    market.id = 7
+    market.name = "Market 7"
+    market.description = ""
+    market.resolution_criteria = ""
+    market.reference_price_nanos = None
+    feed = NewsFeed([market], api_key=None)
+    analyst = PersonaAnalyst(
+        client=MagicMock(),
+        news_feed=feed,
+        bus=FairValueBus("test"),
+        api_key="test",
+        persona="Test",
+        persona_key="test",
+        market_ids=[7],
+        markets_info={7: market},
+        min_llm_interval_s=1_000,
+        name="Test (Analyst)",
+    )
+    analyst._observed_first_block = True
+    article = _article()
+    async with feed._lock:
+        analyst.news_sub._deliver(7, article)
+    block = _block()
+    block.clearing_prices[7] = (550_000_000, 450_000_000)
+    analyst._call_llm = AsyncMock(side_effect=TimeoutError("provider timeout"))
+
+    await analyst.on_block(block)
+    await analyst.on_block(block)
+
+    assert analyst._call_llm.await_count == 1
+    assert list(analyst.news_sub._pending[7]) == [article]
 
 
 # -- Cost delta: one analyst call serves BOTH sizing arms (2N -> N) ------- #

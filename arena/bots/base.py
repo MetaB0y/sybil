@@ -3,7 +3,15 @@
 import logging
 from abc import ABC, abstractmethod
 
-from sybil_client import Block, BlockStreamBlockEvent, OrderSpec, SybilClient
+from sybil_client import (
+    SHARE_SCALE,
+    Block,
+    BlockStreamBlockEvent,
+    OrderAdmissionPolicy,
+    OrderSpec,
+    SybilClient,
+    shares_to_quantity_units,
+)
 from sybil_client.client import SybilClientError
 from sybil_client.types import TimeInForce
 
@@ -44,6 +52,9 @@ class BaseAgent(ABC):
         # Fill tracking via get_account_fills(after=cursor)
         self._last_fill_cursor: str = "0.0"
         self._fill_history: list = []  # list[AccountFill], available to subclasses
+        self.order_admission_policy: OrderAdmissionPolicy | None = None
+        self.metrics = None
+        self.orders_suppressed_count = 0
 
     @abstractmethod
     async def on_block(self, block: Block) -> list[OrderSpec]:
@@ -77,15 +88,17 @@ class BaseAgent(ABC):
                 if not self._running:
                     break
 
-                # Update our state
-                await self._update_state(block)
+                # Never let a strategy trade from a stale account snapshot.
+                if not await self._update_state(block):
+                    continue
 
                 # Replays repair canonical observations after reconnect but
                 # must never call a strategy or submit historical orders.
                 if event.replayed:
                     continue
 
-                if await self._has_pending_orders():
+                pending_orders = await self._has_pending_orders()
+                if pending_orders is None or pending_orders:
                     continue
 
                 # Record block-level stats (welfare, volume, fills)
@@ -111,9 +124,8 @@ class BaseAgent(ABC):
                         self.on_block_error_count,
                     )
                     continue
+                orders, _ = self.apply_order_admission_policy(orders)
 
-                # Log and submit orders
-                self.block_log.append((block.height, orders))
                 if orders:
                     try:
                         accepted = await self.client.submit_orders(
@@ -124,17 +136,36 @@ class BaseAgent(ABC):
                             expires_at_block=self.expires_at_block,
                         )
                         if accepted:
+                            self.block_log.append((block.height, orders))
                             self.last_orders = orders
                             self.total_orders_submitted += len(orders)
-                            await self.on_orders_submitted(block, orders)
+                            blocks_traded += 1
+                            try:
+                                await self.on_orders_submitted(block, orders)
+                            except Exception:
+                                log.exception(
+                                    "Post-submission hook failed after API acceptance: "
+                                    "name=%s block_height=%s",
+                                    self.name,
+                                    block.height,
+                                )
                         else:
-                            print(f"[{self.name}] Order submission was not accepted")
-                    except Exception as e:
-                        print(f"[{self.name}] Order submission failed: {e}")
-                    blocks_traded += 1
+                            log.warning(
+                                "Order submission was not accepted: name=%s block_height=%s",
+                                self.name,
+                                block.height,
+                            )
+                    except Exception:
+                        log.exception(
+                            "Order submission failed: name=%s block_height=%s",
+                            self.name,
+                            block.height,
+                        )
                     if self.max_blocks is not None and blocks_traded >= self.max_blocks:
                         print(f"[{self.name}] Reached max_blocks={self.max_blocks}, stopping.")
                         break
+                else:
+                    self.block_log.append((block.height, []))
 
         except Exception as e:
             print(f"[{self.name}] Error in run loop: {e}")
@@ -144,8 +175,12 @@ class BaseAgent(ABC):
         """Stop the bot gracefully."""
         self._running = False
 
-    async def _update_state(self, block: Block) -> None:
-        """Update positions and balance from account state."""
+    async def _update_state(self, block: Block) -> bool:
+        """Update positions and balance from account state.
+
+        Returns whether the canonical refresh completed. Callers must skip the
+        strategy when it does not: stale cash or positions are unsafe inputs.
+        """
         try:
             account = await self.client.get_account(self.account_id)
             self._apply_canonical_account(account)
@@ -171,8 +206,15 @@ class BaseAgent(ABC):
                 if len(new_fills) < page_size:
                     break
 
-        except Exception as e:
-            print(f"[{self.name}] Failed to update state: {e}")
+        except Exception:
+            log.exception(
+                "Canonical account refresh failed; skipping strategy: "
+                "name=%s block_height=%s",
+                self.name,
+                block.height,
+            )
+            return False
+        return True
 
     def _apply_canonical_account(self, account, *, replace_latest_balance: bool = False) -> None:
         """Replace strategy state from the canonical account snapshot."""
@@ -209,16 +251,61 @@ class BaseAgent(ABC):
             cursor,
         )
 
-    async def _has_pending_orders(self) -> bool:
-        """Avoid stacking reservations from previously accepted orders."""
+    async def _has_pending_orders(self) -> bool | None:
+        """Return pending status, or ``None`` when it cannot be established.
+
+        An unknown status fails closed: submitting anyway could stack cash or
+        position reservations behind an already accepted resting order.
+        """
         get_pending = getattr(self.client, "get_pending_orders", None)
         if get_pending is None:
             return False
         try:
             return bool(await get_pending(self.account_id))
-        except Exception as e:
-            print(f"[{self.name}] Failed to check pending orders: {e}")
-            return False
+        except Exception:
+            log.exception(
+                "Pending-order refresh failed; skipping strategy: name=%s",
+                self.name,
+            )
+            return None
+
+    def apply_order_admission_policy(
+        self,
+        orders: list[OrderSpec],
+    ) -> tuple[list[OrderSpec], list[OrderSpec]]:
+        """Suppress ordinary orders that cannot meet advertised admission."""
+        policy = self.order_admission_policy
+        if policy is None or self.mm_budget_nanos is not None:
+            return orders, []
+
+        accepted: list[OrderSpec] = []
+        suppressed: list[OrderSpec] = []
+        for order in orders:
+            quantity_units = shares_to_quantity_units(order.quantity)
+            notional = (
+                order.limit_price_nanos * quantity_units + SHARE_SCALE - 1
+            ) // SHARE_SCALE
+            if notional < policy.min_order_notional_nanos:
+                suppressed.append(order)
+            else:
+                accepted.append(order)
+
+        if suppressed:
+            self.orders_suppressed_count += len(suppressed)
+            log.warning(
+                "Suppressing below-minimum order notional before API submission: "
+                "name=%s count=%d minimum_nanos=%d",
+                self.name,
+                len(suppressed),
+                policy.min_order_notional_nanos,
+            )
+            if self.metrics is not None:
+                self.metrics.record_order_suppressed(
+                    self.name,
+                    "below_min_notional",
+                    len(suppressed),
+                )
+        return accepted, suppressed
 
     @property
     def current_balance(self) -> float:
@@ -244,4 +331,7 @@ class BaseAgent(ABC):
         default_price = (500_000_000, 500_000_000)
         if self.market_ids is None:
             return block.clearing_prices
-        return {mid: block.clearing_prices.get(mid, default_price) for mid in self.market_ids}
+        return {
+            mid: block.clearing_prices.get(mid, default_price)
+            for mid in sorted(self.market_ids)
+        }

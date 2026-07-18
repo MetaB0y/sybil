@@ -30,6 +30,7 @@ from .costs import cost_of_call
 from .fair_value_bus import FairValueBus, FairValueUpdate
 from .news_feed import LiveArticle, NewsFeed, NewsSubscription, PairedNewsBatchView
 from .pricing import market_price
+from .provider_health import ProviderCircuit
 from .strategy import RESOLVED_HIGH, RESOLVED_LOW
 
 if TYPE_CHECKING:
@@ -308,6 +309,11 @@ class PersonaAnalyst:
         self.prompt_contract = prompt_contract
         self._now = now_fn or (lambda: datetime.now(timezone.utc))
         self._monotonic = monotonic_fn or time.monotonic
+        self.provider = ProviderCircuit(
+            self.name,
+            metrics,
+            monotonic_fn=self._monotonic,
+        )
 
         # SYB-64: per-agent LLM pause threshold. The analyst is the persona's sole LLM
         # caller (SYB-210), so this threshold is separate from the sizers'
@@ -409,6 +415,20 @@ class PersonaAnalyst:
             )
         if self.metrics is not None:
             self.metrics.set_llm_paused(self.name, True)
+
+    async def _ack_news_batch(self, market_id: int) -> None:
+        if isinstance(self.news_sub, PairedNewsBatchView):
+            await self.news_sub.ack_batch(market_id)
+
+    async def _retry_news_batch(
+        self,
+        market_id: int,
+        articles: list[LiveArticle],
+    ) -> None:
+        if isinstance(self.news_sub, PairedNewsBatchView):
+            await self.news_sub.retry_batch(market_id)
+        elif isinstance(self.news_sub, NewsSubscription):
+            await self.news_sub.requeue_front(market_id, articles)
 
     async def _call_llm(self, prompt: str) -> tuple[str, float]:
         llm = self._get_llm_client()
@@ -659,13 +679,15 @@ class PersonaAnalyst:
         if self._budget_exhausted():
             self._enter_paused()
             return
+        if not self.provider.can_attempt():
+            return
 
         # AR-6: the min interval is enforced per LLM *call*, not per block. A
         # single block can surface articles for many markets; stop draining once
         # the interval blocks another call and leave remaining articles pending for a later
         # block. Now that the analyst is the only LLM caller, this threshold governs
         # total analysis-LLM cost.
-        for market_id in list(self.market_ids or []):
+        for market_id in sorted(self.market_ids or []):
             elapsed_llm = self._monotonic() - self._last_llm_call
             if self._last_llm_call != 0 and elapsed_llm < self.min_llm_interval_s:
                 break
@@ -679,6 +701,7 @@ class PersonaAnalyst:
                 articles = await self.news_sub.drain(market_id) if self.news_sub else []
             if not articles:
                 continue
+            raw_articles = articles
             clusters = cluster_near_duplicate_articles(articles)
             deduped_articles = [cluster.representative for cluster in clusters]
             if len(deduped_articles) < len(articles):
@@ -693,6 +716,7 @@ class PersonaAnalyst:
 
             market = self.markets_info.get(market_id)
             if not market:
+                await self._ack_news_batch(market_id)
                 continue
 
             ref_price = (
@@ -701,6 +725,7 @@ class PersonaAnalyst:
                 else market_price(self.news_feed, market_id, block)
             )
             if ref_price <= 0:
+                await self._retry_news_batch(market_id, raw_articles)
                 continue
 
             # Skip resolved markets — don't waste LLM calls.
@@ -713,6 +738,7 @@ class PersonaAnalyst:
                         ref_price,
                     )
                     del self.fair_values[market_id]
+                await self._ack_news_batch(market_id)
                 continue
 
             titles = "; ".join(f'"{a.title[:40]}"' for a in articles)
@@ -732,17 +758,31 @@ class PersonaAnalyst:
                 reference_price=batch_reference_price,
             )
             if not prompt:
+                await self._retry_news_batch(market_id, raw_articles)
                 continue
 
+            # The interval governs attempts, not only successful responses.
+            # Otherwise a transient 5xx/timeout (which deliberately has no
+            # long circuit backoff) would be retried on every block.
+            self._last_llm_call = self._monotonic()
             try:
                 raw_text, llm_duration_s = await self._call_llm(prompt)
-                self._last_llm_call = self._monotonic()
+                self.provider.record_success()
+                await self._ack_news_batch(market_id)
                 if self.metrics is not None:
                     self.metrics.record_llm_call(self.name)
                 log.info("[%s] LLM response (%.1fs):\n%s", self.name, llm_duration_s, raw_text)
-            except Exception as e:
-                log.warning("[%s] LLM call failed: %s", self.name, e)
-                continue
+            except Exception as exc:
+                failure = self.provider.record_failure(exc)
+                await self._retry_news_batch(market_id, raw_articles)
+                log.error(
+                    "[%s] LLM provider failure (kind=%s, backoff=%.0fs): %s",
+                    self.name,
+                    failure.kind,
+                    failure.backoff_seconds,
+                    exc,
+                )
+                break
 
             parsed = self._parse_fair_value(raw_text)
             if parsed is None:

@@ -5,6 +5,8 @@ import logging
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from live.news_feed import (
     GATE_MODEL,
     LiveArticle,
@@ -14,6 +16,7 @@ from live.news_feed import (
     build_search_query,
     llm_gate_batch,
 )
+from live.metrics import ArenaMetrics
 from sybil_client.types import Market
 
 
@@ -58,11 +61,23 @@ def test_search_query_retains_late_subject_terms():
     )
 
 
-async def test_relevance_gate_fails_open_on_provider_error():
+async def test_relevance_gate_surfaces_provider_error_to_feed_policy():
     client = MagicMock()
     client.chat.completions.create = AsyncMock(side_effect=TimeoutError("provider"))
 
-    assert await llm_gate_batch(client, ["one", "two"], "market") == [True, True]
+    with pytest.raises(TimeoutError):
+        await llm_gate_batch(client, ["one", "two"], "market")
+
+
+@pytest.mark.parametrize("answer", ["", "NONE because irrelevant", "0", "3", "1 and 2"])
+async def test_relevance_gate_rejects_malformed_lossy_answers(answer):
+    client = MagicMock()
+    response = MagicMock()
+    response.choices[0].message.content = answer
+    client.chat.completions.create = AsyncMock(return_value=response)
+
+    with pytest.raises(ValueError, match="relevance-gate"):
+        await llm_gate_batch(client, ["one", "two"], "market")
 
 
 async def test_multi_market_article_fans_out_to_all_markets(monkeypatch):
@@ -158,8 +173,6 @@ async def _poll_delivering_one_article(feed, url, title):
     async def fake_text(http, _url):
         return "text"
 
-    import pytest
-
     _mp = pytest.MonkeyPatch()
     _mp.setattr(feed, "_fetch_feed", fake_fetch_feed)
     _mp.setattr("live.news_feed.fetch_article_text", fake_text)
@@ -217,6 +230,28 @@ async def test_paired_batch_barrier_holds_next_batch_until_both_arms_drain():
     stage1_second = await stage1.drain(1)
     assert control_second is stage1_second
     assert control_second == [second]
+
+
+async def test_paired_batch_can_be_retried_without_advancing_other_arm():
+    feed = NewsFeed([_market(1, "Market")], api_key=None)
+    upstream = feed.subscribe(name="paired")
+    barrier = PairedNewsBatchBarrier(upstream, ("control", "stage1"), lambda _market_id: 0.5)
+    control = barrier.view("control")
+    stage1 = barrier.view("stage1")
+    article = _article("http://ex/retry")
+
+    async with feed._lock:
+        upstream._deliver(1, article)
+
+    first_attempt = await control.drain_batch(1)
+    await control.retry_batch(1)
+    retry = await control.drain_batch(1)
+    assert retry is first_attempt
+    await control.ack_batch(1)
+
+    paired = await stage1.drain_batch(1)
+    assert paired is first_attempt
+    await stage1.ack_batch(1)
 
 
 async def test_paired_batch_barrier_concurrent_drains_share_one_snapshot():
@@ -297,3 +332,32 @@ async def test_subscriber_queue_bounds_drop_oldest(caplog):
     # Oldest dropped; only the two most-recent survive, in order.
     assert [a.url for a in drained] == ["http://ex/2", "http://ex/3"]
     assert "dropping oldest" in caplog.text
+
+
+async def test_gate_credit_failure_is_visible_and_backed_off():
+    class CreditError(Exception):
+        status_code = 402
+
+    metrics = ArenaMetrics()
+    feed = NewsFeed(
+        [_market(1, "Market")],
+        api_key="test",
+        poll_interval_s=1,
+        metrics=metrics,
+    )
+    feed._llm_client.chat.completions.create = AsyncMock(side_effect=CreditError("credit"))
+
+    assert await _poll_delivering_one_article(feed, "http://ex/credit-1", "first") == (1, 1)
+    assert await _poll_delivering_one_article(feed, "http://ex/credit-2", "second") == (1, 1)
+
+    # The first failure is classified; the second poll passes evidence through
+    # without hammering a known non-retryable provider state.
+    assert feed._llm_client.chat.completions.create.await_count == 1
+    assert metrics.registry.get_sample_value(
+        "sybil_arena_llm_provider_failures_total",
+        {"component": "news-gate", "kind": "credit"},
+    ) == 1
+    assert metrics.registry.get_sample_value(
+        "sybil_arena_llm_provider_degraded",
+        {"component": "news-gate"},
+    ) == 1

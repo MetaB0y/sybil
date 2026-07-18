@@ -2,7 +2,7 @@
 tags: [arena]
 layer: arena
 status: current
-last_verified: 2026-07-15
+last_verified: 2026-07-18
 ---
 
 Sybil has two LLM trading paths with deliberately different boundaries.
@@ -39,7 +39,18 @@ LLM calls or divergent news inputs.
 LLM cost and failure are contained at the analyst boundary. Each analyst has a persistent spend
 pause threshold; reaching it blocks the next call without affecting other personas. Because cost
 is known only after a completed call, actual spend may exceed the threshold by that final call.
-Parse fallbacks are counted. A durable sizer decision is written exactly once,
+Parse fallbacks are counted. Provider capability is tracked independently from
+that local experiment budget: relevance-gate and analyst calls classify
+authentication, credit, rate-limit, timeout, upstream, and other failures;
+publish degraded/last-success/backoff metrics; and use bounded backoff for
+401/402/429. Failed analyst calls retain their evidence batch for retry and
+still consume the normal call cadence, so a transient failure cannot become a
+per-block retry loop. Relevance-gate failure passes already-seen candidates to
+the analyst rather than destroying evidence. A successful provider response
+clears the degraded state. Alerts, Grafana, and `live.status` make this
+capability distinct from container health and local budget remaining.
+
+A durable sizer decision is written exactly once,
 when a fresh `FairValueUpdate` is first applied; it records the raw/effective fair value, age,
 confidence, restatement, countercase, rejection reason, article sources, and proposed orders.
 Timer-only position management may still emit replacement orders, but it does not duplicate the
@@ -67,7 +78,9 @@ token spend, decisions, snapshots, and portfolios cannot be confused across arms
 two analysts share one feed subscription through a paired batch barrier. The first drain snapshots
 the current per-market article list and one still-unexpired API reference price. Each arm receives
 that exact evidence-and-price batch once, and the next pending batch remains blocked until both
-views consume the active batch. When the reference is unavailable, articles remain queued rather
+views acknowledge the active batch. A failed provider attempt releases only
+that arm's lease so it can retry the identical batch; the other arm cannot
+advance the barrier. When the reference is unavailable, articles remain queued rather
 than being paired with the frozen experiment-start value.
 A paused or lagging arm therefore cannot let the other advance onto differently grouped evidence or
 a later price context. Experiment startup rejects any selected market without a positive external
@@ -197,6 +210,7 @@ uv run python -m scripts.calibration_compare \
 - Per-persona `FairValueBus` gives Kelly and Flat sizers identical analyst inputs
 - Live order sizing and freshness handling are deterministic and LLM-free
 - Persistent per-analyst spend thresholds pause only that analyst's later calls
+- Provider credit/auth health is explicit, independently metered, and evidence-preserving
 - One decision row per fresh forecast application, plus outcome records, supports
   windowed, cohort-pinned calibration
 - Opt-in Stage 1 A/B uses paired evidence batches, isolated Flat arms, and single-run ids

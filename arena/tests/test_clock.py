@@ -3,6 +3,7 @@
 import asyncio
 from datetime import datetime, timedelta
 
+import pytest
 
 from sim.clock import SimulatedClock
 
@@ -111,3 +112,23 @@ def test_resume_without_pause_is_noop():
     clock = SimulatedClock(sim_start=t0)
     clock.start()
     clock.resume()  # should not raise
+
+
+@pytest.mark.parametrize("ratio", [0, -1, float("inf"), float("nan")])
+def test_invalid_compression_ratio_is_rejected(ratio):
+    with pytest.raises(ValueError, match="compression_ratio"):
+        SimulatedClock(datetime(2026, 1, 1), compression_ratio=ratio)
+
+
+@pytest.mark.anyio
+async def test_sleep_sim_does_not_advance_through_pause():
+    clock = SimulatedClock(datetime(2026, 1, 1), compression_ratio=100.0)
+    clock.start()
+    clock.pause()
+
+    sleeper = asyncio.create_task(clock.sleep_sim(1))
+    await asyncio.sleep(0.03)
+    assert not sleeper.done()
+
+    clock.resume()
+    await asyncio.wait_for(sleeper, timeout=0.1)

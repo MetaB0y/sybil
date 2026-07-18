@@ -3,7 +3,7 @@ tags: [audit, code-quality, collaboration, codex]
 layer: cross-cutting
 status: current
 date: 2026-07-17
-last_verified: 2026-07-17
+last_verified: 2026-07-18
 ---
 
 # Code-quality audit collaboration log — July 2026
@@ -442,3 +442,51 @@ that needed a single classification owner.
   gates validate the refreshed graphs.
 - No proof generation or deployment occurred.
 - The next cluster is Python/Arena data and experiment correctness.
+
+## 2026-07-18T12:56:54+01:00 — Python/Arena data and experiment correctness
+
+### Primary-reviewer method and reusable handoff
+
+- Treat transport failure and unknown canonical state as states, never as
+  empty account/order/evidence data.
+- For simulations, require point-in-time inputs and observed simulated
+  timestamps; block-height interpolation and calendar-date matching are not
+  time evidence.
+- Distinguish proposed, API-accepted, and filled orders in both accounting and
+  failure handling.
+- Make provider capability independent of local model-spend budgets and
+  container liveness.
+- Publish server construction constraints through a typed boundary; keep risk
+  decisions in the strategy layer.
+
+### Findings and decisions
+
+- Made canonical account/fill and pending-order refresh fail closed before
+  strategy calls; fixed accepted-order/max-block accounting and isolated
+  post-acceptance hooks.
+- Prevented transient startup failures from replacing durable bot identities
+  and minting newly funded accounts.
+- Removed future-price leakage, wall-clock elapsed time, hidden background-task
+  failures, cumulative day output, fabricated sim time, and collision-prone
+  result persistence from backtests.
+- Implemented GitHub #192: shared LLM failure classification/backoff,
+  evidence-preserving retries, paired lease/ack semantics, provider metrics,
+  status, Grafana, and tested alerts.
+- Fixed a follow-on defect where transient analyst failures retried each block
+  and made malformed lossy-gate output fail open rather than discard evidence.
+- Implemented GitHub #193: public exact order-admission policy, regenerated
+  SDK, conservative central dust suppression, durable reason, metric, status,
+  dashboard, and boundary tests.
+- Retained only explicit ambiguous trade-offs: generic demo-feed time,
+  best-effort status HTTP, startup-scoped policy refresh, and transport success
+  versus parse quality.
+
+### Result
+
+- Report:
+  [`code-quality-audit-arena-correctness-2026-07-18.md`](code-quality-audit-arena-correctness-2026-07-18.md)
+- Arena Ruff and all 352 tests pass; API/OpenAPI, serial process-restart,
+  Prometheus alert-rule, generated-SDK, JSON/YAML, and documentation gates pass.
+- No proof generation, deployment, protocol-byte, or solver-policy change
+  occurred.
+- The next cluster is frontend semantic correctness and accessibility.

@@ -706,6 +706,33 @@ groups:
           summary: "Arena news feed polls are erroring"
           description: "At least 3 arena news feed poll cycles have raised in the last 15m. Upstream RSS, the LLM gate, or Polymarket price fetches may be failing."
 
+      - alert: ArenaLlmProviderAuthOrCreditRejected
+        expr: |
+          sum(
+            increase(
+              sybil_arena_llm_provider_failures_total{
+                kind=~"authentication|credit"
+              }[10m]
+            )
+          ) > 0
+        for: 0m
+        labels:
+          severity: critical
+          component: arena
+        annotations:
+          summary: "Arena LLM provider rejected authentication or credit"
+          description: "An Arena relevance-gate or analyst call received HTTP 401/402 in the last 10m. Synthetic trading may remain healthy while the LLM product capability is degraded; local experiment budget does not represent provider credit."
+
+      - alert: ArenaLlmProviderDegraded
+        expr: max(sybil_arena_llm_provider_degraded) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: arena
+        annotations:
+          summary: "Arena LLM provider capability remains degraded"
+          description: "At least one Arena relevance-gate or analyst caller has not recovered from its latest provider failure for 5m. Inspect failure classification, last-success, and backoff metrics."
+
       - alert: ProverDown
         expr: up{job="sybil-prover"} == 0
         for: 2m

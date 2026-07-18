@@ -5,7 +5,9 @@ use serde_json;
 
 use crate::state::AppState;
 use crate::types::error::AppError;
-use crate::types::response::{AttestationResponse, HealthResponse, StateRootResponse};
+use crate::types::response::{
+    AttestationResponse, HealthResponse, OrderAdmissionPolicyResponse, StateRootResponse,
+};
 
 /// GET /v1/attestation
 ///
@@ -61,6 +63,24 @@ pub async fn health(State(state): State<AppState>) -> (StatusCode, Json<HealthRe
             )
         }
     }
+}
+
+/// GET /v1/orders/policy
+#[utoipa::path(
+    tag = "routessystem",
+    get,
+    path = "/v1/orders/policy",
+    responses(
+        (status = 200, description = "Public order-construction admission policy", body = OrderAdmissionPolicyResponse)
+    )
+)]
+pub async fn order_admission_policy(
+    State(state): State<AppState>,
+) -> Json<OrderAdmissionPolicyResponse> {
+    Json(OrderAdmissionPolicyResponse {
+        min_order_notional_nanos: state.min_order_notional_nanos,
+        share_scale: matching_engine::SHARE_SCALE,
+    })
 }
 
 fn operational_health(

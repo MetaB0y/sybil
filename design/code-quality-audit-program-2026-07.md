@@ -3,7 +3,7 @@ tags: [audit, code-quality, planning, testing, codex]
 layer: cross-cutting
 status: current
 date: 2026-07-17
-last_verified: 2026-07-17
+last_verified: 2026-07-18
 ---
 
 # Code-quality audit program — July 2026
@@ -86,48 +86,45 @@ The program is deliberately repository-aware and validation-heavy:
 | Error, panic, and recovery boundaries | Audited and strengthened; service-create identity and file fault matrix open | [`code-quality-audit-error-recovery-2026-07-17.md`](code-quality-audit-error-recovery-2026-07-17.md), GitHub #188/#189 and existing #129 |
 | Static lint, dead code, and unsafe-code policy | Audited, fixed, and enforced | [`code-quality-audit-static-lint-unsafe-2026-07-18.md`](code-quality-audit-static-lint-unsafe-2026-07-18.md); zero authored unsafe and strict feature/standalone gates |
 | Dependency and build supply chain | Audited and remediated; three upstream exceptions open | [`code-quality-audit-dependency-supply-chain-2026-07-18.md`](code-quality-audit-dependency-supply-chain-2026-07-18.md), GitHub #194/#195 plus existing #65/#118 |
-| Performance and algorithmic complexity | Partially covered by DoS audit | Allocation/copy hotspots, serialization amplification, solver worst cases, query indexes, benchmark regression gates |
-| Documentation, API, and implementation drift | Partially covered | Route/OpenAPI pins, generated clients, config/runbook drift, architecture freshness and link gates |
-| Python/Arena data and experiment correctness | **Next** | Time semantics, leakage, determinism, fixture realism, result persistence, bot isolation |
-| Frontend semantic correctness and accessibility | Queued | Exact-domain conversions, cache invalidation, async races, keyboard/screen-reader flows, failure-state UX |
+| Performance and algorithmic complexity | Queued | Allocation/copy hotspots, serialization amplification, non-solver worst cases, query indexes, benchmark regression gates |
+| Documentation, API, and implementation drift | Queued | Route/OpenAPI pins, generated clients, config/runbook drift, architecture freshness and link gates |
+| Python/Arena data and experiment correctness | Audited and fixed | [`code-quality-audit-arena-correctness-2026-07-18.md`](code-quality-audit-arena-correctness-2026-07-18.md), GitHub #192/#193 |
+| Frontend semantic correctness and accessibility | **Next** | Exact-domain conversions, cache invalidation, async races, keyboard/screen-reader flows, failure-state UX |
 | Solidity/L1 differential semantics | Queued | Rust/Solidity hash/ABI parity, invariant tests, reorg/finality assumptions, mutation/fuzz campaigns |
 
-## Next-cluster charter: static lint, dead code, and unsafe-code policy
+## Next-cluster charter: frontend semantic correctness and accessibility
 
-The next cluster should answer one question: can automated static checks reject
-new production hazards without hiding feature-specific code, generated
-artifacts, deliberate invariant assertions, or guest constraints in a noisy
-workspace-wide allowlist?
+The next cluster should answer one question: does the browser present exact,
+current exchange state through accessible interactions without inventing
+success, hiding failure, or racing realtime and backfilled data?
 
 Initial scope:
 
-- normal, all-target, and all-feature Clippy surfaces across every workspace;
-- crate/module lint overrides and suppressed warnings, including the reason and
-  narrowest scope for each;
-- exported-but-unused APIs, feature-only helpers, obsolete compatibility
-  branches, and generated-code boundaries;
-- every `unsafe` block/function/impl plus the invariant that makes it sound;
-- production `unwrap`/`expect`/`panic` policy informed by the completed
-  error/recovery inventory; and
-- CI/toolchain differences that cause local strict lint to diverge from the
-  checked gate.
+- exact nanodollar/share conversion and formatting at every component edge;
+- query-cache ownership, invalidation, and current-chain identity;
+- WebSocket replay/backfill handoff, stale loading labels, and async races;
+- mutation success/error/unknown states and optimistic UI rollback;
+- keyboard, focus, dialog, form-label, reduced-motion, and screen-reader flows;
+- chart scale/smoothing semantics and small-card information integrity; and
+- natural-language computer-use scenarios alongside focused Vitest/component
+  evidence.
 
 Method:
 
-1. Render the effective feature/target matrix before interpreting warnings.
-2. Capture a reproducible baseline by crate, lint, target, and feature profile.
-3. Prove reachability and ownership before deleting an export or branch.
-4. Require a local safety comment and executable invariant evidence for each
-   retained `unsafe` boundary.
-5. Convert reviewed production panic restrictions into scoped denies plus
-   explicit, reasoned allows; do not enable restriction lints indiscriminately.
-6. Fix bounded findings and file only coherent policy/architecture work after
-   deduplicating GitHub Issues.
+1. Trace each page from generated schema through parsing, cache, provider, and
+   rendered state before interpreting a visual symptom.
+2. Use exact boundary corpora and fake-clock/deferred-promise tests for races.
+3. Exercise primary flows with keyboard-only and semantic DOM assertions.
+4. Treat “loading,” “empty,” “stale,” “failed,” and “ready” as distinct states.
+5. Keep chart transforms visually helpful but semantically labelled and
+   reversible; never smooth values used for settlement or exact display.
+6. Fix bounded findings and file only coherent product/architecture trade-offs
+   after deduplicating GitHub Issues.
 
-Completion requires a dated lint/unsafe inventory, feature-matrix evidence,
-zero unexplained strict warnings in the selected production profiles, bounded
-dead-code cleanup, reviewed unsafe invariants, documented suppressions,
-deduplicated issues, and proportionate test/documentation gates.
+Completion requires a dated page/data-flow inventory, executable exactness and
+race evidence, primary accessibility coverage, reviewed chart semantics,
+natural-language computer-use scenarios, generated-client drift checks, full
+frontend gates, deduplicated issues, and explicit unresolved product choices.
 
 ## Reusable review prompt
 

@@ -65,6 +65,7 @@ use crate::util::now_ms;
         MarketSearchParams,
         AccountResponse,
         OnboardingPolicyResponse,
+        OrderAdmissionPolicyResponse,
         PositionResponse,
         BridgeStatusResponse,
         BridgeDomainResponse,
@@ -528,6 +529,7 @@ declare_route_registry! {
         "GET" "/v1/bots/equity-series" => routes::bots::get_bot_equity_series;
         "GET" "/v1/leaderboard" => routes::leaderboard::get_leaderboard;
         "GET" "/v1/health" => routes::system::health;
+        "GET" "/v1/orders/policy" => routes::system::order_admission_policy;
         "GET" "/v1/state-root" => routes::system::state_root;
         "GET" "/v1/da/{height}/manifest" => routes::da::get_da_manifest;
         "GET" "/v1/onboarding" => routes::accounts::get_onboarding_policy;

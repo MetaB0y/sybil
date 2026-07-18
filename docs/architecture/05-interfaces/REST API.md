@@ -26,7 +26,7 @@ migration but always emits strings, and OpenAPI advertises the string contract.
 Clients must parse these values with integer/big-integer arithmetic rather than
 floating point.
 
-The endpoint groups are: **System** (`/v1/health`, `/v1/state-root`), **Proofs** (`/v1/proofs/state/{leaf_key_hex}`), **Data Availability** (`/v1/da/{height}/manifest`, `/v1/da/{height}/payload`), **Accounts** (create, query balance/positions, fund, register keys), **Markets** (list, create, query details/prices/groups, resolve), **Orders** (submit unsigned or [[P256 Authentication|signed]]), **Bridge** (status, account bridge keys, L1 deposits, signed/unsigned withdrawal leaves), and **Blocks** (latest, by height, and the privacy-preserving [[WebSocket Block Stream|public WebSocket stream]] at `/v2/blocks/ws?from_block=N`). `/v1/health` reads committed height and genesis hash in one actor snapshot; snapshot failure returns 503 rather than reporting a partial chain identity as healthy. Operator/service writes, the state-proof and DA-payload custody surfaces, authenticated canonical v1 block stream, and bridge operations require `Authorization: Bearer $SYBIL_SERVICE_TOKEN`; an unset token fails closed. Dev mode skips that service bearer check for local workflows and additionally mounts simulation pause/resume, diagnostic all-pending/orderbook listings, and the explicit unverified [[Attestation|attestation shape stub]].
+The endpoint groups are: **System** (`/v1/health`, `/v1/state-root`), **Proofs** (`/v1/proofs/state/{leaf_key_hex}`), **Data Availability** (`/v1/da/{height}/manifest`, `/v1/da/{height}/payload`), **Accounts** (create, query balance/positions, fund, register keys), **Markets** (list, create, query details/prices/groups, resolve), **Orders** (public construction policy plus unsigned or [[P256 Authentication|signed]] submission), **Bridge** (status, account bridge keys, L1 deposits, signed/unsigned withdrawal leaves), and **Blocks** (latest, by height, and the privacy-preserving [[WebSocket Block Stream|public WebSocket stream]] at `/v2/blocks/ws?from_block=N`). `/v1/health` reads committed height and genesis hash in one actor snapshot; snapshot failure returns 503 rather than reporting a partial chain identity as healthy. Operator/service writes, the state-proof and DA-payload custody surfaces, authenticated canonical v1 block stream, and bridge operations require `Authorization: Bearer $SYBIL_SERVICE_TOKEN`; an unset token fails closed. Dev mode skips that service bearer check for local workflows and additionally mounts simulation pause/resume, diagnostic all-pending/orderbook listings, and the explicit unverified [[Attestation|attestation shape stub]].
 
 When `SYBIL_EVENT_SNAPSHOT_DIR` is configured, startup requires that directory
 to be usable. Raw event PUTs publish through a unique same-directory temporary
@@ -163,6 +163,13 @@ longer tradeable returns `409 MARKET_NOT_TRADEABLE` with `details.market_id`
 and `details.market_status`. Bots and SDKs use those stable fields to remove
 only the rejected market from a batch. The human-readable `error` remains a
 diagnostic and is not a machine interface.
+
+`GET /v1/orders/policy` is the public order-construction capability boundary.
+It reports the active minimum ordinary-order notional as an exact decimal
+nanodollar string and the canonical share-unit scale. Clients use this before
+constructing orders instead of duplicating a deployment default. The policy
+does not apply to flash-liquidity/MM bundles, which are one-shot and validated
+under their separate budget constraint.
 
 Trusted `POST /v1/markets` callers may supply `creation_key` as a stable
 operator identity (at most 128 ASCII letters, digits, or `-_:./`). The first
@@ -326,6 +333,7 @@ row. In-memory API instances return 503 because they have no durable outbox.
 - DA endpoints expose public typed manifests and service-gated retained witness payload bytes
 - Public block endpoints expose a typed market-tape projection; canonical account rows are service-only
 - Order submissions support GTC, IOC, and GTD time-in-force
+- `GET /v1/orders/policy` advertises exact ordinary-order construction constraints
 - Stateless API layer — all state in sequencer
 - CORS is permissive only in dev mode; production uses `SYBIL_CORS_ORIGINS` and defaults to same-origin only
 - `GET /v1/attestation` is an unverified shape stub mounted only in dev mode; production returns 404 until real Nitro verification exists

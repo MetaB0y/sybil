@@ -298,6 +298,8 @@ pub struct AppState {
     /// Server-selected balance for public onboarding. Caller-selected funding
     /// remains confined to service/dev account creation.
     pub public_account_grant_nanos: u64,
+    /// Public construction policy for ordinary non-MM orders.
+    pub min_order_notional_nanos: u64,
     /// Cheap pre-handler budget for anonymous onboarding key material.
     pub http_onboarding_limiter: Arc<HttpRateLimiter>,
     /// Public DA reads have their own low-rate bucket and a hard in-flight cap
@@ -403,6 +405,7 @@ impl AppState {
             )),
             public_account_capacity: config.public_account_capacity,
             public_account_grant_nanos: config.public_account_grant_nanos,
+            min_order_notional_nanos: config.min_resting_order_notional_nanos,
             http_onboarding_limiter: Arc::new(HttpRateLimiter::new(
                 config.http_onboarding_global_rps,
                 config.http_onboarding_global_burst,

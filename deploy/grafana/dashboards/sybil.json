@@ -986,6 +986,76 @@
         "defaults": { "unit": "ops", "min": 0, "custom": { "drawStyle": "bars", "fillOpacity": 35 } },
         "overrides": []
       }
+    },
+    {
+      "title": "Arena LLM Provider",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 164 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "title": "LLM Callers Degraded",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 165 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{
+        "expr": "sum(sybil_arena_llm_provider_degraded)",
+        "legendFormat": "degraded callers",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "red", "value": 1 }
+        ] } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "LLM Provider Last-Success Age",
+      "type": "timeseries",
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 165 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{
+        "expr": "time() - sybil_arena_llm_provider_last_success_timestamp_seconds > 0",
+        "legendFormat": "{{component}}",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "LLM Provider Failures",
+      "type": "timeseries",
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 165 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{
+        "expr": "sum by (component, kind) (increase(sybil_arena_llm_provider_failures_total[10m]))",
+        "legendFormat": "{{component}}: {{kind}}",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "custom": { "drawStyle": "bars", "fillOpacity": 35 } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Arena Orders Suppressed Before Submission",
+      "type": "timeseries",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 169 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{
+        "expr": "sum by (reason) (increase(sybil_arena_orders_suppressed_total[10m]))",
+        "legendFormat": "{{reason}}",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "custom": { "drawStyle": "bars", "fillOpacity": 35 } },
+        "overrides": []
+      }
     }
   ],
   "schemaVersion": 39,

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import live.runner as runner
+from sybil_client import SybilClientError
 
 
 def test_synthetic_capital_is_fixed_across_actor_counts():
@@ -216,3 +217,45 @@ async def test_only_experiment_arm_baseline_failures_abort_startup():
             MagicMock(),
             required_trader_names={experiment.name},
         )
+
+
+async def test_persisted_account_is_replaced_only_after_authoritative_404():
+    db = MagicMock()
+    db.get_bot_account_id.return_value = 42
+    client = MagicMock()
+    client.get_account = AsyncMock(side_effect=SybilClientError(404, "not found"))
+    client.create_account = AsyncMock(return_value=SimpleNamespace(id=99))
+
+    account_id = await runner._resolve_bot_account(
+        client,
+        db,
+        "persona",
+        "Flat",
+        500_000_000_000,
+        "Persona (Flat)",
+    )
+
+    assert account_id == 99
+    db.save_bot_account_id.assert_called_once_with("persona", "Flat", 99)
+
+
+async def test_transient_account_lookup_failure_does_not_mint_new_capital():
+    db = MagicMock()
+    db.get_bot_account_id.return_value = 42
+    client = MagicMock()
+    client.get_account = AsyncMock(side_effect=SybilClientError(503, "unavailable"))
+    client.create_account = AsyncMock()
+
+    with pytest.raises(SybilClientError) as raised:
+        await runner._resolve_bot_account(
+            client,
+            db,
+            "persona",
+            "Flat",
+            500_000_000_000,
+            "Persona (Flat)",
+        )
+
+    assert raised.value.status_code == 503
+    client.create_account.assert_not_awaited()
+    db.save_bot_account_id.assert_not_called()

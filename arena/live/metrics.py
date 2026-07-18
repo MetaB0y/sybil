@@ -171,7 +171,7 @@ class ArenaMetrics:
         )
         self.llm_budget_remaining_usd = Gauge(
             "sybil_arena_llm_budget_remaining_usd",
-            "Remaining USD LLM budget per arena agent.",
+            "Remaining local Arena experiment budget per agent; not provider credit.",
             ["trader"],
             registry=self.registry,
         )
@@ -185,6 +185,42 @@ class ArenaMetrics:
             "sybil_arena_analyst_parse_fallbacks",
             "Structured analyst response fields that fell back to conservative defaults.",
             ["trader", "field"],
+            registry=self.registry,
+        )
+        self.llm_provider_failures = Counter(
+            "sybil_arena_llm_provider_failures",
+            "OpenAI-compatible provider failures classified by caller and kind.",
+            ["component", "kind"],
+            registry=self.registry,
+        )
+        self.llm_provider_degraded = Gauge(
+            "sybil_arena_llm_provider_degraded",
+            "1 when the caller's latest provider attempt failed, else 0.",
+            ["component"],
+            registry=self.registry,
+        )
+        self.llm_provider_last_success = Gauge(
+            "sybil_arena_llm_provider_last_success_timestamp_seconds",
+            "Unix time of the caller's latest successful provider response (0 = never).",
+            ["component"],
+            registry=self.registry,
+        )
+        self.llm_provider_last_failure = Gauge(
+            "sybil_arena_llm_provider_last_failure_timestamp_seconds",
+            "Unix time of the caller's latest failed provider response (0 = never).",
+            ["component"],
+            registry=self.registry,
+        )
+        self.llm_provider_backoff_until = Gauge(
+            "sybil_arena_llm_provider_backoff_until_timestamp_seconds",
+            "Unix time before which the caller suppresses provider attempts (0 = no backoff).",
+            ["component"],
+            registry=self.registry,
+        )
+        self.orders_suppressed = Counter(
+            "sybil_arena_orders_suppressed",
+            "Arena-generated orders suppressed before API submission.",
+            ["trader", "reason"],
             registry=self.registry,
         )
 
@@ -259,6 +295,37 @@ class ArenaMetrics:
             self.analyst_parse_fallbacks.labels(trader=trader_name, field=field).inc()
         except Exception:  # pragma: no cover - defensive
             log.debug("record_analyst_parse_fallback metrics update failed", exc_info=True)
+
+    def record_llm_provider_failure(
+        self,
+        component: str,
+        kind: str,
+        backoff_seconds: float,
+    ) -> None:
+        try:
+            now = time.time()
+            self.llm_provider_failures.labels(component=component, kind=kind).inc()
+            self.llm_provider_degraded.labels(component=component).set(1)
+            self.llm_provider_last_failure.labels(component=component).set(now)
+            self.llm_provider_backoff_until.labels(component=component).set(
+                now + backoff_seconds if backoff_seconds > 0 else 0
+            )
+        except Exception:  # pragma: no cover - defensive
+            log.debug("record_llm_provider_failure metrics update failed", exc_info=True)
+
+    def record_llm_provider_success(self, component: str) -> None:
+        try:
+            self.llm_provider_degraded.labels(component=component).set(0)
+            self.llm_provider_last_success.labels(component=component).set(time.time())
+            self.llm_provider_backoff_until.labels(component=component).set(0)
+        except Exception:  # pragma: no cover - defensive
+            log.debug("record_llm_provider_success metrics update failed", exc_info=True)
+
+    def record_order_suppressed(self, trader_name: str, reason: str, count: int = 1) -> None:
+        try:
+            self.orders_suppressed.labels(trader=trader_name, reason=reason).inc(count)
+        except Exception:  # pragma: no cover - defensive
+            log.debug("record_order_suppressed metrics update failed", exc_info=True)
 
 
 def start_metrics_server(

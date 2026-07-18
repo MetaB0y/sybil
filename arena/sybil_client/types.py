@@ -98,6 +98,14 @@ class MarketGroup:
     market_ids: tuple[int, ...]
 
 
+@dataclass(frozen=True)
+class OrderAdmissionPolicy:
+    """Server-advertised construction constraints for ordinary orders."""
+
+    min_order_notional_nanos: int
+    share_scale: int
+
+
 @dataclass
 class Fill:
     """A fill from the matching engine."""

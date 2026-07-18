@@ -4,6 +4,7 @@ PUBLIC GET /v1/bots/decisions
 PUBLIC GET /v1/bots/equity-series
 PUBLIC GET /v1/leaderboard
 PUBLIC GET /v1/health
+PUBLIC GET /v1/orders/policy
 PUBLIC GET /v1/state-root
 PUBLIC GET /v1/da/{height}/manifest
 PUBLIC GET /v1/onboarding
