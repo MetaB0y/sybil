@@ -3,7 +3,7 @@ tags: [solver, crate]
 layer: solver
 crate: matching-solver
 status: current
-last_verified: 2026-07-13
+last_verified: 2026-07-18
 ---
 
 The MILP Solver formulates matching plus [[MM Budget Constraint|MM budget constraints]] as a mixed-integer quadratically constrained program and solves it with SCIP through `russcip`. It is the exact/reference route when SCIP reaches a proven optimum; with a timeout it may return the best feasible solution found so far.
@@ -15,7 +15,14 @@ SCIP the original non-convex model. This is NP-hard in general; small references
 can prove global optimality, while realistic or adversarial books may exhaust a
 configured timeout. A timeout incumbent is never described as exact.
 
-The solver is feature-gated because SCIP has external dependencies. Its primary role is benchmarking and validation against faster convex/heuristic paths. The formulation scales prices to dollars and monetary objectives likewise before calling SCIP; raw nanos made nonlinear feasibility numerically unreliable. Returned prices are then landed inside every filled order's integer limit interval, with any market-group rounding remainder distributed inside those intervals before verification.
+The solver is feature-gated because SCIP has external dependencies. Its
+primary role is benchmarking and validation against faster convex/heuristic
+paths. The formulation scales prices to dollars and monetary objectives before
+calling SCIP; raw nanos made nonlinear feasibility numerically unreliable.
+SCIP's price variables constrain its allocation but are not published. Landed
+fills pass through the same [[LP Duality and Clearing Prices|canonical integer
+price selector]] as the convex solvers, followed by a bounded hard-budget
+fixed point.
 
 ## Key Properties
 - SCIP via `russcip` — MIQCQP branch-and-bound

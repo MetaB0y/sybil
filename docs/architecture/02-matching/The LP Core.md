@@ -3,7 +3,7 @@ tags: [concept, solver]
 layer: solver
 crate: matching-solver
 status: current
-last_verified: 2026-07-17
+last_verified: 2026-07-18
 ---
 
 Without market maker budget constraints, the welfare-maximizing matching problem is a plain Linear Program. This is the structural insight that makes Sybil tractable: the core problem is trivially solvable, and all computational difficulty comes from a small number of [[MM Budget Constraint|bilinear side constraints]].
@@ -45,17 +45,18 @@ curve, while categorical groups merge those curves under one price-simplex
 capacity. Complementary-slackness intervals recover a matching primal point.
 This structural price sweep is exact only for the zero-RHS matching oracle;
 budget rows, supporting-face projection, and integer landing remain general
-HiGHS problems. Balance-constraint duals become [[LP Duality and Clearing
-Prices|clearing prices]] and minting stationarity produces price coherence.
-The final protocol boundary clamps approximate floating duals to the exact
-integer price interval supporting every rounded fill and preserves the
-categorical group cap; the verifier still checks the landed integer result.
+HiGHS problems. Balance-constraint duals characterize the [[LP Duality and
+Clearing Prices|equilibrium-price face]] and minting stationarity produces
+price coherence. The final protocol boundary reconstructs that face from
+landed integer fills and chooses its canonical maximum-entropy point. Solver
+duals are not published; the verifier independently recomputes the selection.
 
 ## Key Properties
 - Variables: `q_i` (fills), free signed `mint_m` (per-market creation/burning), nonnegative `gmint_g` (group creation) — all continuous, bounded
 - Constraints: per-outcome minting epigraph inequalities + quantity bounds
 - O(N + M + G) size — trivially solvable by simplex or interior-point methods
-- Clearing prices = [[LP Duality and Clearing Prices|dual variables]] of balance constraints
+- Clearing-price support = dual-optimal face of the balance constraints
+- Protocol price = canonical integer maximum-entropy point of that face
 - The [[MM Budget Constraint]] is the only thing that makes this hard
 
 ## Where This Lives

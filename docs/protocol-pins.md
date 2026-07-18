@@ -26,8 +26,8 @@ status: current
 
 | Guest | Executable commitment | VM commitment |
 |---|---|---|
-| State transition | `0x0078357d8232fb0ded2c529dc8b920e78a12a965ae46b5a4c93d9d03e8658210` | `0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d` |
-| Escape claim | `0x008c8f972e57f4b15163aa7bb8d5ca89c5532212c091bb85c1c19a1428a53ffd` | `0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d` |
+| State transition | `0x0079b1a181ea4ac954db8c19c1cd74382b8a6cb1c4c86348f74152b0777df961` | `0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d` |
+| Escape claim | `0x0097bc9bfbbeafe1005708bb5ec1cff2c5a310532f542304d309d1ab6479a6cf` | `0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d` |
 
 ## Deployment coordination
 

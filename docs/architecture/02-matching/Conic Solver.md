@@ -3,7 +3,7 @@ tags: [solver, crate]
 layer: solver
 crate: matching-solver
 status: current
-last_verified: 2026-07-13
+last_verified: 2026-07-18
 ---
 
 The Conic Solver uses Clarabel, a Rust-native interior-point solver for conic
@@ -38,9 +38,10 @@ development-sweep availability, but it does not turn every ill-scaled generated
 book into a solved instance. Non-solved statuses remain visible with iteration,
 objective-gap, and residual diagnostics; they are never replaced by an LP
 allocation. Solved continuous allocations pass through the shared supporting
-LP and [[LP Duality and Clearing Prices|integer supporting-price recovery]];
-this prevents one-nano order-limit violations from floating dual rounding
-without hiding genuine Clarabel convergence failures.
+LP and [[LP Duality and Clearing Prices|canonical integer price selection]].
+Clarabel may identify the allocation face, but its numerically selected dual
+point is never published. This isolates its known numerical availability
+failures from protocol price determinism without hiding them.
 
 ## Key Properties
 - Clarabel interior-point solver (Rust-native, conic)

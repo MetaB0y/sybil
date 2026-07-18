@@ -48,6 +48,7 @@ pub fn verify_match(witness: &BlockWitness, diagnostics: bool) -> VerificationRe
     // --- Market-level checks ---
     verify_order_id_uniqueness(witness, &mut violations);
     verify_price_complementarity(witness, &mut violations);
+    verify_canonical_clearing_prices(witness, &mut violations);
     verify_resolved_markets(witness, &order_map, &mut violations);
     verify_conditional_activation(witness, &order_map, &mut violations);
 
@@ -470,6 +471,83 @@ fn verify_price_complementarity(witness: &BlockWitness, violations: &mut Vec<Vio
     }
 }
 
+fn verify_canonical_clearing_prices(witness: &BlockWitness, violations: &mut Vec<Violation>) {
+    let orders: Vec<_> = witness
+        .orders
+        .iter()
+        .map(|witness_order| witness_order.order.clone())
+        .collect();
+    let order_map: HashMap<_, _> = orders.iter().map(|order| (order.id, order)).collect();
+    let freshly_cleared: std::collections::BTreeSet<_> = witness
+        .fills
+        .iter()
+        .filter(|fill| fill.fill_qty.0 > 0)
+        .filter_map(|fill| order_map.get(&fill.order_id))
+        .flat_map(|order| {
+            std::iter::once(order.markets[0])
+                .chain(order.condition.as_ref().map(|condition| condition.market))
+        })
+        .collect();
+    let expected = match matching_engine::canonical_clearing_prices(
+        &orders,
+        &witness.fills,
+        &witness.mm_constraints,
+        &witness.market_groups,
+    ) {
+        Ok(selection) => selection.prices,
+        Err(error) => {
+            violations.push(Violation {
+                kind: ViolationKind::CanonicalClearingPriceViolation,
+                details: format!("canonical clearing price could not be derived: {error}"),
+            });
+            return;
+        }
+    };
+
+    let mut mismatches = Vec::new();
+    for &market in &freshly_cleared {
+        let Some(expected_prices) = expected.get(&market) else {
+            mismatches.push(format!(
+                "{market}: canonical selector returned no fresh price"
+            ));
+            continue;
+        };
+        match witness.clearing_prices.get(&market) {
+            Some(actual) if actual == expected_prices => {}
+            Some(actual) => mismatches.push(format!(
+                "{market}: expected {expected_prices:?}, got {actual:?}"
+            )),
+            None => mismatches.push(format!("{market}: missing; expected {expected_prices:?}")),
+        }
+    }
+    let previous_prices: HashMap<_, _> = witness
+        .pre_state_sidecar
+        .markets
+        .iter()
+        .map(|market| (market.market_id, &market.last_clearing_prices))
+        .collect();
+    for (&market, actual) in &witness.clearing_prices {
+        if freshly_cleared.contains(&market) {
+            continue;
+        }
+        if previous_prices
+            .get(&market)
+            .is_none_or(|previous| **previous != *actual)
+        {
+            mismatches.push(format!(
+                "{market}: non-clearing entry does not carry the previous committed price"
+            ));
+        }
+    }
+    if !mismatches.is_empty() {
+        mismatches.sort();
+        violations.push(Violation {
+            kind: ViolationKind::CanonicalClearingPriceViolation,
+            details: mismatches.join("; "),
+        });
+    }
+}
+
 /// Check 14: Market group constraint — sum of YES clearing prices <= $1.
 fn verify_market_group_constraints(witness: &BlockWitness, violations: &mut Vec<Violation>) {
     for group in &witness.market_groups {
@@ -587,7 +665,7 @@ fn verify_conditional_activation(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{WitnessBlockHeader, WitnessOrder};
+    use crate::types::{MarketSnapshot, MarketStatusSnapshot, WitnessBlockHeader, WitnessOrder};
     use matching_engine::{
         ConditionDir, MarketSet, MmConstraint, MmId, MmSide, Nanos, Qty, conditional_buy,
         gross_welfare_from_fills, minting_cost_from_fills, net_welfare, outcome_sell,
@@ -747,6 +825,50 @@ mod tests {
             violation.kind == ViolationKind::UniformClearingPriceViolation
                 && violation.details.contains("missing clearing price")
         }));
+    }
+
+    #[test]
+    fn arbitrary_dual_endpoint_is_not_a_canonical_clearing_price() {
+        let mut markets = MarketSet::new();
+        let market = markets.add_binary("M0");
+        let orders = vec![
+            WitnessOrder {
+                order: simple_yes_buy(&markets, 1, market, 700_000_000, 50),
+                account_id: 0,
+                is_mm: false,
+            },
+            WitnessOrder {
+                order: outcome_sell(&markets, 2, market, 0, 200_000_000, 50),
+                account_id: 1,
+                is_mm: false,
+            },
+        ];
+        let fills = vec![
+            Fill::new(1, Qty(50), Nanos(200_000_000)),
+            Fill::new(2, Qty(50), Nanos(200_000_000)),
+        ];
+        let mut witness = make_witness(orders, fills);
+        witness
+            .clearing_prices
+            .insert(market, vec![Nanos(200_000_000), Nanos(800_000_000)]);
+        refresh_welfare(&mut witness);
+
+        let endpoint = verify_match(&witness, false);
+        assert!(
+            endpoint.violations.iter().any(|violation| {
+                violation.kind == ViolationKind::CanonicalClearingPriceViolation
+            })
+        );
+
+        witness
+            .clearing_prices
+            .insert(market, vec![Nanos(500_000_000), Nanos(500_000_000)]);
+        for fill in &mut witness.fills {
+            fill.fill_price = Nanos(500_000_000);
+        }
+        refresh_welfare(&mut witness);
+        let canonical = verify_match(&witness, false);
+        assert!(canonical.valid, "{:?}", canonical.violations);
     }
 
     #[test]
@@ -938,7 +1060,54 @@ mod tests {
             .insert(m0, vec![Nanos(600_000_000), Nanos(400_000_000)]);
 
         let result = verify_match(&witness, false);
-        assert!(result.valid, "Violations: {:?}", result.violations);
+        assert!(
+            !result
+                .violations
+                .iter()
+                .any(|violation| violation.kind == ViolationKind::PriceComplementarityViolation),
+            "Violations: {:?}",
+            result.violations,
+        );
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|violation| violation.kind == ViolationKind::CanonicalClearingPriceViolation),
+            "a price for a market absent from the batch is not canonical"
+        );
+    }
+
+    #[test]
+    fn historical_price_may_be_carried_but_not_changed_without_a_fill() {
+        let market = MarketId::new(7);
+        let previous = vec![Nanos(620_000_000), Nanos(380_000_000)];
+        let mut witness = make_witness(vec![], vec![]);
+        witness.pre_state_sidecar.markets.push(MarketSnapshot {
+            market_id: market,
+            name: "historical".to_string(),
+            num_outcomes: 2,
+            status: MarketStatusSnapshot::Active,
+            metadata_digest: [0; 32],
+            resolution_template: "admin".to_string(),
+            last_clearing_prices: previous.clone(),
+        });
+        witness.clearing_prices.insert(market, previous);
+        assert!(
+            !verify_match(&witness, false)
+                .violations
+                .iter()
+                .any(|violation| violation.kind == ViolationKind::CanonicalClearingPriceViolation)
+        );
+
+        witness
+            .clearing_prices
+            .insert(market, vec![Nanos(500_000_000), Nanos(500_000_000)]);
+        assert!(
+            verify_match(&witness, false)
+                .violations
+                .iter()
+                .any(|violation| violation.kind == ViolationKind::CanonicalClearingPriceViolation)
+        );
     }
 
     #[test]
@@ -998,6 +1167,7 @@ mod tests {
             (1, ConditionDir::Below, threshold - 1),
         ] {
             let order_id = index + 1;
+            let seller_id = order_id + 10;
             let order = WitnessOrder {
                 order: conditional_buy(
                     &markets,
@@ -1012,9 +1182,17 @@ mod tests {
                 account_id: order_id,
                 is_mm: false,
             };
+            let seller = WitnessOrder {
+                order: outcome_sell(&markets, seller_id, traded_market, 0, 400_000_000, qty.0),
+                account_id: seller_id,
+                is_mm: false,
+            };
             let mut witness = make_witness(
-                vec![order],
-                vec![Fill::new(order_id, qty, Nanos(500_000_000))],
+                vec![order, seller],
+                vec![
+                    Fill::new(order_id, qty, Nanos(500_000_000)),
+                    Fill::new(seller_id, qty, Nanos(500_000_000)),
+                ],
             );
             witness
                 .clearing_prices
@@ -1126,22 +1304,27 @@ mod tests {
     }
 
     #[test]
-    fn test_match_layer_allows_mint_backed_position_imbalance() {
+    fn unsupported_minting_price_is_not_a_canonical_match() {
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("M0");
 
         // A one-sided buy creates position imbalance at the fill layer, but
         // this is valid when settlement derives the MINT counterparty.
         let orders = vec![buy_order(&markets, 1, m0)];
-        let fills = vec![Fill::new(1, shares_to_qty(50), Nanos(500_000_000))];
+        let fills = vec![Fill::new(1, shares_to_qty(50), Nanos(600_000_000))];
 
         let mut witness = make_witness(orders, fills);
         witness
             .clearing_prices
-            .insert(m0, vec![Nanos(500_000_000), Nanos(500_000_000)]);
+            .insert(m0, vec![Nanos(600_000_000), Nanos(400_000_000)]);
+        refresh_welfare(&mut witness);
 
         let result = verify_match(&witness, false);
-        assert!(result.valid, "Violations: {:?}", result.violations);
+        assert!(
+            result.violations.iter().any(|violation| {
+                violation.kind == ViolationKind::CanonicalClearingPriceViolation
+            })
+        );
     }
 
     #[test]

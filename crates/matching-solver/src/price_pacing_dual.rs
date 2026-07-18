@@ -23,6 +23,7 @@ struct LinearSegment {
 #[derive(Debug)]
 pub(crate) struct PriceDualSolution {
     /// YES prices as probabilities in the same order as `PriceDualOracle::markets`.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) yes_prices: Vec<f64>,
     /// A primal optimum in protocol quantity units.
     pub(crate) q_values: Vec<f64>,
@@ -98,10 +99,6 @@ impl<'a> PriceDualOracle<'a> {
             components,
             previous_q: vec![0.0; orders.len()],
         })
-    }
-
-    pub(crate) fn markets(&self) -> &[MarketId] {
-        &self.markets
     }
 
     pub(crate) fn solve(&mut self, coefficients_nanos: &[f64]) -> Option<PriceDualSolution> {

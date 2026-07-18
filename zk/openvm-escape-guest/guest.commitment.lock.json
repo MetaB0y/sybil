@@ -1,7 +1,7 @@
 {
   "_comment": "Staleness pin for the independent Form-L escape guest commitment. Regenerate with 'scripts/zk-guest-fingerprint.sh --write' AFTER 'just openvm-escape-commit'. No proving keys are generated or consumed by this commitment-only Stage 2 workflow.",
   "openvm_tag": "v2.0.0",
-  "source_sha256": "0185a41cdd0118f9fc84d2380a9aa29a7e5567bb138be24f366118cca939e6bb",
-  "app_exe_commit": "0x008c8f972e57f4b15163aa7bb8d5ca89c5532212c091bb85c1c19a1428a53ffd",
+  "source_sha256": "b3c521491fb388f2833346435ff3e9dd164b8db3e73447b80ff5a3716bfe41f2",
+  "app_exe_commit": "0x0097bc9bfbbeafe1005708bb5ec1cff2c5a310532f542304d309d1ab6479a6cf",
   "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
 }

@@ -40,6 +40,8 @@ pub enum ViolationKind {
     UniformClearingPriceViolation,
     /// `clearing_price_YES + clearing_price_NO != NANOS_PER_DOLLAR`.
     PriceComplementarityViolation,
+    /// Clearing prices differ from the canonical retained-cash face selection.
+    CanonicalClearingPriceViolation,
     /// Sum of YES clearing prices in a group exceeds `NANOS_PER_DOLLAR`.
     MarketGroupConstraintViolation,
     /// Fill or order references a resolved/voided market.

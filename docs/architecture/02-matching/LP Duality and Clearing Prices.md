@@ -2,10 +2,16 @@
 tags: [concept, economics]
 layer: solver
 status: current
-last_verified: 2026-07-17
+last_verified: 2026-07-18
 ---
 
-The idea in plain words: nobody in Sybil ever *chooses* a price. You hand the solver a pile of orders and ask one question — "which fills create the most welfare?" — and the prices fall out the side of the answer for free. Every "market cannot sell what it doesn't have" constraint has a shadow price attached: how much more welfare you'd get from one extra unit of supply. That shadow price *is* the clearing price. Price discovery isn't a separate step; it's the receipt the optimizer prints.
+The allocation objective determines a face of economically valid prices, but it
+need not determine one point. Every "market cannot sell what it doesn't have"
+constraint has a shadow price: the marginal welfare of one extra unit of
+supply. On a non-degenerate book that price is unique. On a degenerate book,
+such as a seller at 20 crossing a buyer at 70 with no marginal order, the same
+fills can be supported by an interval. A numerical LP basis may return either
+endpoint, but basis choice is not protocol economics.
 
 Formally: every LP has a dual, and the dual variable of a constraint is the marginal value of relaxing it by one unit. For the position balance constraint on market m, outcome o — "total demand cannot exceed total supply plus minting" — that marginal value is exactly the clearing price for the outcome. Conjure one more unit of supply and welfare rises by the clearing price. That is the textbook definition of a competitive market price.
 
@@ -31,29 +37,38 @@ flowchart LR
     P4 -. "stationarity" .-> D4
 ```
 
-LP duality hands you three economic properties, each an edge in the diagram above. First, the Uniform Clearing Price (UCP): complementary slackness says a filled order (`q_i > 0`) must have non-negative surplus — buyers fill only at or above the clearing price, sellers only at or below. Second, price normalization: stationarity on the per-market minting variable gives `YES_price + NO_price <= $1`, with equality when [[Minting]] is active (almost always). Third, group consistency: stationarity on group minting gives `sum(YES_prices) <= $1` across a [[Binary Markets and Market Groups|group]], with equality when group minting is active.
+LP duality hands you three economic properties, each an edge in the diagram
+above. First, the Uniform Clearing Price (UCP): a filled order must have
+non-negative surplus. Second, minting stationarity gives outcome-price
+normalization. Third, group minting gives the categorical price simplex. KKT
+conditions for unfilled executable quantity add the opposite support bounds.
 
-Those statements hold for the continuous LP. HiGHS returns approximate
-floating primal and dual values, while protocol prices are integer nanos.
-Nearest rounding can move a dual one nano outside a filled order's support
-condition. The shared landing boundary therefore derives the exact integer
-YES-price interval implied by every rounded fill, clamps the normalized dual
-into that interval, and preserves `sum(YES) <= $1` for grouped markets. This is
-not economic price selection: it chooses the nearest protocol-representable
-point that supports the same rounded allocation. The verifier remains the
-final authority.
+After integer fill landing, Sybil reconstructs those conditions with integer
+arithmetic. Filled orders use their literal limits. Residual MM quantity uses
+the one exact rational pacing factor shared across that MM's markets, so
+budget-blocked quotes do not create fictitious pressure. The remaining
+box-simplex face is canonicalized by maximum Shannon entropy: equalize
+unclamped outcome probabilities, with indivisible one-nano remainders assigned
+by market id. This is the zero-temperature limit of the paper's unique
+positive-temperature price, not a midpoint convention.
+
+Floating duals remain useful for optimization and certificates, but never
+cross the protocol boundary. `sybil-verifier` recomputes the same canonical
+integer point from orders, fills, MM constraints, and market groups.
 
 ## Key Properties
-- Clearing price = dual variable of position balance constraint
+- Dual variables characterize the competitive equilibrium-price face
 - Complementary slackness = Uniform Clearing Price (UCP)
 - [[Minting]] stationarity = `YES + NO <= $1` per market
 - Group minting stationarity = `sum(YES) <= $1` per [[Binary Markets and Market Groups|group]]
-- Integer price landing preserves filled-order support and group consistency
-  after floating-point dual recovery
+- Maximum entropy selects exactly one integer point on a non-unique face
+- Canonical prices are independent of solver backend and floating dual basis
 
 ## Where This Lives
-> `crates/matching-solver/src/lp_solver.rs` — dual variable extraction after solve
-> `design/problem-statement.md` — dual conditions table (Section 7)
+> `crates/matching-engine/src/canonical_price.rs` — pure integer face reconstruction and selection
+> `crates/matching-solver/src/lp_solver.rs` — shared landed-fill finalization
+> `crates/sybil-verifier/src/match_verifier.rs` — exact canonical-price enforcement
+> `docs/adr/0020-canonical-maximum-entropy-clearing-prices.md` — invariant and alternatives
 
 ## See Also
 - [[The LP Core]] — the primal LP whose dual gives prices

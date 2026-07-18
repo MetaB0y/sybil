@@ -1141,7 +1141,7 @@ fn test_minting_market_totals_include_markets_only_present_in_positions() {
 }
 
 #[test]
-fn test_block_minting_uses_position_markets_outside_catalog() {
+fn uncommitted_price_for_position_market_outside_catalog_fails_closed() {
     let mut markets = MarketSet::new();
     let active_market = markets.add_binary("Active");
     let orphaned_market = MarketId::new(active_market.0 + 1);
@@ -1164,24 +1164,18 @@ fn test_block_minting_uses_position_markets_outside_catalog() {
         .positions
         .insert((orphaned_market, 1), 7);
 
-    let bp = seq.produce_block(vec![], 1_000);
-
-    let mint = seq
-        .accounts
-        .get(crate::account::AccountId::MINT)
-        .expect("mint should exist");
-    assert_eq!(mint.position(orphaned_market, 1), -7);
-    assert_eq!(
-        bp.block.clearing_prices.get(&orphaned_market),
-        Some(&vec![Nanos(400_000_000), Nanos(600_000_000)])
-    );
-
-    let verification = sybil_verifier::verify_full(&bp.witness, false);
-    assert!(
-        verification.valid,
-        "Violations: {:?}",
-        verification.violations
-    );
+    let error = expect_invariant_failure(seq.try_produce_block(vec![], 1_000));
+    assert!(matches!(
+        error,
+        SequencerError::BlockInvariantFailure { failures, .. }
+            if failures.iter().any(|failure| matches!(
+                failure,
+                BlockInvariantFailure::FullVerificationFailed { violations }
+                    if violations.iter().any(|violation| {
+                        violation.kind == "CanonicalClearingPriceViolation"
+                    })
+            ))
+    ));
 }
 
 #[test]
@@ -4209,8 +4203,8 @@ fn can_cancel_pending_order_matches_apply_validation() {
 
 // --- Mark-price portfolio valuation ---
 
-/// After a crossing batch at price P, the mark is set to the clearing
-/// price P.  In the next batch, two resting orders form a two-sided
+/// After a crossing batch with a residual 60c bid, the mark is set to that
+/// canonical residual boundary. In the next batch, two resting orders form a two-sided
 /// spread (bid 40c / ask 60c) but do NOT cross.  The mark should move
 /// to the book midpoint (50c), and `portfolio_summary` must reflect
 /// that midpoint — not the old clearing price — for the holder's
@@ -4244,10 +4238,17 @@ fn portfolio_summary_values_positions_at_book_midpoint_mark() {
     );
 
     // --- Batch 1: crossing at 70c (buyer) / 30c (seller) ---
-    // buyer buys YES at 70c, seller sells YES at 30c — they must cross.
+    // A second 60c bid remains executable at lower prices, so the canonical
+    // clearing price is its residual boundary rather than the 50c
+    // maximum-entropy point of the filled limits alone.
+    let mut residual_bid = outcome_buy(&markets, 0, m0, 0, 600_000_000, 5);
+    residual_bid.expires_at_block = Some(1);
     let buy_sub = OrderSubmission {
         account_id: buyer_id,
-        orders: vec![outcome_buy(&markets, 0, m0, 0, 700_000_000, 10)],
+        orders: vec![
+            outcome_buy(&markets, 0, m0, 0, 700_000_000, 10),
+            residual_bid,
+        ],
         mm_constraint: None,
     };
     let sell_sub = OrderSubmission {
@@ -4263,19 +4264,18 @@ fn portfolio_summary_values_positions_at_book_midpoint_mark() {
         "buyer must have a YES position after the crossing batch"
     );
 
-    // The clearing price after a 70c bid / 30c ask cross is NOT 50c.
-    // Verify the mark at this point differs from 50c so the subsequent
-    // assertion is meaningful.
+    // Verify the residual bid sets the non-50c clearing mark so the subsequent
+    // midpoint assertion is meaningful.
     let mark_after_cross = seq
         .analytics()
         .last_mark_prices()
         .get(&m0)
         .and_then(|v| v.first().copied())
         .expect("mark price must be set after a filled batch");
-    assert_ne!(
+    assert_eq!(
         mark_after_cross,
-        Nanos(500_000_000),
-        "clearing mark must differ from 50c so the midpoint assertion is non-trivial"
+        Nanos(600_000_000),
+        "the executable residual bid must set the canonical boundary"
     );
 
     // --- Batch 2: resting spread, no cross ---

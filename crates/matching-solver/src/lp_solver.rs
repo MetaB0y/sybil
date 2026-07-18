@@ -6,9 +6,10 @@
 //! - Objective: maximize total welfare (limit_price × quantity for buyers, minus for sellers)
 //!   minus minting cost ($1 per mint)
 //!
-//! Prices emerge from LP duality: the dual of the YES epigraph constraint for market m
-//! gives p_YES_m, and the dual of the NO constraint gives p_NO_m. When minting is active,
-//! p_YES + p_NO = $1 automatically. When group minting is active, Σ p_YES = $1.
+//! LP duality characterizes the face of supporting equilibrium prices. After
+//! integer quantity landing, the protocol price is recomputed as the canonical
+//! maximum-entropy point of that exact integer face; a floating dual basis is
+//! never published.
 //!
 //! MM budget constraints (bilinear: price × quantity) are handled iteratively by
 //! re-solving the LP with tightened order limits until budgets are satisfied.
@@ -151,7 +152,10 @@ impl LpSolver {
             }
 
             // Check MM budget violations at current prices
-            let prices = integer_supporting_yes_prices(&sol, &oracle_orders, &ctx);
+            let Ok(prices) = canonical_yes_prices(&sol, problem) else {
+                best_solution = Some(sol);
+                break;
+            };
             let violated = has_mm_budget_violations(
                 &sol,
                 &oracle_orders,
@@ -214,7 +218,8 @@ impl LpSolver {
 
     /// Build and solve the core LP using HiGHS.
     ///
-    /// Returns the raw LP solution (primal + dual values) or None if infeasible.
+    /// Returns the raw LP solution (primal values plus an optional dual upper
+    /// certificate) or None if infeasible.
     /// `budget_rows` contains linearized MM budget constraints: each entry is
     /// (terms: [(order_index, capital_per_unit)], budget_nanos_f64).
     fn solve_lp(
@@ -269,11 +274,10 @@ impl crate::Solver for LpSolver {
     }
 }
 
-/// Raw solution from the LP solver: primal fill quantities + dual prices.
+/// Raw solution from the LP solver: primal fill quantities plus objective
+/// certificate data.
 pub(crate) struct LpSolution {
     pub(crate) q_values: Vec<f64>,
-    pub(crate) dual_yes: HashMap<MarketId, f64>,
-    pub(crate) dual_no: HashMap<MarketId, f64>,
     /// A Lagrangian upper bound for zero-RHS matching LPs, in HiGHS objective
     /// units. Unlike the returned primal objective, this remains a valid
     /// oracle bound when HiGHS stops within floating-point tolerances.
@@ -320,27 +324,11 @@ impl<'a> MatchingLpOracle<'a> {
             Self::Highs(oracle) => oracle.solve(objective_coeffs),
             Self::Structural(oracle) => {
                 let solution = oracle.solve(objective_coeffs)?;
-                let nanos = NANOS_PER_DOLLAR as f64;
-                let dual_yes = oracle
-                    .markets()
-                    .iter()
-                    .copied()
-                    .zip(&solution.yes_prices)
-                    .map(|(market, &price)| (market, price * nanos))
-                    .collect();
-                let dual_no = oracle
-                    .markets()
-                    .iter()
-                    .copied()
-                    .zip(&solution.yes_prices)
-                    .map(|(market, &price)| (market, (1.0 - price) * nanos))
-                    .collect();
                 Some(LpSolution {
                     q_values: solution.q_values,
-                    dual_yes,
-                    dual_no,
                     objective_upper_bound_dollars: Some(
-                        solution.dual_objective_nanos * SHARE_SCALE as f64 / nanos,
+                        solution.dual_objective_nanos * SHARE_SCALE as f64
+                            / NANOS_PER_DOLLAR as f64,
                     ),
                     objective_value_dollars: solution.primal_objective_dollars,
                 })
@@ -360,9 +348,6 @@ pub(crate) struct ReusableLpOracle {
     q_cols: Vec<Col>,
     mint_cols: Vec<Col>,
     gmint_cols: Vec<Col>,
-    markets: Vec<MarketId>,
-    yes_row_indices: HashMap<MarketId, usize>,
-    no_row_indices: HashMap<MarketId, usize>,
     column_bounds: Vec<(f64, f64)>,
     certifiable_zero_rhs: bool,
 }
@@ -410,10 +395,6 @@ impl ReusableLpOracle {
         column_bounds.extend(markets.iter().map(|_| (-flow_bound, flow_bound)));
         column_bounds.extend((0..num_groups).map(|_| (0.0, flow_bound)));
 
-        let mut yes_row_indices = HashMap::new();
-        let mut no_row_indices = HashMap::new();
-        let mut row_count = 0usize;
-
         // Index orders once. The former market-by-order scan made model setup
         // O(markets * orders), which was especially visible before reuse.
         let mut orders_by_market: HashMap<MarketId, Vec<usize>> = HashMap::new();
@@ -454,11 +435,7 @@ impl ReusableLpOracle {
             // incorrectly require balanced demand before the minting sector
             // acts and is stricter than the paper's `max_omega D_omega` cost.
             pb.add_row(..=0.0, &yes_terms);
-            yes_row_indices.insert(market, row_count);
-            row_count += 1;
             pb.add_row(..=0.0, &no_terms);
-            no_row_indices.insert(market, row_count);
-            row_count += 1;
         }
 
         for (terms, budget) in budget_rows {
@@ -483,9 +460,6 @@ impl ReusableLpOracle {
             q_cols,
             mint_cols,
             gmint_cols,
-            markets: markets.to_vec(),
-            yes_row_indices,
-            no_row_indices,
             column_bounds,
             certifiable_zero_rhs: budget_rows.is_empty(),
         })
@@ -507,7 +481,6 @@ impl ReusableLpOracle {
         let solution = solved.get_solution();
         let objective_value_dollars = solved.objective_value();
         let primal = solution.columns();
-        let dual_rows = solution.dual_rows();
         let objective_upper_bound_dollars = self.certifiable_zero_rhs.then(|| {
             solution
                 .dual_columns()
@@ -524,17 +497,6 @@ impl ReusableLpOracle {
         });
 
         let q_values = primal[..self.q_cols.len()].to_vec();
-        let mut dual_yes = HashMap::new();
-        let mut dual_no = HashMap::new();
-        for &market in &self.markets {
-            if let Some(&row) = self.yes_row_indices.get(&market) {
-                dual_yes.insert(market, dual_rows[row] * nanos_f);
-            }
-            if let Some(&row) = self.no_row_indices.get(&market) {
-                dual_no.insert(market, dual_rows[row] * nanos_f);
-            }
-        }
-
         // Converting the solved model back preserves HiGHS' current basis for
         // the next objective update.
         self.model = Some(Model::from(solved));
@@ -542,8 +504,6 @@ impl ReusableLpOracle {
         match status {
             HighsModelStatus::Optimal | HighsModelStatus::ObjectiveBound => Some(LpSolution {
                 q_values,
-                dual_yes,
-                dual_no,
                 objective_upper_bound_dollars,
                 objective_value_dollars,
             }),
@@ -554,10 +514,8 @@ impl ReusableLpOracle {
     /// Select the point on the current objective's optimal face that is
     /// closest in L1 distance to `target`.
     ///
-    /// The market prices must still come from the preceding primary solve.
-    /// The extra face and distance rows are only a primal selector; using
-    /// their duals as market prices would repeat the utility-band bug where
-    /// omitted auxiliary shadow prices broke order-limit support.
+    /// The extra face and distance rows are only a primal selector. Protocol
+    /// prices are reconstructed from the selected integer quantities.
     pub(crate) fn solve_nearest_on_current_face(
         &mut self,
         target: &[f64],
@@ -695,7 +653,7 @@ fn solve_primary_and_nearest_face(
     // primary model and use a narrow near-face band only when the exact
     // lexicographic solve is numerically infeasible. Making the relaxed band
     // the default can move substantial quantity along a nearly flat objective
-    // and leave the published primary prices unable to support the landing.
+    // and leave a poor integer representative of the certified face.
     let mut relaxed_oracle =
         ReusableLpOracle::new(orders, markets, market_to_group, num_groups, budget_rows)?;
     let relaxed_primary = relaxed_oracle.solve(objective_coeffs)?;
@@ -709,153 +667,34 @@ fn solve_primary_and_nearest_face(
     Some((relaxed_primary, nearest))
 }
 
-/// Derive normalized YES clearing prices from LP dual variables.
-///
-/// For each market, takes |dual_yes| and |dual_no|, normalizes so they sum to $1.
-/// Returns p_YES per market (in nanos). p_NO = NANOS_PER_DOLLAR - p_YES.
-pub(crate) fn normalized_yes_prices(
+/// Recompute prices from landed integer quantities instead of accepting one
+/// arbitrary floating-point dual basis.
+fn canonical_yes_prices(
     solution: &LpSolution,
-    markets: &[MarketId],
-) -> HashMap<MarketId, Nanos> {
-    let nanos_f = NANOS_PER_DOLLAR as f64;
-    let mut prices = HashMap::new();
-
-    for &market in markets {
-        let dual_y = solution.dual_yes.get(&market).copied().unwrap_or(0.0);
-        let dual_n = solution.dual_no.get(&market).copied().unwrap_or(0.0);
-
-        let p_yes_raw = dual_y.abs().round().clamp(0.0, nanos_f) as u64;
-        let p_no_raw = dual_n.abs().round().clamp(0.0, nanos_f) as u64;
-
-        let sum = p_yes_raw + p_no_raw;
-        let p_yes = if sum > 0 {
-            let scale = nanos_f / sum as f64;
-            Nanos((p_yes_raw as f64 * scale).round() as u64)
-        } else {
-            // No price signal — use 50/50 as neutral default.
-            // Only happens when no orders touch the market.
-            Nanos(NANOS_PER_DOLLAR / 2)
-        };
-
-        prices.insert(market, p_yes);
-    }
-
-    prices
-}
-
-/// Land floating LP duals on integer prices that support every rounded fill.
-///
-/// HiGHS returns an approximately complementary primal/dual pair. Rounding a
-/// normalized dual to nanos can move the published price one nano across a
-/// filled order's limit even when the continuous price is feasible. Derive
-/// the exact integer interval implied by every rounded fill, clamp the dual
-/// price into it, and preserve the categorical `sum(p_yes) <= $1` constraint.
-///
-/// If a group's filled-order intervals have no jointly feasible integer point,
-/// retain the raw normalized prices so the ordinary verifier exposes the
-/// numerical inconsistency instead of silently changing the allocation.
-pub(crate) fn integer_supporting_yes_prices(
-    solution: &LpSolution,
-    orders: &[Order],
-    ctx: &SolverContext,
-) -> HashMap<MarketId, Nanos> {
-    let mut prices = normalized_yes_prices(solution, &ctx.markets);
-    let mut bounds: HashMap<MarketId, (u64, u64)> = ctx
-        .markets
+    problem: &Problem,
+) -> Result<HashMap<MarketId, Nanos>, matching_engine::CanonicalPriceError> {
+    let fills: Vec<_> = solution
+        .q_values
         .iter()
-        .copied()
-        .map(|market| (market, (0, NANOS_PER_DOLLAR)))
+        .zip(&problem.orders)
+        .filter_map(|(&quantity, order)| {
+            let rounded = quantity.round().clamp(0.0, order.max_fill.0 as f64) as u64;
+            (rounded > 0).then(|| Fill::new(order.id, Qty(rounded), Nanos::ZERO))
+        })
         .collect();
-
-    for (&quantity, order) in solution.q_values.iter().zip(orders) {
-        if quantity.round() < 1.0 || order.num_markets != 1 || order.num_states != 2 {
-            continue;
-        }
-        let Some((lower, upper)) = bounds.get_mut(&order.markets[0]) else {
-            continue;
-        };
-        let limit = order.limit_price.0.min(NANOS_PER_DOLLAR);
-        if order.payoffs[0] != 0 {
-            if order.is_seller() {
-                *lower = (*lower).max(limit);
-            } else {
-                *upper = (*upper).min(limit);
-            }
-        } else {
-            let complementary_limit = NANOS_PER_DOLLAR.saturating_sub(limit);
-            if order.is_seller() {
-                *upper = (*upper).min(complementary_limit);
-            } else {
-                *lower = (*lower).max(complementary_limit);
-            }
-        }
-    }
-
-    // Independent markets have no cross-price condition.
-    for &market in &ctx.markets {
-        if ctx.market_to_group.contains_key(&market) {
-            continue;
-        }
-        let &(lower, upper) = &bounds[&market];
-        if lower <= upper {
-            let price = prices.get(&market).map_or(0, |price| price.0);
-            prices.insert(market, Nanos(price.clamp(lower, upper)));
-        }
-    }
-
-    // For grouped markets, first clamp to each fill-support interval, then
-    // remove any integer rounding overflow from the group cap. Reducing a YES
-    // price is safe down to its lower bound.
-    for group in 0..ctx.num_groups {
-        let grouped_markets: Vec<_> = ctx
-            .markets
-            .iter()
-            .copied()
-            .filter(|market| ctx.market_to_group.get(market) == Some(&group))
-            .collect();
-        let mut candidates = Vec::with_capacity(grouped_markets.len());
-        let mut feasible = true;
-        for market in grouped_markets {
-            let (lower, upper) = bounds[&market];
-            if lower > upper {
-                feasible = false;
-                break;
-            }
-            let price = prices
-                .get(&market)
-                .map_or(0, |price| price.0)
-                .clamp(lower, upper);
-            candidates.push((market, price, lower));
-        }
-        if !feasible {
-            continue;
-        }
-
-        let sum: u128 = candidates.iter().map(|(_, price, _)| *price as u128).sum();
-        let mut excess = sum.saturating_sub(NANOS_PER_DOLLAR as u128);
-        // Prefer the largest available movement, with market order providing
-        // deterministic tie-breaking.
-        candidates.sort_by(|left, right| {
-            (right.1 - right.2)
-                .cmp(&(left.1 - left.2))
-                .then_with(|| left.0.cmp(&right.0))
-        });
-        for (_, price, lower) in &mut candidates {
-            let reduction = excess.min((*price - *lower) as u128) as u64;
-            *price -= reduction;
-            excess -= reduction as u128;
-            if excess == 0 {
-                break;
-            }
-        }
-        if excess == 0 {
-            for (market, price, _) in candidates {
-                prices.insert(market, Nanos(price));
-            }
-        }
-    }
-
-    prices
+    matching_engine::canonical_clearing_prices(
+        &problem.orders,
+        &fills,
+        &problem.mm_constraints,
+        &problem.market_groups,
+    )
+    .map(|selection| {
+        selection
+            .prices
+            .into_iter()
+            .filter_map(|(market, prices)| prices.first().copied().map(|yes| (market, yes)))
+            .collect()
+    })
 }
 
 /// Collect all unique markets from active orders.
@@ -871,18 +710,20 @@ pub(crate) fn collect_markets(orders: &[Order]) -> Vec<MarketId> {
 
 /// Extract real order fills and clearing prices from the LP solution.
 ///
-/// Rounds continuous q_i to integer fills and derives clearing prices from
-/// duals. Minting/group-minting variables are settled later by the sequencer's
-/// MINT account; they are never represented as synthetic fills.
+/// Rounds continuous q_i to integer fills and derives the canonical price from
+/// those landed quantities. Minting/group-minting variables are settled later
+/// by the sequencer's MINT account; they are never represented as synthetic
+/// fills.
 pub(crate) fn extract_result(
     solution: &LpSolution,
-    orders: &[Order],
-    ctx: &SolverContext,
-) -> (MatchingResult, HashMap<MarketId, Vec<Nanos>>) {
+    problem: &Problem,
+) -> Result<(MatchingResult, HashMap<MarketId, Vec<Nanos>>), matching_engine::CanonicalPriceError> {
+    let orders = &problem.orders;
     let mut result = MatchingResult::new();
 
-    // Derive clearing prices from LP duals (YES and NO per market)
-    let yes_prices = integer_supporting_yes_prices(solution, orders, ctx);
+    // Integer quantities determine one canonical price on the retained-cash
+    // support face. Floating duals never cross this boundary.
+    let yes_prices = canonical_yes_prices(solution, problem)?;
     let clearing_prices: HashMap<MarketId, Vec<Nanos>> = yes_prices
         .iter()
         .map(|(&m, &p_yes)| {
@@ -927,7 +768,77 @@ pub(crate) fn extract_result(
     }
 
     // Welfare is recomputed from scratch after all post-processing.
-    (result, clearing_prices)
+    Ok((result, clearing_prices))
+}
+
+fn canonicalize_result_prices(
+    result: &mut MatchingResult,
+    problem: &Problem,
+) -> Result<HashMap<MarketId, Vec<Nanos>>, matching_engine::CanonicalPriceError> {
+    let selection = matching_engine::canonical_clearing_prices(
+        &problem.orders,
+        &result.fills,
+        &problem.mm_constraints,
+        &problem.market_groups,
+    )?;
+    let prices: HashMap<_, _> = selection.prices.into_iter().collect();
+    let orders: HashMap<_, _> = problem
+        .orders
+        .iter()
+        .map(|order| (order.id, order))
+        .collect();
+    for fill in &mut result.fills {
+        let order = orders[&fill.order_id];
+        let market_prices = &prices[&order.markets[0]];
+        fill.fill_price = if order.payoffs[0] != 0 {
+            market_prices[0]
+        } else {
+            market_prices[1]
+        };
+    }
+    Ok(prices)
+}
+
+/// Re-establish the canonical price, hard-budget, and minting fixed point after
+/// any solver or component assembler has landed integer quantities.
+pub(crate) fn stabilize_integer_result(
+    result: &mut MatchingResult,
+    problem: &Problem,
+) -> Result<HashMap<MarketId, Vec<Nanos>>, String> {
+    let order_map: HashMap<u64, &Order> = problem
+        .orders
+        .iter()
+        .map(|order| (order.id, order))
+        .collect();
+    let mm_order_info = build_mm_order_info(problem);
+    const MAX_CANONICAL_LANDING_STEPS: usize = 16;
+    for _ in 0..MAX_CANONICAL_LANDING_STEPS {
+        let prices =
+            canonicalize_result_prices(result, problem).map_err(|error| error.to_string())?;
+        let before: Vec<_> = result
+            .fills
+            .iter()
+            .map(|fill| (fill.order_id, fill.fill_qty))
+            .collect();
+        let target_differences = fill_differences(result, &order_map);
+        trim_mm_budget_overflows(result, &problem.mm_constraints, &mm_order_info);
+        if !restore_differences_after_trim(result, &order_map, &target_differences) {
+            return Err(
+                "MM budget repair could not preserve landed market demand differences".to_string(),
+            );
+        }
+        trim_zero_price_minting(result, &order_map, &prices);
+        let after: Vec<_> = result
+            .fills
+            .iter()
+            .map(|fill| (fill.order_id, fill.fill_qty))
+            .collect();
+        if after == before {
+            recompute_welfare(result, &order_map);
+            return Ok(prices);
+        }
+    }
+    Err("canonical price, MM budget, and minting landing did not stabilize in 16 steps".to_string())
 }
 
 /// Check whether any MM budget constraint is violated at current LP solution prices.
@@ -1189,6 +1100,67 @@ fn outcome_diff_coeff(order: &Order) -> i8 {
     order.payoffs[0].saturating_sub(order.payoffs[1])
 }
 
+fn fill_differences(
+    result: &MatchingResult,
+    order_map: &HashMap<u64, &Order>,
+) -> HashMap<MarketId, i128> {
+    let mut differences = HashMap::new();
+    for fill in &result.fills {
+        let Some(order) = order_map.get(&fill.order_id) else {
+            continue;
+        };
+        *differences.entry(order.markets[0]).or_insert(0) +=
+            outcome_diff_coeff(order) as i128 * fill.fill_qty.0 as i128;
+    }
+    differences
+}
+
+/// Budget trimming must remove the matching opposite flow as well. Otherwise
+/// a formerly balanced market acquires a minting imbalance after prices were
+/// selected, and no interior price can support the mutated allocation.
+fn restore_differences_after_trim(
+    result: &mut MatchingResult,
+    order_map: &HashMap<u64, &Order>,
+    target: &HashMap<MarketId, i128>,
+) -> bool {
+    let current = fill_differences(result, order_map);
+    let markets: HashSet<_> = target.keys().chain(current.keys()).copied().collect();
+    for market in markets {
+        let target_difference = target.get(&market).copied().unwrap_or(0);
+        let current_difference = current.get(&market).copied().unwrap_or(0);
+        let delta = current_difference - target_difference;
+        if delta == 0 {
+            continue;
+        }
+        let required_coefficient = if delta > 0 { 1 } else { -1 };
+        let mut remaining = delta.unsigned_abs();
+        let mut candidates: Vec<_> = result
+            .fills
+            .iter()
+            .enumerate()
+            .filter_map(|(index, fill)| {
+                let order = order_map.get(&fill.order_id)?;
+                (order.markets[0] == market && outcome_diff_coeff(order) == required_coefficient)
+                    .then_some((fill.order_id, index))
+            })
+            .collect();
+        candidates.sort_unstable();
+        for (_, index) in candidates {
+            if remaining == 0 {
+                break;
+            }
+            let trim = remaining.min(result.fills[index].fill_qty.0 as u128) as u64;
+            result.fills[index].fill_qty.0 -= trim;
+            remaining -= trim as u128;
+        }
+        if remaining != 0 {
+            return false;
+        }
+    }
+    result.fills.retain(|fill| fill.fill_qty.0 > 0);
+    true
+}
+
 /// Per-order welfare weight in the objective: sign × limit price.
 ///
 /// Buyers contribute `+limit_price`, sellers `-limit_price`. This is the
@@ -1281,16 +1253,32 @@ pub(crate) fn build_solver_context(problem: &Problem) -> SolverContext {
 pub(crate) fn finalize_result(
     solution: &LpSolution,
     problem: &Problem,
-    ctx: &SolverContext,
+    _ctx: &SolverContext,
     start: Instant,
 ) -> PipelineResult {
-    let orders = &problem.orders;
-    let order_map: HashMap<u64, &Order> = orders.iter().map(|o| (o.id, o)).collect();
-    let (mut result, prices) = extract_result(solution, orders, ctx);
+    let (mut result, _) = match extract_result(solution, problem) {
+        Ok(extracted) => extracted,
+        Err(error) => {
+            return PipelineResult::failure(
+                "canonical-price",
+                TerminationStatus::PostProcessingFailure,
+                error.to_string(),
+                start.elapsed().as_secs_f64(),
+            );
+        }
+    };
 
-    trim_mm_budget_overflows(&mut result, &problem.mm_constraints, &ctx.mm_order_info);
-    trim_zero_price_minting(&mut result, &order_map, &prices);
-    recompute_welfare(&mut result, &order_map);
+    let prices = match stabilize_integer_result(&mut result, problem) {
+        Ok(prices) => prices,
+        Err(error) => {
+            return PipelineResult::failure(
+                "canonical-price",
+                TerminationStatus::PostProcessingFailure,
+                error,
+                start.elapsed().as_secs_f64(),
+            );
+        }
+    };
 
     let mut pipeline_result = PipelineResult::empty();
     pipeline_result.result = result;
@@ -1317,9 +1305,9 @@ pub(crate) fn finalize_result(
 /// Shared projection-LP epilogue for continuous solvers.
 ///
 /// Their core phase (Frank--Wolfe or conic interior point)
-/// produces a continuous allocation whose duals don't yield valid clearing
-/// prices. This caps each order's `max_fill` at the ceiled core allocation,
-/// re-solves the standard welfare LP for exact prices, and finalizes.
+/// produces a continuous allocation that is not protocol state. This caps each
+/// order's `max_fill` at the ceiled core allocation, re-solves the standard
+/// welfare LP for a supported allocation, and finalizes with canonical prices.
 ///
 /// `allocation[i]` is the core-phase fill for order `i` (in the same order as
 /// `problem.orders`); it is ceiled as an integer upper bound and clamped to
@@ -1381,7 +1369,17 @@ pub(crate) fn project_and_finalize_with_objective(
             );
         };
 
-        let prices = integer_supporting_yes_prices(&final_sol, &projected_orders, ctx);
+        let prices = match canonical_yes_prices(&final_sol, problem) {
+            Ok(prices) => prices,
+            Err(error) => {
+                return PipelineResult::failure(
+                    "canonical-price",
+                    TerminationStatus::PostProcessingFailure,
+                    error.to_string(),
+                    start.elapsed().as_secs_f64(),
+                );
+            }
+        };
         if !has_mm_budget_violations(
             &final_sol,
             &projected_orders,
@@ -1412,15 +1410,14 @@ pub(crate) fn project_and_finalize_with_objective(
     unreachable!("bounded projection loop always returns")
 }
 
-/// Land a certified continuous target while taking prices from its supporting
-/// matching LP.
+/// Land a certified continuous target on its supporting matching-LP face.
 ///
 /// This is stronger than [`project_and_finalize_with_objective`]: the caller
 /// must know that `allocation` maximizes `projection_obj` up to its declared
 /// certificate. A linear supporting objective can expose a large optimal
 /// face, so a second lexicographic LP selects the primary-optimal point nearest
-/// the certified target. Published market prices still come from the original
-/// primary LP; auxiliary nearest-face duals are never mistaken for prices.
+/// the certified target. Prices are then reconstructed from landed quantities;
+/// neither the primary nor auxiliary floating dual is published.
 pub(crate) fn support_and_finalize_target_with_objective(
     allocation: &[f64],
     problem: &Problem,
@@ -1541,7 +1538,7 @@ pub(crate) fn support_and_finalize_target_on_face(
 
     let mm_constraint_orders = mm_constraint_order_indices(problem, ctx);
     let mut budget_rows = Vec::new();
-    const MAX_PRICE_STEPS: usize = 8;
+    const MAX_PRICE_STEPS: usize = 32;
 
     for iteration in 0..=MAX_PRICE_STEPS {
         let Some((mut price_solution, nearest_allocation)) = solve_primary_and_nearest_face(
@@ -1564,30 +1561,12 @@ pub(crate) fn support_and_finalize_target_on_face(
             );
         };
 
-        let prices = integer_supporting_yes_prices(&price_solution, &capped_orders, ctx);
         let primary_allocation = price_solution.q_values.clone();
-        let round_at_primary_prices = |allocation: &[f64]| {
+        let round_candidate = |allocation: &[f64]| {
             allocation
                 .iter()
                 .zip(orders)
-                .map(|(&quantity, order)| {
-                    let rounded = quantity.round().clamp(0.0, order.max_fill.0 as f64);
-                    let p_yes = prices
-                        .get(&order.markets[0])
-                        .copied()
-                        .unwrap_or(Nanos(NANOS_PER_DOLLAR / 2));
-                    let fill_price = if order.payoffs[0] != 0 {
-                        p_yes
-                    } else {
-                        Nanos(NANOS_PER_DOLLAR.saturating_sub(p_yes.0))
-                    };
-                    let within_limit = if order.is_seller() {
-                        fill_price >= order.limit_price
-                    } else {
-                        fill_price <= order.limit_price
-                    };
-                    if within_limit { rounded } else { 0.0 }
-                })
+                .map(|(&quantity, order)| quantity.round().clamp(0.0, order.max_fill.0 as f64))
                 .collect::<Vec<_>>()
         };
         // Ill-scaled faces can make either the L1 selector or the primary basis
@@ -1599,14 +1578,15 @@ pub(crate) fn support_and_finalize_target_on_face(
         // that support band. No other solver is called, and target movement
         // remains measured.
         let candidate_allocations = [
-            round_at_primary_prices(&nearest_allocation),
-            round_at_primary_prices(&primary_allocation),
-            round_at_primary_prices(allocation),
+            round_candidate(&nearest_allocation),
+            round_candidate(&primary_allocation),
+            round_candidate(allocation),
         ];
         let mut candidates = Vec::with_capacity(candidate_allocations.len());
         let mut candidate_gaps = Vec::with_capacity(candidate_allocations.len());
         let mut raw_candidate_gaps = Vec::with_capacity(candidate_allocations.len());
         let mut candidate_objectives = Vec::with_capacity(candidate_allocations.len());
+        let mut candidate_price_errors = Vec::with_capacity(candidate_allocations.len());
         for candidate in candidate_allocations {
             price_solution.q_values = candidate;
             // Test price support before hard-budget projection. Calling the
@@ -1615,7 +1595,26 @@ pub(crate) fn support_and_finalize_target_on_face(
             // the fixed-point loop had a chance to add its budget row. The
             // zero-price cleanup is retained because it is independent of MM
             // budgets and is also applied to the eventual landed result.
-            let (mut preview, clearing_prices) = extract_result(&price_solution, orders, ctx);
+            let (mut preview, clearing_prices) = match extract_result(&price_solution, problem) {
+                Ok(extracted) => {
+                    candidate_price_errors.push(None);
+                    extracted
+                }
+                Err(error) => {
+                    candidate_price_errors.push(Some(error.to_string()));
+                    candidates.push((
+                        price_solution.q_values.clone(),
+                        f64::INFINITY,
+                        f64::NEG_INFINITY,
+                        f64::INFINITY,
+                        0,
+                    ));
+                    raw_candidate_gaps.push(f64::INFINITY);
+                    candidate_gaps.push(f64::INFINITY);
+                    candidate_objectives.push(f64::NEG_INFINITY);
+                    continue;
+                }
+            };
             recompute_welfare(&mut preview, &order_map);
             let raw_zero_temperature =
                 crate::retained_cash_solver::zero_temperature_minting_cost_for_fills(
@@ -1657,7 +1656,7 @@ pub(crate) fn support_and_finalize_target_on_face(
                 "target-support-lp",
                 TerminationStatus::PostProcessingFailure,
                 format!(
-                    "no integer candidate was supported by primary minting prices at budget step {iteration}: best gap=${:.9}, C0=${:.9}, price cash=${:.9}, raw gaps=${raw_candidate_gaps:?}, cleaned gaps=${candidate_gaps:?}, retained objectives=${candidate_objectives:?}",
+                    "no integer candidate was supported at budget step {iteration}: best gap=${:.9}, C0=${:.9}, price cash=${:.9}, canonical-price errors={candidate_price_errors:?}, raw gaps=${raw_candidate_gaps:?}, cleaned gaps=${candidate_gaps:?}, retained objectives=${candidate_objectives:?}",
                     min_gap / NANOS_PER_DOLLAR as f64,
                     zero_temperature / NANOS_PER_DOLLAR as f64,
                     *settlement_minting as f64 / NANOS_PER_DOLLAR as f64,
@@ -1673,6 +1672,17 @@ pub(crate) fn support_and_finalize_target_on_face(
             .expect("minimum-gap candidate is inside its own support band");
         let (candidate, _, _, _, _) = candidates.swap_remove(selected_index);
         price_solution.q_values = candidate;
+        let prices = match canonical_yes_prices(&price_solution, problem) {
+            Ok(prices) => prices,
+            Err(error) => {
+                return PipelineResult::failure(
+                    "canonical-price",
+                    TerminationStatus::PostProcessingFailure,
+                    error.to_string(),
+                    start.elapsed().as_secs_f64(),
+                );
+            }
+        };
 
         if !has_mm_budget_violations(
             &price_solution,
@@ -1686,9 +1696,6 @@ pub(crate) fn support_and_finalize_target_on_face(
             return result;
         }
         if iteration == MAX_PRICE_STEPS {
-            // This is an explicit, measured integer repair inside the same
-            // solver—not a substitution of a different core allocation.
-            // The L1/objective/duality diagnostics expose its effect.
             let mut result = finalize_result(&price_solution, problem, ctx, start);
             result.diagnostics.integer_landing_budget_trimmed = Some(true);
             return result;
@@ -1749,66 +1756,6 @@ mod tests {
             Some(1),
             "ties prefer lower support gap and stable candidate order"
         );
-    }
-
-    #[test]
-    fn integer_price_landing_respects_every_filled_side_at_a_rounding_boundary() {
-        let mut problem = Problem::new("integer_price_support");
-        let market = problem.markets.add_binary("market");
-        let yes_limit = 317_674_412;
-        let no_limit = NANOS_PER_DOLLAR - yes_limit;
-        problem.orders.extend([
-            matching_engine::simple_yes_buy(&problem.markets, 1, market, yes_limit, 1),
-            matching_engine::outcome_sell(&problem.markets, 2, market, 0, yes_limit, 1),
-            matching_engine::simple_no_buy(&problem.markets, 3, market, no_limit, 1),
-            matching_engine::outcome_sell(&problem.markets, 4, market, 1, no_limit, 1),
-        ]);
-        let ctx = build_solver_context(&problem);
-        let solution = LpSolution {
-            q_values: vec![1.0; 4],
-            dual_yes: HashMap::from([(market, yes_limit as f64 + 0.6)]),
-            dual_no: HashMap::from([(market, no_limit as f64 - 0.4)]),
-            objective_upper_bound_dollars: None,
-            objective_value_dollars: 0.0,
-        };
-
-        assert_eq!(
-            normalized_yes_prices(&solution, &ctx.markets)[&market],
-            Nanos(yes_limit + 1),
-            "ordinary nearest-integer dual landing reproduces the one-nano overshoot"
-        );
-        assert_eq!(
-            integer_supporting_yes_prices(&solution, &problem.orders, &ctx)[&market],
-            Nanos(yes_limit),
-        );
-    }
-
-    #[test]
-    fn integer_price_landing_preserves_the_group_price_cap() {
-        let mut problem = Problem::new("integer_group_price_support");
-        let market_a = problem.markets.add_binary("a");
-        let market_b = problem.markets.add_binary("b");
-        let mut group = matching_engine::MarketGroup::new("group");
-        group.add_market(market_a);
-        group.add_market(market_b);
-        problem.add_market_group(group);
-        problem.orders.extend([
-            matching_engine::outcome_sell(&problem.markets, 1, market_a, 0, 600_000_000, 1),
-            matching_engine::outcome_sell(&problem.markets, 2, market_b, 0, 399_000_000, 1),
-        ]);
-        let ctx = build_solver_context(&problem);
-        let solution = LpSolution {
-            q_values: vec![1.0; 2],
-            dual_yes: HashMap::from([(market_a, 600_000_001.0), (market_b, 400_000_001.0)]),
-            dual_no: HashMap::from([(market_a, 399_999_999.0), (market_b, 599_999_999.0)]),
-            objective_upper_bound_dollars: None,
-            objective_value_dollars: 0.0,
-        };
-
-        let prices = integer_supporting_yes_prices(&solution, &problem.orders, &ctx);
-        assert_eq!(prices[&market_a].0 + prices[&market_b].0, NANOS_PER_DOLLAR,);
-        assert!(prices[&market_a].0 >= 600_000_000);
-        assert!(prices[&market_b].0 >= 399_000_000);
     }
 
     #[test]
@@ -2003,6 +1950,40 @@ mod tests {
         assert_eq!(
             result.result.orders_filled, 0,
             "should not fill unprofitable minting"
+        );
+    }
+
+    #[test]
+    fn degenerate_cross_uses_the_maximum_entropy_price_not_a_dual_endpoint() {
+        let mut problem = Problem::new("canonical_degenerate_cross");
+        let market = problem.markets.add_binary("market");
+        problem.orders.extend([
+            matching_engine::simple_yes_buy(&problem.markets, 1, market, 700_000_000, 100),
+            matching_engine::outcome_sell(&problem.markets, 2, market, 0, 200_000_000, 100),
+        ]);
+
+        let result = LpSolver::new().solve(&problem);
+        assert_eq!(result.result.fills.len(), 2);
+        assert_eq!(
+            result.price_discovery.expect("prices").prices[&market][0],
+            Nanos(500_000_000),
+        );
+    }
+
+    #[test]
+    fn executable_residual_sell_liquidity_selects_the_lower_support_boundary() {
+        let mut problem = Problem::new("canonical_residual_sell");
+        let market = problem.markets.add_binary("market");
+        problem.orders.extend([
+            matching_engine::simple_yes_buy(&problem.markets, 1, market, 700_000_000, 100),
+            matching_engine::outcome_sell(&problem.markets, 2, market, 0, 200_000_000, 100),
+            matching_engine::outcome_sell(&problem.markets, 3, market, 0, 225_000_000, 100),
+        ]);
+
+        let result = LpSolver::new().solve(&problem);
+        assert_eq!(
+            result.price_discovery.expect("prices").prices[&market][0],
+            Nanos(225_000_000),
         );
     }
 }

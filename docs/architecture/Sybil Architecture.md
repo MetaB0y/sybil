@@ -104,8 +104,8 @@ sequenceDiagram
     Note over A,O: Configured block interval fires
     A->>O: Apply system events, expire/revalidate, collect batch
     A->>S: Supported Problem + MM constraints
-    S-->>A: Floating candidate allocation and dual prices
-    A->>A: Integer landing, settle, derive minting
+    S-->>A: Floating candidate allocation
+    A->>A: Land fills + canonical integer price
     A->>P: Write inactive qMDB slot and redb transaction
     P-->>A: Root checked, commit fence flipped
     A-->>C: Publish committed SealedBlock

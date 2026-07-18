@@ -6,10 +6,12 @@
 
 use std::collections::HashMap;
 
-use matching_engine::{MarketId, Nanos, Order, Problem};
+use matching_engine::{MarketId, Nanos, Problem};
 
 use crate::MatchingResult;
-use crate::result::{PipelineResult, PipelineTimings, PriceDiscoveryResult};
+use crate::result::{
+    PipelineResult, PipelineTimings, PriceDiscoveryResult, SolverDiagnostics, TerminationStatus,
+};
 
 /// Aggregate disjoint component results, then enforce the original problem's
 /// global integer invariants and recompute welfare.
@@ -19,26 +21,22 @@ pub(crate) fn assemble_component_results(
 ) -> PipelineResult {
     let mut result = aggregate_results(component_results);
 
-    let mm_order_info = crate::lp_solver::build_mm_order_info(problem);
-    let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
-    let empty_prices = HashMap::new();
-    let clearing_prices = result
-        .price_discovery
-        .as_ref()
-        .map(|price_discovery| &price_discovery.prices)
-        .unwrap_or(&empty_prices);
-
-    if !problem.mm_constraints.is_empty() {
-        crate::lp_solver::trim_mm_budget_overflows(
-            &mut result.result,
-            &problem.mm_constraints,
-            &mm_order_info,
-        );
-    }
-
-    crate::lp_solver::trim_zero_price_minting(&mut result.result, &order_map, clearing_prices);
-    crate::lp_solver::recompute_welfare(&mut result.result, &order_map);
+    let prices = match crate::lp_solver::stabilize_integer_result(&mut result.result, problem) {
+        Ok(prices) => prices,
+        Err(error) => {
+            result.result = MatchingResult::new();
+            result.price_discovery = None;
+            result.diagnostics = SolverDiagnostics {
+                algorithm: "component-assembly".to_string(),
+                status: TerminationStatus::PostProcessingFailure,
+                message: Some(error),
+                ..Default::default()
+            };
+            return result;
+        }
+    };
     if let Some(price_discovery) = result.price_discovery.as_mut() {
+        price_discovery.prices = prices;
         price_discovery.total_fills = result.result.fills.len();
         price_discovery.total_welfare = result.result.total_welfare();
     }

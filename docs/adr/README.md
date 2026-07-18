@@ -60,6 +60,7 @@ relevant, not replaced).
 | [0017](0017-bounded-durable-account-history.md) | Bounded durable account history with explicit retention semantics | Superseded by ADR-0018 | No |
 | [0018](0018-extract-private-history-service.md) | Private history service behind a transactional outbox | Accepted | No |
 | [0019](0019-epoch-stark-prover-service.md) | Epoch STARK proofs from a durable standalone prover service | Accepted | Yes |
+| [0020](0020-canonical-maximum-entropy-clearing-prices.md) | Select canonical maximum-entropy clearing prices | Accepted | Yes |
 
 > These first ten are **backfilled** from decisions already made and already in
 > production; their rationale was reconstructed from the design/review estate

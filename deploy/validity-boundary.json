@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fingerprint": "sha256:9efced89d2fb2c466ab030dcac22fc146efb46e1e602c06afb6061de86a1237d",
+  "fingerprint": "sha256:6ea2abf2c6a60670c3bc26f33fab0af62a98c55da63fb0999186b1deb7f47163",
   "inputs": {
     "commonware_packages": [
       {
@@ -74,31 +74,31 @@
     "guests": {
       "state_transition": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "a7a3afe6515cc51357570d4a65f6109b30926bf5602096e4957a6f5aec5d9411",
-        "app_exe_commit": "0x0078357d8232fb0ded2c529dc8b920e78a12a965ae46b5a4c93d9d03e8658210",
+        "source_sha256": "ec8f7ce98c6b520078f28fe623df3d5d649c723c6466d0495defbc7079edec69",
+        "app_exe_commit": "0x0079b1a181ea4ac954db8c19c1cd74382b8a6cb1c4c86348f74152b0777df961",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       },
       "escape_claim": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "0185a41cdd0118f9fc84d2380a9aa29a7e5567bb138be24f366118cca939e6bb",
-        "app_exe_commit": "0x008c8f972e57f4b15163aa7bb8d5ca89c5532212c091bb85c1c19a1428a53ffd",
+        "source_sha256": "b3c521491fb388f2833346435ff3e9dd164b8db3e73447b80ff5a3716bfe41f2",
+        "app_exe_commit": "0x0097bc9bfbbeafe1005708bb5ec1cff2c5a310532f542304d309d1ab6479a6cf",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       }
     },
     "desired_validity_pins": {
       "state_transition": {
-        "app_exe_commit": "0x0078357d8232fb0ded2c529dc8b920e78a12a965ae46b5a4c93d9d03e8658210",
+        "app_exe_commit": "0x0079b1a181ea4ac954db8c19c1cd74382b8a6cb1c4c86348f74152b0777df961",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       },
       "escape_claim": {
-        "app_exe_commit": "0x008c8f972e57f4b15163aa7bb8d5ca89c5532212c091bb85c1c19a1428a53ffd",
+        "app_exe_commit": "0x0097bc9bfbbeafe1005708bb5ec1cff2c5a310532f542304d309d1ab6479a6cf",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       }
     }
   },
   "decision": {
     "action": "fresh_genesis",
-    "reason": "Fix fail-open clearing-price verification and strengthen validity-core transition checks",
+    "reason": "Canonical clearing-price validity under ADR-0020 plus current main validity hardening; existing witnesses are incompatible",
     "reference": "docs/runbooks/fresh-genesis-redeploy.md"
   }
 }
