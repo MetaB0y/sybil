@@ -69,7 +69,10 @@ impl FillRecorder {
     /// the cost-basis tracker (C1) so realized PnL accumulates in lockstep
     /// with the fill window. The tracker reaches into `accounts` for
     /// post-fill position state (the prior position is `current - delta`).
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "fill projection consumes independently owned settlement facts"
+    )]
     pub fn record_fills(
         &mut self,
         fills: &[Fill],

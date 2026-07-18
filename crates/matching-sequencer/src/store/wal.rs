@@ -244,7 +244,10 @@ impl Store {
 
     // Prometheus gauges use f64 at the metrics-library boundary; protocol
     // state and sequence allocation remain integer-only.
-    #[allow(clippy::disallowed_types)]
+    #[allow(
+        clippy::disallowed_types,
+        reason = "integer sequence values are converted only at the Prometheus boundary"
+    )]
     async fn append_acknowledged_write(&self, write: AcknowledgedWrite) -> Result<u64, StoreError> {
         let kind = write.kind();
         let sequence = self

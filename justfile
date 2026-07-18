@@ -10,11 +10,20 @@ test:
 
 # Lint the normal workspace build.
 lint:
-    cargo clippy --workspace --all-targets -- -D warnings
+    ./scripts/check-rust-allow-reasons.py
+    cargo clippy --workspace --all-targets -- -D warnings -F unsafe-code
 
 # Lint every root-workspace target and feature combination.
 lint-all:
-    cargo clippy --workspace --all-targets --all-features -- -D warnings
+    ./scripts/check-rust-allow-reasons.py
+    cargo clippy --workspace --all-targets --all-features -- -D warnings -F unsafe-code
+
+# Lint each declared feature in isolation. The ordinary no-feature/all-feature
+# pair cannot expose feature-only dead helpers or missing cfg ownership.
+feature-lint:
+    ./scripts/check-rust-allow-reasons.py
+    cargo hack -p matching-solver -p matching-sim -p sybil-api-types -p sybil-prover --each-feature clippy --all-targets -- -D warnings -F unsafe-code
+    cargo hack -p sybil-verifier --each-feature clippy --all-targets -- -D warnings -F unsafe-code
 
 # Compile every target in the normal workspace build.
 workspace-check:
@@ -396,7 +405,7 @@ check-fast: rust-workspaces-check fmt-check workspace-check lint
 
 # Exhaustive Rust feature gate. Keep this out of the edit/compile loop while
 # still making every optional integration part of the complete gate.
-check-features: workspace-check-all lint-all
+check-features: workspace-check-all lint-all feature-lint
 
 # Consensus/protocol gate: shared vectors, guest inputs, deployment coordination,
 # an explicit validity deployment boundary, and generated protocol documentation

@@ -262,7 +262,10 @@ async fn main() -> Result<(), AnyError> {
     verdict.map_err(invalid_input)
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "subscriber task receives each independently measured load-test boundary"
+)]
 async fn run_subscriber(
     id: usize,
     host: String,

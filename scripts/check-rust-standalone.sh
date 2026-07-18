@@ -22,7 +22,11 @@ manifests=(
     zk/openvm-tools/Cargo.toml
 )
 
+"$REPO_ROOT/scripts/check-rust-allow-reasons.py"
+
 for manifest in "${manifests[@]}"; do
-    echo "checking standalone workspace: $manifest"
-    cargo check --locked --all-targets --manifest-path "$manifest"
+    echo "linting standalone workspace: $manifest"
+    cargo clippy --locked --all-targets --manifest-path "$manifest" -- \
+        -D warnings \
+        -F unsafe-code
 done

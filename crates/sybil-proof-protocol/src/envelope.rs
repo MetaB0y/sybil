@@ -54,7 +54,10 @@ pub struct ProofEnvelope {
 }
 
 impl ProofEnvelope {
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "constructor mirrors the fixed proof-envelope wire fields"
+    )]
     pub fn new(
         proof_kind: ProofKind,
         public_inputs: crate::EpochTransitionPublicInputs,

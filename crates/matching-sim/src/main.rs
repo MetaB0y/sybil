@@ -27,6 +27,7 @@
 mod cli;
 mod json_export;
 mod report;
+#[cfg(any(feature = "lp", feature = "conic", feature = "milp"))]
 mod witness;
 
 #[cfg(any(feature = "lp", feature = "conic"))]
@@ -43,6 +44,7 @@ use sybil_verifier::{BlockWitness, verify_match};
 use cli::*;
 use json_export::build_comparison_json;
 use report::*;
+#[cfg(any(feature = "lp", feature = "conic", feature = "milp"))]
 use witness::*;
 
 #[cfg(feature = "conic")]
@@ -138,7 +140,11 @@ fn main() {
 // Detailed Pipeline Runner
 // ============================================================================
 
-#[allow(unused_variables, clippy::too_many_arguments)]
+#[allow(
+    unused_variables,
+    clippy::too_many_arguments,
+    reason = "feature-gated solver branches consume different CLI inputs"
+)]
 #[cfg(any(feature = "lp", feature = "conic"))]
 fn run_detailed_pipeline(
     base_config: &ScenarioConfig,
@@ -342,7 +348,11 @@ fn run_detailed_pipeline(
     }
 }
 
-#[allow(unused_variables, clippy::too_many_arguments)]
+#[allow(
+    unused_variables,
+    clippy::too_many_arguments,
+    reason = "no-solver build retains the shared CLI call shape for an explicit failure"
+)]
 #[cfg(not(any(feature = "lp", feature = "conic")))]
 fn run_detailed_pipeline(
     base_config: &ScenarioConfig,
@@ -362,7 +372,10 @@ fn run_detailed_pipeline(
 // ============================================================================
 
 /// Run a single solver choice on a problem and return (MatchingResult, witness for verification).
-#[allow(unused_variables)]
+#[allow(
+    unused_variables,
+    reason = "feature-gated solver branches consume different solver configuration"
+)]
 fn run_solver_with_witness(
     choice: &SolverChoice,
     problem: &Problem,
@@ -419,7 +432,11 @@ fn run_solver_with_witness(
     }
 }
 
-#[allow(unused_variables, clippy::too_many_arguments)]
+#[allow(
+    unused_variables,
+    clippy::too_many_arguments,
+    reason = "simulation orchestration keeps independently configurable inputs explicit"
+)]
 fn run_simulation(
     base_config: &ScenarioConfig,
     solver_choice: &SolverChoice,

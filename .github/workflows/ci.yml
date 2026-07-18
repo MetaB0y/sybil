@@ -34,7 +34,9 @@ jobs:
         run: cargo check --workspace --all-targets --all-features
 
       - name: Clippy # just lint-all
-        run: cargo clippy --workspace --all-targets --all-features
+        run: |
+          ./scripts/check-rust-allow-reasons.py
+          cargo clippy --workspace --all-targets --all-features -- -D warnings -F unsafe-code
 
       - name: Test # just test
         run: cargo test --workspace
@@ -124,19 +126,19 @@ jobs:
         run: cargo hack check --workspace --no-default-features --no-dev-deps
 
       - name: matching-solver features
-        run: cargo hack check -p matching-solver --each-feature --no-dev-deps
+        run: cargo hack clippy -p matching-solver --each-feature --all-targets -- -D warnings -F unsafe-code
 
       - name: matching-sim features
-        run: cargo hack check -p matching-sim --each-feature --no-dev-deps
+        run: cargo hack clippy -p matching-sim --each-feature --all-targets -- -D warnings -F unsafe-code
 
       - name: sybil-api-types features
-        run: cargo hack check -p sybil-api-types --each-feature --no-dev-deps
+        run: cargo hack clippy -p sybil-api-types --each-feature --all-targets -- -D warnings -F unsafe-code
 
       - name: sybil-prover features
-        run: cargo hack check -p sybil-prover --each-feature --no-dev-deps
+        run: cargo hack clippy -p sybil-prover --each-feature --all-targets -- -D warnings -F unsafe-code
 
       - name: sybil-verifier features
-        run: cargo hack check -p sybil-verifier --each-feature --no-dev-deps
+        run: cargo hack clippy -p sybil-verifier --each-feature --all-targets -- -D warnings -F unsafe-code
 
   docker:
     name: Docker Build

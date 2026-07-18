@@ -66,7 +66,7 @@ pub use market_info::{
 };
 pub use portfolio::{PortfolioSummary, PositionValue};
 pub use sequencer::{
-    BatchResult, BatchSequencer, BlockSequencer, DEFAULT_MIN_RESTING_ORDER_NOTIONAL_NANOS,
+    BatchResult, BlockSequencer, DEFAULT_MIN_RESTING_ORDER_NOTIONAL_NANOS,
     DEFAULT_ORDER_TTL_BLOCKS, LeaderboardBase, LeaderboardRow, OrderSubmission, PendingOrderInfo,
     SequencerConfig,
 };

@@ -629,7 +629,10 @@ fn generate_mm_constraints(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "scenario generator keeps each varied quote dimension explicit"
+)]
 fn add_live_flash_quotes(
     problem: &mut Problem,
     constraint: &mut MmConstraint,

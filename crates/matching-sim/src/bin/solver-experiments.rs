@@ -861,7 +861,10 @@ fn run_warmups(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "experiment runner keeps protocol, corpus, and output ownership explicit"
+)]
 fn run_one(
     protocol: &Protocol,
     experiment: &ExperimentSpec,
@@ -961,7 +964,10 @@ fn run_one(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one benchmark record binds all solve inputs and measured context"
+)]
 fn record_solve(
     protocol: &Protocol,
     experiment: &ExperimentSpec,

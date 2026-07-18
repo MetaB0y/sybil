@@ -63,7 +63,10 @@ enum SyncCycle {
 }
 
 impl SyncActor {
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "actor constructor receives each independently owned integration dependency"
+    )]
     pub fn new(
         config: Config,
         gamma_client: GammaClient,

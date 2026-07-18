@@ -270,7 +270,10 @@ impl AnalyticsState {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "finalization fan-in receives independently owned block facts"
+    )]
     pub fn record_finalized_block(
         &mut self,
         fills: &[Fill],

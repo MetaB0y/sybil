@@ -21,7 +21,10 @@ pub struct MarketMakerAgent {
 }
 
 impl MarketMakerAgent {
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "simulation constructor exposes independently varied agent parameters"
+    )]
     pub fn new(
         name: String,
         account_id: AccountId,

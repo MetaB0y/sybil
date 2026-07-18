@@ -363,3 +363,40 @@ that needed a single classification owner.
 - No consensus bytes, guest/public-input behavior, or deployment pins changed.
 - No deployment occurred.
 - The next cluster is static lint, dead code, and unsafe-code policy.
+
+## 2026-07-18T10:40:39+01:00 — static lint, dead code, and unsafe policy
+
+### Primary-reviewer method and reusable handoff
+
+- Render and compile isolated feature graphs; default plus all-features is not
+  a feature-lattice audit.
+- Treat dead public APIs as ownership questions. Delete only with a consumer
+  search and a clear replacement, not merely because the compiler is quiet.
+- Enforce a zero-unsafe repository at every Rust workspace boundary while it
+  is still true.
+- Require suppressions to state their invariant or tooling reason at the
+  attribute site.
+
+### Findings and decisions
+
+- Found no authored unsafe construct across the root, fuzz, or OpenVM
+  workspaces and converted that property into strict Clippy/CI gates.
+- Isolated-feature Clippy exposed a no-solver `matching-sim` build failure and
+  a feature-only dead benchmark helper; both were fixed.
+- Made the `parallel` solver feature own the LP/decomposed code that consumes
+  Rayon.
+- Removed the unused `BatchSequencer` compatibility export.
+- Documented retained lint suppressions outside the commitment-fingerprinted
+  guest closure. The closure keeps its adjacent rationale and a narrow lint
+  exception because even attribute-only edits require a real guest rebuild.
+- Opened no issue because all accepted findings were bounded and remediated.
+
+### Result
+
+- Report:
+  [`code-quality-audit-static-lint-unsafe-2026-07-18.md`](code-quality-audit-static-lint-unsafe-2026-07-18.md)
+- Root all-feature, isolated-feature, and standalone-workspace strict Clippy
+  form the completion gate.
+- No proof generation, deployment, protocol-byte, or solver-policy change
+  occurred.
+- The next cluster is dependency and build supply chain.

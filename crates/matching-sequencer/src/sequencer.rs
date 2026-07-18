@@ -171,9 +171,6 @@ impl BlockSequencer {
     }
 }
 
-/// Backwards-compatible alias.
-pub type BatchSequencer = BlockSequencer;
-
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

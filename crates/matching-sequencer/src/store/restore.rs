@@ -62,7 +62,10 @@ fn read_acknowledged_writes(
 
 // Prometheus gauges use f64 at the metrics-library boundary; restored
 // protocol state and all validation remain integer-only.
-#[allow(clippy::disallowed_types)]
+#[allow(
+    clippy::disallowed_types,
+    reason = "restored integer state is converted only at the Prometheus boundary"
+)]
 fn read_acknowledged_writes_inner(
     txn: &redb::ReadTransaction,
 ) -> Result<Vec<SequencedAcknowledgedWrite>, StoreError> {
@@ -515,7 +518,10 @@ impl Store {
         }))
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "root validation compares all independently persisted recovery components"
+    )]
     async fn ensure_state_qmdb_root(
         &self,
         account_state: RecoveryAccountState,

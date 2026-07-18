@@ -255,7 +255,10 @@ impl<S: crate::Solver> DecomposedSolver<S> {
     /// MM's positive-weight components (seller-only components keep their fixed
     /// reserved share). Fixed points are equal-scarcity allocations, i.e. the
     /// exact monolithic decomposition (companion note, Theorem 1).
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "coordination loop keeps immutable problem topology separate from iterate state"
+    )]
     fn solve_with_proportional_response(
         &self,
         problem: &Problem,

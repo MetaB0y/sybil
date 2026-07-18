@@ -315,7 +315,10 @@ async fn run(
 
 // `NonZero*::new(CONST).unwrap()` on compile-time non-zero page/blob/buffer
 // constants is infallible; no fallible runtime input reaches these.
-#[allow(clippy::unwrap_used)]
+#[allow(
+    clippy::unwrap_used,
+    reason = "NonZero constructors receive compile-time positive constants"
+)]
 async fn open_db(
     context: commonware_tokio::Context,
     generation: u64,

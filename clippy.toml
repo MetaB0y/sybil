@@ -19,3 +19,4 @@ disallowed-types = [
 # where a panic is the failure signal.
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
+allow-panic-in-tests = true

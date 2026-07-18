@@ -8,6 +8,7 @@
 
 use std::fmt;
 use std::hint::black_box;
+#[cfg(feature = "retained-cash")]
 use std::sync::OnceLock;
 
 use matching_engine::Problem;
@@ -58,6 +59,7 @@ fn generate(workload: Workload) -> Problem {
     }
 }
 
+#[cfg(feature = "retained-cash")]
 fn problem(workload: Workload) -> &'static Problem {
     static SMALL: OnceLock<Problem> = OnceLock::new();
     static MARKET_LIKE: OnceLock<Problem> = OnceLock::new();

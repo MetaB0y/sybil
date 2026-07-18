@@ -1,4 +1,7 @@
-#![allow(clippy::too_many_arguments)]
+#![allow(
+    clippy::too_many_arguments,
+    reason = "generated ABI signatures mirror Solidity function fields"
+)]
 
 //! Host-side Solidity ABI bindings shared by L1 clients.
 //!

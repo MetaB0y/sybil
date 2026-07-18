@@ -1,7 +1,10 @@
 // Exempt from the f64 ban (SYB-196): this module is off the consensus/state-root
 // path. Its floats are Prometheus metric gauges/histograms; no value here is
 // committed into a block's state root.
-#![allow(clippy::disallowed_types)]
+#![allow(
+    clippy::disallowed_types,
+    reason = "actor floats are confined to off-protocol Prometheus observations"
+)]
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};

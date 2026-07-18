@@ -46,6 +46,7 @@ overflow-checks = true
 # exempted via `allow-unwrap-in-tests`).
 [workspace.lints.clippy]
 disallowed_types = "deny"
+panic = "deny"
 unwrap_used = "deny"
 
 [workspace.dependencies]

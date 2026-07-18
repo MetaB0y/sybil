@@ -155,7 +155,10 @@ impl TestEnv {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "test snapshot helper exposes each persisted aggregate independently"
+    )]
     pub(super) fn snapshot<'a>(
         &'a self,
         accounts: &'a AccountStore,

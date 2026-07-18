@@ -27,12 +27,18 @@ use sybil_oracle::{FeedId, FeedPubkey, ResolutionPolicy, ResolutionTemplate, Tem
 use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each integration-test crate consumes a different subset of shared helpers"
+)]
 pub mod process;
 
 static NEXT_STORE_ID: AtomicU64 = AtomicU64::new(0);
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each integration-test crate consumes a different subset of shared helpers"
+)]
 pub fn nanos_i64(value: &serde_json::Value) -> i64 {
     value
         .as_str()
@@ -41,7 +47,10 @@ pub fn nanos_i64(value: &serde_json::Value) -> i64 {
         .expect("valid i64 decimal string")
 }
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each integration-test crate consumes a different subset of shared helpers"
+)]
 pub fn nanos_u64(value: &serde_json::Value) -> u64 {
     value
         .as_str()
@@ -113,7 +122,10 @@ async fn history_backed_state(
 /// Create a test app with optional dev mode. Bootstraps an `admin` feed +
 /// `admin_immediate` template out of the box, mirroring production wiring.
 /// Returns (router, handle, admin signing key, admin feed id).
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each integration-test crate consumes a different subset of shared helpers"
+)]
 pub async fn test_app_with_bootstrap(
     dev_mode: bool,
 ) -> (Router, SequencerHandle, SigningKey, FeedId) {
@@ -154,7 +166,10 @@ pub async fn test_app_with_bootstrap(
 
 /// Create a test app without feed/template bootstrap. The trusted unsigned
 /// dev-mode resolution path remains available.
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each integration-test crate consumes a different subset of shared helpers"
+)]
 pub async fn test_app(dev_mode: bool) -> (Router, SequencerHandle) {
     test_app_with_config(ApiConfig {
         dev_mode,
@@ -167,7 +182,10 @@ pub async fn test_app(dev_mode: bool) -> (Router, SequencerHandle) {
 }
 
 /// Create a test app with an explicit API config.
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each integration-test crate consumes a different subset of shared helpers"
+)]
 pub async fn test_app_with_config(config: ApiConfig) -> (Router, SequencerHandle) {
     let accounts = AccountStore::new();
     let markets = MarketSet::new();
@@ -187,7 +205,10 @@ pub async fn test_app_with_config(config: ApiConfig) -> (Router, SequencerHandle
 
 /// Create a test app backed by the production persistent store path. Use this
 /// for endpoints that depend on qMDB state roots or proofs.
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each integration-test crate consumes a different subset of shared helpers"
+)]
 pub async fn test_app_with_store(dev_mode: bool) -> (Router, SequencerHandle) {
     test_app_with_store_config(
         dev_mode,
@@ -200,7 +221,10 @@ pub async fn test_app_with_store(dev_mode: bool) -> (Router, SequencerHandle) {
 }
 
 /// Create a store-backed test app with an explicit sequencer config.
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each integration-test crate consumes a different subset of shared helpers"
+)]
 pub async fn test_app_with_store_config(
     dev_mode: bool,
     sequencer_config: SequencerConfig,
@@ -216,7 +240,10 @@ pub async fn test_app_with_store_config(
 }
 
 /// Create a store-backed test app with explicit API and sequencer config.
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each integration-test crate consumes a different subset of shared helpers"
+)]
 pub async fn test_app_with_store_api_config(
     api_config: ApiConfig,
     sequencer_config: SequencerConfig,
@@ -238,7 +265,10 @@ pub async fn test_app_with_store_api_config(
 /// Store-backed test app with the attached history projector.
 /// Equity/events/fills are served only by that projector, so tests using this
 /// prove the extracted-service path.
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each integration-test crate consumes a different subset of shared helpers"
+)]
 pub async fn test_app_with_store_zero_caps(dev_mode: bool) -> (Router, SequencerHandle) {
     let accounts = AccountStore::new();
     let markets = MarketSet::new();
@@ -262,7 +292,10 @@ pub async fn test_app_with_store_zero_caps(dev_mode: bool) -> (Router, Sequencer
 }
 
 /// Send a GET request and return (status, body bytes).
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each integration-test crate consumes a different subset of shared helpers"
+)]
 pub async fn get(app: Router, uri: &str) -> (StatusCode, Vec<u8>) {
     let is_history = uri.contains("/fills")
         || uri.contains("/events")
@@ -317,7 +350,10 @@ pub async fn get(app: Router, uri: &str) -> (StatusCode, Vec<u8>) {
 }
 
 /// Send a POST request with JSON body and return (status, body bytes).
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each integration-test crate consumes a different subset of shared helpers"
+)]
 pub async fn post_json(app: Router, uri: &str, body: serde_json::Value) -> (StatusCode, Vec<u8>) {
     let req = Request::builder()
         .method(Method::POST)
@@ -338,7 +374,10 @@ pub async fn post_json(app: Router, uri: &str, body: serde_json::Value) -> (Stat
 }
 
 /// Send a PUT request with a JSON body and return (status, body bytes).
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each integration-test crate consumes a different subset of shared helpers"
+)]
 pub async fn put_json(app: Router, uri: &str, body: serde_json::Value) -> (StatusCode, Vec<u8>) {
     let req = Request::builder()
         .method(Method::PUT)
@@ -359,7 +398,10 @@ pub async fn put_json(app: Router, uri: &str, body: serde_json::Value) -> (Statu
 }
 
 /// Send a POST request with JSON body and return (status, headers, body bytes).
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "each integration-test crate consumes a different subset of shared helpers"
+)]
 pub async fn post_json_with_headers(
     app: Router,
     uri: &str,

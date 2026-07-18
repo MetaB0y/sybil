@@ -215,7 +215,10 @@ pub enum BatchValidationError {
 }
 
 impl CommittedHistoryBatchV1 {
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "constructor mirrors the committed history-batch envelope"
+    )]
     pub fn new(
         genesis_hash: [u8; 32],
         height: u64,

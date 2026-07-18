@@ -51,7 +51,7 @@ milp = ["dep:russcip"]  # MIQCQP solver via SCIP
 retained-cash = ["dep:highs"] # Production retained-cash policy, RC-FW reference, and private HiGHS core
 lp = ["retained-cash"]  # Public LP baseline and approximate decomposition surface
 conic = ["dep:clarabel", "lp"] # Conic EG solver via Clarabel (reuses LP utilities)
-parallel = ["dep:rayon"] # Parallel decomposed solves
+parallel = ["dep:rayon", "lp"] # Parallel decomposed solves require the decomposed LP surface
 
 [lints.clippy]
 # f64 ban is scoped to the consensus crates (matching-engine, matching-sequencer);

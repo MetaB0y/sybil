@@ -725,7 +725,10 @@ pub fn sign_key_revocation(
 }
 
 /// Sign a signing-key registration with a P256 signing key (testing / client use).
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "test/client helper mirrors every signed key-registration field"
+)]
 pub fn sign_key_registration(
     account_id: crate::account::AccountId,
     new_pubkey: PublicKey,

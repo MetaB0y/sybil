@@ -1,7 +1,10 @@
 // Crash-injection test harness compiled into the lib for integration tests.
 // Its `.unwrap()`s assert setup invariants of a test scenario (keys and
 // deterministic RNG); a panic here is the intended test-failure signal.
-#![allow(clippy::unwrap_used)]
+#![allow(
+    clippy::unwrap_used,
+    reason = "test harness unwraps are assertions over generated setup invariants"
+)]
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};

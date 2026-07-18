@@ -192,7 +192,10 @@ async fn ensure_genesis(handle: &SequencerHandle) -> [u8; 32] {
 
 /// SYB-229: register an additional agent key via the SIGNED path, authorized by
 /// `signer` (an existing account key).
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "integration helper carries the complete signed key-registration context"
+)]
 async fn register_extra_key(
     app: &axum::Router,
     account_id: u64,

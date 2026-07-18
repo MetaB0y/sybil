@@ -232,7 +232,10 @@ pub enum SolverChoice {
 
 // The default follows the enabled solver features. `derive(Default)` cannot
 // express a feature-dependent fallback.
-#[allow(clippy::derivable_impls)]
+#[allow(
+    clippy::derivable_impls,
+    reason = "the default solver depends on the enabled feature set"
+)]
 impl Default for SolverChoice {
     fn default() -> Self {
         #[cfg(feature = "lp")]
@@ -246,6 +249,10 @@ impl Default for SolverChoice {
         #[cfg(all(not(feature = "lp"), not(feature = "conic"), feature = "milp"))]
         {
             Self::Milp
+        }
+        #[cfg(not(any(feature = "lp", feature = "conic", feature = "milp")))]
+        {
+            Self::All
         }
     }
 }
@@ -284,31 +291,37 @@ pub fn create_milp_solver(milp_timeout: Option<f64>, mm_mode: MmBudgetMode) -> M
 /// Expand a solver choice into individual choices for comparison.
 // The `All` arm builds its vec with cfg-gated pushes per solver feature,
 // which vec![] cannot express.
-#[allow(clippy::vec_init_then_push)]
+#[allow(
+    clippy::vec_init_then_push,
+    unused_mut,
+    reason = "the solver list is assembled from independently gated features"
+)]
 pub fn expand_solver_choices(choice: &SolverChoice) -> Vec<SolverChoice> {
-    match choice {
-        SolverChoice::All => {
-            let mut choices = Vec::new();
-            #[cfg(feature = "milp")]
-            choices.push(SolverChoice::Milp);
-            #[cfg(feature = "lp")]
-            choices.push(SolverChoice::Lp);
-            #[cfg(feature = "lp")]
-            choices.push(SolverChoice::RetainedCash);
-            #[cfg(feature = "conic")]
-            choices.push(SolverChoice::Conic);
-            #[cfg(feature = "lp")]
-            choices.push(SolverChoice::DecomposedLp);
-            #[cfg(feature = "conic")]
-            choices.push(SolverChoice::DecomposedConic);
-            choices
-        }
-        other => vec![other.clone()],
+    if *choice != SolverChoice::All {
+        return vec![choice.clone()];
     }
+
+    let mut choices = Vec::new();
+    #[cfg(feature = "milp")]
+    choices.push(SolverChoice::Milp);
+    #[cfg(feature = "lp")]
+    choices.push(SolverChoice::Lp);
+    #[cfg(feature = "lp")]
+    choices.push(SolverChoice::RetainedCash);
+    #[cfg(feature = "conic")]
+    choices.push(SolverChoice::Conic);
+    #[cfg(feature = "lp")]
+    choices.push(SolverChoice::DecomposedLp);
+    #[cfg(feature = "conic")]
+    choices.push(SolverChoice::DecomposedConic);
+    choices
 }
 
 /// Get the display name for a solver choice.
-#[allow(unused_variables)]
+#[allow(
+    unused_variables,
+    reason = "milp_timeout is used only when the milp feature is enabled"
+)]
 pub fn solver_display_name(choice: &SolverChoice, milp_timeout: Option<f64>) -> String {
     match choice {
         #[cfg(feature = "milp")]
@@ -359,6 +372,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "lp")]
     fn legacy_solver_and_preset_aliases_are_retained() {
         #[cfg(feature = "milp")]
         let preset = "milp_killer";
