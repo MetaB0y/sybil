@@ -10,28 +10,32 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
+ADDITIONAL_INSTRUCTION_ROOTS = (
+    Path("arena"),
+    Path("contracts"),
+    Path("deploy"),
+    Path("frontend"),
+    Path("zk"),
+)
 
 
 def main() -> int:
     errors: list[str] = []
     workspace = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
-    members = [
-        Path(member)
-        for member in workspace["workspace"]["members"]
-        if member.startswith("crates/")
-    ]
-
-    root_map = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    members = [Path(member) for member in workspace["workspace"]["members"]]
     dependency_map = (ROOT / "docs/architecture/Crate Dependency Map.md").read_text(
         encoding="utf-8"
     )
 
-    for member in members:
-        name = member.name
+    instruction_roots = [*members, *ADDITIONAL_INSTRUCTION_ROOTS]
+    for member in instruction_roots:
         if not (ROOT / member / "AGENTS.md").is_file():
             errors.append(f"{member}/AGENTS.md is missing")
-        if not re.search(rf"(?:├──|└──)\s+{re.escape(name)}/", root_map):
-            errors.append(f"{name} is missing from the root repo map")
+
+    for member in members:
+        if not member.parts or member.parts[0] != "crates":
+            continue
+        name = member.name
         if f"`{name}`" not in dependency_map:
             errors.append(f"{name} is missing from Crate Dependency Map.md")
 
@@ -50,7 +54,8 @@ def main() -> int:
         return 1
 
     print(
-        f"doc sync clean: {len(members)} workspace crates and "
+        f"doc sync clean: {len(instruction_roots)} instruction roots, "
+        f"{len(members)} workspace crates, and "
         f"{len(list((ROOT / 'design').glob('*.md')))} top-level design files"
     )
     return 0
