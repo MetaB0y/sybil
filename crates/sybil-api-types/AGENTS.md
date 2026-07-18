@@ -19,6 +19,4 @@ derive their wire contract from here.
 - Do not hand-edit generated frontend or Python shapes; regenerate them after
   DTO/OpenAPI changes.
 
-Modules: `request.rs`, `response.rs`, and `ws.rs`. Run
-`cargo test -p sybil-api-types --all-features`, then the frontend and arena
-schema-generation checks when the public surface changes.
+Public-surface changes require the frontend and arena schema-generation gates.

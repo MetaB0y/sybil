@@ -18,8 +18,3 @@ submits one atomic IOC MM bundle per live block.
 - Replay repairs lifecycle/inventory state but never emits historical quotes.
 - Both owning processes must construct `ValidatedMmConfig` before creating an
   account or actor; unchecked floats must not reach integer protocol inputs.
-
-```bash
-cargo test -p sybil-market-maker
-cargo clippy -p sybil-market-maker --all-targets -- -D warnings
-```

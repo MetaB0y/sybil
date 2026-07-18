@@ -22,5 +22,3 @@ historical facts, stable fact identities, and internal query/response shapes.
   these Rust types are reusable.
 - Wire or hash changes require coordinated producer/consumer tests; early-dev
   breaking changes should still be explicit rather than silently permissive.
-
-Run `cargo test -p sybil-history-types` after changing this contract.

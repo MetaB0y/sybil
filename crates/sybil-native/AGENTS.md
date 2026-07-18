@@ -22,8 +22,3 @@ that manifest.
   from Sybil clearing prices.
 - Native resolution remains an explicit operator workflow. No LLM resolver is
   bundled into provisioning or market making.
-
-```bash
-cargo test -p sybil-native
-cargo clippy -p sybil-native --all-targets -- -D warnings
-```

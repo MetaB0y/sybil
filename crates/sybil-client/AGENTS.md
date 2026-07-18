@@ -15,6 +15,3 @@ this crate rather than creating another HTTP/WebSocket wrapper.
 - Client helpers may prepare requests but canonical signature bytes remain in
   `sybil-signing`.
 - Examples are smoke/development tools; never log or persist private keys.
-
-Main code is `client.rs` plus `error.rs`. Run `cargo test -p sybil-client` and
-compile affected examples.

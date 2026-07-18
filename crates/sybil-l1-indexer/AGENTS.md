@@ -22,14 +22,5 @@ lifecycle inputs through service-authenticated API routes.
 - Public-chain operation assumes at least one configured independently operated
   provider is honest; never silently drop a provider from an acknowledged set.
 
-## Code map
-
-| Area | Location |
-|---|---|
-| Polling/reconciliation orchestration | `src/main.rs` |
-| Vault-log decoding and ordering | `src/events.rs` |
-| Deployment-bound cursor durability | `src/cursor.rs` |
-| Finalized multi-provider source policy | `src/source.rs` |
-
 Run `cargo test -p sybil-l1-indexer`. Exercise compose bridge tests for changes
 to scanning, cursor, or API submission behavior.

@@ -1,52 +1,27 @@
 # `sybil-verifier`
 
-Canonical native verifier and encoding owner for the block witness. The OpenVM
-guest reuses this transition logic through `sybil-zk`; changes here can move
-guest commitments, state roots, witness bytes, and L1 public inputs.
+Canonical native block-witness verifier and encoding owner. `sybil-zk` reuses
+this transition logic, so changes can move witness bytes, state roots, guest
+commitments, and L1 public inputs.
 
 ## Read first
 
-- [[Four-Layer Verification]] and [[Block Witness]]
-- [[Canonical Serialization]] and [[State Root Schema]]
-- [[P256 Authentication]] and [[ZK Integration Path]]
-
-## Verification shape
-
-`verify_full(witness, diagnostics)` combines more than the historical four
-named layers:
-
-- match/fill, uniform-price, group, MM-budget, and welfare checks;
-- integer settlement/MINT replay;
-- header roots, parent/height/counts, and exact authenticated state;
-- admission funding/positions/expiry/rejection validity;
-- system-event, bridge/quarantine, lifecycle, and committed sidecar transition;
-- active-key universe/digest transitions and RawP256/WebAuthn authorization.
-
-There is no “lenient versus strict” verifier mode. The `diagnostics` flag
-controls extra diagnostic reporting, not validity rules.
-
-## Ownership
-
-| Area | Location |
-|---|---|
-| Witness/domain types | `types.rs` |
-| Full orchestration | `lib.rs` |
-| Match/settlement/orders/block | corresponding verifier modules |
-| System/sidecar/quarantine | `system.rs`, `sidecar.rs`, `quarantine.rs` |
-| Keys and intent | `account_keys.rs`, `key_transition.rs`, `key_op_auth.rs` |
-| Canonical bytes | `canonical.rs`, `witness_schema.rs`, event/state/snapshot schemas |
-| Violations/results | `violations.rs` |
+- [[Four-Layer Verification]], [[Block Witness]], and [[State Root Schema]]
+- [[Canonical Serialization]], [[P256 Authentication]], and
+  [[ZK Integration Path]]
 
 ## Rules
 
-- Never fork canonical byte layouts between host and guest.
-- Preserve exact-keyspace/absence proofs, not inclusion alone.
+- `verify_full` covers match/settlement, exact authenticated state,
+  admission/rejections, system/bridge/lifecycle transitions, and key/action
+  authorization. `diagnostics` changes reporting, never validity.
+- Never fork canonical layouts between host and guest.
+- Preserve exact-keyspace and absence proofs, not inclusion alone.
 - Use shared checked integer settlement helpers; no floating point.
-- Treat tag/version/layout changes as validity changes: update golden vectors,
-  decoders, guest fingerprints/commitments, ADR/current docs, and fresh-genesis
-  planning together.
-- `sybil-verifier` is the sole trusted solver-output verifier; no parallel
-  matching-solver verifier exists.
+- Tag, version, layout, or domain changes require golden vectors, decoders,
+  guest fingerprints/commitments, current docs, and an explicit
+  migration/fresh-genesis decision.
+- This crate is the sole trusted solver-output verifier.
 
-Run `cargo test -p sybil-verifier`, `just golden-check`, and relevant
-`sybil-zk`/OpenVM checks for validity-surface changes.
+Validity-surface changes require crate tests, `just golden-check`, and the
+relevant `sybil-zk`/OpenVM checks.

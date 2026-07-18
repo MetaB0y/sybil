@@ -25,6 +25,3 @@ mutate exchange state.
   unless the runbook explicitly defines an isolated disposable environment.
 - Run the generator off the target host for capacity measurements; same-host
   runs measure load-generator contention too.
-
-Run `cargo test -p sybil-loadtest` and `cargo clippy -p sybil-loadtest
---all-targets` after changes.

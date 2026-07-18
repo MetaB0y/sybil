@@ -1,43 +1,15 @@
-# AGENTS.md
+# `contracts`
 
-This directory contains the Solidity L1 bridge contracts for Sybil.
+Solidity settlement/vault boundary. Read [[L1 Settlement and Vault]],
+[[State Root Schema]], [[ZK Integration Path]], and [[Canonical Serialization]].
 
-## Commands
+- `IOpenVmVerifierAdapter` isolates OpenVM verifier internals.
+- The first collateral is a 6-decimal USDC-like ERC20.
+- Deposits use the fixed-depth-32, domain-separated keccak accumulator.
+- Normal withdrawals use committed leaves and root-independent nullifiers.
+- Prediction-market matching and qMDB verification stay out of Solidity.
+- Keep dependencies narrow until the production verifier SDK is deliberately
+  integrated.
 
-Run from the repository root:
-
-```bash
-just contracts-fmt
-just contracts-fmt-check
-just contracts-build
-just contracts-test
-just contracts-coverage
-just contracts-sepolia-mock-deploy
-```
-
-Or from this directory:
-
-```bash
-forge fmt
-forge build
-forge test
-```
-
-## Design Context
-
-Read these architecture notes before changing contracts:
-
-- `docs/architecture/04-verification/L1 Settlement and Vault.md`
-- `docs/architecture/04-verification/State Root Schema.md`
-- `docs/architecture/04-verification/ZK Integration Path.md`
-- `docs/architecture/04-verification/Canonical Serialization.md`
-
-## Constraints
-
-- Solidity + Foundry.
-- Keep contracts dependency-light until the real OpenVM Solidity SDK is wired.
-- Use `IOpenVmVerifierAdapter` as the boundary to OpenVM verifier internals.
-- First asset is a USDC-like 6-decimal ERC20.
-- Deposit log is a fixed-depth 32 keccak Merkle accumulator with leaf/node domain separation.
-- Normal withdrawals use committed withdrawal leaves and root-independent nullifiers.
-- Do not implement prediction-market settlement or qmdb proof verification in Solidity.
+Run `just contracts-test`; shared bytes/domains also require
+`just golden-check` and the owning Rust tests.

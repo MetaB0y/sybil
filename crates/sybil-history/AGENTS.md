@@ -23,6 +23,3 @@ query load.
 - History is derived and must never feed matching, settlement, roots, or proof
   validity.
 - Account-attributed ingestion and queries are private internal surfaces.
-
-Run `cargo test -p sybil-history` after changing ingestion or query semantics.
-
