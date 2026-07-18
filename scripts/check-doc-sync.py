@@ -18,6 +18,7 @@ ADDITIONAL_INSTRUCTION_ROOTS = (
     Path("deploy"),
     Path("frontend"),
     Path("fuzz"),
+    Path("lean"),
     Path("zk"),
 )
 EXCLUDED_AGENT_PARTS = {".git", ".jj", ".next", ".venv", "node_modules", "target"}
