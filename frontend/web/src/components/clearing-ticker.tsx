@@ -6,11 +6,19 @@ import {
   formatAge,
   formatCompactDollars,
   formatInt,
+  formatPercentPrecise,
   parseNanos,
 } from "@/lib/format/nanos";
 import type { IndexMarket } from "@/lib/markets/use-markets";
 import { useEventQuestions } from "@/lib/markets/use-event-raw";
-import { selectLatestBlock, selectRecentBlocks, useStore } from "@/lib/store";
+import {
+  selectLatestBlock,
+  selectRecentBlocks,
+  selectRecentHistory,
+  type RecentHistoryState,
+  useStore,
+} from "@/lib/store";
+import type { Block } from "@/lib/ws/types";
 
 type Props = {
   /** Lookup table for resolving market_id → name. */
@@ -23,8 +31,9 @@ const MAX_TICKER_ITEMS = 40;
 const MARQUEE_MIN_ITEMS = 6;
 
 /** One market clearing in one batch — a single "trade" entry on the ticker. */
-type ClearEvent = {
+export type ClearEvent = {
   key: string;
+  height: number;
   id: number;
   name: string;
   /** Mirror identifiers used to resolve the full per-outcome question. */
@@ -34,21 +43,20 @@ type ClearEvent = {
   yes: bigint;
   /** Matched volume this market contributed this batch (nanos, $). */
   volNanos: bigint;
-  /** YES price change vs this market's previous clear, in pp. Always a real
-   *  (non-flat) move — flat and first-seen clears are filtered out of the feed. */
-  ppChange: number;
+  /** YES price change vs this market's previous traded clear, in pp. Null for
+   *  the first traded clear in the loaded window; flat changes are real data. */
+  ppChange: number | null;
   /** Block timestamp (epoch ms) → "seconds ago". */
   ts: number;
 };
 
 /**
  * ClearingTicker — a continuously scrolling strip of recent clears across the
- * last committed blocks. Each entry is one market whose clearing price moved
- * in a batch (flat / first-seen clears are skipped):
- * `name  $vol  ±pp  age` (title · volume · price change · age). The buffer
- * accumulates across blocks (rather
- * than being replaced each batch) so the marquee has stable content to scroll;
- * new clears enter at the head and old ones fall off after MAX_TICKER_ITEMS.
+ * last committed blocks. Each entry is one market that traded in one batch:
+ * `name  price  $vol  ±pp  age` (title · YES price · volume · change · age).
+ * First and flat traded clears remain visible because price movement is not
+ * the membership predicate. The buffer accumulates across blocks rather than
+ * being replaced each batch, so the marquee has stable content to scroll.
  *
  * Side (buy/sell) is intentionally absent: block-level fills carry no
  * market_id or side, so a global feed can only speak in per-batch clears.
@@ -56,6 +64,7 @@ type ClearEvent = {
 export function ClearingTicker({ marketsById }: Props) {
   const latest = useStore(selectLatestBlock);
   const recent = useStore(selectRecentBlocks);
+  const recentHistory = useStore(selectRecentHistory);
   const [paused, setPaused] = useState(false);
 
   // Live "now" so the age column ticks every second between blocks.
@@ -65,50 +74,10 @@ export function ClearingTicker({ marketsById }: Props) {
     return () => clearInterval(t);
   }, []);
 
-  const events = useMemo(() => {
-    // Walk oldest → newest so each market's previous clear price is known when
-    // we reach its next clear (price change is vs the prior *clearing* batch).
-    const prevYes = new Map<number, bigint>();
-    const all: ClearEvent[] = [];
-    for (const b of [...recent].reverse()) {
-      const cp = b.clearing_prices_nanos;
-      if (!cp) continue;
-      for (const [key, arr] of Object.entries(cp)) {
-        const id = Number(key);
-        if (!Number.isFinite(id)) continue;
-        const yesStr = arr[0];
-        if (yesStr == null) continue;
-        const volStr = b.by_market?.[key]?.volume_nanos;
-        const volNanos = volStr == null ? 0n : parseNanos(volStr);
-        // Only batches where this market actually traded — a "purchase".
-        if (volNanos <= 0n) continue;
-        const yes = parseNanos(yesStr);
-        const prior = prevYes.get(id);
-        const ppChange = prior == null ? null : Number(yes - prior) / 1e7;
-        prevYes.set(id, yes);
-        // Only surface clears that actually moved the price: skip a market's
-        // first clear in the window (no prior to diff) and flat ticks (which
-        // would read "0.0pp"). prevYes is updated above regardless, so the next
-        // clear's delta stays correct.
-        if (ppChange == null || Math.abs(ppChange) < 0.05) continue;
-        const m = marketsById.get(id);
-        all.push({
-          key: `${b.height}-${id}`,
-          id,
-          name: m?.name ?? `#${id}`,
-          condId: m?.polymarket_condition_id ?? null,
-          eventId: m?.event_id ?? null,
-          yes,
-          volNanos,
-          ppChange,
-          ts: b.timestamp_ms,
-        });
-      }
-    }
-    // Newest first, capped.
-    all.reverse();
-    return all.slice(0, MAX_TICKER_ITEMS);
-  }, [recent, marketsById]);
+  const events = useMemo(
+    () => deriveRecentTrades(recent, marketsById),
+    [recent, marketsById],
+  );
 
   const eventIds = useMemo(() => {
     const ids = new Set<string>();
@@ -129,6 +98,7 @@ export function ClearingTicker({ marketsById }: Props) {
   return (
     <div
       className="clearing-ticker"
+      aria-busy={events.length === 0 && recentHistory === "loading"}
       style={{
         position: "sticky",
         top: "var(--nav-height)",
@@ -160,6 +130,7 @@ export function ClearingTicker({ marketsById }: Props) {
         }}
       >
         <span
+          className="clearing-ticker-live-dot sybil-motion-pulse"
           aria-hidden
           style={{
             width: 6,
@@ -179,6 +150,7 @@ export function ClearingTicker({ marketsById }: Props) {
       {events.length === 0 ? (
         <span
           className="text-mono"
+          role={recentHistory === "error" ? "alert" : "status"}
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -187,7 +159,7 @@ export function ClearingTicker({ marketsById }: Props) {
             fontSize: "var(--fs-12)",
           }}
         >
-          awaiting fills…
+          {recentTradesEmptyCopy(recentHistory, recent)}
         </span>
       ) : (
         <div
@@ -204,6 +176,7 @@ export function ClearingTicker({ marketsById }: Props) {
           }}
         >
           <div
+            className="clearing-ticker-track"
             style={{
               display: "inline-flex",
               flexWrap: "nowrap",
@@ -284,6 +257,9 @@ function TickerCell({
         {label}
       </span>
       <span className="tabular" style={{ color: "var(--fg-4)" }}>
+        YES {formatPercentPrecise(event.yes)}
+      </span>
+      <span className="tabular" style={{ color: "var(--fg-4)" }}>
         {formatCompactDollars(volNanos)} vol
       </span>
       <span
@@ -300,7 +276,8 @@ function TickerCell({
 }
 
 /** ±N.N pp with explicit sign; ~flat collapses to "0.0pp". */
-function formatPp(pp: number): string {
+function formatPp(pp: number | null): string {
+  if (pp == null) return "—";
   if (Math.abs(pp) < 0.05) return "0.0pp";
   const sign = pp > 0 ? "+" : "−";
   return `${sign}${Math.abs(pp).toFixed(1)}pp`;
@@ -311,4 +288,67 @@ function ppColor(pp: number | null): string {
   // is actually visible; only real moves take the green/red accents.
   if (pp == null || Math.abs(pp) < 0.05) return "var(--fg-3)";
   return pp > 0 ? "var(--yes)" : "var(--no)";
+}
+
+/**
+ * Pure trade-strip derivation. Walk oldest-to-newest to compute each market's
+ * delta against its previous traded clear, then order newest block first and
+ * market id ascending within a block for deterministic rendering.
+ */
+export function deriveRecentTrades(
+  recent: Block[],
+  marketsById: Map<number, IndexMarket>,
+  maxItems = MAX_TICKER_ITEMS,
+): ClearEvent[] {
+  const prevYes = new Map<number, bigint>();
+  const all: ClearEvent[] = [];
+  const chronological = [...recent].sort((a, b) => a.height - b.height);
+
+  for (const block of chronological) {
+    const prices = block.clearing_prices_nanos;
+    if (!prices) continue;
+    for (const [key, vector] of Object.entries(prices)) {
+      const id = Number(key);
+      if (!Number.isSafeInteger(id)) continue;
+      const yesRaw = vector[0];
+      const volumeRaw = block.by_market?.[key]?.volume_nanos;
+      if (yesRaw == null || volumeRaw == null) continue;
+      const volumeNanos = parseNanos(volumeRaw);
+      if (volumeNanos <= 0n) continue;
+
+      const yes = parseNanos(yesRaw);
+      const prior = prevYes.get(id);
+      prevYes.set(id, yes);
+      const market = marketsById.get(id);
+      all.push({
+        key: `${block.height}-${id}`,
+        height: block.height,
+        id,
+        name: market?.name ?? `#${id}`,
+        condId: market?.polymarket_condition_id ?? null,
+        eventId: market?.event_id ?? null,
+        yes,
+        volNanos: volumeNanos,
+        ppChange: prior == null ? null : Number(yes - prior) / 1e7,
+        ts: block.timestamp_ms,
+      });
+    }
+  }
+
+  return all
+    .sort((a, b) => b.height - a.height || a.id - b.id)
+    .slice(0, Math.max(0, maxItems));
+}
+
+/** Truthful empty-state language for the independently loaded history window. */
+export function recentTradesEmptyCopy(
+  state: RecentHistoryState,
+  recent: Block[],
+): string {
+  if (state === "idle" || state === "loading") return "loading recent trades…";
+  if (state === "error") return "recent trades unavailable";
+  if (recent.some((block) => block.fill_count > 0)) {
+    return "recent trade details unavailable";
+  }
+  return "no trades in recent blocks";
 }

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatCentsPrecise, formatPercentPrecise, parseNanos } from "./nanos";
+import {
+  formatCentsPrecise,
+  formatCompactCount,
+  formatPercentPrecise,
+  parseNanos,
+} from "./nanos";
 
 // 1 cent = 1e7 nanos; 1% probability = 1e7 nanos (a binary price IS its odds).
 const CENT = 10_000_000n;
@@ -58,5 +63,13 @@ describe("formatPercentPrecise", () => {
   it("shows one decimal and surfaces edge odds (no <1% clamp)", () => {
     expect(formatPercentPrecise(634_000_000n)).toBe("63.4%");
     expect(formatPercentPrecise(3_000_000n)).toBe("0.3%");
+  });
+});
+
+describe("formatCompactCount", () => {
+  it("keeps small counts exact and compacts thousands and millions", () => {
+    expect(formatCompactCount(240)).toBe("240");
+    expect(formatCompactCount(4_200)).toBe("4.2K");
+    expect(formatCompactCount(1_800_000)).toBe("1.8M");
   });
 });

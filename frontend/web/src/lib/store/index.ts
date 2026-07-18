@@ -4,9 +4,10 @@
  * below — the RealtimeProvider is the only thing that drives them.
  *
  * Data flow:
- *   REST hydration (/v1/blocks/latest + /v1/markets/prices) seeds the store
- *   on mount → BlockStream connects with from_block=H₀+1 → server replays
- *   any missed blocks → live blocks keep prices fresh.
+ *   REST hydration (/v1/blocks/latest + /v1/markets/prices) seeds the head,
+ *   while one global /v1/blocks history bootstrap fills the bounded recent
+ *   ring → BlockStream connects with from_block=H₀+1 → server replays any
+ *   missed blocks → live blocks keep prices fresh.
  */
 
 import { create } from "zustand";
@@ -20,6 +21,8 @@ const RECENT_BLOCKS_CAP = 80;
 
 /** Hydration phases for the initial REST snapshot. */
 export type HydrationState = "idle" | "hydrating" | "hydrated" | "error";
+/** State of the independent bounded recent-block history bootstrap. */
+export type RecentHistoryState = "idle" | "loading" | "ready" | "error";
 
 export type MarketPrice = {
   yes: bigint;
@@ -38,6 +41,9 @@ export type StoreState = {
   hydration: HydrationState;
   /** H₀ — the height captured from REST before subscribing to WS. */
   hydratedAtHeight: number | null;
+  /** Recent-block bootstrap state. This is independent from head hydration:
+   *  the live stream may be useful even when historical reads are unavailable. */
+  recentHistory: RecentHistoryState;
 
   /** Most recent committed block. */
   latestBlock: Block | null;
@@ -54,21 +60,19 @@ export type StoreState = {
   // ── Dispatchers ─────────────────────────────────────────────────────
   setConnection: (snapshot: ConnectionSnapshot) => void;
   setHydration: (state: HydrationState, height?: number | null) => void;
+  setRecentHistory: (state: RecentHistoryState) => void;
   /** Seed prices from /v1/markets/prices. Does not overwrite existing entries
    *  that were applied from a more recent block. */
   applyRestPrices: (
-    prices: Record<
-      string,
-      { yes_price_nanos: string; no_price_nanos: string }
-    >
+    prices: Record<string, { yes_price_nanos: string; no_price_nanos: string }>,
   ) => void;
   /** Apply a committed block: update latest, ring buffer, and any prices it
    *  carried in clearing_prices_nanos. */
   applyBlock: (block: Block) => void;
-  /** Seed many blocks at once (e.g. the REST backfill for the Activity table)
-   *  in a single atomic update. Dedupes against the ring by height; only the
-   *  newest incoming block is allowed to advance latest/prices/anchor, so a
-   *  historical backfill never regresses the live tip. */
+  /** Seed many blocks at once (the global REST recent-history bootstrap) in a
+   *  single atomic update. Dedupes against the ring by height; only the newest
+   *  incoming block may advance latest/prices/anchor, so history never
+   *  regresses the live tip. */
   applyBlocks: (blocks: Block[]) => void;
   /** Wipe live caches; used when the WS reports "block not found" and we
    *  need to re-hydrate from REST. */
@@ -87,6 +91,7 @@ export const useStore = create<StoreState>((set) => ({
   connection: { state: "idle", lastSeenHeight: null },
   hydration: "idle",
   hydratedAtHeight: null,
+  recentHistory: "idle",
 
   latestBlock: null,
   latestBlockAnchorPerf: null,
@@ -100,6 +105,7 @@ export const useStore = create<StoreState>((set) => ({
       hydration: state,
       hydratedAtHeight: height ?? s.hydratedAtHeight,
     })),
+  setRecentHistory: (recentHistory) => set({ recentHistory }),
 
   applyRestPrices: (rest) =>
     set((s) => {
@@ -219,6 +225,7 @@ export const useStore = create<StoreState>((set) => ({
       pricesByMarketId: {},
       hydration: "idle",
       hydratedAtHeight: null,
+      recentHistory: "idle",
     }),
 }));
 
@@ -232,6 +239,7 @@ export const selectWsLive = (s: StoreState) =>
   s.connection.state === "live" || s.connection.state === "replaying";
 export const selectHydration = (s: StoreState) => s.hydration;
 export const selectHydratedAtHeight = (s: StoreState) => s.hydratedAtHeight;
+export const selectRecentHistory = (s: StoreState) => s.recentHistory;
 export const selectLatestBlock = (s: StoreState) => s.latestBlock;
 export const selectLatestBlockAnchor = (s: StoreState) =>
   s.latestBlockAnchorPerf;

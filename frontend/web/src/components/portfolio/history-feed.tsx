@@ -12,7 +12,6 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { MockValue } from "@/components/mock-value";
 import {
   Pager,
   usePaged,
@@ -40,7 +39,6 @@ interface Props {
   marketsById: Map<number, Market>;
   /** market_id → natural question title (see `portfolio/page.tsx`). */
   titleByMarket: Map<number, string>;
-  isMock?: boolean;
 }
 
 const CHIPS: { id: HistoryCategory; label: string }[] = [
@@ -148,7 +146,6 @@ export function HistoryFeed({
   events,
   marketsById,
   titleByMarket,
-  isMock,
 }: Props) {
   const [category, setCategory] = useState<HistoryCategory>("all");
   const [type, setType] = useState<HistoryEventType | "all">("all");
@@ -249,16 +246,6 @@ export function HistoryFeed({
           )
         }
       >
-        {isMock && (
-          <span>
-            <MockValue
-              hint="history feed is mocked; pending backend /events endpoint (per-account event log)"
-              variant="pill"
-            >
-              {" "}
-            </MockValue>
-          </span>
-        )}
         {!noData && (
           <div style={{ display: "flex", gap: 6 }}>
             {CHIPS.map((c) => (

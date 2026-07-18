@@ -44,14 +44,8 @@ export function WaitingAlert() {
         padding: "var(--space-3) var(--space-4)",
       }}
     >
-      <style>{`
-        @keyframes waiting-alert-pulse {
-          0% { transform: scale(1); opacity: 1; }
-          50% { transform: scale(1.5); opacity: 0.4; }
-          100% { transform: scale(1); opacity: 1; }
-        }
-      `}</style>
       <span
+        className="sybil-motion-pulse"
         aria-hidden
         style={{
           width: 8,
@@ -59,7 +53,7 @@ export function WaitingAlert() {
           borderRadius: "50%",
           background: "var(--accent)",
           flexShrink: 0,
-          animation: "waiting-alert-pulse 1.4s ease-in-out infinite",
+          animation: "sybil-pulse 1.4s ease-in-out infinite",
         }}
       />
       <span

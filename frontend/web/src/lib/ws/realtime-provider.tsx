@@ -5,6 +5,7 @@ import { useEffect, type ReactNode } from "react";
 import { api } from "../api/client";
 import { useStore } from "../store";
 import { getBlockStream } from "./client";
+import { fetchRecentBlockHistory } from "./recent-block-history";
 
 /**
  * Min gap between REST stat-chip refreshes (vol / 24h / liq / traders). Blocks
@@ -25,9 +26,11 @@ let lastStatRefresh = 0;
  * Owns the singleton block-stream connection for the whole app.
  *
  * Lifecycle on mount:
- *   1. HYDRATE — fetch /v1/blocks/latest + /v1/markets/prices in parallel.
- *      The latest block gives us H₀ and any fresh clearing prices; the
- *      prices endpoint fills in the markets that didn't update last block.
+ *   1. HYDRATE — fetch /v1/blocks/latest + /v1/markets/prices in parallel,
+ *      while independently bootstrapping the bounded recent-block ring.
+ *      The latest block gives us H₀ and any fresh clearing prices; the prices
+ *      endpoint fills in markets that didn't update last block. Recent history
+ *      serves global trade surfaces and Activity without owning the live head.
  *   2. SEED — push hydration data into the store, seed the stream with H₀.
  *   3. CONNECT — open the WebSocket with `?from_block=H₀+1`. Server replays
  *      any blocks committed during hydration, then transitions to live.
@@ -42,7 +45,9 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     const {
       setConnection,
       setHydration,
+      setRecentHistory,
       applyBlock,
+      applyBlocks,
       applyRestPrices,
       resetForFreshSnapshot,
     } = useStore.getState();
@@ -88,6 +93,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 
     let cancelled = false;
     let recoveryInFlight = false;
+    let snapshotGeneration = 0;
 
     const hydrateSnapshot = async (recovering: boolean) => {
       if (recovering) {
@@ -95,13 +101,32 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
         recoveryInFlight = true;
         resetForFreshSnapshot();
       }
+      const generation = ++snapshotGeneration;
       setHydration("hydrating");
+      setRecentHistory("loading");
+
+      // Recent history is useful but not part of the critical WS handshake.
+      // Fetch it independently so a history outage cannot prevent the live
+      // head from connecting. The generation guard prevents an old request
+      // from repopulating state after retention-gap recovery reset it.
+      void fetchRecentBlockHistory()
+        .then((blocks) => {
+          if (cancelled || generation !== snapshotGeneration) return;
+          applyBlocks(blocks);
+          setRecentHistory("ready");
+        })
+        .catch((err: unknown) => {
+          if (cancelled || generation !== snapshotGeneration) return;
+          console.error("[realtime] recent history failed:", err);
+          setRecentHistory("error");
+        });
+
       try {
         const [latestRes, pricesRes] = await Promise.all([
           api.GET("/v1/blocks/latest"),
           api.GET("/v1/markets/prices"),
         ]);
-        if (cancelled) return;
+        if (cancelled || generation !== snapshotGeneration) return;
 
         if (latestRes.error || !latestRes.data) {
           throw new Error("hydrate: /v1/blocks/latest failed");
@@ -125,7 +150,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
           stream.connect();
         }
       } catch (err) {
-        if (cancelled) return;
+        if (cancelled || generation !== snapshotGeneration) return;
         console.error("[realtime] hydration failed:", err);
         setHydration("error");
         if (!recovering) {
@@ -134,7 +159,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
           stream.connect();
         }
       } finally {
-        recoveryInFlight = false;
+        if (generation === snapshotGeneration) recoveryInFlight = false;
       }
     };
 

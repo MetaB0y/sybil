@@ -41,7 +41,9 @@ export function ResearchNudge() {
   }, []);
 
   useEffect(() => {
-    if (paused) return;
+    // Reduced-motion means no autonomous content replacement, not merely a
+    // hard cut without the slide animation.
+    if (paused || reducedMotion) return;
     const interval = window.setInterval(() => {
       setIndex((current) => {
         if (!reducedMotion) setOutgoing(current);

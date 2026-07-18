@@ -22,13 +22,15 @@ without gaps, duplicates, false zeroes, or a forced page reload.
   test window.
 - Use an instrumented browser that can disable and restore all network traffic
   without changing server state.
-- Record the initial visible block height, market price label, and connection
-  state after the page has fully settled.
+- Record the initial visible block height, market price label, recent-trades
+  entries, and connection state after the page has fully settled.
 
 ## Steps
 
-1. Open the bound market, observe at least one live update or countdown change,
-   then visit Activity and record the latest visible batch height.
+1. Open the market index directly and wait for Recent trades to settle without
+   visiting Activity first. Record its visible traded clears, then open the
+   bound market, observe at least one live update or countdown change, and visit
+   Activity to record the latest visible batch height.
 2. Disable network traffic while keeping the page open and interact with the
    market and Activity views long enough for freshness indicators to react.
 3. Inspect headline prices, charts, batch counts, retry or connection language,
@@ -36,7 +38,8 @@ without gaps, duplicates, false zeroes, or a forced page reload.
 4. Restore network traffic and wait for the connection and read states to settle
    without manually clearing storage or refreshing.
 5. Revisit the bound market and Activity, then compare the recovered latest
-   height and visible history with the before-offline observations.
+   height and visible history with the before-offline observations. Return to
+   the market index and compare Recent trades with the same loaded block window.
 
 ## Observable assertions
 
@@ -48,6 +51,9 @@ without gaps, duplicates, false zeroes, or a forced page reload.
   required account or market reads are unavailable.
 - Recovery resumes automatically, advances beyond the recorded height, and does
   not duplicate batches, chart points, toasts, or order rows.
+- Recent trades loads on direct index entry, includes first and flat traded
+  clears with their clearing prices, and does not depend on visiting Activity.
+  Navigation order and reconnect recovery produce the same loaded-window feed.
 - If the retained range cannot bridge the interruption, the product exposes a
   clear recovery or unavailable state rather than concealing a gap.
 - Console and network diagnostics contain no unbounded reconnect loop or burst

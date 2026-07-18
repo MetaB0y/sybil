@@ -5,7 +5,7 @@
 > pages to endpoint families and records trust/durability boundaries; it does
 > not duplicate every rendered field or serve as a product backlog.
 
-Last implementation audit: 2026-07-17. A Vitest guard checks that every path
+Last implementation audit: 2026-07-18. A Vitest guard checks that every path
 named here exists in generated OpenAPI types and that every path called through
 the frontend API client appears here.
 
@@ -14,7 +14,7 @@ the frontend API client appears here.
 ```mermaid
 flowchart LR
     API["sybil-api REST"] --> QUERY["React Query caches"]
-    HEAD["GET latest block + market prices"] --> STORE["Zustand realtime store"]
+    HEAD["GET latest block + market prices<br/>+ recent blocks"] --> STORE["Zustand realtime store"]
     WS["/v2/blocks/ws<br/>resume from H+1"] --> STORE
     QUERY --> PAGE["Next.js pages"]
     STORE --> PAGE
@@ -23,7 +23,11 @@ flowchart LR
 
 - REST uses `src/lib/api/client.ts` and generated `schema.d.ts`.
 - Realtime hydration reads `GET /v1/blocks/latest` and
-  `GET /v1/markets/prices`, then opens `/v2/blocks/ws` with height resume.
+  `GET /v1/markets/prices`, and independently bootstraps one bounded
+  `GET /v1/blocks` window before opening `/v2/blocks/ws` with height resume.
+  The global realtime provider owns that bootstrap; Activity consumes the
+  shared ring and only fetches query-local pages when its requested window is
+  absent.
 - Money is nanodollars (`1_000_000_000 = $1`); quantity is share units
   (`1000 = 1 share`). `*_nanos` fields cross JSON as exact decimal strings,
   and application money arithmetic uses `bigint` helpers.

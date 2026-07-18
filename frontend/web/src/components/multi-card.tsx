@@ -4,9 +4,10 @@ import { useMemo } from "react";
 import Link from "next/link";
 import { useInViewport } from "@/lib/hooks/use-in-viewport";
 import {
-  formatPercentPrecise,
-  formatPercentDelta,
   formatCompactDollars,
+  formatCompactCount,
+  formatPercentDelta,
+  formatPercentPrecise,
 } from "@/lib/format/nanos";
 import {
   isMirror,
@@ -15,7 +16,6 @@ import {
 } from "@/lib/markets/use-markets";
 import { avgLiquidityNanos } from "@/lib/markets/liquidity";
 import { useCardHistory } from "@/lib/markets/use-card-history";
-import { formatTraders } from "@/lib/mock";
 import { useEventTraders } from "@/lib/markets/use-event-traders";
 import { getCategoryColor, pickDisplayCategory } from "@/lib/categorize";
 import type { MarketPrice } from "@/lib/store";
@@ -594,7 +594,7 @@ function FooterRow({
   traderCount: number;
 }) {
   const liq = totalLiqNanos > 0n ? formatCompactDollars(totalLiqNanos) : "—";
-  const traders = traderCount > 0 ? formatTraders(traderCount) : "—";
+  const traders = traderCount > 0 ? formatCompactCount(traderCount) : "—";
   return (
     <div
       style={{

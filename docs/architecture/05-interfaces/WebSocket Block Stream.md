@@ -3,7 +3,7 @@ tags: [infrastructure]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-17
+last_verified: 2026-07-18
 ---
 
 The WebSocket block stream is the first-party production transport for the
@@ -104,8 +104,13 @@ The browser client therefore enters a failed/cold-resync state on
 `retention_gap`; it does not automatically reconnect. `RealtimeProvider`
 clears derived stream state, fetches latest block and market prices from REST,
 applies that snapshot, then resumes with
-`?from_block=<snapshot_height + 1>`. The initial REST-seeded connection follows
-the same replay classification until `replay_complete`.
+`?from_block=<snapshot_height + 1>`. Independently, the provider owns one
+bounded `GET /v1/blocks` bootstrap for global recent-trade and Activity
+surfaces. That history read never gates the live handshake, and store merges
+are monotonic, so a late history response cannot regress the live head. A
+generation fence prevents a pre-recovery response from repopulating a cleared
+snapshot. The initial REST-seeded connection follows the same replay
+classification until `replay_complete`.
 
 ## Keepalive
 
@@ -129,4 +134,4 @@ The server sends a WebSocket Ping frame every 30 seconds. Any message from the c
 ## See Also
 - [[REST API]] — `GET /v1/blocks/{height}` for one-shot block fetches
 - [[Block Lifecycle]] — canonical block production behind the public projection
-- [[Historical Data Serving]] — planned durable replay source
+- [[Historical Data Serving]] — durable replay and query ownership

@@ -91,6 +91,7 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
         }}
       >
         <span
+          className="sybil-motion-pulse"
           aria-hidden
           style={{
             width: 6,

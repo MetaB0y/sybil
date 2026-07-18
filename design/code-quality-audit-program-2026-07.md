@@ -89,42 +89,43 @@ The program is deliberately repository-aware and validation-heavy:
 | Performance and algorithmic complexity | Queued | Allocation/copy hotspots, serialization amplification, non-solver worst cases, query indexes, benchmark regression gates |
 | Documentation, API, and implementation drift | Queued | Route/OpenAPI pins, generated clients, config/runbook drift, architecture freshness and link gates |
 | Python/Arena data and experiment correctness | Audited and fixed | [`code-quality-audit-arena-correctness-2026-07-18.md`](code-quality-audit-arena-correctness-2026-07-18.md), GitHub #192/#193 |
-| Frontend semantic correctness and accessibility | **Next** | Exact-domain conversions, cache invalidation, async races, keyboard/screen-reader flows, failure-state UX |
-| Solidity/L1 differential semantics | Queued | Rust/Solidity hash/ABI parity, invariant tests, reorg/finality assumptions, mutation/fuzz campaigns |
+| Frontend semantic correctness and accessibility | Audited and fixed; broader integer/WebSocket generation policy open | [`code-quality-audit-frontend-correctness-2026-07-18.md`](code-quality-audit-frontend-correctness-2026-07-18.md), GitHub #191 fixed; #177/#183 retained |
+| Solidity/L1 differential semantics | **Next** | Rust/Solidity hash/ABI parity, invariant tests, reorg/finality assumptions, mutation/fuzz campaigns |
 
-## Next-cluster charter: frontend semantic correctness and accessibility
+## Next-cluster charter: Solidity/L1 differential semantics
 
-The next cluster should answer one question: does the browser present exact,
-current exchange state through accessible interactions without inventing
-success, hiding failure, or racing realtime and backfilled data?
+The next cluster should answer one question: do Rust, Solidity, ABI bindings,
+and the indexer agree exactly on every L1 hash, amount, identity, lifecycle, and
+finality transition that can move or release value?
 
 Initial scope:
 
-- exact nanodollar/share conversion and formatting at every component edge;
-- query-cache ownership, invalidation, and current-chain identity;
-- WebSocket replay/backfill handoff, stale loading labels, and async races;
-- mutation success/error/unknown states and optimistic UI rollback;
-- keyboard, focus, dialog, form-label, reduced-motion, and screen-reader flows;
-- chart scale/smoothing semantics and small-card information integrity; and
-- natural-language computer-use scenarios alongside focused Vitest/component
-  evidence.
+- Rust/Solidity bridge hash-domain and known-answer vector parity;
+- generated ABI bindings versus deployed contract interfaces and selectors;
+- deposit, withdrawal, root, nullifier, escape, and adapter lifecycle
+  invariants;
+- confirmation, provider-quorum, reorg, cursor, and idempotency assumptions;
+- Foundry invariant/fuzz coverage and Rust differential tests; and
+- deployment pins, manifests, unsafe mock boundaries, and runbook semantics.
 
 Method:
 
-1. Trace each page from generated schema through parsing, cache, provider, and
-   rendered state before interpreting a visual symptom.
-2. Use exact boundary corpora and fake-clock/deferred-promise tests for races.
-3. Exercise primary flows with keyboard-only and semantic DOM assertions.
-4. Treat “loading,” “empty,” “stale,” “failed,” and “ready” as distinct states.
-5. Keep chart transforms visually helpful but semantically labelled and
-   reversible; never smooth values used for settlement or exact display.
-6. Fix bounded findings and file only coherent product/architecture trade-offs
-   after deduplicating GitHub Issues.
+1. Inventory each value-moving hash and ABI field across Rust and Solidity.
+2. Prefer one shared checked-in vector corpus exercised independently by both
+   runtimes.
+3. Mutate domain tags, ordering, widths, and lifecycle conditions to challenge
+   existing oracles.
+4. Use Anvil only as a disposable local boundary; do not call public providers,
+   submit a live transaction, or generate a proof.
+5. Separate real-value security requirements from explicitly unsafe devnet
+   adapters without allowing mock acceptance into the real submission type.
+6. Fix bounded discrepancies and file only coherent governance or economic
+   trade-offs after deduplicating GitHub Issues.
 
-Completion requires a dated page/data-flow inventory, executable exactness and
-race evidence, primary accessibility coverage, reviewed chart semantics,
-natural-language computer-use scenarios, generated-client drift checks, full
-frontend gates, deduplicated issues, and explicit unresolved product choices.
+Completion requires a dated cross-runtime inventory, independent differential
+vectors, Foundry/Rust boundary gates, reviewed indexer/finality assumptions,
+deployment-pin validation, deduplicated issues, and explicit unresolved
+security/governance choices.
 
 ## Reusable review prompt
 

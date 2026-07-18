@@ -34,8 +34,7 @@ export function mock24hVolumeNanos(
 }
 
 /**
- * Mocked lifetime unique trader count. Roughly `sqrt(dollars) * 1.4 ± jitter`
- * to match the shape of `mockTraders` in `lib/mock.ts`.
+ * Mocked lifetime unique trader count. Roughly `sqrt(dollars) * 1.4 ± jitter`.
  */
 export function mockLifetimeTraders(
   marketId: number,

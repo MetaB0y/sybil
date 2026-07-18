@@ -95,6 +95,7 @@ export function BatchPill() {
       }}
     >
       <span
+        className="sybil-motion-pulse"
         aria-hidden
         style={{
           width: 6,

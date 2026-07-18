@@ -1137,6 +1137,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/orders/policy": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/orders/policy */
+    get: operations["order_admission_policy"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/orders/signed": {
     parameters: {
       query?: never;
@@ -2572,6 +2589,19 @@ export interface components {
       accepted: boolean;
       /** @description Sequencer-assigned IDs for the admitted orders, in request order. */
       order_ids: number[];
+    };
+    /** @description Public constraints needed to construct orders that admission can accept. */
+    OrderAdmissionPolicyResponse: {
+      /**
+       * @description Minimum ceil(limit_price * quantity / 1000) for ordinary non-MM orders.
+       *     Integer nanodollars; 1_000_000_000 = $1.
+       */
+      min_order_notional_nanos: string;
+      /**
+       * Format: int64
+       * @description Integer quantity units per user-facing share.
+       */
+      share_scale: number;
     };
     /**
      * @description Tagged enum representing public order types.
@@ -6122,6 +6152,26 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PendingOrderResponse"][];
+        };
+      };
+    };
+  };
+  order_admission_policy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Public order-construction admission policy */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OrderAdmissionPolicyResponse"];
         };
       };
     };

@@ -10,9 +10,10 @@
  *
  * Two sources, one shape:
  *
- *   1. `recentBlocks` in the global store (fed by the WS tail + the one-shot
- *      REST backfill below). Covers the newest ~80 heights, so the first pages
- *      resolve without a request and page 0 keeps tailing live.
+ *   1. `recentBlocks` in the global store (fed by the WS tail + the global
+ *      realtime provider's one-shot REST bootstrap). Covers the newest ~80
+ *      heights, so the first pages resolve without a request and page 0 keeps
+ *      tailing live.
  *   2. `GET /v1/blocks?limit&before_height` for anything older. Blocks are
  *      sealed and immutable, so those pages cache forever.
  *
@@ -20,7 +21,7 @@
  * bounded newest-first ring, and pushing 2000-block-old history through it
  * would evict the live tail every other page turn.
  *
- * Why REST for the backfill and not a WS replay handshake: the replay path is
+ * Why REST for the bootstrap and not a WS replay handshake: the replay path is
  * all-or-nothing — asking for `latest - N` when the server retains less makes
  * it close with `block not found` and we get zero history. REST clamps to what
  * exists. `applyBlocks` dedupes + sorts by height, so the REST seed and live
@@ -30,18 +31,15 @@
 
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { deriveBatchRow } from "./derive-batch";
 import type { BatchRow, Block } from "./types";
-import { selectRecentBlocks, useStore } from "../store";
+import { selectRecentBlocks, selectRecentHistory, useStore } from "../store";
 import { api } from "../api/client";
 
 /** First block the chain ever produces. There is no height 0. */
 const GENESIS_HEIGHT = 1;
-
-/** Seeds the store so the first pages — and row expansion — need no request. */
-const BACKFILL_LIMIT = 60;
 
 export type UseBatchPageArgs = {
   /** Newest height to show: the tip when live, the frozen height otherwise. */
@@ -70,18 +68,7 @@ export function useBatchPage({
   pageSize,
 }: UseBatchPageArgs): UseBatchPageResult {
   const recentBlocks = useStore(selectRecentBlocks);
-  const backfillQ = useQuery({
-    queryKey: ["blocks", "backfill", BACKFILL_LIMIT],
-    queryFn: () => fetchBatchBackfill(BACKFILL_LIMIT),
-    staleTime: Infinity,
-  });
-
-  // Seed only the bounded live ring. Deep cursor pages remain query-local.
-  useEffect(() => {
-    if (backfillQ.data && backfillQ.data.length > 0) {
-      useStore.getState().applyBlocks(backfillQ.data);
-    }
-  }, [backfillQ.data]);
+  const recentHistory = useStore(selectRecentHistory);
 
   // Exclusive upper bound, i.e. what `before_height` means to the API.
   const beforeHeight = head == null ? null : head + 1 - page * pageSize;
@@ -107,7 +94,8 @@ export function useBatchPage({
       beforeHeight != null &&
       expected > 0 &&
       !complete &&
-      !backfillQ.isFetching,
+      recentHistory !== "idle" &&
+      recentHistory !== "loading",
     staleTime: Infinity, // sealed blocks never change
   });
 
@@ -125,32 +113,19 @@ export function useBatchPage({
     isLoading:
       rows.length === 0 &&
       (head == null ||
-        backfillQ.isFetching ||
+        recentHistory === "idle" ||
+        recentHistory === "loading" ||
         (expected > 0 && !complete && pageQ.isFetching)),
     hasOlder: oldest != null && oldest > GENESIS_HEIGHT,
-    error:
-      pageQ.error instanceof Error
-        ? pageQ.error
-        : backfillQ.error instanceof Error
-          ? backfillQ.error
-          : null,
-    isRetrying: backfillQ.isFetching || pageQ.isFetching,
+    error: pageQ.error instanceof Error ? pageQ.error : null,
+    isRetrying: pageQ.isFetching,
     retry: () => {
-      void Promise.allSettled([backfillQ.refetch(), pageQ.refetch()]);
+      void pageQ.refetch();
     },
   };
 }
 
-/** Fetch the newest sealed blocks used to hydrate the bounded live ring. */
-export async function fetchBatchBackfill(limit: number): Promise<Block[]> {
-  const { data, error } = await api.GET("/v1/blocks", {
-    params: { query: { limit } },
-  });
-  if (error || !data) throw new Error("/v1/blocks backfill failed");
-  return data;
-}
-
-async function fetchBlockPage(
+export async function fetchBlockPage(
   beforeHeight: number | null,
   limit: number,
 ): Promise<Block[]> {

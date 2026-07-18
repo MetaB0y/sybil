@@ -490,3 +490,46 @@ that needed a single classification owner.
 - No proof generation, deployment, protocol-byte, or solver-policy change
   occurred.
 - The next cluster is frontend semantic correctness and accessibility.
+
+## 2026-07-18T13:35:56+01:00 — frontend semantic correctness and accessibility
+
+### Primary-reviewer method and reusable handoff
+
+- Trace rendered states back through generated types, query ownership, global
+  store, REST bootstrap, and WebSocket replay before interpreting UI copy.
+- Treat loading, unavailable, stale, genuinely empty, and ready as separate
+  product states.
+- Keep one owner for global data bootstrap and prove async arrival-order
+  convergence at the store boundary.
+- Treat reduced motion as stopping autonomous replacement, not only removing
+  transition effects.
+
+### Findings and decisions
+
+- Implemented #191 by moving the bounded recent-block bootstrap from Activity
+  into the global realtime provider, independently of the critical WebSocket
+  handshake.
+- Added a recovery-generation fence and store convergence tests so history,
+  live, replay, and cold-resync arrival order cannot regress the head.
+- Made Recent trades include every positive-volume per-market clear, including
+  first, flat, and sub-threshold observations, with truthful price/delta and
+  loading/failure/empty language.
+- Disabled ticker/status motion and autonomous research-nudge rotation for
+  reduced-motion users.
+- Removed the dead Portfolio history mock branch and the unused production mock
+  generator; compact real trader counts now use an ordinary formatter.
+- Reviewed exactness and card-chart semantics: product nanos arithmetic remains
+  bigint-backed, and raw unsmoothed sparklines retain the tested 20pp minimum
+  span.
+- Existing #177 and #183 continue to own broader non-nanos int64 policy and
+  generated cross-runtime WebSocket contracts.
+
+### Result
+
+- Report:
+  [`code-quality-audit-frontend-correctness-2026-07-18.md`](code-quality-audit-frontend-correctness-2026-07-18.md)
+- Generated schema, scenarios, TypeScript, ESLint, Vitest, production build,
+  and documentation gates pass.
+- No proof generation, deployment, protocol-byte, or solver-policy change
+  occurred.
+- The next cluster is Solidity/L1 differential semantics.

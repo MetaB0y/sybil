@@ -43,7 +43,9 @@ describe("markets page accessibility", () => {
     expect(batchPillLabelColor(true)).toBe("var(--accent)");
     expect(batchPillLabelColor(false)).toBe("var(--warn)");
     expect(ticker).toContain('class="clearing-ticker"');
-    expect(ticker).toMatch(/color:var\(--fg-2\)[^>]*>awaiting fills…<\/span>/);
+    expect(ticker).toMatch(
+      /role="status"[^>]*color:var\(--fg-2\)[^>]*>loading recent trades…<\/span>/,
+    );
   });
 
   it("uses a non-skipped heading level and readable empty category on cards", () => {

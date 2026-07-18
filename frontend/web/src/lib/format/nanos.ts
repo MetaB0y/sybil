@@ -163,6 +163,13 @@ export const formatCentsDelta = (cents: number): string => {
 export const formatInt = (v: NanosInput): string =>
   parseNanos(v).toLocaleString("en-US");
 
+/** Compact non-money count formatter for card-level aggregate labels. */
+export function formatCompactCount(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return value.toString();
+}
+
 /**
  * Compact integer: 1_234 → "1.2K", 1_234_567 → "1.2M", 1_234_567_890 → "1.2B".
  * Drops trailing zero in the decimal (1.0K → "1K"). Negatives keep their sign.
