@@ -37,8 +37,8 @@ pub struct ApiConfig {
     #[arg(long, default_value = "false", env = "SYBIL_DEV_MODE")]
     pub dev_mode: bool,
 
-    /// Deployment profile: `local`, `devnet`, `private-devnet`, or `prod`.
-    /// `private-devnet` applies the production durability/trust guardrails but
+    /// Deployment profile: `local`, `devnet`, `prelaunch`, or `prod`.
+    /// `prelaunch` applies the production durability/trust guardrails but
     /// requires a fixed public play-money grant. Locked profiles refuse other
     /// dev-only knobs unless `SYBIL_ALLOW_DEV_KNOBS=1` is set.
     #[arg(long, default_value = "local", env = "SYBIL_DEPLOYMENT_PROFILE")]

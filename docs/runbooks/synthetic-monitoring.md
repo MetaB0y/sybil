@@ -182,7 +182,7 @@ Modes (`SYBIL_SMOKE_PROOF_LAG` / `--proof-lag`):
   established; return to `fail` — with `SYBIL_SMOKE_PROOF_LAG_MAX` raised to
   match observed real-prover cadence — once it holds a steady lag.
 - `off`: skip entirely (deployments with no prover at all). The checked-in
-  systemd unit selects this for the 2 GB product devnet. Override it to `fail`
+  systemd unit selects this for the 2 GB prelaunch host. Override it to `fail`
   in a systemd drop-in only when the validity profile is enabled.
 
 The 30-block default threshold is one probe period (5 min) at the 10s block

@@ -3,36 +3,33 @@ tags: [infrastructure, operations, deployment]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-17
+last_verified: 2026-07-18
 ---
 
-Sybil runs the same API/history images in four different postures. The
-public 2 GB devnet box is deliberately tuned with dev-only tradeoffs —
-`SYBIL_DEV_MODE=true`, bounded hot serving state, same-host storage — and nothing used to
-stop those tradeoffs from silently leaking into a locked product or real-value
-deploy. This note is the source of truth for which durability, cache, and
-prover knob is meant to hold which value in each profile, and it documents the
-startup guardrail (SYB-133) that fail-closes locked profiles when a forbidden
-dev-only knob is wired in. See [[REST API]] for the endpoints these knobs feed and
-[[Sybil Architecture]] for the system overview.
+Sybil runs the same API/history images in four different postures. `local` and
+`devnet` permit deliberate development tradeoffs; `prelaunch` and `prod`
+fail-close if those tradeoffs leak into a locked deployment. This note is the
+source of truth for which durability, cache, and prover knob belongs in each
+profile and documents the startup guardrail (SYB-133). See [[REST API]] for the
+endpoints these knobs feed and [[Sybil Architecture]] for the system overview.
 
 ## Deployment profiles
 
-`SYBIL_DEPLOYMENT_PROFILE` (`local` | `devnet` | `private-devnet` | `prod`, process default
+`SYBIL_DEPLOYMENT_PROFILE` (`local` | `devnet` | `prelaunch` | `prod`, process default
 `local`) names the intended posture and drives the preflight guardrail.
 
 - **local** — developer laptop / CI. `docker compose up` (base + override)
   starts the minimal API/history/web core, or use `cargo run`. Dev conveniences
   on, no durability expected.
-- **devnet** — the current shared public box (base `docker-compose.yml` plus
-  explicitly selected service profiles). Dev-tuned but multi-user; no
-  production guarantees. Base Compose explicitly selects `devnet`, so its
-  startup log cannot silently self-label as local.
-- **private-devnet** — the product-facing play-money network (base +
-  `docker-compose.prod.yml`). It keeps the production persistence, service
-  authentication, WebAuthn pins, and fail-closed guardrails, while explicitly
-  requiring a bounded fixed public account grant. The product overlay selects
-  this profile by default.
+- **devnet** — a shared public development network (base
+  `docker-compose.yml` plus explicitly selected service profiles). Dev-tuned
+  and multi-user; no production guarantees. Base Compose explicitly selects
+  `devnet`, so its startup log cannot silently self-label as local.
+- **prelaunch** — the operator-only play-money sandbox currently deployed
+  through base Compose plus `docker-compose.prod.yml`. It keeps production
+  persistence, service authentication, WebAuthn pins, and fail-closed
+  guardrails while requiring a bounded fixed public account grant. The locked
+  product overlay selects this profile by default.
 - **prod** — real-value posture (the same product overlay with explicit
   `SYBIL_DEPLOYMENT_PROFILE=prod` and
   `SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS=0`). It permits no play-money minting and
@@ -40,15 +37,15 @@ dev-only knob is wired in. See [[REST API]] for the endpoints these knobs feed a
 
 Compose service profiles are deliberately separate from the process posture
 above. The unprofiled default is the core: `sybil-api`, `sybil-history`, and
-`sybil-web` (plus Caddy in the production overlay). Optional subsystems are:
+`sybil-web` (plus Caddy in the locked product overlay). Optional subsystems are:
 
 - `integrations` — native catalog/admin/MM, Polymarket mirror, and Arena runner/dashboard;
 - `validity` — the durable prover daemon;
 - `ops` — VictoriaMetrics, vmalert, Grafana, and node-exporter;
 - `l1-indexer` — the separately credentialed L1 lifecycle sidecar.
 
-`just docker-up-all` selects the first three on a workstation. The 2 GB product
-devnet deploy recipes select `integrations` and `ops`; both `validity` and
+`just docker-up-all` selects the first three on a workstation. The 2 GB
+prelaunch deploy recipes select `integrations` and `ops`; both `validity` and
 `l1-indexer` remain independent opt-ins. Product Compose sets
 `SYBIL_RETAIN_VALIDITY_ARTIFACTS=false`, so it keeps native verification,
 recovery state, replay blocks, and product history without building portable
@@ -65,16 +62,16 @@ coupled state and starts the validity topology from fresh genesis.
 
 ## Profile matrix
 
-Values are the effective settings after Compose overrides. "current devnet"
-reflects base `docker-compose.yml`; "private devnet" reflects the default
-base + `docker-compose.prod.yml` product stack. The real-value `prod` posture
+Values are the effective settings after Compose overrides. "devnet" reflects
+base `docker-compose.yml`; "prelaunch" reflects the default base +
+`docker-compose.prod.yml` product stack. The real-value `prod` posture
 uses that same overlay with the two explicit funding overrides above.
 
 ### Trust boundary
 
-| Knob | local | current devnet | private devnet / prod | Dev-only in locked profiles? |
+| Knob | local | devnet | prelaunch / prod | Dev-only in locked profiles? |
 | --- | --- | --- | --- | --- |
-| `SYBIL_DEPLOYMENT_PROFILE` | `local` | `devnet` | `private-devnet` / `prod` | — |
+| `SYBIL_DEPLOYMENT_PROFILE` | `local` | `devnet` | `prelaunch` / `prod` | — |
 | `SYBIL_DEV_MODE` | `true` | `true` | `false` | **yes — blocks** |
 | `SYBIL_SERVICE_TOKEN` | unset | unset | **set** (required) | **yes — blocks** |
 | `SYBIL_HISTORY_URL` | compose service | compose service | `http://sybil-history:3003` | **yes — blocks** |
@@ -87,7 +84,7 @@ uses that same overlay with the two explicit funding overrides above.
 
 ### Durability / persistence
 
-| Knob | local | current devnet | private devnet / prod | Dev-only in locked profiles? |
+| Knob | local | devnet | prelaunch / prod | Dev-only in locked profiles? |
 | --- | --- | --- | --- | --- |
 | `SYBIL_DATA_DIR` | `/data` in Compose; unset for direct `cargo run` | `/data` (redb) | `/data` (redb) | **yes — blocks** |
 | `SYBIL_MARKET_REF_DATA_PATH` | unset (volatile) | unset (volatile) | `/data/market_ref_data.json` | no (degraded) |
@@ -99,7 +96,7 @@ uses that same overlay with the two explicit funding overrides above.
 
 ### Cache / history caps
 
-| Knob | default | current devnet | private devnet / prod | Dev-only in locked profiles? |
+| Knob | default | devnet | prelaunch / prod | Dev-only in locked profiles? |
 | --- | --- | --- | --- | --- |
 | `SYBIL_RECENT_BLOCK_CACHE_CAPACITY` | `100` | `100` | `100` | no |
 | `SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS` | `0` (no prune) | `0` | `60480` (7 days at 10s/block) | no |
@@ -114,7 +111,7 @@ uses that same overlay with the two explicit funding overrides above.
 | `SYBIL_WS_CLIENT_IDLE_TIMEOUT_MS` | `90000` | `90000` | `90000` | no |
 | `SYBIL_REFERENCE_PRICE_TTL_MS` | `60000` | `60000` | `60000` | no |
 | `SYBIL_PUBLIC_ACCOUNT_CAPACITY` | `1000` | `1000` | `1000` (override deliberately) | no |
-| `SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS` | `1000000000000` ($1,000 play money) | same | `1000000000000` / `0` | **private devnet exception; blocks prod when nonzero** |
+| `SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS` | `1000000000000` ($1,000 play money) | same | `1000000000000` / `0` | **prelaunch exception; blocks prod when nonzero** |
 | `SYBIL_HTTP_ONBOARDING_GLOBAL_RPS` / `BURST` | `5` / `20` | `5` / `20` | `5` / `20` | no |
 | `SYBIL_HTTP_ONBOARDING_CLIENT_RPS` / `BURST` | `1` / `3` | `1` / `3` | `1` / `3` | no |
 
@@ -145,7 +142,7 @@ account creation remains a trusted operator bypass and is therefore not an
 anti-compromise control. Account ids are never reclaimed or reused. A real-value
 `prod` profile sets the public grant to zero; a nonzero override blocks startup
 unless the loud dev-knob escape hatch is used. Conversely,
-`private-devnet` requires both nonzero account capacity and a nonzero fixed
+`prelaunch` requires both nonzero account capacity and a nonzero fixed
 grant, so a product deployment cannot silently present an unfunded demo-account
 flow again. Real-value identity funding must arrive through the capital-backed
 path, with monitoring retained for total stock and remaining public capacity.
@@ -166,7 +163,7 @@ retention and swaps VictoriaMetrics' empty prover discovery file for the exact
 daemon target. It must be selected from block 1; use
 `just deploy-prover-daemon CONFIRM`, never add the profile to a running product
 chain.
-It is not part of the 2 GB product devnet. A live soak reached 303 MiB anonymous
+It is not part of the 2 GB prelaunch host. A live soak reached 303 MiB anonymous
 RSS and its 384 MiB cgroup ceiling after only 140 retained jobs, so the profile
 uses bounded restart attempts and remains opt-in while #137 defines and
 implements retention. Production-capable STARK mode runs from a pinned
@@ -189,7 +186,7 @@ At boot, before opening the store or binding the socket,
 2. **Fail-closes locked starts.** `prod` rejects every dev-only knob:
    `SYBIL_DEV_MODE=true`, service/history token unset, history URL unset,
    `SYBIL_DATA_DIR` unset, `SYBIL_ADMIN_FEED_KEY_PATH` unset, or
-   `SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS` nonzero. `private-devnet` applies the same
+   `SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS` nonzero. `prelaunch` applies the same
    list except that its fixed play-money grant is permitted and required. The
    process exits non-zero with a message naming the offending knobs. This
    mirrors the existing fail-closed service-token posture in `service_auth`
@@ -198,7 +195,7 @@ At boot, before opening the store or binding the socket,
    `tracing::error!` and lets the process start — a fail-open escape hatch for
    deliberate one-off operations, never steady state.
 
-`local` and `devnet` never block. `private-devnet` and `prod` fail closed.
+`local` and `devnet` never block. `prelaunch` and `prod` fail closed.
 
 ## L1 indexer finality and cursor policy
 
@@ -288,14 +285,15 @@ live contract wiring before sending a transaction.
   do not roll back block production. Product-only mode retains the latest
   recovery witness but writes neither DA rows nor portable proof-job rows.
 
-The production overlay gives canonical full blocks an explicit seven-day
+The locked product overlay gives canonical full blocks an explicit seven-day
 target. In a validity deployment the same floor also bounds paired local DA
 artifacts. At the inherited 10-second interval that is 60,480 heights. Product
 prices/candles are not part of this job; they live in `sybil-history`.
 
 Base Compose keeps one day of acknowledged source jobs and examines at most
-1,000 old rows every 60 blocks. Production keeps seven days and raises the
-independent proof-job pass to 10,000 rows at the same ten-minute cadence.
+1,000 old rows every 60 blocks. The locked product overlay keeps seven days
+and raises the independent proof-job pass to 10,000 rows at the same ten-minute
+cadence.
 Direct/in-memory development retains the conservative disabled default unless
 the operator opts in.
 
@@ -314,8 +312,8 @@ devnet canonical/DA budget.
 ## Product-history service policy
 
 Compose runs `sybil-history` as a separate process with its own named volume.
-`sybil-api` points to it through `SYBIL_HISTORY_URL`; production requires a
-dedicated `SYBIL_HISTORY_TOKEN` on both processes. The service is not routed by
+`sybil-api` points to it through `SYBIL_HISTORY_URL`; locked profiles require
+a dedicated `SYBIL_HISTORY_TOKEN` on both processes. The service is not routed by
 Caddy and only `/healthz` is unauthenticated. Base Compose also keeps internal
 authentication enabled with a dev-only default secret; adjacent containers do
 not receive an unauthenticated private-history interface.
@@ -323,7 +321,7 @@ not receive an unauthenticated private-history interface.
 The sequencer requires `SYBIL_DATA_DIR` to retain the transactional outbox.
 Base Compose now mounts `sybil-data` and sets `/data`, so the current devnet
 actually emits the outbox. A direct in-memory `cargo run` still trades but
-cannot deliver committed history. Production preflight therefore requires both canonical persistence
+cannot deliver committed history. Locked-profile preflight therefore requires both canonical persistence
 and the history connection/credential. A history outage returns explicit 503s
 from historical endpoints while trading continues and outbox rows accumulate.
 
@@ -417,7 +415,7 @@ reprojection/new history volume rather than silently starting a partial series.
 
 ## Admin resolution key durability
 
-The production overlay pins `SYBIL_ADMIN_FEED_KEY_PATH=/data/admin-feed.key`.
+The locked product overlay pins `SYBIL_ADMIN_FEED_KEY_PATH=/data/admin-feed.key`.
 On the first boot of a new `sybil-data` volume, the API generates the P256
 scalar and writes it there with mode `0600`; later process and container starts
 load the same key and repair broader Unix permissions to `0600`. The admin feed
@@ -433,7 +431,7 @@ prover (see Prover section above).
 
 ## WebAuthn validity pins
 
-Production startup requires the API WebAuthn policy to equal the values compiled
+Locked-profile startup requires the API WebAuthn policy to equal the values compiled
 into shared native/guest verification: RP ID `app.172-104-31-54.nip.io`, origin
 `https://app.172-104-31-54.nip.io`, and user verification enabled. A mismatch
 would let the API admit an assertion the validity guest must reject, so the

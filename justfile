@@ -649,14 +649,14 @@ polymarket-dev port="3001" max_events="10":
     cargo run --release -p sybil-polymarket -- --sybil-url http://localhost:{{port}} --max-events {{max_events}} --mm-half-spread 0.03
 
 # ── Deploy (SSH) ──────────────────────────────────────────────────────────
-# Production uses the same docker-compose.yml as local dev, with
-# docker-compose.prod.yml layered on top (persistence, prod params, Caddy).
+# The remote prelaunch host uses base Compose with the locked product overlay
+# (persistence, service auth, durable state, and Caddy).
 # docker-compose.override.yml (build contexts) is NOT shipped to the server.
 
 SERVER := "root@172.104.31.54"
-COMPOSE_PROD := "docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile integrations --profile ops"
-COMPOSE_PROD_VALIDITY := "docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.validity.yml --profile integrations --profile ops --profile validity"
-COMPOSE_PROD_L1 := "docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.l1.yml --profile integrations --profile ops --profile l1-indexer"
+COMPOSE_REMOTE := "docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile integrations --profile ops"
+COMPOSE_REMOTE_VALIDITY := "docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.validity.yml --profile integrations --profile ops --profile validity"
+COMPOSE_REMOTE_L1 := "docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.l1.yml --profile integrations --profile ops --profile l1-indexer"
 COMPOSE_TELEGRAM := "docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.telegram.yml --profile integrations --profile ops"
 COMPOSE_TELEGRAM_VALIDITY := "docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.validity.yml -f docker-compose.telegram.yml --profile integrations --profile ops --profile validity"
 
@@ -667,7 +667,7 @@ COMPOSE_TELEGRAM_VALIDITY := "docker compose -f docker-compose.yml -f docker-com
 #
 # The deploy is orchestrated from this source checkout, where post-deploy smoke
 # builds (or reuses) the canonical `smoke_sign` helper locally. Signed order and
-# cancel are core private-devnet flows, so every deploy requires the signer and
+# cancel are core prelaunch flows, so every deploy requires the signer and
 # fails closed if it is unavailable or either lifecycle check regresses.
 
 # Sync compose configs + deploy/ directory to server
@@ -686,7 +686,7 @@ deploy-sync:
 deploy-install-synthetic-probe: deploy-sync
     ssh {{SERVER}} 'install -m 0644 /opt/sybil/deploy/systemd/sybil-synthetic-probe.service /etc/systemd/system/sybil-synthetic-probe.service && install -m 0644 /opt/sybil/deploy/systemd/sybil-synthetic-probe.timer /etc/systemd/system/sybil-synthetic-probe.timer && systemctl daemon-reload && systemctl enable --now sybil-synthetic-probe.timer'
 
-deploy-prod-env-check:
+deploy-prelaunch-env-check:
     ssh {{SERVER}} 'cd /opt/sybil && test -f .env && grep -q "^GF_SECURITY_ADMIN_PASSWORD=." .env && grep -q "^CADDY_OPS_AUTH_USER=." .env && grep -q "^CADDY_OPS_AUTH_HASH=." .env && grep -q "^SYBIL_SERVICE_TOKEN=." .env && grep -q "^SYBIL_HISTORY_TOKEN=." .env && grep -q "^SYBIL_ARENA_READ_TOKEN=." .env && grep -q "^SYBIL_WEBAUTHN_RP_ID=." .env && grep -q "^SYBIL_WEBAUTHN_ORIGIN=." .env'
 
 deploy-openrouter-env-check:
@@ -695,46 +695,46 @@ deploy-openrouter-env-check:
 # Build and deploy sybil-api plus the native and Polymarket integrations.
 # Validity is a separate deployment boundary: the 2 GB product host does not
 # claim ZK/TEE/L1 validity and cannot safely retain the current mock job stock.
-deploy-api: deploy-sync deploy-prod-env-check && deploy-verify
+deploy-api: deploy-sync deploy-prelaunch-env-check && deploy-verify
     DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-api
     docker save sybil-api:latest | ssh {{SERVER}} docker load
-    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-api sybil-native-admin sybil-native-mm sybil-polymarket'
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_REMOTE}} up -d sybil-api sybil-native-admin sybil-native-mm sybil-polymarket'
 
 # Explicit mock-validity integration deployment. Validity artifact retention is
 # chain identity, so this always starts from fresh genesis and requires an
-# explicit destructive confirmation. This is not part of the product devnet:
+# explicit destructive confirmation. This is not part of prelaunch:
 # issue #137 owns bounded prover retention before it can soak indefinitely, and
 # real STARK mode requires measured prover hardware.
-deploy-prover-daemon confirm: deploy-sync deploy-prod-env-check && deploy-verify-validity
+deploy-prover-daemon confirm: deploy-sync deploy-prelaunch-env-check && deploy-verify-validity
     @test "{{confirm}}" = "CONFIRM" || (echo 'Refusing to reset into validity mode. Run: just deploy-prover-daemon CONFIRM' >&2; exit 2)
-    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} --profile validity --profile l1-indexer down; else {{COMPOSE_PROD}} --profile validity --profile l1-indexer down; fi'
+    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} --profile validity --profile l1-indexer down; else {{COMPOSE_REMOTE}} --profile validity --profile l1-indexer down; fi'
     ssh {{SERVER}} 'docker volume rm sybil-data history-data polymarket-data native-data arena-data prover-data prover-artifacts prover-jobs sybil_prover-jobs sybil_prover-artifacts l1-indexer-data vmdata || true'
-    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM_VALIDITY}} up -d --remove-orphans; else {{COMPOSE_PROD_VALIDITY}} up -d --remove-orphans; fi'
+    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM_VALIDITY}} up -d --remove-orphans; else {{COMPOSE_REMOTE_VALIDITY}} up -d --remove-orphans; fi'
 
-# Destructively reset production app state, then restart services.
+# Destructively reset prelaunch app state, then restart services.
 # This removes old markets, projected history, mirror mappings, Arena bot DB,
 # prover/L1 cursors and artifacts, and metric history. Pass CONFIRM explicitly.
-deploy-reset-state confirm: deploy-prod-env-check
-    @test "{{confirm}}" = "CONFIRM" || (echo 'Refusing to reset production state. Run: just deploy-reset-state CONFIRM' >&2; exit 2)
-    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} --profile validity --profile l1-indexer down; else {{COMPOSE_PROD}} --profile validity --profile l1-indexer down; fi'
+deploy-reset-state confirm: deploy-prelaunch-env-check
+    @test "{{confirm}}" = "CONFIRM" || (echo 'Refusing to reset prelaunch state. Run: just deploy-reset-state CONFIRM' >&2; exit 2)
+    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} --profile validity --profile l1-indexer down; else {{COMPOSE_REMOTE}} --profile validity --profile l1-indexer down; fi'
     ssh {{SERVER}} 'docker volume rm sybil-data history-data polymarket-data native-data arena-data prover-data prover-artifacts prover-jobs sybil_prover-jobs sybil_prover-artifacts l1-indexer-data vmdata || true'
-    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --remove-orphans; else {{COMPOSE_PROD}} up -d --remove-orphans; fi'
+    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --remove-orphans; else {{COMPOSE_REMOTE}} up -d --remove-orphans; fi'
 
 # Build and deploy arena bots + dashboard. Requires OPENROUTER_API_KEY in /opt/sybil/arena.env.
-deploy-arena: deploy-sync deploy-prod-env-check deploy-openrouter-env-check && deploy-verify-scoped
+deploy-arena: deploy-sync deploy-prelaunch-env-check deploy-openrouter-env-check && deploy-verify-scoped
     DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-arena
     docker save sybil-arena:latest | ssh {{SERVER}} docker load
-    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-arena sybil-arena-dashboard caddy'
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_REMOTE}} up -d sybil-arena sybil-arena-dashboard caddy'
 
 # Deploy observability stack (node-exporter + VictoriaMetrics + vmalert + Grafana)
 # Recreate the processes even when Compose wiring is unchanged: VictoriaMetrics
 # scrape config and vmalert local rule files are read into process memory and a
 # bind-mount update alone does not reliably activate them.
-deploy-monitoring: deploy-install-synthetic-probe deploy-prod-env-check
-    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --force-recreate --remove-orphans node-exporter victoriametrics vmalert grafana telegram-alerts; else {{COMPOSE_PROD}} up -d --force-recreate --remove-orphans node-exporter victoriametrics vmalert grafana; fi'
+deploy-monitoring: deploy-install-synthetic-probe deploy-prelaunch-env-check
+    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --force-recreate --remove-orphans node-exporter victoriametrics vmalert grafana telegram-alerts; else {{COMPOSE_REMOTE}} up -d --force-recreate --remove-orphans node-exporter victoriametrics vmalert grafana; fi'
 
 # Enable Telegram delivery for vmalert alerts. Requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in /opt/sybil/.env on the server.
-deploy-telegram-alerts: deploy-sync deploy-prod-env-check
+deploy-telegram-alerts: deploy-sync deploy-prelaunch-env-check
     ssh {{SERVER}} 'cd /opt/sybil && test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env && {{COMPOSE_TELEGRAM}} up -d telegram-alerts vmalert'
 
 # Build and deploy the Next.js web frontend, then reload Caddy for its vhost.
@@ -743,20 +743,20 @@ deploy-telegram-alerts: deploy-sync deploy-prod-env-check
 #   NEXT_PUBLIC_API_BASE=https://api.sybil.exchange \
 #   NEXT_PUBLIC_WS_BASE=wss://api.sybil.exchange \
 #   NEXT_PUBLIC_WEBAUTHN_RP_ID=sybil.exchange just deploy-web
-deploy-web: deploy-sync deploy-prod-env-check && deploy-verify-web
+deploy-web: deploy-sync deploy-prelaunch-env-check && deploy-verify-web
     DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-web
     docker save sybil-web:latest | ssh {{SERVER}} docker load
-    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-web caddy'
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_REMOTE}} up -d sybil-web caddy'
 
 # Deploy Caddy HTTPS reverse proxy
-deploy-caddy: deploy-sync deploy-prod-env-check
-    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d caddy'
+deploy-caddy: deploy-sync deploy-prelaunch-env-check
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_REMOTE}} up -d caddy'
 
 # Deploy everything
-deploy-all: deploy-install-synthetic-probe deploy-prod-env-check deploy-openrouter-env-check && deploy-verify
+deploy-all: deploy-install-synthetic-probe deploy-prelaunch-env-check deploy-openrouter-env-check && deploy-verify
     DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} --profile integrations --profile ops build
     docker save sybil-api:latest sybil-arena:latest sybil-web:latest | ssh {{SERVER}} docker load
-    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --remove-orphans; else {{COMPOSE_PROD}} up -d --remove-orphans; fi'
+    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --remove-orphans; else {{COMPOSE_REMOTE}} up -d --remove-orphans; fi'
 
 # Post-deploy smoke GATE against the LIVE stack (SYB-248). Fail-closed: exits
 # non-zero if any core flow is broken (health, CORS, passkey onboarding,
@@ -794,7 +794,7 @@ deploy-verify-restart:
 
 # Tail logs from a container on the server
 deploy-logs service="sybil-api":
-    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} logs -f --tail 100 {{service}}'
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_REMOTE}} logs -f --tail 100 {{service}}'
 
 # SSH into server
 deploy-shell:
@@ -802,19 +802,19 @@ deploy-shell:
 
 # Arena bot status — text dashboard (readable by CLI / LLM)
 arena-status hours="24":
-    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} exec -T sybil-arena-dashboard uv run --no-sync python -m live.status --hours {{hours}}'
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_REMOTE}} exec -T sybil-arena-dashboard uv run --no-sync python -m live.status --hours {{hours}}'
 
 # Preview resolved-market labels that would be added to the live decisions DB.
 arena-outcomes-dry-run:
-    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} exec -T sybil-arena-dashboard uv run --no-sync python -m scripts.record_outcomes --db /data/decisions.db --api-base http://sybil-api:3000 --dry-run'
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_REMOTE}} exec -T sybil-arena-dashboard uv run --no-sync python -m scripts.record_outcomes --db /data/decisions.db --api-base http://sybil-api:3000 --dry-run'
 
 # Persist conflict-checked resolved-market labels used by calibration reports.
 arena-record-outcomes:
-    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} exec -T sybil-arena-dashboard uv run --no-sync python -m scripts.record_outcomes --db /data/decisions.db --api-base http://sybil-api:3000'
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_REMOTE}} exec -T sybil-arena-dashboard uv run --no-sync python -m scripts.record_outcomes --db /data/decisions.db --api-base http://sybil-api:3000'
 
 # Print the live bot calibration/rejection report from the shared arena volume.
 arena-calibration:
-    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} exec -T sybil-arena-dashboard uv run --no-sync python -m scripts.calibration --db /data/decisions.db'
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_REMOTE}} exec -T sybil-arena-dashboard uv run --no-sync python -m scripts.calibration --db /data/decisions.db'
 
 # Live system status (containers, blocks, traders, fills)
 status:

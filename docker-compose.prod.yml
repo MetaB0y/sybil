@@ -1,5 +1,6 @@
-# Production overrides: persistence, tuned params, Caddy.
-# Usage (product devnet): docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+# Locked product overrides shared by prelaunch and production: persistence,
+# tuned parameters, and Caddy.
+# Usage (prelaunch): docker compose -f docker-compose.yml -f docker-compose.prod.yml \
 #   --profile integrations --profile ops up -d
 # Add --profile validity only for an explicit, separately gated prover soak.
 x-default-logging: &default-logging
@@ -13,11 +14,11 @@ services:
     volumes:
       - sybil-data:/data
     environment:
-      # Product devnet keeps the prod durability/trust guardrails while
+      # Prelaunch keeps the prod durability/trust guardrails while
       # explicitly permitting its one play-money behavior. A real-value
       # deployment must override profile=prod and grant=0.
       # See docs/architecture/Deployment Profiles.md.
-      SYBIL_DEPLOYMENT_PROFILE: "${SYBIL_DEPLOYMENT_PROFILE:-private-devnet}"
+      SYBIL_DEPLOYMENT_PROFILE: "${SYBIL_DEPLOYMENT_PROFILE:-prelaunch}"
       SYBIL_DEV_MODE: "false"
       SYBIL_PUBLIC_ACCOUNT_CAPACITY: "${SYBIL_PUBLIC_ACCOUNT_CAPACITY:-1000}"
       # Fixed $1,000 of non-redeemable play money for browser onboarding.
@@ -63,7 +64,7 @@ services:
       # Run canonical block/DA maintenance every ten minutes (60 blocks).
       SYBIL_CANONICAL_ARCHIVE_MAINTENANCE_INTERVAL_BLOCKS: "60"
       SYBIL_CANONICAL_ARCHIVE_MAX_ROWS_PER_PASS: "10000"
-      # Product devnet makes no proof/DA validity claim. Keep native
+      # Prelaunch makes no proof/DA validity claim. Keep native
       # verification, replay/history, and the latest recovery witness without
       # accumulating portable proof jobs or DA serving payloads.
       SYBIL_RETAIN_VALIDITY_ARTIFACTS: "false"
@@ -79,7 +80,7 @@ services:
   sybil-l1-indexer:
     environment:
       # Compose interpolates inactive profile services too. Keep ordinary
-      # private-devnet deploys independent of L1 credentials; the indexer CLI
+      # Prelaunch deploys independent of L1 credentials; the indexer CLI
       # still rejects missing/invalid providers if this profile is enabled.
       SYBIL_L1_RPC_URLS: "${SYBIL_L1_RPC_URLS:-}"
       SYBIL_L1_RPC_IDS: "${SYBIL_L1_RPC_IDS:-}"

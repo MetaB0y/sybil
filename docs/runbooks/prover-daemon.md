@@ -20,12 +20,12 @@ debugging tools; they do not provide the daemon's recovery guarantees.
 
 The repository default is `stark`; Compose explicitly selects `mock` because
 the small runtime image does not contain the pinned OpenVM toolchain. The
-current 2 GB product devnet does not enable that profile: the mock daemon's
+current 2 GB prelaunch host does not enable that profile: the mock daemon's
 retained job stock exhausted its cgroup during a live soak (#137). Run bounded
 mock integration tests locally and STARK mode from a repository checkout on
 measured prover hardware.
 
-Artifact retention is chain identity. On the production host, the product
+Artifact retention is chain identity. On the prelaunch host, the product
 overlay disables source proof jobs and DA payloads; adding only
 `--profile validity` to that running chain cannot create the missing historical
 sequence. `just deploy-prover-daemon CONFIRM` applies the validity overlay,

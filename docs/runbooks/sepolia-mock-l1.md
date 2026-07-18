@@ -1,12 +1,12 @@
 ---
 tags: [runbook, l1, sepolia, devnet]
 status: current
-last_verified: 2026-07-15
+last_verified: 2026-07-18
 ---
 
 # Unsafe Sepolia mock L1 deployment
 
-This profile gives the private devnet a real Sepolia custody/state-machine
+This profile gives prelaunch a real Sepolia custody/state-machine
 footprint without running a prover. It deliberately does **not** verify proofs.
 Use it only for wallet, deposit-indexing, root-submission, withdrawal queue,
 finalization, restart, and UI/API integration. The one-shot relay is

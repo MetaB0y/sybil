@@ -122,9 +122,9 @@ expected_profile_contract=$(printf '%s\n' \
 pass "default core and optional subsystem memberships are explicit"
 
 if ! SYBIL_L1_RPC_URLS= SYBIL_L1_RPC_IDS= compose config --services >/dev/null; then
-    fail "inactive L1 indexer credentials block the default private-devnet stack"
+    fail "inactive L1 indexer credentials block the default prelaunch stack"
 fi
-pass "inactive L1 credentials do not block private-devnet deploys"
+pass "inactive L1 credentials do not block prelaunch deploys"
 
 available_profiles=$(compose config --profiles)
 for profile in integrations validity ops l1-indexer; do
@@ -140,26 +140,26 @@ compose_validity --profile integrations --profile validity --profile ops config 
     || fail "explicit validity profile set does not compose cleanly"
 pass "integration, validity, and ops profiles are isolated and compose cleanly"
 
-for variable in COMPOSE_PROD COMPOSE_TELEGRAM; do
+for variable in COMPOSE_REMOTE COMPOSE_TELEGRAM; do
     definition=$(grep -E "^${variable} :=" justfile)
     for profile in integrations ops; do
         grep -Fq -- "--profile $profile" <<<"$definition" \
             || fail "$variable does not explicitly select the $profile profile"
     done
     if grep -Fq -- '--profile validity' <<<"$definition"; then
-        fail "$variable silently enables validity on the product devnet"
+        fail "$variable silently enables validity in prelaunch"
     fi
 done
-validity_definition=$(grep -E '^COMPOSE_PROD_VALIDITY :=' justfile)
+validity_definition=$(grep -E '^COMPOSE_REMOTE_VALIDITY :=' justfile)
 for profile in integrations ops validity; do
     grep -Fq -- "--profile $profile" <<<"$validity_definition" \
-        || fail "COMPOSE_PROD_VALIDITY does not explicitly select the $profile profile"
+        || fail "COMPOSE_REMOTE_VALIDITY does not explicitly select the $profile profile"
 done
 grep -Fq -- '-f docker-compose.validity.yml' <<<"$validity_definition" \
-    || fail "COMPOSE_PROD_VALIDITY does not select the validity chain overlay"
-l1_definition=$(grep -E '^COMPOSE_PROD_L1 :=' justfile)
+    || fail "COMPOSE_REMOTE_VALIDITY does not select the validity chain overlay"
+l1_definition=$(grep -E '^COMPOSE_REMOTE_L1 :=' justfile)
 grep -Fq -- '-f docker-compose.l1.yml' <<<"$l1_definition" \
-    || fail "COMPOSE_PROD_L1 does not select the L1 monitoring overlay"
+    || fail "COMPOSE_REMOTE_L1 does not select the L1 monitoring overlay"
 [[ "$(compose config | artifact_profile_contract)" == "false|disabled.json|disabled.json" ]] \
     || fail "product topology retains validity artifacts or exposes an absent optional target"
 [[ "$(compose_validity config | artifact_profile_contract)" == "true|sybil-prover.json|disabled.json" ]] \
@@ -416,7 +416,7 @@ for key in keys:
 '
 )
 expected_retention_env=$(printf '%s\n' \
-    'SYBIL_DEPLOYMENT_PROFILE=private-devnet' \
+    'SYBIL_DEPLOYMENT_PROFILE=prelaunch' \
     'SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS=1000000000000' \
     'SYBIL_BLOCK_INTERVAL_MS=10000' \
     'SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS=60480' \
@@ -426,7 +426,7 @@ expected_retention_env=$(printf '%s\n' \
     'SYBIL_CANONICAL_ARCHIVE_MAINTENANCE_INTERVAL_BLOCKS=60' \
     'SYBIL_CANONICAL_ARCHIVE_MAX_ROWS_PER_PASS=10000')
 [[ "$retention_env" == "$expected_retention_env" ]] \
-    || fail "product compose does not pin private-devnet funding and retention"
+    || fail "product compose does not pin prelaunch funding and retention"
 
 real_value_funding=$(
     SYBIL_DEPLOYMENT_PROFILE=prod SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS=0 \
@@ -441,7 +441,7 @@ print(environment["SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS"])
 )
 [[ "$real_value_funding" == $'prod\n0' ]] \
     || fail "product overlay cannot be explicitly switched to the zero-grant prod posture"
-pass "product compose pins private-devnet funding and retains an explicit real-value posture"
+pass "product compose pins prelaunch funding and retains an explicit real-value posture"
 
 durability_contract=$(
     compose config | python3 -c '

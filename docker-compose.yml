@@ -256,7 +256,7 @@ services:
     image: sybil-api:latest
     # Integration-only safety ceiling, not a steady-state capacity claim. The
     # daemon's retained job stock exceeded this budget in the live soak (#137),
-    # so the product devnet excludes this profile until retention is bounded.
+    # so prelaunch excludes this profile until retention is bounded.
     mem_limit: "384m"
     memswap_limit: "512m"
     entrypoint: ["sybil-prover"]

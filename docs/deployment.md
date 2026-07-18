@@ -1,16 +1,16 @@
 # Deployment and operations
 
 > **Executive summary:** [`DEPLOY.md`](https://github.com/MetaB0y/sybil/blob/main/DEPLOY.md) is the single authoritative
-> production deployment runbook. This page is the documentation-site index: it
+> remote deployment runbook. This page is the documentation-site index: it
 > explains the topology at a glance and routes operators to the procedure they
 > need without duplicating commands, ports, or credentials.
 
-## Production shape
+## Deployed shape
 
-Production is one Docker Compose stack on a single host. Caddy is the only
+Prelaunch is one Docker Compose stack on a single host. Caddy is the only
 public listener; the API, prover, dashboards, metrics, mirror, and arena are
-reachable only on the Docker network. Production startup fails closed when
-required secrets or persistence settings are missing.
+reachable only on the Docker network. The locked prelaunch startup fails
+closed when required secrets or persistence settings are missing.
 
 ```mermaid
 flowchart LR
@@ -55,9 +55,9 @@ design document.
 | Block-production latency incident | [Block-production latency](runbooks/block-production-latency.md) |
 | Contract authority and key rotation | [Admin keys](runbooks/admin-keys.md) |
 
-## Non-negotiable production checks
+## Non-negotiable locked-stack checks
 
-Before treating a deployment as production-like:
+Before operating prelaunch or a future real-value deployment:
 
 1. Use `docker-compose.prod.yml`; do not copy the local override to the host.
 2. Keep every service except Caddy off public host ports.

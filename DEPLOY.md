@@ -1,12 +1,12 @@
 # Deployment Runbook
 
-Production is a single Linode host running Docker Compose from `/opt/sybil`.
+Prelaunch is a single Linode host running Docker Compose from `/opt/sybil`.
 Images are built locally, transferred with `docker save | ssh docker load`, and
 started with the `deploy-*` recipes in the `justfile`.
 
 ## Public Surface
 
-Only Caddy publishes host ports in the production compose stack.
+Only Caddy publishes host ports in the locked remote Compose stack.
 
 | Public port | Hostname | Service | Auth |
 | --- | --- | --- | --- |
@@ -16,7 +16,7 @@ Only Caddy publishes host ports in the production compose stack.
 | 80, 443 | `grafana.172-104-31-54.nip.io` | Grafana | Caddy basic auth, then Grafana login |
 | 80, 443 | `prover.172-104-31-54.nip.io` | Prover status/API | Caddy basic auth |
 
-These services are Docker-network-only in prod and must not publish host ports:
+These services are Docker-network-only in prelaunch and must not publish host ports:
 `sybil-api`, `sybil-prover`, `sybil-arena-dashboard`, `victoriametrics`,
 `vmalert`, `grafana`, `node-exporter`, `sybil-polymarket`, and `sybil-arena`.
 VictoriaMetrics and vmalert are intentionally not routed through Caddy.
@@ -27,9 +27,9 @@ Local development still gets localhost-only port mappings through
 `docker-compose.override.yml`, which is auto-loaded by plain `docker compose up`
 and is not copied to the server.
 
-## Required Prod Secrets
+## Required Prelaunch Secrets
 
-Create `/opt/sybil/.env` on the deploy host before running prod compose commands:
+Create `/opt/sybil/.env` on the deploy host before running remote Compose commands:
 
 ```bash
 SYBIL_SERVICE_TOKEN=<strong random bearer token for service/operator routes>
@@ -41,7 +41,7 @@ CADDY_OPS_AUTH_HASH='<bcrypt hash from caddy hash-password>'
 ```
 
 `SYBIL_SERVICE_TOKEN` is injected into `sybil-api`, `sybil-polymarket`, and
-`sybil-arena`. In prod, service routes fail closed when it is missing. Optional
+`sybil-arena`. In prelaunch, service routes fail closed when it is missing. Optional
 `SYBIL_CORS_ORIGINS` may be set to a comma-separated browser-origin allowlist;
 empty/unset keeps CORS same-origin only.
 
@@ -53,7 +53,7 @@ addresses. Do not trust a broad private range: every address in this list is
 allowed to influence rate-limit identity, and Caddy must sanitize or append
 `X-Forwarded-For`.
 
-The admin resolution key is not supplied through `.env`. The production
+The admin resolution key is not supplied through `.env`. The locked product
 overlay pins `SYBIL_ADMIN_FEED_KEY_PATH=/data/admin-feed.key`; `sybil-api`
 creates it on the first boot of the persistent `sybil-data` volume and reuses
 it on subsequent boots. A normal container restart therefore does not rotate
@@ -93,22 +93,23 @@ its environment and exits with a clear error if it is missing.
 
 ## Deployment Profile Guardrail
 
-`sybil-api` reads `SYBIL_DEPLOYMENT_PROFILE` (`local` | `devnet` | `prod`,
-default `local`). `docker-compose.prod.yml` sets it to `prod`, which arms a
-startup preflight: the server refuses to boot if a dev-only knob is wired in
-(`SYBIL_DEV_MODE=true`, unset `SYBIL_SERVICE_TOKEN`, unset `SYBIL_DATA_DIR`, or
-unset `SYBIL_ADMIN_FEED_KEY_PATH`). Every profile logs a `deployment profile
-preflight` block naming knobs that diverge from the prod baseline.
+`sybil-api` reads `SYBIL_DEPLOYMENT_PROFILE` (`local` | `devnet` |
+`prelaunch` | `prod`, default `local`). `docker-compose.prod.yml` defaults to
+`prelaunch`, which arms the locked startup preflight while requiring the fixed
+play-money onboarding grant. The server refuses to boot if another dev-only
+knob is wired in (`SYBIL_DEV_MODE=true`, unset `SYBIL_SERVICE_TOKEN`, unset
+`SYBIL_DATA_DIR`, or unset `SYBIL_ADMIN_FEED_KEY_PATH`). Every profile logs a
+`deployment profile preflight` block naming knobs that diverge from the
+real-value baseline.
 
 Override deliberately (never steady state) with `SYBIL_ALLOW_DEV_KNOBS=1`.
-The checked-in production overlay sets the profile to `prod`; changing a shell
-variable does not override that literal Compose value. Full knob matrix and
-history-serving policy:
+Real-value deployment explicitly selects `SYBIL_DEPLOYMENT_PROFILE=prod` and
+sets `SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS=0`. Full knob matrix and history-serving policy:
 `docs/architecture/Deployment Profiles.md`.
 
-## Production History Retention
+## Prelaunch History Retention
 
-The production overlay pins the history families already supported by bounded
+The locked product overlay pins the history families already supported by bounded
 store pruning to seven days. At the inherited 10-second block interval this is
 60,480 full blocks plus paired DA artifact/manifest rows, 60,480 raw-price
 heights per market, and 604,800 seconds of each 1-minute, 5-minute, and 1-hour
@@ -116,12 +117,12 @@ candle series. A pass runs every 60 blocks (ten minutes) and deletes at most
 10,000 rows. `just compose-smoke` checks these effective merged-Compose values
 without starting containers.
 
-This is a devnet product-history budget, not a hard disk quota or an escape
+This is a prelaunch product-history budget, not a hard disk quota or an escape
 availability promise. Account events, fills, equity rows, canonical recovery
 state, and live account/order/market state are not pruned by this job. Bounded
 maintenance can lag, redb deletion need not immediately shrink the file, and
 DA needed for an accepted-root escape must be retained independently before a
-production escape SLO can be claimed. See
+real-value escape SLO can be claimed. See
 `docs/architecture/03-sequencing/Historical Data Serving.md` and the open
 finding 5 in `design/dos-audit-2026-07-11.md`.
 

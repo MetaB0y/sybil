@@ -3,7 +3,7 @@ tags: [infrastructure, crate]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-17
+last_verified: 2026-07-18
 ---
 
 The REST API is the external interface to the exchange. Built with Axum, it
@@ -84,7 +84,7 @@ is capital-backed by the token transfer and L1 gas but remains in the bounded
 quarantine workflow until that key is registered on an account allocated by
 one of the normal routes; quarantine cannot bypass the account-stock ceiling.
 The protocol currently imposes no additional economic minimum above a valid
-positive token-unit deposit. The `private-devnet` posture requires a nonzero
+positive token-unit deposit. The `prelaunch` posture requires a nonzero
 fixed play-money grant while retaining the locked persistence/authentication
 guardrails. The `prod` posture fixes that grant at zero and fail-closes a
 nonzero override. Any vault minimum/state-rent policy must be ratified together

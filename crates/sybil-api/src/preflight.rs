@@ -27,25 +27,25 @@ pub enum DeploymentProfile {
     Local,
     /// Public shared devnet. Dev-tuned but multi-user; no prod guarantees.
     Devnet,
-    /// Product-facing play-money devnet. Prod guardrails with a fixed public
+    /// Operator-only prelaunch sandbox. Prod guardrails with a fixed public
     /// grant as the sole permitted dev-only deviation.
-    PrivateDevnet,
+    Prelaunch,
     /// Real-value production. Durable, locked-down, fail-closed.
     Prod,
 }
 
 impl DeploymentProfile {
     /// Parse the `SYBIL_DEPLOYMENT_PROFILE` value. Case-insensitive; accepts
-    /// `product-devnet` and `production` as aliases.
+    /// `production` as an alias.
     pub fn parse(raw: &str) -> Result<Self, String> {
         match raw.trim().to_ascii_lowercase().as_str() {
             "local" => Ok(Self::Local),
             "devnet" => Ok(Self::Devnet),
-            "private-devnet" | "product-devnet" => Ok(Self::PrivateDevnet),
+            "prelaunch" => Ok(Self::Prelaunch),
             "prod" | "production" => Ok(Self::Prod),
             other => Err(format!(
                 "unknown SYBIL_DEPLOYMENT_PROFILE '{other}' \
-                 (expected local|devnet|private-devnet|prod)"
+                 (expected local|devnet|prelaunch|prod)"
             )),
         }
     }
@@ -54,17 +54,17 @@ impl DeploymentProfile {
         match self {
             Self::Local => "local",
             Self::Devnet => "devnet",
-            Self::PrivateDevnet => "private-devnet",
+            Self::Prelaunch => "prelaunch",
             Self::Prod => "prod",
         }
     }
 
     fn fail_closed(self) -> bool {
-        matches!(self, Self::PrivateDevnet | Self::Prod)
+        matches!(self, Self::Prelaunch | Self::Prod)
     }
 
     fn permits_deviation(self, deviation: &Deviation) -> bool {
-        self == Self::PrivateDevnet && deviation.knob == "SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS"
+        self == Self::Prelaunch && deviation.knob == "SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS"
     }
 }
 
@@ -98,8 +98,8 @@ impl PreflightReport {
         self.deviations.iter().filter(|d| d.dev_only).collect()
     }
 
-    /// Deviations forbidden by the selected fail-closed posture. A private
-    /// devnet permits only its explicit fixed play-money grant.
+    /// Deviations forbidden by the selected fail-closed posture. Prelaunch
+    /// permits only its explicit fixed play-money grant.
     pub fn blocking_violations(&self) -> Vec<&Deviation> {
         self.violations()
             .into_iter()
@@ -323,12 +323,12 @@ pub fn run_preflight(config: &ApiConfig) -> Result<(), String> {
     let report = build_report(config)?;
     log_report(&report);
 
-    if report.profile == DeploymentProfile::PrivateDevnet {
+    if report.profile == DeploymentProfile::Prelaunch {
         if config.public_account_capacity == 0 {
-            return Err("private-devnet requires SYBIL_PUBLIC_ACCOUNT_CAPACITY > 0".to_string());
+            return Err("prelaunch requires SYBIL_PUBLIC_ACCOUNT_CAPACITY > 0".to_string());
         }
         if config.public_account_grant_nanos == 0 {
-            return Err("private-devnet requires SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS > 0".to_string());
+            return Err("prelaunch requires SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS > 0".to_string());
         }
     }
 
@@ -401,12 +401,8 @@ mod tests {
             Ok(DeploymentProfile::Devnet)
         );
         assert_eq!(
-            DeploymentProfile::parse("private-devnet"),
-            Ok(DeploymentProfile::PrivateDevnet)
-        );
-        assert_eq!(
-            DeploymentProfile::parse("product-devnet"),
-            Ok(DeploymentProfile::PrivateDevnet)
+            DeploymentProfile::parse("prelaunch"),
+            Ok(DeploymentProfile::Prelaunch)
         );
         assert_eq!(
             DeploymentProfile::parse("Prod"),
@@ -416,6 +412,7 @@ mod tests {
             DeploymentProfile::parse("production"),
             Ok(DeploymentProfile::Prod)
         );
+        assert!(DeploymentProfile::parse("private-devnet").is_err());
         assert!(DeploymentProfile::parse("staging").is_err());
     }
 
@@ -538,43 +535,43 @@ mod tests {
         assert_eq!(report.profile, DeploymentProfile::Devnet);
         // Deviations are still surfaced for the log block…
         assert!(!report.violations().is_empty());
-        // …but only prod fail-closes.
+        // …but only locked profiles fail-close.
         assert!(!report.blocks_start(false));
         assert!(run_preflight(&config).is_ok());
     }
 
     #[test]
-    fn private_devnet_requires_and_permits_only_a_fixed_public_grant() {
+    fn prelaunch_requires_and_permits_only_a_fixed_public_grant() {
         let config = ApiConfig {
-            deployment_profile: "private-devnet".to_string(),
+            deployment_profile: "prelaunch".to_string(),
             public_account_capacity: 1000,
             public_account_grant_nanos: 1_000_000_000_000,
             ..prod_ready_config()
         };
         let report = build_report(&config).unwrap();
-        assert_eq!(report.profile, DeploymentProfile::PrivateDevnet);
+        assert_eq!(report.profile, DeploymentProfile::Prelaunch);
         assert_eq!(report.blocking_violations(), Vec::<&Deviation>::new());
         assert!(!report.blocks_start(false));
         assert!(run_preflight(&config).is_ok());
     }
 
     #[test]
-    fn private_devnet_rejects_empty_onboarding_and_other_dev_knobs() {
+    fn prelaunch_rejects_empty_onboarding_and_other_dev_knobs() {
         for config in [
             ApiConfig {
-                deployment_profile: "private-devnet".to_string(),
+                deployment_profile: "prelaunch".to_string(),
                 public_account_capacity: 0,
                 public_account_grant_nanos: 1,
                 ..prod_ready_config()
             },
             ApiConfig {
-                deployment_profile: "private-devnet".to_string(),
+                deployment_profile: "prelaunch".to_string(),
                 public_account_capacity: 1000,
                 public_account_grant_nanos: 0,
                 ..prod_ready_config()
             },
             ApiConfig {
-                deployment_profile: "private-devnet".to_string(),
+                deployment_profile: "prelaunch".to_string(),
                 public_account_capacity: 1000,
                 public_account_grant_nanos: 1,
                 dev_mode: true,

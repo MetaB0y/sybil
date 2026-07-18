@@ -141,11 +141,11 @@ export function WithdrawalStatusPanel({
           lineHeight: 1.5,
         }}
       >
-        Status only on this private devnet. New withdrawal requests are not
+        Status only in prelaunch. New withdrawal requests are not
         enabled in the web app. The owner-signed API can create a Sybil
         withdrawal leaf and debit available cash, but relay, delayed L1
         finalization, and confirmed-log indexing are separate steps. This
-        devnet&apos;s accept-all mock relay is not real-funds proof security.
+        environment&apos;s accept-all mock relay is not real-funds proof security.
       </div>
     </section>
   );

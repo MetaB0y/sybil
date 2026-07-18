@@ -225,8 +225,8 @@ The Python arena and web frontend use the same public interfaces. The Rust clien
 
 ## 10. Deployment and trust boundary
 
-`SYBIL_DEPLOYMENT_PROFILE` distinguishes local, devnet, private-devnet, and
-prod postures. Private devnet keeps the locked persistence and authentication
+`SYBIL_DEPLOYMENT_PROFILE` distinguishes local, devnet, prelaunch, and prod
+postures. Prelaunch keeps the locked persistence and authentication
 guardrails but requires its bounded fixed play-money grant; prod requires that
 grant to be zero. Both locked profiles fail-close dangerous combinations such
 as dev mode, missing service/history tokens, missing history URL, or missing
