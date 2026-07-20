@@ -24,13 +24,15 @@ impl SequencerHandle {
             .ok_or(SequencerError::ActorGone)
     }
 
-    async fn rpc<T>(
+    async fn rpc_with_class<T>(
         &self,
+        class: RpcClass,
         build_message: impl FnOnce(RpcReplyPort<T>) -> SequencerMsg,
     ) -> Result<T, SequencerError>
     where
         T: Send + 'static,
     {
+        let _admission = self.inner.rpc_admission.try_admit(class)?;
         let actor = self.actor_ref().await?;
         self.inner.mailbox_monitor.queued();
         match actor.call(build_message, None).await {
@@ -43,6 +45,36 @@ impl SequencerHandle {
         }
     }
 
+    async fn rpc<T>(
+        &self,
+        build_message: impl FnOnce(RpcReplyPort<T>) -> SequencerMsg,
+    ) -> Result<T, SequencerError>
+    where
+        T: Send + 'static,
+    {
+        self.rpc_with_class(RpcClass::Write, build_message).await
+    }
+
+    async fn query_rpc<T>(
+        &self,
+        build_message: impl FnOnce(RpcReplyPort<T>) -> SequencerMsg,
+    ) -> Result<T, SequencerError>
+    where
+        T: Send + 'static,
+    {
+        self.rpc_with_class(RpcClass::Query, build_message).await
+    }
+
+    async fn control_rpc<T>(
+        &self,
+        build_message: impl FnOnce(RpcReplyPort<T>) -> SequencerMsg,
+    ) -> Result<T, SequencerError>
+    where
+        T: Send + 'static,
+    {
+        self.rpc_with_class(RpcClass::Control, build_message).await
+    }
+
     async fn read_query<T>(
         &self,
         query: impl FnOnce(&SequencerActorState) -> T + Send + 'static,
@@ -50,7 +82,7 @@ impl SequencerHandle {
     where
         T: Send + 'static,
     {
-        self.rpc(|reply| SequencerMsg::Query(SequencerReadQuery::new(reply, query)))
+        self.query_rpc(|reply| SequencerMsg::Query(SequencerReadQuery::new(reply, query)))
             .await
     }
 
@@ -91,6 +123,7 @@ impl SequencerHandle {
         let config = sequencer.config.clone();
         let (block_broadcast, _) = broadcast::channel(64);
         let recent_blocks = Arc::new(RwLock::new(VecDeque::new()));
+        let (fatal_error, _) = watch::channel(None);
         let mailbox_monitor = MailboxMonitor::new(
             SEQUENCER_ACTOR_METRIC_NAME,
             config.actor_queue_warn_depth,
@@ -102,7 +135,9 @@ impl SequencerHandle {
             recent_blocks: recent_blocks.clone(),
             store: store.clone(),
             mailbox_monitor,
+            rpc_admission: RpcAdmission::new(),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
+            fatal_error,
         };
         let supervisor_args = SequencerSupervisorArgs {
             config,
@@ -136,12 +171,32 @@ impl SequencerHandle {
         Self { inner, supervisor }
     }
 
+    /// Subscribe to terminal loss of canonical sequencer ownership.
+    ///
+    /// A published error means in-process recovery was exhausted. Process
+    /// owners must stop serving traffic, drain, and exit nonzero.
+    pub fn subscribe_fatal_errors(&self) -> watch::Receiver<Option<String>> {
+        self.inner.fatal_error.subscribe()
+    }
+
+    /// Mark process shutdown before draining traffic so a simultaneous child
+    /// exit is not misclassified as an unrecoverable runtime failure.
+    pub fn begin_shutdown(&self) {
+        self.inner.shutdown_requested.store(true, Ordering::Release);
+    }
+
     #[cfg(test)]
     pub(crate) fn spawn_with_store_arc_for_test(
         sequencer: BlockSequencer,
         store: Arc<crate::store::Store>,
     ) -> Self {
         Self::spawn_with_store_arc(sequencer, Some(store))
+    }
+
+    #[cfg(test)]
+    fn with_rpc_capacities_for_test(mut self, query: usize, write: usize, control: usize) -> Self {
+        self.inner.rpc_admission = RpcAdmission::with_capacities(query, write, control);
+        self
     }
 
     #[cfg(test)]
@@ -237,7 +292,7 @@ impl SequencerHandle {
     /// drain queued future messages.
     pub async fn stop_and_wait(&self, timeout: std::time::Duration) -> bool {
         let deadline = Instant::now() + timeout;
-        self.inner.shutdown_requested.store(true, Ordering::Release);
+        self.begin_shutdown();
 
         let actor = self
             .inner
@@ -386,16 +441,16 @@ impl SequencerHandle {
         &self,
         leaf_key: Vec<u8>,
     ) -> Result<SequencerStateProof, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetStateProof(leaf_key, reply))
+        self.query_rpc(|reply| SequencerMsg::GetStateProof(leaf_key, reply))
             .await?
     }
 
     pub async fn produce_block(&self) -> Result<SealedBlock, SequencerError> {
-        self.rpc(SequencerMsg::ProduceBlock).await?
+        self.control_rpc(SequencerMsg::ProduceBlock).await?
     }
 
     pub async fn create_account(&self, initial_balance: i64) -> Result<Account, SequencerError> {
-        self.rpc(|reply| SequencerMsg::CreateAccount(initial_balance, reply))
+        self.control_rpc(|reply| SequencerMsg::CreateAccount(initial_balance, reply))
             .await?
     }
 
@@ -416,7 +471,7 @@ impl SequencerHandle {
         pubkey: PublicKey,
         meta: RegisteredPubkey,
     ) -> Result<Account, SequencerError> {
-        self.rpc(|reply| {
+        self.control_rpc(|reply| {
             SequencerMsg::CreateAccountWithInitialKey(initial_balance, pubkey, meta, reply)
         })
         .await?
@@ -427,7 +482,7 @@ impl SequencerHandle {
         account_id: AccountId,
         amount: i64,
     ) -> Result<Account, SequencerError> {
-        self.rpc(|reply| SequencerMsg::FundAccount(account_id, amount, reply))
+        self.control_rpc(|reply| SequencerMsg::FundAccount(account_id, amount, reply))
             .await?
     }
 
@@ -438,7 +493,7 @@ impl SequencerHandle {
     }
 
     pub async fn create_market(&self, name: String) -> Result<MarketId, SequencerError> {
-        self.rpc(|reply| SequencerMsg::CreateMarket(name, reply))
+        self.control_rpc(|reply| SequencerMsg::CreateMarket(name, reply))
             .await?
     }
 
@@ -447,7 +502,7 @@ impl SequencerHandle {
         name: String,
         market_ids: Vec<MarketId>,
     ) -> Result<(u64, MarketGroup), SequencerError> {
-        self.rpc(|reply| SequencerMsg::CreateMarketGroup(name, market_ids, reply))
+        self.control_rpc(|reply| SequencerMsg::CreateMarketGroup(name, market_ids, reply))
             .await?
     }
 
@@ -456,7 +511,7 @@ impl SequencerHandle {
         group_id: u64,
         market_id: MarketId,
     ) -> Result<(MarketGroup, bool), SequencerError> {
-        self.rpc(|reply| SequencerMsg::ExtendMarketGroup(group_id, market_id, reply))
+        self.control_rpc(|reply| SequencerMsg::ExtendMarketGroup(group_id, market_id, reply))
             .await?
     }
 
@@ -470,7 +525,7 @@ impl SequencerHandle {
         market_id: MarketId,
         payout_nanos: Nanos,
     ) -> Result<ResolutionRecord, SequencerError> {
-        self.rpc(|reply| SequencerMsg::ResolveMarket(market_id, payout_nanos, reply))
+        self.control_rpc(|reply| SequencerMsg::ResolveMarket(market_id, payout_nanos, reply))
             .await?
     }
 
@@ -479,7 +534,7 @@ impl SequencerHandle {
         market_id: MarketId,
         signed: SignedAttestation,
     ) -> Result<ResolutionRecord, SequencerError> {
-        self.rpc(|reply| SequencerMsg::ResolveMarketAttested(market_id, signed, reply))
+        self.control_rpc(|reply| SequencerMsg::ResolveMarketAttested(market_id, signed, reply))
             .await?
     }
 
@@ -488,7 +543,7 @@ impl SequencerHandle {
         pubkey: FeedPubkey,
         name: String,
     ) -> Result<FeedId, SequencerError> {
-        self.rpc(|reply| SequencerMsg::RegisterFeed(pubkey, name, reply))
+        self.control_rpc(|reply| SequencerMsg::RegisterFeed(pubkey, name, reply))
             .await?
     }
 
@@ -514,7 +569,7 @@ impl SequencerHandle {
         &self,
         template: sybil_oracle::ResolutionTemplate,
     ) -> Result<(), SequencerError> {
-        self.rpc(|reply| SequencerMsg::InstallTemplate(template, reply))
+        self.control_rpc(|reply| SequencerMsg::InstallTemplate(template, reply))
             .await?
     }
 
@@ -573,12 +628,12 @@ impl SequencerHandle {
     }
 
     pub async fn get_da_artifact(&self, height: u64) -> Result<DaArtifactLookup, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetDaArtifact(height, reply))
+        self.query_rpc(|reply| SequencerMsg::GetDaArtifact(height, reply))
             .await?
     }
 
     pub async fn get_da_manifest(&self, height: u64) -> Result<DaManifestLookup, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetDaManifest(height, reply))
+        self.query_rpc(|reply| SequencerMsg::GetDaManifest(height, reply))
             .await?
     }
 
@@ -713,7 +768,7 @@ impl SequencerHandle {
         name: String,
         metadata: MarketMetadata,
     ) -> Result<MarketId, SequencerError> {
-        self.rpc(|reply| SequencerMsg::CreateMarketWithMetadata(name, metadata, reply))
+        self.control_rpc(|reply| SequencerMsg::CreateMarketWithMetadata(name, metadata, reply))
             .await?
     }
 
@@ -777,11 +832,12 @@ impl SequencerHandle {
     }
 
     pub async fn pause_block_production(&self) -> Result<(), SequencerError> {
-        self.rpc(SequencerMsg::PauseBlockProduction).await?
+        self.control_rpc(SequencerMsg::PauseBlockProduction).await?
     }
 
     pub async fn resume_block_production(&self) -> Result<(), SequencerError> {
-        self.rpc(SequencerMsg::ResumeBlockProduction).await?
+        self.control_rpc(SequencerMsg::ResumeBlockProduction)
+            .await?
     }
 
     #[tracing::instrument(skip_all)]
@@ -1517,6 +1573,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unrecoverable_actor_loss_publishes_terminal_failure() {
+        let (seq, _) = make_test_sequencer();
+        let handle = SequencerHandle::spawn(seq);
+        let mut fatal_errors = handle.subscribe_fatal_errors();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let actor = handle.actor_ref().await.unwrap();
+
+        actor.kill_and_wait(Some(TEST_ACTOR_TIMEOUT)).await.unwrap();
+        tokio::time::timeout(TEST_ACTOR_TIMEOUT, fatal_errors.changed())
+            .await
+            .expect("terminal failure notification timed out")
+            .expect("terminal failure sender remains live");
+        let error = fatal_errors
+            .borrow()
+            .clone()
+            .expect("terminal failure value");
+        assert!(error.starts_with("store_unavailable:"));
+        assert!(matches!(
+            handle.actor_ref().await,
+            Err(SequencerError::ActorGone)
+        ));
+        assert!(handle.stop_and_wait(TEST_ACTOR_TIMEOUT).await);
+    }
+
+    #[tokio::test]
+    async fn actor_loss_during_declared_shutdown_is_not_fatal() {
+        let (seq, _) = make_test_sequencer();
+        let handle = SequencerHandle::spawn(seq);
+        let mut fatal_errors = handle.subscribe_fatal_errors();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        handle.begin_shutdown();
+        let actor = handle.actor_ref().await.unwrap();
+
+        actor.kill_and_wait(Some(TEST_ACTOR_TIMEOUT)).await.unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), fatal_errors.changed())
+                .await
+                .is_err(),
+            "declared shutdown must not publish a fatal restart failure"
+        );
+        assert!(fatal_errors.borrow().is_none());
+        assert!(handle.stop_and_wait(TEST_ACTOR_TIMEOUT).await);
+    }
+
+    #[tokio::test]
     async fn stop_and_wait_drains_in_flight_tick() {
         let path = temp_store_path("stop-drain-in-flight");
         let store = Arc::new(crate::store::Store::open(&path).unwrap());
@@ -1563,6 +1664,75 @@ mod tests {
             handle.get_latest_block().await,
             Err(SequencerError::ActorGone)
         ));
+    }
+
+    #[tokio::test]
+    async fn rpc_admission_bounds_writes_and_reserves_control_capacity() {
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(60),
+            ..SequencerConfig::default()
+        };
+        let (seq, _) = make_test_sequencer_with_config(config);
+        let handle = SequencerHandle::spawn(seq).with_rpc_capacities_for_test(1, 1, 1);
+        let initial_accounts = handle.account_stock().await.unwrap();
+
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        handle
+            .hold_next_tick_for_test(SequencerTestTickHold {
+                started: started_tx,
+                release: release_rx,
+            })
+            .await
+            .unwrap();
+        handle.send_tick_for_test().await.unwrap();
+        started_rx.await.unwrap();
+
+        let accepted_write = tokio::spawn({
+            let handle = handle.clone();
+            async move {
+                handle
+                    .rpc(|reply| SequencerMsg::CreateAccount(1, reply))
+                    .await
+            }
+        });
+        while handle.inner.mailbox_monitor.depth() < 1 {
+            tokio::task::yield_now().await;
+        }
+
+        assert!(matches!(
+            handle
+                .rpc(|reply| SequencerMsg::CreateAccount(1, reply))
+                .await,
+            Err(SequencerError::ActorOverloaded { class: "write" })
+        ));
+
+        let accepted_control = tokio::spawn({
+            let handle = handle.clone();
+            async move { handle.control_rpc(SequencerMsg::PauseBlockProduction).await }
+        });
+        while handle.inner.mailbox_monitor.depth() < 2 {
+            tokio::task::yield_now().await;
+        }
+        assert!(matches!(
+            handle.control_rpc(SequencerMsg::PauseBlockProduction).await,
+            Err(SequencerError::ActorOverloaded { class: "control" })
+        ));
+        assert_eq!(
+            handle.inner.mailbox_monitor.depth(),
+            2,
+            "rejected calls must not enter the actor mailbox"
+        );
+
+        release_tx.send(()).unwrap();
+        accepted_write.await.unwrap().unwrap().unwrap();
+        accepted_control.await.unwrap().unwrap().unwrap();
+        assert_eq!(
+            handle.account_stock().await.unwrap(),
+            initial_accounts + 1,
+            "the rejected write must never execute later"
+        );
+        assert!(handle.stop_and_wait(TEST_ACTOR_TIMEOUT).await);
     }
 
     #[tokio::test(start_paused = true)]

@@ -209,6 +209,14 @@ archive-maintenance futures and waits for them during a graceful ractor stop.
 Ractor supervision owns actor restart relationships; Tokio task tracking is
 only for non-actor child futures.
 
+Actor recovery is fail-fast at the process boundary. If the supervisor cannot
+load the committed snapshot, replay the acknowledged suffix, or spawn the
+replacement canonical actor, it publishes a terminal failure rather than
+leaving an apparently healthy API without an exchange owner. The API drains
+and exits nonzero; the external process manager is the next recovery layer.
+Expected shutdown is declared before actor teardown so it does not trigger
+that path.
+
 Other sequencer-owned durable serving rows are:
 
 - **Canonical block replay payloads**: `SealedBlock` rows in the

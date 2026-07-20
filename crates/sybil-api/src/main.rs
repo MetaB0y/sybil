@@ -437,6 +437,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })?;
 
     let shutdown_handle = handle.clone();
+    let fatal_errors = handle.subscribe_fatal_errors();
     let state = AppState::new(handle, &config, prometheus_handle);
     match (store.clone(), state.history.clone()) {
         (Some(store), Some(client)) => {
@@ -483,13 +484,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.port
     );
 
+    let fatal_shutdown = fatal_errors.clone();
+    let graceful_shutdown_handle = shutdown_handle.clone();
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
-    .with_graceful_shutdown(shutdown_signal())
+    .with_graceful_shutdown(shutdown_or_fatal(graceful_shutdown_handle, fatal_shutdown))
     .await?;
 
+    let terminal_failure = fatal_errors.borrow().clone();
     worker_cancel.cancel();
     workers.close();
     if tokio::time::timeout(WORKER_SHUTDOWN_TIMEOUT, workers.wait())
@@ -517,6 +521,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     tracing::info!("Server shut down cleanly");
+    if let Some(error) = terminal_failure {
+        return Err(
+            std::io::Error::other(format!("canonical sequencer ownership lost: {error}")).into(),
+        );
+    }
     Ok(())
 }
 
@@ -690,5 +699,33 @@ async fn shutdown_signal() {
     tokio::select! {
         _ = ctrl_c => { tracing::info!("received Ctrl-C"); },
         _ = terminate => { tracing::info!("received SIGTERM"); },
+    }
+}
+
+async fn shutdown_or_fatal(
+    handle: SequencerHandle,
+    mut fatal_errors: tokio::sync::watch::Receiver<Option<String>>,
+) {
+    tokio::select! {
+        _ = shutdown_signal() => {
+            handle.begin_shutdown();
+        }
+        error = wait_for_fatal_error(&mut fatal_errors) => {
+            tracing::error!(%error, "terminal sequencer failure is stopping the API process");
+            handle.begin_shutdown();
+        }
+    }
+}
+
+async fn wait_for_fatal_error(
+    fatal_errors: &mut tokio::sync::watch::Receiver<Option<String>>,
+) -> String {
+    loop {
+        if let Some(error) = fatal_errors.borrow().clone() {
+            return error;
+        }
+        if fatal_errors.changed().await.is_err() {
+            return "sequencer fatal-error channel closed".to_string();
+        }
     }
 }

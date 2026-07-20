@@ -258,7 +258,11 @@ Actor and persistence availability retain stable retry identity at this
 boundary. A missing canonical actor returns `503 SEQUENCER_UNAVAILABLE`;
 failure to commit through the sequencer persistence layer returns
 `503 SEQUENCER_PERSISTENCE_UNAVAILABLE`. The latter logs its internal cause but
-does not expose filesystem/provider details in the response. Integrity
+does not expose filesystem/provider details in the response. Pre-mailbox
+admission exhaustion returns `503 SEQUENCER_OVERLOADED`. These overload
+rejections are definitive: the call did not enter the actor mailbox and cannot
+execute later. Query, ordinary-write, and operator-control capacity are
+independent, preserving a small control reserve during traffic bursts. Integrity
 violations remain separate, fail-stop errors rather than availability retries.
 
 The same atomic operational snapshot includes the sequencer's integrity-halt

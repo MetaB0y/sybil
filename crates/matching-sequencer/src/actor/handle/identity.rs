@@ -26,8 +26,10 @@ impl SequencerHandle {
         pubkey: PublicKey,
         auth_scheme: AccountAuthScheme,
     ) -> Result<(), SequencerError> {
-        self.rpc(|reply| SequencerMsg::RegisterPubkey(account_id, pubkey, auth_scheme, reply))
-            .await?
+        self.control_rpc(|reply| {
+            SequencerMsg::RegisterPubkey(account_id, pubkey, auth_scheme, reply)
+        })
+        .await?
     }
 
     pub async fn lookup_registered_pubkey(
@@ -45,8 +47,10 @@ impl SequencerHandle {
         pubkey: PublicKey,
         meta: RegisteredPubkey,
     ) -> Result<(), SequencerError> {
-        self.rpc(|reply| SequencerMsg::RegisterPubkeyWithMeta(account_id, pubkey, meta, reply))
-            .await?
+        self.control_rpc(|reply| {
+            SequencerMsg::RegisterPubkeyWithMeta(account_id, pubkey, meta, reply)
+        })
+        .await?
     }
 
     /// Register a NEW signing key from a raw-P256-signed request (SYB-229).

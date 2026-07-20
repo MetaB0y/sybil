@@ -234,6 +234,11 @@ impl From<matching_sequencer::SequencerError> for AppError {
             matching_sequencer::SequencerError::ActorGone => {
                 AppError::sequencer_unavailable("Sequencer actor is unavailable")
             }
+            matching_sequencer::SequencerError::ActorOverloaded { class } => AppError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("Sequencer {class} capacity is temporarily exhausted"),
+                "SEQUENCER_OVERLOADED",
+            ),
             matching_sequencer::SequencerError::AccountAlreadyRegistered => {
                 AppError::conflict("Public key already registered to an account")
             }
@@ -386,6 +391,11 @@ mod tests {
         let actor = AppError::from(matching_sequencer::SequencerError::ActorGone);
         assert_eq!(actor.status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(actor.body.code, "SEQUENCER_UNAVAILABLE");
+
+        let overload =
+            AppError::from(matching_sequencer::SequencerError::ActorOverloaded { class: "write" });
+        assert_eq!(overload.status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(overload.body.code, "SEQUENCER_OVERLOADED");
 
         let persistence = AppError::from(matching_sequencer::SequencerError::Persistence(
             "disk full".into(),

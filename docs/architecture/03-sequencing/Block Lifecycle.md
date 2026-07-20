@@ -17,6 +17,14 @@ building an obsolete mailbox burst; one successor can still wait behind the
 in-flight block, preserving maximum sustained throughput. Explicit
 `ProduceBlock` requests remain independent.
 
+External RPCs are also bounded before they enter the actor mailbox. Read,
+ordinary-write, and operator-control calls have independent fail-fast
+admission budgets; the control budget prevents an order burst from consuming
+the capacity needed to pause or produce a block. A rejected call returns
+`SEQUENCER_OVERLOADED` and was never enqueued, so it cannot execute after the
+caller has received the error. In-flight, capacity, rejection, and high-water
+metrics are labeled by this small fixed class set.
+
 ```mermaid
 flowchart LR
     EVENTS["1. System · key · bridge events"] --> BOOK["2. Expire/revalidate book"]
@@ -67,6 +75,13 @@ height and genesis hash, and mutation endpoints return the stable
 control; resume cannot override the stronger halt. Recovery is an operator
 restart from the last committed fence after the underlying solver/state fault
 is understood.
+
+The supervised actor normally restarts from the committed fence plus the
+acknowledged-write suffix. If that recovery cannot load, restore, or spawn the
+canonical child, the supervisor publishes one terminal ownership failure.
+The API then drains its workers, stops serving, and exits nonzero so the
+process manager restarts the whole owner. A declared operator shutdown is
+marked before actor teardown and is not misclassified as a recovery failure.
 
 ## Where this lives
 

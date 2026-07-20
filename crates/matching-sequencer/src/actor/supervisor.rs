@@ -8,7 +8,9 @@ pub(super) struct SequencerHandleInner {
     pub(super) recent_blocks: Arc<RwLock<VecDeque<SealedBlock>>>,
     pub(super) store: Option<Arc<crate::store::Store>>,
     pub(super) mailbox_monitor: MailboxMonitor,
+    pub(super) rpc_admission: RpcAdmission,
     pub(super) shutdown_requested: Arc<AtomicBool>,
+    pub(super) fatal_error: watch::Sender<Option<String>>,
 }
 
 impl SequencerHandleInner {
@@ -18,6 +20,20 @@ impl SequencerHandleInner {
             .actor
             .write()
             .expect("sequencer actor ref lock poisoned") = actor;
+    }
+
+    fn report_terminal_failure(&self, stage: &'static str, error: impl std::fmt::Display) {
+        if self.shutdown_requested.load(Ordering::Acquire) || self.fatal_error.borrow().is_some() {
+            return;
+        }
+        let message = format!("{stage}: {error}");
+        metrics::counter!(
+            "sybil_sequencer_terminal_failures_total",
+            "stage" => stage
+        )
+        .increment(1);
+        tracing::error!(stage, error = %error, "canonical sequencer ownership was lost");
+        self.fatal_error.send_replace(Some(message));
     }
 }
 
@@ -75,8 +91,9 @@ impl SequencerSupervisorState {
         }
 
         let Some(store) = self.store.clone() else {
-            tracing::error!(
-                "sequencer actor exited without a persistent store; restart unavailable"
+            self.handle.report_terminal_failure(
+                "store_unavailable",
+                "sequencer actor exited without a persistent store",
             );
             return;
         };
@@ -84,13 +101,14 @@ impl SequencerSupervisorState {
         let restored = match store.load_state().await {
             Ok(state) => state,
             Err(error) => {
-                tracing::error!(error = %error, "failed to load sequencer snapshot for restart");
+                self.handle.report_terminal_failure("load_state", error);
                 return;
             }
         };
 
         let Some(state) = restored else {
-            tracing::error!("no persisted sequencer snapshot available for restart");
+            self.handle
+                .report_terminal_failure("snapshot_missing", "no persisted sequencer snapshot");
             return;
         };
 
@@ -101,10 +119,7 @@ impl SequencerSupervisorState {
         let sequencer = match BlockSequencer::try_restore(state, self.config.clone()) {
             Ok(sequencer) => sequencer,
             Err(error) => {
-                tracing::error!(
-                    error = %error,
-                    "acknowledged-write replay failed; sequencer restart remains halted"
-                );
+                self.handle.report_terminal_failure("restore", error);
                 return;
             }
         };
@@ -112,7 +127,7 @@ impl SequencerSupervisorState {
         match self.spawn_child(myself, sequencer).await {
             Ok(()) => tracing::warn!("sequencer actor restarted from persistent snapshot"),
             Err(error) => {
-                tracing::error!(error = %error, "failed to restart sequencer actor from snapshot");
+                self.handle.report_terminal_failure("spawn_child", error);
             }
         }
     }

@@ -164,6 +164,9 @@ pub enum SequencerError {
     /// All handles dropped; the actor has shut down.
     #[error("sequencer actor shut down")]
     ActorGone,
+    /// The bounded external RPC class has no capacity before actor enqueue.
+    #[error("sequencer {class} admission is at capacity")]
+    ActorOverloaded { class: &'static str },
     /// A public key is already registered to an account.
     #[error("public key already registered to an account")]
     AccountAlreadyRegistered,

@@ -12,7 +12,7 @@ use std::sync::{Arc, RwLock};
 
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use ratelimit::Ratelimiter;
-use tokio::sync::broadcast;
+use tokio::sync::{Semaphore, broadcast, watch};
 use tokio::time::{Instant, interval_at};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
@@ -60,7 +60,9 @@ mod production;
 mod queries;
 mod supervisor;
 
-use self::infra::{IndicativeSolveGate, MailboxMonitor, ScheduledTickGate, rate_limiter};
+use self::infra::{
+    IndicativeSolveGate, MailboxMonitor, RpcAdmission, RpcClass, ScheduledTickGate, rate_limiter,
+};
 #[cfg(not(test))]
 use self::messages::SequencerTestCrashpoint;
 use self::messages::{SequencerActor, SequencerActorArgs, SequencerActorState};

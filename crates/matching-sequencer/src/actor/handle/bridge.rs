@@ -13,7 +13,7 @@ impl SequencerHandle {
         &self,
         deposit: L1Deposit,
     ) -> Result<crate::bridge::DepositDisposition, SequencerError> {
-        self.rpc(|reply| SequencerMsg::SubmitL1Deposit(deposit, reply))
+        self.control_rpc(|reply| SequencerMsg::SubmitL1Deposit(deposit, reply))
             .await?
     }
 
@@ -45,7 +45,7 @@ impl SequencerHandle {
         &self,
         event: BridgeWithdrawalL1Event,
     ) -> Result<Option<WithdrawalLeaf>, SequencerError> {
-        self.rpc(|reply| SequencerMsg::ApplyBridgeWithdrawalL1Event(event, reply))
+        self.control_rpc(|reply| SequencerMsg::ApplyBridgeWithdrawalL1Event(event, reply))
             .await?
     }
 
@@ -53,7 +53,7 @@ impl SequencerHandle {
         &self,
         height: u64,
     ) -> Result<Vec<WithdrawalLeaf>, SequencerError> {
-        self.rpc(|reply| SequencerMsg::ObserveBridgeL1Height(height, reply))
+        self.control_rpc(|reply| SequencerMsg::ObserveBridgeL1Height(height, reply))
             .await?
     }
 
