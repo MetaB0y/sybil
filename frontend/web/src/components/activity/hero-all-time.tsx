@@ -5,12 +5,11 @@
  * left, 4-cell stat grid on the right.
  *
  * Real (GET /v1/activity/overview, `all_time` bucket): matched volume, active
- * traders, placed / matched / unmatched orders. Also real: `totalBatches`
+ * traders, trader admissions, and trader first fills. Also real: `totalBatches`
  * (latestBlock.height) and `liveMarkets` (/v1/markets/summary).
  *
- * "Placed orders" = distinct orders admitted (counted once per order at
- * intake), from `orders.placed_distinct` — consistent with matched/unmatched,
- * which are also counted once per order lifetime.
+ * Trader execution deliberately excludes one-block MM quotes. An order counts
+ * once when admitted and once when it receives its first positive fill.
  */
 
 import { formatCompactInt, formatInt } from "@/lib/format/nanos";
@@ -109,13 +108,13 @@ export function HeroAllTime({
             sub="addresses placed ≥1 order"
           />
           <BigKv
-            label="Placed orders"
+            label="Trader orders"
             value={
-              allTime.ordersPlacedDistinct == null
+              allTime.traderOrdersAdmitted == null
                 ? "—"
-                : formatCompactInt(allTime.ordersPlacedDistinct)
+                : formatCompactInt(allTime.traderOrdersAdmitted)
             }
-            sub="distinct, all-time"
+            sub="fresh non-MM admissions"
           />
           <BigKv
             label="Bots"
@@ -124,13 +123,13 @@ export function HeroAllTime({
             accent="var(--accent)"
           />
           <BigKv
-            label="Matched orders"
+            label="Trader orders filled"
             value={
-              allTime.ordersMatched == null
+              allTime.traderOrdersFirstFilled == null
                 ? "—"
-                : formatCompactInt(allTime.ordersMatched)
+                : formatCompactInt(allTime.traderOrdersFirstFilled)
             }
-            sub="successfully filled at clear"
+            sub="received a positive fill"
             accent="var(--yes)"
           />
         </div>

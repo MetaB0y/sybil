@@ -9,9 +9,8 @@ const unavailableAllTime: AllTimeStats = {
   matchedVolume: "—",
   welfare: "—",
   traders: null,
-  ordersPlacedDistinct: null,
-  ordersMatched: null,
-  ordersUnmatched: null,
+  traderOrdersAdmitted: null,
+  traderOrdersFirstFilled: null,
   totalBatches: null,
   liveMarkets: null,
 };

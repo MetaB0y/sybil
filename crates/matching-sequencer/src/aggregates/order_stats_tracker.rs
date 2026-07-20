@@ -30,6 +30,9 @@ const MILLIS_PER_DAY: u64 = 24 * MILLIS_PER_HOUR;
 
 /// Rolling counters for one (market, all-time) entry, the platform total,
 /// or a single hourly bucket.
+///
+/// Snapshot serialization is positional MessagePack. New counters must remain
+/// append-only and default to zero so older, shorter rows still decode.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OrderStats {
     #[serde(default)]
@@ -39,11 +42,32 @@ pub struct OrderStats {
     #[serde(default)]
     pub unmatched: u64,
     /// Distinct orders admitted — counted once per order at intake, NOT per
-    /// batch (unlike `placed`). Must stay the LAST field: snapshots use
-    /// positional rmp_serde arrays, so appending keeps old 3-element blobs
-    /// decodable via `#[serde(default)]` (same pattern as `created_at_ms`).
+    /// batch (unlike `placed`).
     #[serde(default)]
     pub placed_distinct: u64,
+    /// Product execution denominator: fresh non-MM orders, counted once.
+    #[serde(default)]
+    pub trader_orders_admitted: u64,
+    /// Product execution numerator: admitted non-MM orders that have received
+    /// at least one positive fill, counted once over their lifetime.
+    #[serde(default)]
+    pub trader_orders_first_filled: u64,
+    /// Liquidity-utilization denominator: one-shot MM quote orders worked.
+    #[serde(default)]
+    pub maker_quotes_worked: u64,
+    /// Liquidity-utilization numerator: worked MM quote orders with at least
+    /// one positive fill.
+    #[serde(default)]
+    pub maker_quotes_hit: u64,
+}
+
+/// Exact block-local changes to the two execution-quality cohorts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ExecutionQualityDelta {
+    pub trader_orders_admitted: u64,
+    pub trader_orders_first_filled: u64,
+    pub maker_quotes_worked: u64,
+    pub maker_quotes_hit: u64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -88,7 +112,9 @@ impl OrderStatsTracker {
             self.per_market.entry(m).or_default().placed += 1;
         }
         self.platform.placed += 1;
-        self.hourly_entry_mut(ts_ms).placed += 1;
+        if let Some(hourly) = self.hourly_entry_mut(ts_ms) {
+            hourly.placed += 1;
+        }
     }
 
     /// Record a distinct order admission — once per order at intake, NOT per
@@ -98,7 +124,53 @@ impl OrderStatsTracker {
     /// block and never rest, so counting them here matches their `placed`.
     pub fn record_admitted(&mut self, ts_ms: u64) {
         self.platform.placed_distinct += 1;
-        self.hourly_entry_mut(ts_ms).placed_distinct += 1;
+        if let Some(hourly) = self.hourly_entry_mut(ts_ms) {
+            hourly.placed_distinct += 1;
+        }
+    }
+
+    /// Record one fresh order in its explicit product/liquidity cohort.
+    pub fn record_execution_admitted(&mut self, is_mm: bool, cohort_ms: u64) {
+        if is_mm {
+            self.platform.maker_quotes_worked += 1;
+            if let Some(hourly) = self.hourly_entry_mut(cohort_ms) {
+                hourly.maker_quotes_worked += 1;
+            }
+        } else {
+            self.platform.trader_orders_admitted += 1;
+            if let Some(hourly) = self.hourly_entry_mut(cohort_ms) {
+                hourly.trader_orders_admitted += 1;
+            }
+        }
+    }
+
+    /// Record the first positive fill for one admitted order.
+    ///
+    /// The rolling numerator is credited to the admission cohort, not the fill
+    /// hour. This keeps each window bounded by its own denominator when a
+    /// carried resting order fills later.
+    pub fn record_execution_first_fill(&mut self, is_mm: bool, cohort_ms: u64) {
+        if is_mm {
+            self.platform.maker_quotes_hit += 1;
+        } else {
+            self.platform.trader_orders_first_filled += 1;
+        }
+
+        let bucket_start = hour_start(cohort_ms);
+        let Some((_, hourly)) = self
+            .hourly_platform
+            .iter_mut()
+            .find(|(start, _)| *start == bucket_start)
+        else {
+            // The admission cohort aged out. The all-time total remains exact;
+            // the rolling window must not resurrect an expired denominator.
+            return;
+        };
+        if is_mm {
+            hourly.maker_quotes_hit += 1;
+        } else {
+            hourly.trader_orders_first_filled += 1;
+        }
     }
 
     /// Record an order exit (removed from the book by `expire`,
@@ -124,34 +196,53 @@ impl OrderStatsTracker {
                 self.per_market.entry(m).or_default().matched += 1;
             }
             self.platform.matched += 1;
-            self.hourly_entry_mut(ts_ms).matched += 1;
+            if let Some(hourly) = self.hourly_entry_mut(ts_ms) {
+                hourly.matched += 1;
+            }
         } else {
             for m in markets {
                 self.per_market.entry(m).or_default().unmatched += 1;
             }
             self.platform.unmatched += 1;
-            self.hourly_entry_mut(ts_ms).unmatched += 1;
+            if let Some(hourly) = self.hourly_entry_mut(ts_ms) {
+                hourly.unmatched += 1;
+            }
         }
     }
 
-    fn hourly_entry_mut(&mut self, ts_ms: u64) -> &mut OrderStats {
-        let bucket_start = ts_ms - (ts_ms % MILLIS_PER_HOUR);
-        let needs_new = self
+    /// Returns the requested bucket when it is among the newest retained
+    /// buckets. An event for an already-pruned cohort still updates all-time
+    /// totals, but cannot resurrect an expired rolling denominator.
+    fn hourly_entry_mut(&mut self, ts_ms: u64) -> Option<&mut OrderStats> {
+        let bucket_start = hour_start(ts_ms);
+        if let Some(index) = self
             .hourly_platform
-            .back()
-            .is_none_or(|(start, _)| *start != bucket_start);
-        if needs_new {
-            self.hourly_platform
-                .push_back((bucket_start, OrderStats::default()));
-            while self.hourly_platform.len() > HOURLY_STATS_CAP {
-                self.hourly_platform.pop_front();
-            }
+            .iter()
+            .position(|(start, _)| *start == bucket_start)
+        {
+            return Some(
+                &mut self
+                    .hourly_platform
+                    .get_mut(index)
+                    .expect("hourly bucket index came from this deque")
+                    .1,
+            );
         }
-        &mut self
+
+        let insertion = self
             .hourly_platform
-            .back_mut()
-            .expect("just pushed a bucket")
-            .1
+            .iter()
+            .position(|(start, _)| *start > bucket_start)
+            .unwrap_or(self.hourly_platform.len());
+        self.hourly_platform
+            .insert(insertion, (bucket_start, OrderStats::default()));
+        while self.hourly_platform.len() > HOURLY_STATS_CAP {
+            self.hourly_platform.pop_front();
+        }
+        self.hourly_platform
+            .iter_mut()
+            .find(|(start, _)| *start == bucket_start)
+            .map(|(_, stats)| stats)
     }
 
     /// All-time stats for one market.
@@ -179,10 +270,18 @@ impl OrderStatsTracker {
                 out.matched += stats.matched;
                 out.unmatched += stats.unmatched;
                 out.placed_distinct += stats.placed_distinct;
+                out.trader_orders_admitted += stats.trader_orders_admitted;
+                out.trader_orders_first_filled += stats.trader_orders_first_filled;
+                out.maker_quotes_worked += stats.maker_quotes_worked;
+                out.maker_quotes_hit += stats.maker_quotes_hit;
             }
         }
         out
     }
+}
+
+fn hour_start(ts_ms: u64) -> u64 {
+    ts_ms - (ts_ms % MILLIS_PER_HOUR)
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -303,12 +402,89 @@ mod tests {
     }
 
     #[test]
+    fn execution_quality_uses_distinct_admission_cohorts() {
+        let mut t = OrderStatsTracker::new();
+        let h = MILLIS_PER_HOUR;
+
+        t.record_execution_admitted(false, 0);
+        t.record_execution_admitted(false, h);
+        t.record_execution_first_fill(false, 0);
+        t.record_execution_admitted(true, h);
+        t.record_execution_admitted(true, h);
+        t.record_execution_first_fill(true, h);
+
+        let all_time = t.platform();
+        assert_eq!(all_time.trader_orders_admitted, 2);
+        assert_eq!(all_time.trader_orders_first_filled, 1);
+        assert_eq!(all_time.maker_quotes_worked, 2);
+        assert_eq!(all_time.maker_quotes_hit, 1);
+
+        let rolling = t.platform_24h(h);
+        assert_eq!(rolling.trader_orders_admitted, 2);
+        assert_eq!(rolling.trader_orders_first_filled, 1);
+        assert_eq!(rolling.maker_quotes_worked, 2);
+        assert_eq!(rolling.maker_quotes_hit, 1);
+    }
+
+    #[test]
+    fn delayed_first_fill_is_credited_to_its_admission_hour() {
+        let mut t = OrderStatsTracker::new();
+        let h = MILLIS_PER_HOUR;
+
+        t.record_execution_admitted(false, 2 * h);
+        t.record_placed([], 20 * h);
+        t.record_execution_first_fill(false, 2 * h);
+
+        let admission_bucket = t
+            .hourly_platform
+            .iter()
+            .find(|(start, _)| *start == 2 * h)
+            .map(|(_, stats)| *stats)
+            .expect("admission cohort retained");
+        assert_eq!(admission_bucket.trader_orders_admitted, 1);
+        assert_eq!(admission_bucket.trader_orders_first_filled, 1);
+        let fill_hour = t
+            .hourly_platform
+            .iter()
+            .find(|(start, _)| *start == 20 * h)
+            .map(|(_, stats)| *stats)
+            .expect("clock-advance bucket retained");
+        assert_eq!(fill_hour.trader_orders_admitted, 0);
+        assert_eq!(fill_hour.trader_orders_first_filled, 0);
+    }
+
+    #[test]
+    fn expired_cohort_is_not_resurrected_by_late_events() {
+        let mut t = OrderStatsTracker::new();
+        let h = MILLIS_PER_HOUR;
+        for hour in 0..=25 {
+            t.record_execution_admitted(false, hour * h);
+        }
+
+        assert_eq!(t.hourly_platform.front().unwrap().0, h);
+        t.record_execution_first_fill(false, 0);
+        t.record_execution_admitted(false, 0);
+
+        let all_time = t.platform();
+        assert_eq!(all_time.trader_orders_admitted, 27);
+        assert_eq!(all_time.trader_orders_first_filled, 1);
+
+        let rolling = t.platform_24h(25 * h);
+        assert_eq!(rolling.trader_orders_admitted, 25);
+        assert_eq!(rolling.trader_orders_first_filled, 0);
+        assert_eq!(t.hourly_platform.front().unwrap().0, h);
+    }
+
+    #[test]
     fn snapshot_roundtrip() {
         let mut t = OrderStatsTracker::new();
         let m = mid(1);
         t.record_placed([m], 0);
         t.record_exit(&matched_resting(1, m), 0);
         t.record_admitted(0);
+        t.record_execution_admitted(false, 0);
+        t.record_execution_first_fill(false, 0);
+        t.record_execution_admitted(true, 0);
 
         let snap = t.snapshot();
         let restored = OrderStatsTracker::restore(snap);
@@ -372,5 +548,9 @@ mod tests {
             decoded.placed_distinct, 0,
             "missing trailing field defaults to 0"
         );
+        assert_eq!(decoded.trader_orders_admitted, 0);
+        assert_eq!(decoded.trader_orders_first_filled, 0);
+        assert_eq!(decoded.maker_quotes_worked, 0);
+        assert_eq!(decoded.maker_quotes_hit, 0);
     }
 }

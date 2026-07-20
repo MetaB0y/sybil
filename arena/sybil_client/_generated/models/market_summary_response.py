@@ -29,6 +29,9 @@ class MarketSummaryResponse:
             name (str):
             status (str):
             volume_nanos (str): All-time traded notional. Integer nanodollars; 1_000_000_000 = $1.
+            closed (bool | None | Unset): Whether an external mirror has closed this component market.
+            event_id (None | str | Unset): Product-level grouping key. Component markets with the same value
+                render as one market card. `None` means this market stands alone.
             liquidity_avg10_nanos (str | Unset): Liquidity depth score. Integer nanodollars; 1_000_000_000 = $1.
                 Mirrors `MarketResponse`.
             liquidity_band_nanos (str | Unset): Liquidity price-band width. Integer nanodollars; 1_000_000_000 = $1.
@@ -62,6 +65,8 @@ class MarketSummaryResponse:
     name: str
     status: str
     volume_nanos: str
+    closed: bool | None | Unset = UNSET
+    event_id: None | str | Unset = UNSET
     liquidity_avg10_nanos: str | Unset = UNSET
     liquidity_band_nanos: str | Unset = UNSET
     no_price_24h_ago_nanos: None | str | Unset = UNSET
@@ -89,6 +94,18 @@ class MarketSummaryResponse:
         status = self.status
 
         volume_nanos = self.volume_nanos
+
+        closed: bool | None | Unset
+        if isinstance(self.closed, Unset):
+            closed = UNSET
+        else:
+            closed = self.closed
+
+        event_id: None | str | Unset
+        if isinstance(self.event_id, Unset):
+            event_id = UNSET
+        else:
+            event_id = self.event_id
 
         liquidity_avg10_nanos = self.liquidity_avg10_nanos
 
@@ -149,6 +166,10 @@ class MarketSummaryResponse:
             "status": status,
             "volume_nanos": volume_nanos,
         })
+        if closed is not UNSET:
+            field_dict["closed"] = closed
+        if event_id is not UNSET:
+            field_dict["event_id"] = event_id
         if liquidity_avg10_nanos is not UNSET:
             field_dict["liquidity_avg10_nanos"] = liquidity_avg10_nanos
         if liquidity_band_nanos is not UNSET:
@@ -190,6 +211,26 @@ class MarketSummaryResponse:
         status = d.pop("status")
 
         volume_nanos = d.pop("volume_nanos")
+
+        def _parse_closed(data: object) -> bool | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(bool | None | Unset, data)
+
+        closed = _parse_closed(d.pop("closed", UNSET))
+
+
+        def _parse_event_id(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        event_id = _parse_event_id(d.pop("event_id", UNSET))
+
 
         liquidity_avg10_nanos = d.pop("liquidity_avg10_nanos", UNSET)
 
@@ -270,6 +311,8 @@ class MarketSummaryResponse:
             name=name,
             status=status,
             volume_nanos=volume_nanos,
+            closed=closed,
+            event_id=event_id,
             liquidity_avg10_nanos=liquidity_avg10_nanos,
             liquidity_band_nanos=liquidity_band_nanos,
             no_price_24h_ago_nanos=no_price_24h_ago_nanos,

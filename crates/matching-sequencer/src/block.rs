@@ -43,6 +43,7 @@ pub struct BlockFlowMetrics {
     pub fresh_orders_accepted: usize,
     pub rejected_orders: usize,
     pub pending_orders_after: usize,
+    pub execution_quality: crate::aggregates::ExecutionQualityDelta,
 }
 
 /// Header of a sequencer block.
@@ -207,6 +208,10 @@ pub struct AdmitTimingView {
     pub admit_timestamp_ms: u64,
     pub is_new: bool,
     pub is_mm: bool,
+    /// Whether this resting order had already received a positive fill before
+    /// entering this batch. Always false for fresh and one-shot MM orders.
+    #[serde(default)]
+    pub had_prior_fill: bool,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

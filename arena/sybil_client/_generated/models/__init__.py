@@ -48,6 +48,7 @@ from .derived_view_sidecar_response import DerivedViewSidecarResponse
 from .equity_point_response import EquityPointResponse
 from .equity_series_response import EquitySeriesResponse
 from .event_traders_response import EventTradersResponse
+from .execution_quality_response import ExecutionQualityResponse
 from .extend_market_group_request import ExtendMarketGroupRequest
 from .fill_response import FillResponse
 from .fund_account_request import FundAccountRequest
@@ -210,6 +211,7 @@ __all__ = (
     "EquityPointResponse",
     "EquitySeriesResponse",
     "EventTradersResponse",
+    "ExecutionQualityResponse",
     "ExtendMarketGroupRequest",
     "FillResponse",
     "FundAccountRequest",

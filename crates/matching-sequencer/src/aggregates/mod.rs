@@ -31,6 +31,8 @@ pub use account_event_log::{
 pub use cost_basis_tracker::{CostBasisTracker, CostBasisTrackerSnapshot};
 pub use equity_tracker::{EquityPoint, EquityTracker};
 pub use liquidity_tracker::{LIQUIDITY_RING_CAP, LiquidityTracker, LiquidityTrackerSnapshot};
-pub use order_stats_tracker::{OrderStats, OrderStatsTracker, OrderStatsTrackerSnapshot};
+pub use order_stats_tracker::{
+    ExecutionQualityDelta, OrderStats, OrderStatsTracker, OrderStatsTrackerSnapshot,
+};
 pub use trader_tracker::{TraderTracker, TraderTrackerSnapshot};
 pub use welfare_tracker::{WelfareTracker, WelfareTrackerSnapshot};

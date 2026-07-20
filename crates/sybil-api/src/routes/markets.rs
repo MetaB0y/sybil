@@ -309,6 +309,7 @@ pub async fn list_markets_summary(
     let (liquidity_by_market, liquidity_band_nanos) = liquidity;
 
     let ref_prices = state.fresh_reference_prices().await;
+    let market_ref_data = state.market_ref_data.read().await;
 
     let _build_span = tracing::info_span!(
         "list_markets_summary.build_response",
@@ -319,6 +320,7 @@ pub async fn list_markets_summary(
         .iter()
         .map(|m| {
             let market_prices = prices.get(&m.id);
+            let ref_data = market_ref_data.get(&m.id.0);
             let status = statuses
                 .get(&m.id)
                 .cloned()
@@ -334,6 +336,8 @@ pub async fn list_markets_summary(
             MarketSummaryResponse {
                 market_id: m.id.0,
                 name: m.name.clone(),
+                event_id: ref_data.and_then(|data| data.event_id.clone()),
+                closed: ref_data.and_then(|data| data.closed),
                 yes_price_nanos: market_prices.and_then(|p| p.first().map(|n| n.0)),
                 no_price_nanos: market_prices.and_then(|p| p.get(1).map(|n| n.0)),
                 reference_price_nanos: ref_prices.get(&m.id.0).map(|price| price.price_nanos),

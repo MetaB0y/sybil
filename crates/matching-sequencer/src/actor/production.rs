@@ -467,6 +467,89 @@ impl SequencerActorState {
         metrics::histogram!("sybil_rejections_per_block")
             .record(bp.flow_metrics.rejected_orders as f64);
         metrics::histogram!("sybil_fills_per_block").record(bp.block.header.fill_count as f64);
+        let execution = bp.flow_metrics.execution_quality;
+        for (submission_class, denominator_event, numerator_event, admitted, first_filled) in [
+            (
+                "trader",
+                "admitted",
+                "first_filled",
+                execution.trader_orders_admitted,
+                execution.trader_orders_first_filled,
+            ),
+            (
+                "maker_quote",
+                "worked",
+                "hit",
+                execution.maker_quotes_worked,
+                execution.maker_quotes_hit,
+            ),
+        ] {
+            metrics::counter!(
+                "sybil_execution_order_events_total",
+                "submission_class" => submission_class,
+                "event" => denominator_event
+            )
+            .increment(admitted);
+            metrics::counter!(
+                "sybil_execution_order_events_total",
+                "submission_class" => submission_class,
+                "event" => numerator_event
+            )
+            .increment(first_filled);
+        }
+        let (execution_all_time, execution_24h) = self
+            .sequencer
+            .analytics()
+            .platform_order_stats(bp.block.header.timestamp_ms);
+        for (window, stats) in [
+            ("all_time", execution_all_time),
+            ("24h_admission_cohort", execution_24h),
+        ] {
+            record_execution_cohort_metrics(
+                "trader",
+                window,
+                "admitted",
+                "first_filled",
+                stats.trader_orders_admitted,
+                stats.trader_orders_first_filled,
+            );
+            record_execution_cohort_metrics(
+                "maker_quote",
+                window,
+                "worked",
+                "hit",
+                stats.maker_quotes_worked,
+                stats.maker_quotes_hit,
+            );
+        }
+        metrics::gauge!(
+            "sybil_trader_execution_fill_ratio",
+            "window" => "all_time"
+        )
+        .set(ratio_or_zero(
+            execution_all_time.trader_orders_first_filled,
+            execution_all_time.trader_orders_admitted,
+        ));
+        metrics::gauge!(
+            "sybil_trader_execution_fill_ratio",
+            "window" => "24h_admission_cohort"
+        )
+        .set(ratio_or_zero(
+            execution_24h.trader_orders_first_filled,
+            execution_24h.trader_orders_admitted,
+        ));
+        metrics::gauge!("sybil_maker_quote_hit_ratio", "window" => "all_time").set(ratio_or_zero(
+            execution_all_time.maker_quotes_hit,
+            execution_all_time.maker_quotes_worked,
+        ));
+        metrics::gauge!(
+            "sybil_maker_quote_hit_ratio",
+            "window" => "24h_admission_cohort"
+        )
+        .set(ratio_or_zero(
+            execution_24h.maker_quotes_hit,
+            execution_24h.maker_quotes_worked,
+        ));
         metrics::gauge!("sybil_welfare_nanos").set(bp.analytics.total_welfare as f64);
         metrics::gauge!("sybil_volume_nanos").set(bp.analytics.total_volume as f64);
         metrics::gauge!("sybil_pending_bundles").set(pending_bundles_before as f64);
@@ -542,6 +625,38 @@ impl SequencerActorState {
     }
 }
 
+fn record_execution_cohort_metrics(
+    submission_class: &'static str,
+    window: &'static str,
+    denominator_event: &'static str,
+    numerator_event: &'static str,
+    admitted: u64,
+    first_filled: u64,
+) {
+    metrics::gauge!(
+        "sybil_execution_cohort_orders",
+        "submission_class" => submission_class,
+        "window" => window,
+        "event" => denominator_event
+    )
+    .set(admitted as f64);
+    metrics::gauge!(
+        "sybil_execution_cohort_orders",
+        "submission_class" => submission_class,
+        "window" => window,
+        "event" => numerator_event
+    )
+    .set(first_filled as f64);
+}
+
+fn ratio_or_zero(numerator: u64, denominator: u64) -> f64 {
+    if denominator == 0 {
+        0.0
+    } else {
+        (numerator as f64) / (denominator as f64)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -552,6 +667,13 @@ mod tests {
         p.markets = markets;
         p.orders = orders;
         p
+    }
+
+    #[test]
+    fn execution_ratio_is_zero_without_a_cohort_and_does_not_hide_inconsistency() {
+        assert_eq!(ratio_or_zero(0, 0), 0.0);
+        assert_eq!(ratio_or_zero(1, 4), 0.25);
+        assert_eq!(ratio_or_zero(2, 1), 2.0);
     }
 
     #[test]

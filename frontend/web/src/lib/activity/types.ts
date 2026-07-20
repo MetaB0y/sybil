@@ -48,9 +48,8 @@ export type Last24hStats = {
   matchedVolume: string; // formatted; "—" until loaded
   welfare: string; // formatted signed dollars; "—" until loaded
   traders: number | null; // null until loaded
-  ordersPlacedDistinct: number | null; // distinct orders placed; null until loaded
-  ordersMatched: number | null; // null until loaded
-  ordersUnmatched: number | null; // null until loaded
+  traderOrdersAdmitted: number | null; // fresh non-MM admissions; null until loaded
+  traderOrdersFirstFilled: number | null; // received a positive fill; null until loaded
 };
 
 /**

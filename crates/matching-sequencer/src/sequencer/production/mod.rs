@@ -490,6 +490,7 @@ impl BlockSequencer {
                     self.last_header.as_ref(),
                 ),
                 is_mm: false,
+                had_prior_fill: ro.has_been_matched,
             });
         }
         let carried_resting_orders = all_orders.len();
@@ -618,6 +619,7 @@ impl BlockSequencer {
                         admit_timestamp_ms: timestamp_ms,
                         is_new: true,
                         is_mm: true,
+                        had_prior_fill: false,
                     });
                     accepted_orders.push(order);
                 } else {
@@ -671,6 +673,7 @@ impl BlockSequencer {
                                 admit_timestamp_ms: accepted.resting_order.created_at_ms,
                                 is_new: true,
                                 is_mm: false,
+                                had_prior_fill: false,
                             });
                             accepted_orders.push(accepted.order);
                         }
@@ -992,8 +995,9 @@ impl BlockSequencer {
             analytics: analytics.clone(),
             derived_view_sidecar: derived_view_sidecar.clone(),
         };
-        self.analytics
-            .observe_block(&sealed_for_observe, &derived_view_sidecar, &witness);
+        let execution_quality =
+            self.analytics
+                .observe_block(&sealed_for_observe, &derived_view_sidecar, &witness);
 
         // Debug/prover-adjacent native full verification. Production keeps
         // this off; a separate prover node owns the full verifier path.
@@ -1034,6 +1038,7 @@ impl BlockSequencer {
                 fresh_orders_accepted,
                 rejected_orders,
                 pending_orders_after,
+                execution_quality,
             },
         })
     }

@@ -12,6 +12,7 @@ from ..types import UNSET, Unset
 from typing import cast
 
 if TYPE_CHECKING:
+  from ..models.execution_quality_response import ExecutionQualityResponse
   from ..models.overview_order_stats_response import OverviewOrderStatsResponse
 
 
@@ -29,6 +30,12 @@ class OverviewBucketResponse:
     remain zero until then.
 
         Attributes:
+            execution_quality (ExecutionQualityResponse | Unset): Product execution and liquidity utilization for one time
+                window.
+
+                The rolling window is admission-cohort based: a carried order's first fill
+                is credited to its original admission hour, so each numerator is bounded by
+                its corresponding denominator.
             orders (OverviewOrderStatsResponse | Unset):
             total_volume_nanos (str | Unset): Total traded notional for this bucket. Integer nanodollars;
                 1_000_000_000 = $1.
@@ -38,6 +45,7 @@ class OverviewBucketResponse:
             unique_traders (int | Unset):
      """
 
+    execution_quality: ExecutionQualityResponse | Unset = UNSET
     orders: OverviewOrderStatsResponse | Unset = UNSET
     total_volume_nanos: str | Unset = UNSET
     total_welfare_nanos: str | Unset = UNSET
@@ -49,7 +57,12 @@ class OverviewBucketResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.execution_quality_response import ExecutionQualityResponse
         from ..models.overview_order_stats_response import OverviewOrderStatsResponse
+        execution_quality: dict[str, Any] | Unset = UNSET
+        if not isinstance(self.execution_quality, Unset):
+            execution_quality = self.execution_quality.to_dict()
+
         orders: dict[str, Any] | Unset = UNSET
         if not isinstance(self.orders, Unset):
             orders = self.orders.to_dict()
@@ -65,6 +78,8 @@ class OverviewBucketResponse:
         field_dict.update(self.additional_properties)
         field_dict.update({
         })
+        if execution_quality is not UNSET:
+            field_dict["execution_quality"] = execution_quality
         if orders is not UNSET:
             field_dict["orders"] = orders
         if total_volume_nanos is not UNSET:
@@ -80,8 +95,19 @@ class OverviewBucketResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.execution_quality_response import ExecutionQualityResponse
         from ..models.overview_order_stats_response import OverviewOrderStatsResponse
         d = dict(src_dict)
+        _execution_quality = d.pop("execution_quality", UNSET)
+        execution_quality: ExecutionQualityResponse | Unset
+        if isinstance(_execution_quality,  Unset):
+            execution_quality = UNSET
+        else:
+            execution_quality = ExecutionQualityResponse.from_dict(_execution_quality)
+
+
+
+
         _orders = d.pop("orders", UNSET)
         orders: OverviewOrderStatsResponse | Unset
         if isinstance(_orders,  Unset):
@@ -99,6 +125,7 @@ class OverviewBucketResponse:
         unique_traders = d.pop("unique_traders", UNSET)
 
         overview_bucket_response = cls(
+            execution_quality=execution_quality,
             orders=orders,
             total_volume_nanos=total_volume_nanos,
             total_welfare_nanos=total_welfare_nanos,

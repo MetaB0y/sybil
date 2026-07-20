@@ -376,6 +376,13 @@ pub struct MarketResponse {
 pub struct MarketSummaryResponse {
     pub market_id: u32,
     pub name: String,
+    /// Product-level grouping key. Component markets with the same value
+    /// render as one market card. `None` means this market stands alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_id: Option<String>,
+    /// Whether an external mirror has closed this component market.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed: Option<bool>,
     /// Current YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
     #[serde(with = "crate::wire_integer::option")]
@@ -1616,6 +1623,32 @@ pub struct OverviewBucketResponse {
     pub total_welfare_nanos: i64,
     #[serde(default)]
     pub orders: OverviewOrderStatsResponse,
+    /// Explicit product execution cohorts. These are distinct order
+    /// lifecycles, unlike the legacy per-batch participation counters above.
+    #[serde(default)]
+    pub execution_quality: ExecutionQualityResponse,
+}
+
+/// Product execution and liquidity utilization for one time window.
+///
+/// The rolling window is admission-cohort based: a carried order's first fill
+/// is credited to its original admission hour, so each numerator is bounded by
+/// its corresponding denominator.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ExecutionQualityResponse {
+    /// Fresh non-MM orders admitted once each.
+    #[serde(default)]
+    pub trader_orders_admitted: u64,
+    /// Admitted trader orders that received at least one positive fill.
+    #[serde(default)]
+    pub trader_orders_first_filled: u64,
+    /// One-block operator MM quote orders worked.
+    #[serde(default)]
+    pub maker_quotes_worked: u64,
+    /// Worked MM quote orders that received at least one positive fill.
+    #[serde(default)]
+    pub maker_quotes_hit: u64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

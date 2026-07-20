@@ -182,29 +182,29 @@
       }
     },
     {
-      "title": "Orders Filled (ratio)",
+      "title": "Trader Execution Fill Ratio (24h cohort)",
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 12, "y": 36 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [{
-        "expr": "rate(sybil_fills_per_block_sum[5m]) / clamp_min(rate(sybil_orders_per_block_sum[5m]), 0.0001)",
+        "expr": "sybil_trader_execution_fill_ratio{window=\"24h_admission_cohort\"}",
         "refId": "A"
       }],
       "options": { "graphMode": "area" },
       "fieldConfig": {
-        "defaults": { "unit": "percentunit", "thresholds": { "steps": [{ "color": "purple", "value": null }] } },
+        "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "steps": [{ "color": "purple", "value": null }] } },
         "overrides": []
       }
     },
     {
-      "title": "Market Fills Rate",
+      "title": "Maker Quote Hit Ratio (24h cohort)",
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 36 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
-      "targets": [{ "expr": "sum(rate(sybil_market_fills_total[1m]))", "refId": "A" }],
+      "targets": [{ "expr": "sybil_maker_quote_hit_ratio{window=\"24h_admission_cohort\"}", "refId": "A" }],
       "options": { "graphMode": "area" },
       "fieldConfig": {
-        "defaults": { "unit": "cps", "thresholds": { "steps": [{ "color": "teal", "value": null }] } },
+        "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "steps": [{ "color": "teal", "value": null }] } },
         "overrides": []
       }
     },

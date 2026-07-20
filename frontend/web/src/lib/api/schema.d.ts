@@ -2109,6 +2109,35 @@ export interface components {
       /** Format: int32 */
       trader_count: number;
     };
+    /**
+     * @description Product execution and liquidity utilization for one time window.
+     *
+     *     The rolling window is admission-cohort based: a carried order's first fill
+     *     is credited to its original admission hour, so each numerator is bounded by
+     *     its corresponding denominator.
+     */
+    ExecutionQualityResponse: {
+      /**
+       * Format: int64
+       * @description Worked MM quote orders that received at least one positive fill.
+       */
+      maker_quotes_hit?: number;
+      /**
+       * Format: int64
+       * @description One-block operator MM quote orders worked.
+       */
+      maker_quotes_worked?: number;
+      /**
+       * Format: int64
+       * @description Fresh non-MM orders admitted once each.
+       */
+      trader_orders_admitted?: number;
+      /**
+       * Format: int64
+       * @description Admitted trader orders that received at least one positive fill.
+       */
+      trader_orders_first_filled?: number;
+    };
     ExtendMarketGroupRequest: {
       /**
        * Format: int32
@@ -2453,6 +2482,13 @@ export interface components {
     };
     /** @description Minimal market data for high-throughput dashboards (drops strings & metadata). */
     MarketSummaryResponse: {
+      /** @description Whether an external mirror has closed this component market. */
+      closed?: boolean | null;
+      /**
+       * @description Product-level grouping key. Component markets with the same value
+       *     render as one market card. `None` means this market stands alone.
+       */
+      event_id?: string | null;
       /**
        * @description Liquidity depth score. Integer nanodollars; 1_000_000_000 = $1.
        *     Mirrors `MarketResponse`.
@@ -2691,6 +2727,11 @@ export interface components {
      *     remain zero until then.
      */
     OverviewBucketResponse: {
+      /**
+       * @description Explicit product execution cohorts. These are distinct order
+       *     lifecycles, unlike the legacy per-batch participation counters above.
+       */
+      execution_quality?: components["schemas"]["ExecutionQualityResponse"];
       orders?: components["schemas"]["OverviewOrderStatsResponse"];
       /**
        * @description Total traded notional for this bucket. Integer nanodollars;

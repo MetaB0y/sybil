@@ -3,7 +3,7 @@ tags: [infrastructure, crate]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-18
+last_verified: 2026-07-20
 ---
 
 The REST API is the external interface to the exchange. Built with Axum, it
@@ -188,6 +188,24 @@ another WAL append; a different name or initial member set returns 409. Group
 responses expose the key so native and mirror operators recover by durable
 identity rather than guessing from a title or overlapping membership. Member
 growth remains `POST /v1/markets/groups/{group_id}/members`.
+
+`GET /v1/markets/summary` carries the minimal product grouping facts
+`event_id` and `closed`. Frontend totals count one active visible market card,
+not one sequencer component: active components sharing an `event_id` count
+once, an ungrouped component counts by `market_id`, and resolved or externally
+closed components do not count. This is a display/read-model convention;
+canonical matching and resolution continue to address component market ids.
+
+`GET /v1/activity/overview` keeps its legacy per-batch
+placed/matched/unmatched fields for detailed operational views, but product
+execution uses the nested `execution_quality` object. Trader execution is
+`trader_orders_first_filled / trader_orders_admitted`, where fresh non-MM
+orders are counted once at admission and once on their first positive fill.
+Maker utilization is independently
+`maker_quotes_hit / maker_quotes_worked` for one-block MM quote orders. The
+24-hour slice is admission-cohort based: a later first fill credits the
+original admission hour, while an already-expired cohort affects all-time
+counts only.
 
 Market raw price history is served through
 `GET /v1/markets/{id}/prices/history`, backed by the private history projector.

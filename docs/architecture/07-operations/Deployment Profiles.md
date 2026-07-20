@@ -3,7 +3,7 @@ tags: [infrastructure, operations, deployment]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-18
+last_verified: 2026-07-20
 ---
 
 Sybil runs the same API/history images in four different postures. `local` and
@@ -386,11 +386,10 @@ to a normalized, domain-separated creation key, so a lost market-create
 response returns the original Sybil market rather than allocating a duplicate.
 The integration durably checkpoints each returned market, group, extension,
 and completed event immediately; its mapping publication syncs the file,
-renames it atomically, and syncs the parent directory. Because market-group
-creation does not yet have protocol identity
-([#129](https://github.com/MetaB0y/sybil/issues/129)), restart also lists and
-adopts a uniquely compatible existing group left by a crash before the local
-checkpoint.
+renames it atomically, and syncs the parent directory. Every mirrored event
+also uses a genesis-bound canonical group creation key. A lost group-create
+response therefore returns the exact original group; conflicting reuse fails
+instead of falling back to title or membership-overlap discovery.
 
 Persisted MM accounts are replaced only after an authoritative API 404. A
 network, authentication, decode, or 5xx failure fails startup rather than

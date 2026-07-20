@@ -11,10 +11,10 @@ use sybil_verifier::BlockWitness;
 
 use crate::account::{AccountId, AccountStore};
 use crate::aggregates::{
-    AccountEventLog, CostBasisTracker, CostBasisTrackerSnapshot, EquityTracker, HistoryEvent,
-    LiquidityTracker, LiquidityTrackerSnapshot, OrderStats, OrderStatsTracker,
-    OrderStatsTrackerSnapshot, TraderTracker, TraderTrackerSnapshot, WelfareTracker,
-    WelfareTrackerSnapshot,
+    AccountEventLog, CostBasisTracker, CostBasisTrackerSnapshot, EquityTracker,
+    ExecutionQualityDelta, HistoryEvent, LiquidityTracker, LiquidityTrackerSnapshot, OrderStats,
+    OrderStatsTracker, OrderStatsTrackerSnapshot, TraderTracker, TraderTrackerSnapshot,
+    WelfareTracker, WelfareTrackerSnapshot,
 };
 use crate::block::{
     DerivedViewSidecar, RejectedOrderView, RemovedOrderExitReason, RemovedOrderPhase, SealedBlock,
@@ -386,7 +386,7 @@ impl AnalyticsState {
         block: &SealedBlock,
         sidecar: &DerivedViewSidecar,
         witness: &BlockWitness,
-    ) {
+    ) -> ExecutionQualityDelta {
         let height = block.canonical.header.height;
         let timestamp_ms = block.canonical.header.timestamp_ms;
 
@@ -408,25 +408,51 @@ impl AnalyticsState {
             );
         }
 
+        let filled_order_ids = block
+            .canonical
+            .fills
+            .iter()
+            .filter(|fill| fill.fill_qty.0 > 0)
+            .map(|fill| fill.order_id)
+            .collect::<std::collections::HashSet<_>>();
+        let mut execution_delta = ExecutionQualityDelta::default();
         for admit in &sidecar.admits {
-            if !admit.is_new {
-                continue;
+            if admit.is_new {
+                self.record_order_admitted(timestamp_ms);
+                self.order_stats_tracker
+                    .record_execution_admitted(admit.is_mm, admit.admit_timestamp_ms);
+                if admit.is_mm {
+                    execution_delta.maker_quotes_worked += 1;
+                } else {
+                    execution_delta.trader_orders_admitted += 1;
+                }
             }
-            self.record_order_admitted(timestamp_ms);
-            let Some((order, account_id, is_mm)) = witness_orders.get(&admit.order_id) else {
-                continue;
-            };
-            let markets: Vec<MarketId> = order.active_markets().collect();
-            self.record_trader_placement(*account_id, markets, timestamp_ms, *is_mm);
-            if !*is_mm {
-                self.record_order_history(
-                    *account_id,
-                    crate::aggregates::HistoryKind::Placed,
-                    height,
-                    timestamp_ms,
-                    order,
-                    OrderHistoryOptions::with_price(),
-                );
+
+            if filled_order_ids.contains(&admit.order_id) && !admit.had_prior_fill {
+                self.order_stats_tracker
+                    .record_execution_first_fill(admit.is_mm, admit.admit_timestamp_ms);
+                if admit.is_mm {
+                    execution_delta.maker_quotes_hit += 1;
+                } else {
+                    execution_delta.trader_orders_first_filled += 1;
+                }
+            }
+
+            if admit.is_new
+                && let Some((order, account_id, is_mm)) = witness_orders.get(&admit.order_id)
+            {
+                let markets: Vec<MarketId> = order.active_markets().collect();
+                self.record_trader_placement(*account_id, markets, timestamp_ms, *is_mm);
+                if !*is_mm {
+                    self.record_order_history(
+                        *account_id,
+                        crate::aggregates::HistoryKind::Placed,
+                        height,
+                        timestamp_ms,
+                        order,
+                        OrderHistoryOptions::with_price(),
+                    );
+                }
             }
         }
 
@@ -494,6 +520,7 @@ impl AnalyticsState {
                 > 0;
             self.record_order_outcome(witness_order.order.active_markets(), matched, timestamp_ms);
         }
+        execution_delta
     }
 
     fn observe_rejection_history(

@@ -82,7 +82,7 @@ export function useActivityOverview(): UseActivityOverviewResult {
   });
 
   const liveMarkets = summaryQ.data
-    ? summaryQ.data.filter((m) => m.status === "active").length
+    ? countLiveProductMarkets(summaryQ.data)
     : null;
   const block = latestBlock ?? latestBlockQ.data ?? null;
 
@@ -160,9 +160,8 @@ function bucketStats(bucket: OverviewBucket | undefined): Last24hStats {
       matchedVolume: "—",
       welfare: "—",
       traders: null,
-      ordersPlacedDistinct: null,
-      ordersMatched: null,
-      ordersUnmatched: null,
+      traderOrdersAdmitted: null,
+      traderOrdersFirstFilled: null,
     };
   }
   return {
@@ -171,8 +170,28 @@ function bucketStats(bucket: OverviewBucket | undefined): Last24hStats {
     ),
     welfare: formatCompactDollars(parseNanos(bucket.total_welfare_nanos ?? 0)),
     traders: bucket.unique_traders ?? 0,
-    ordersPlacedDistinct: bucket.orders?.placed_distinct ?? 0,
-    ordersMatched: bucket.orders?.matched ?? 0,
-    ordersUnmatched: bucket.orders?.unmatched ?? 0,
+    traderOrdersAdmitted:
+      bucket.execution_quality?.trader_orders_admitted ?? 0,
+    traderOrdersFirstFilled:
+      bucket.execution_quality?.trader_orders_first_filled ?? 0,
   };
+}
+
+type MarketSummary = components["schemas"]["MarketSummaryResponse"];
+
+/**
+ * Count product markets, not sequencer components: one visible card is one
+ * market. Active sibling components share `event_id`; ungrouped components
+ * stand alone. Externally closed components are not live.
+ */
+export function countLiveProductMarkets(markets: MarketSummary[]): number {
+  const productKeys = new Set<string>();
+  for (const market of markets) {
+    if (market.status !== "active" || market.closed === true) continue;
+    const eventId = market.event_id?.trim();
+    productKeys.add(
+      eventId ? `event:${eventId}` : `market:${market.market_id}`,
+    );
+  }
+  return productKeys.size;
 }

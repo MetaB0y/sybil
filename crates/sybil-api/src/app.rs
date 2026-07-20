@@ -124,6 +124,7 @@ use crate::util::now_ms;
         ActivityOverviewResponse,
         OverviewBucketResponse,
         OverviewOrderStatsResponse,
+        ExecutionQualityResponse,
         OpenBatchResponse,
         EventTradersResponse,
         HistoryEventResponse,

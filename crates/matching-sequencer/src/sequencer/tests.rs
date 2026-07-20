@@ -1317,6 +1317,148 @@ fn flash_mm_quotes_set_no_fill_mark_and_liquidity() {
 }
 
 #[test]
+fn trader_execution_counts_first_positive_fill_once_across_partial_batches() {
+    let (markets, m0) = setup();
+    let mut accounts = AccountStore::new();
+    let buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+    let first_seller = accounts.create_account(0);
+    let second_seller = accounts.create_account(0);
+    accounts
+        .get_mut(first_seller)
+        .unwrap()
+        .positions
+        .insert((m0, 0), qi(4));
+    accounts
+        .get_mut(second_seller)
+        .unwrap()
+        .positions
+        .insert((m0, 0), qi(6));
+    let mut seq = BlockSequencer::with_default_solver(
+        accounts,
+        markets.clone(),
+        vec![],
+        SequencerConfig {
+            min_resting_order_notional_nanos: 0,
+            ..SequencerConfig::default()
+        },
+    );
+
+    let first = seq.produce_block(
+        vec![
+            single_order_sub(buyer, outcome_buy(&markets, 0, m0, 0, 600_000_000, q(10))),
+            single_order_sub(
+                first_seller,
+                outcome_sell(&markets, 0, m0, 0, 400_000_000, q(4)),
+            ),
+        ],
+        1_000,
+    );
+    assert_eq!(
+        first.flow_metrics.execution_quality.trader_orders_admitted,
+        2
+    );
+    assert_eq!(
+        first
+            .flow_metrics
+            .execution_quality
+            .trader_orders_first_filled,
+        2
+    );
+    assert_eq!(seq.order_book.len(), 1, "buyer remainder should carry");
+    assert!(
+        seq.order_book.snapshot()[0].has_been_matched,
+        "a positive partial fill records lifetime fill provenance"
+    );
+
+    let second = seq.produce_block(
+        vec![single_order_sub(
+            second_seller,
+            outcome_sell(&markets, 0, m0, 0, 400_000_000, q(6)),
+        )],
+        2_000,
+    );
+    assert_eq!(
+        second.flow_metrics.execution_quality.trader_orders_admitted,
+        1
+    );
+    assert_eq!(
+        second
+            .flow_metrics
+            .execution_quality
+            .trader_orders_first_filled,
+        1,
+        "the carried buyer must not count a second time"
+    );
+
+    let stats = seq.analytics().platform_order_stats(2_000).0;
+    assert_eq!(stats.trader_orders_admitted, 3);
+    assert_eq!(stats.trader_orders_first_filled, 3);
+}
+
+#[test]
+fn maker_quote_hit_rate_is_separate_from_trader_execution() {
+    let (markets, m0) = setup();
+    let mut accounts = AccountStore::new();
+    let maker = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+    let trader = accounts.create_account(0);
+    accounts
+        .get_mut(trader)
+        .unwrap()
+        .positions
+        .insert((m0, 0), qi(5));
+    let mut seq = BlockSequencer::with_default_solver(
+        accounts,
+        markets.clone(),
+        vec![],
+        SequencerConfig {
+            min_resting_order_notional_nanos: 0,
+            ..SequencerConfig::default()
+        },
+    );
+
+    let mut constraint = MmConstraint::new(MmId::new(1), Nanos(50 * NANOS_PER_DOLLAR));
+    constraint.add_order(0, matching_engine::MmSide::BuyYes);
+    let maker_submission = OrderSubmission {
+        account_id: maker,
+        orders: vec![outcome_buy(&markets, 0, m0, 0, 600_000_000, q(5))],
+        mm_constraint: Some(constraint),
+    };
+    let production = seq.produce_block(
+        vec![
+            maker_submission,
+            single_order_sub(trader, outcome_sell(&markets, 0, m0, 0, 400_000_000, q(5))),
+        ],
+        1_000,
+    );
+
+    assert_eq!(
+        production
+            .flow_metrics
+            .execution_quality
+            .maker_quotes_worked,
+        1
+    );
+    assert_eq!(
+        production.flow_metrics.execution_quality.maker_quotes_hit,
+        1
+    );
+    assert_eq!(
+        production
+            .flow_metrics
+            .execution_quality
+            .trader_orders_admitted,
+        1
+    );
+    assert_eq!(
+        production
+            .flow_metrics
+            .execution_quality
+            .trader_orders_first_filled,
+        1
+    );
+}
+
+#[test]
 fn derived_view_stream_rebuilds_order_stats_over_scenarios() {
     let scenarios = [
         ScenarioConfig::quick().with_seed(216),

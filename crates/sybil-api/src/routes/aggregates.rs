@@ -53,6 +53,12 @@ pub async fn get_activity_overview(
                 unmatched: all_time_orders.unmatched,
                 placed_distinct: all_time_orders.placed_distinct,
             },
+            execution_quality: ExecutionQualityResponse {
+                trader_orders_admitted: all_time_orders.trader_orders_admitted,
+                trader_orders_first_filled: all_time_orders.trader_orders_first_filled,
+                maker_quotes_worked: all_time_orders.maker_quotes_worked,
+                maker_quotes_hit: all_time_orders.maker_quotes_hit,
+            },
         },
         last_24h: OverviewBucketResponse {
             unique_traders: traders_24h as u64,
@@ -63,6 +69,12 @@ pub async fn get_activity_overview(
                 matched: orders_24h.matched,
                 unmatched: orders_24h.unmatched,
                 placed_distinct: orders_24h.placed_distinct,
+            },
+            execution_quality: ExecutionQualityResponse {
+                trader_orders_admitted: orders_24h.trader_orders_admitted,
+                trader_orders_first_filled: orders_24h.trader_orders_first_filled,
+                maker_quotes_worked: orders_24h.maker_quotes_worked,
+                maker_quotes_hit: orders_24h.maker_quotes_hit,
             },
         },
     }))

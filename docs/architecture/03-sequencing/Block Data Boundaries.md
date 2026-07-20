@@ -3,7 +3,7 @@ tags: [infrastructure, analytics]
 layer: sequencer
 crate: matching-sequencer
 status: current
-last_verified: 2026-07-16
+last_verified: 2026-07-20
 ---
 
 Sybil keeps canonical block data separate from derived product data. A
@@ -56,6 +56,18 @@ liquidity scores, and cost-basis summaries live in dedicated sequencer tracker
 snapshots. They are derived from blocks, orders, fills, and account state; they
 are not canonical block fields. Persistence for operational continuity does
 not make them protocol truth.
+
+Execution quality uses two explicit order-lifecycle cohorts rather than fill
+rows or batch participation. A trader order enters the denominator once when a
+fresh non-MM order is admitted and enters the numerator once on its first
+positive fill, including when that fill occurs in a later batch. One-shot MM
+quote orders are a separate `worked` / `hit` cohort. Partial fills count as one
+success, a later fill of the carried remainder does not count again, and the
+two orders on opposite sides of a match are two independently admitted
+lifecycles. The rolling 24-hour numerator is credited to the admission hour,
+not the fill hour, so it cannot exceed its cohort denominator. Expired
+admission buckets are never resurrected by late fills; all-time counts remain
+exact.
 
 Long-lived fills, account events, equity series, price history, candles, and
 windowed leaderboard anchors belong to `sybil-history`. The sequencer exports a

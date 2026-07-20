@@ -29,12 +29,12 @@ export function PulseStrip({ last24h }: { last24h: Last24hStats }) {
       value: fmtCount(last24h.traders),
     },
     {
-      label: "Placed orders",
-      value: fmtCount(last24h.ordersPlacedDistinct),
+      label: "Trader orders",
+      value: fmtCount(last24h.traderOrdersAdmitted),
     },
     {
-      label: "Matched orders",
-      value: fmtCount(last24h.ordersMatched),
+      label: "Trader orders filled",
+      value: fmtCount(last24h.traderOrdersFirstFilled),
       accent: "var(--yes)",
     },
   ];
