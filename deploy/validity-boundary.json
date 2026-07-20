@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fingerprint": "sha256:6ea2abf2c6a60670c3bc26f33fab0af62a98c55da63fb0999186b1deb7f47163",
+  "fingerprint": "sha256:a20caa7a853adc2d0b0ef3d9bb6867ed7597d4ebe1e7c45e3b711607293c5d5d",
   "inputs": {
     "commonware_packages": [
       {
@@ -70,24 +70,24 @@
         "checksum": "dfad44dd2c8e97d55dbe271802740e919d2ce8839277ea53d958381caab92a44"
       }
     ],
-    "golden_vectors_sha256": "20560d5e5cb2cf9668ca834cd1d191b3aff5400fd69ea3020355aa209b2cbf0f",
+    "golden_vectors_sha256": "53398ec0d15858d1923cba2d10ceb868e63b2d1e60c97e052ef48e35630edc8f",
     "guests": {
       "state_transition": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "ec8f7ce98c6b520078f28fe623df3d5d649c723c6466d0495defbc7079edec69",
-        "app_exe_commit": "0x0079b1a181ea4ac954db8c19c1cd74382b8a6cb1c4c86348f74152b0777df961",
+        "source_sha256": "05e8655a02347272f121407c3182b492846235cf2e814aa87f178a2531b607bf",
+        "app_exe_commit": "0x004dd4874319ad7c2330aee4d9b92acd4e224622053cf3c4171c5f923c2a187e",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       },
       "escape_claim": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "b3c521491fb388f2833346435ff3e9dd164b8db3e73447b80ff5a3716bfe41f2",
+        "source_sha256": "8d2c043aa417901cf5f3871804d37248d4b965965d081cfdd5c7a9a3a16ccae0",
         "app_exe_commit": "0x0097bc9bfbbeafe1005708bb5ec1cff2c5a310532f542304d309d1ab6479a6cf",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       }
     },
     "desired_validity_pins": {
       "state_transition": {
-        "app_exe_commit": "0x0079b1a181ea4ac954db8c19c1cd74382b8a6cb1c4c86348f74152b0777df961",
+        "app_exe_commit": "0x004dd4874319ad7c2330aee4d9b92acd4e224622053cf3c4171c5f923c2a187e",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       },
       "escape_claim": {
@@ -98,7 +98,7 @@
   },
   "decision": {
     "action": "fresh_genesis",
-    "reason": "Canonical clearing-price validity under ADR-0020 plus current main validity hardening; existing witnesses are incompatible",
+    "reason": "Canonical clearing-price validity under ADR-0020 plus L1 ABI/parser hardening; existing witnesses are incompatible",
     "reference": "docs/runbooks/fresh-genesis-redeploy.md"
   }
 }

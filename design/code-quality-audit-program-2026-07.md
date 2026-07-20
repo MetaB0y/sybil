@@ -3,7 +3,7 @@ tags: [audit, code-quality, planning, testing, codex]
 layer: cross-cutting
 status: current
 date: 2026-07-17
-last_verified: 2026-07-18
+last_verified: 2026-07-20
 ---
 
 # Code-quality audit program — July 2026

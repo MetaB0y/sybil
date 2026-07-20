@@ -3,7 +3,7 @@ tags: [audit, code-quality, l1, solidity, abi, differential-testing]
 layer: verification
 status: current
 date: 2026-07-18
-last_verified: 2026-07-18
+last_verified: 2026-07-20
 ---
 
 # Solidity/L1 differential-semantics audit — 2026-07-18
@@ -17,9 +17,17 @@ withdrawal-nullifier ABI encoder, and Rust rejects non-canonical withdrawal
 event payloads instead of partially decoding a valid prefix.
 
 No public provider was called, no transaction or proof was submitted, and no
-witness/public-input hash, guest commitment, or deployment pin changed. The
-additive golden-corpus schema advanced from version 5 to 7 and its generated
-protocol-pins inventory was refreshed.
+deployment occurred. The additive golden-corpus schema advanced from version 5
+to 7.
+
+During the 2026-07-20 rebase onto current `main`, the consensus gate correctly
+identified `sybil-l1-protocol` as part of both OpenVM source closures. A
+commitment-only rebuild moved the state-transition executable commitment to
+`0x004dd4874319ad7c2330aee4d9b92acd4e224622053cf3c4171c5f923c2a187e`;
+the escape executable and both VM commitments reproduced unchanged. Source
+locks, desired pins, generated protocol-pin documentation, and the explicit
+`fresh_genesis` boundary were refreshed. Deployment status remains
+`pending_redeploy`.
 
 ## Scope and evidence boundary
 
@@ -164,9 +172,14 @@ Passed:
 - `just contracts-build`; and
 - `just contracts-test` — 81 tests across five suites; and
 - `just contracts-coverage` — 77/78 production branches (98.72%), above every
-  per-contract and aggregate floor.
+  per-contract and aggregate floor;
+- `just openvm-commit-all` — commitment-only rebuild, no setup/keygen/proving;
+- `just zk-rebuild-check`; and
+- `just check-consensus`.
 
 The proof-generation tests remain intentionally ignored and were not invoked.
+The changed desired commitment has not been deployed; the repository explicitly
+requires a fresh-genesis repin before validity-enabled operation.
 
 ## Residual risk
 

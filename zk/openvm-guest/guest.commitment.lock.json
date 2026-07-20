@@ -1,13 +1,13 @@
 {
   "_comment": "Staleness pin for the OpenVM guest commitment. Regenerate with 'scripts/zk-guest-fingerprint.sh --write' AFTER rebuilding the guest commitment ('just openvm-commit'). CI runs '--check' and fails if source_sha256 or pinned key material no longer matches.",
   "openvm_tag": "v2.0.0",
-  "source_sha256": "ec8f7ce98c6b520078f28fe623df3d5d649c723c6466d0495defbc7079edec69",
+  "source_sha256": "05e8655a02347272f121407c3182b492846235cf2e814aa87f178a2531b607bf",
   "key_material": {
     "app.pk": "32cf903772a016261234f37c602aa6107fce35a254461ec816bf24e0990019af",
     "app.vk": "97edda4075bc46603686938dc16e6f7d637e5104c7c71e8545b382d45cb855d5",
     "agg_prefix.pk": "bec025829f3f3aa774711b0b8a50c6f9a42eba931fbd7b48253e9d0b00926097",
     "internal_recursive.pk": "d08091d2a4e2b72f06fdcd8c378bf140af79a2d91fcb1febc9ddf384868ec7cc"
   },
-  "app_exe_commit": "0x0079b1a181ea4ac954db8c19c1cd74382b8a6cb1c4c86348f74152b0777df961",
+  "app_exe_commit": "0x004dd4874319ad7c2330aee4d9b92acd4e224622053cf3c4171c5f923c2a187e",
   "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
 }

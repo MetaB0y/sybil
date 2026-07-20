@@ -3,7 +3,7 @@ tags: [audit, code-quality, collaboration, codex]
 layer: cross-cutting
 status: current
 date: 2026-07-17
-last_verified: 2026-07-18
+last_verified: 2026-07-20
 ---
 
 # Code-quality audit collaboration log — July 2026
@@ -615,3 +615,18 @@ that needed a single classification owner.
 - Report:
   [`code-quality-audit-documentation-drift-2026-07-18.md`](code-quality-audit-documentation-drift-2026-07-18.md)
 - The July code-quality audit program is complete.
+
+## 2026-07-20T09:43:00+01:00 — main rebase and validity closure
+
+- Fetched current `origin/main`, which already contained the canonical
+  clearing-price solver work and the prelaunch deployment-profile rename.
+- Rebased the five outstanding audit changes onto it with no content conflicts.
+- The post-rebase consensus gate found the intended L1 protocol edits inside
+  both guest source-fingerprint closures.
+- Rebuilt both guests through the commitment-only workflow. The
+  state-transition executable commitment moved to `0x004dd487…`; the escape
+  executable and both VM commitments reproduced.
+- Refreshed source locks, desired validity pins, protocol-pin documentation,
+  and the explicit `fresh_genesis` boundary. Deployment remains
+  `pending_redeploy`; no setup, key generation, proof, transaction, reset, or
+  deployment occurred.
