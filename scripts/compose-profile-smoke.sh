@@ -406,7 +406,8 @@ for line in sys.stdin:
         in_api = True
         continue
     if in_api and re.match(r"^  [^ ]", line):
-        break
+        in_api = False
+        continue
     if in_api:
         match = re.match(r"^      ([A-Z0-9_]+): (.*)$", line.rstrip())
         if match:
@@ -461,7 +462,8 @@ for line in sys.stdin:
         in_api = True
         continue
     if in_api and re.match(r"^  [^ ]", line):
-        break
+        in_api = False
+        continue
     if in_api:
         service_lines.append(line)
         match = re.match(r"^      ([A-Z0-9_]+): (.*)$", line.rstrip())
@@ -506,7 +508,8 @@ for line in sys.stdin:
         in_api = True
         continue
     if in_api and re.match(r"^  [^ ]", line):
-        break
+        in_api = False
+        continue
     if in_api:
         match = re.match(r"^      (SYBIL_WEBAUTHN_(?:RP_ID|ORIGIN)): (.*)$", line.rstrip())
         if match:

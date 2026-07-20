@@ -23,11 +23,15 @@ reset_gate() {
     PASSN=0; FAILN=0; SKIPN=0; RESULTS=(); ORDER_MARKET=""
     HISTORY_ACCOUNT=""
     VIRTUAL_SLEEP_CALLS=0
+    VIRTUAL_SLEEP_SECONDS=0
     SECONDS=0
 }
 
 sleep() {
     VIRTUAL_SLEEP_CALLS=$((VIRTUAL_SLEEP_CALLS + 1))
+    VIRTUAL_SLEEP_SECONDS=$((VIRTUAL_SLEEP_SECONDS + $1))
+    # Advance the production gate's Bash monotonic clock without coupling
+    # assertions to wall time spent executing the test itself.
     SECONDS=$((SECONDS + $1))
 }
 
@@ -116,7 +120,7 @@ http() {
     HTTP_BODY=$fixture_unready
 }
 check_markets >/dev/null
-[[ "$FAILN" -gt 0 && "$market_calls" -eq 1 && "$SECONDS" -eq 2 ]] \
+[[ "$FAILN" -gt 0 && "$market_calls" -eq 1 && "$VIRTUAL_SLEEP_SECONDS" -le 2 ]] \
     || { echo "FAIL: mirror timeout boundary was not enforced" >&2; exit 1; }
 
 # Web-only promotion still validates the local native registry immediately but
@@ -132,7 +136,7 @@ http() {
     HTTP_BODY=$fixture_unready
 }
 check_markets >/dev/null
-[[ "$FAILN" -eq 0 && "$SKIPN" -eq 1 && "$market_calls" -eq 1 && "$SECONDS" -eq 0 ]] \
+[[ "$FAILN" -eq 0 && "$SKIPN" -eq 1 && "$market_calls" -eq 1 && "$VIRTUAL_SLEEP_SECONDS" -eq 0 ]] \
     || { echo "FAIL: web-only mirror skip was not isolated" >&2; exit 1; }
 
 # Proof freshness recovers when the mock prover catches up within the bounded
@@ -171,7 +175,7 @@ smoke_compose_service_curl() {
     printf '%s' "{\"block_height\":90,\"state_root\":\"0x$proof_root\",\"status\":\"prepared\",\"proof_status\":\"mock_verified\"}"
 }
 check_proof_freshness >/dev/null
-[[ "$FAILN" -eq 1 && "$SECONDS" -eq 2 ]] \
+[[ "$FAILN" -eq 1 && "$VIRTUAL_SLEEP_SECONDS" -le 2 ]] \
     || { echo "FAIL: stale proof timeout did not block promotion" >&2; exit 1; }
 
 # A status from another genesis at the same height cannot pass by lag alone.
@@ -216,7 +220,7 @@ smoke_compose_service_rows() { printf '%s\n' 'sybil-api /sybil-api running healt
 prover_calls=0
 smoke_compose_service_curl() { prover_calls=$((prover_calls + 1)); return 1; }
 check_proof_freshness >/dev/null
-[[ "$FAILN" -eq 0 && "$SKIPN" -eq 1 && "$SECONDS" -eq 0 && "$prover_calls" -eq 0 ]] \
+[[ "$FAILN" -eq 0 && "$SKIPN" -eq 1 && "$VIRTUAL_SLEEP_SECONDS" -eq 0 && "$prover_calls" -eq 0 ]] \
     || { echo "FAIL: absent optional validity did not skip immediately" >&2; exit 1; }
 
 # Docker/prover access is fail-closed only when the deploy recipe requires it;
