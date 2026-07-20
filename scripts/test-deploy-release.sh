@@ -14,6 +14,51 @@ arena_ref="sybil-arena:$revision"
 web_ref="sybil-web:$revision"
 image_id="sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
+portable_a="$(
+    image_runtime_fingerprint <<'JSON'
+[{
+  "Id": "sha256:local-engine-id",
+  "RepoTags": ["sybil-api:test"],
+  "RepoDigests": [],
+  "Architecture": "amd64",
+  "Os": "linux",
+  "Created": "2026-07-20T00:00:00Z",
+  "Config": {"Labels": {"org.opencontainers.image.revision": "aaaaaaaa"}},
+  "RootFS": {"Type": "layers", "Layers": ["sha256:layer"]},
+  "GraphDriver": {"Name": "overlay2"},
+  "Size": 100
+}]
+JSON
+)"
+portable_b="$(
+    image_runtime_fingerprint <<'JSON'
+[{
+  "Id": "sha256:remote-engine-id",
+  "RepoTags": ["sybil-api:test"],
+  "RepoDigests": ["sybil-api@sha256:manifest"],
+  "Architecture": "amd64",
+  "Os": "linux",
+  "Created": "2026-07-20T00:00:00Z",
+  "Config": {"Labels": {"org.opencontainers.image.revision": "aaaaaaaa"}},
+  "RootFS": {"Type": "layers", "Layers": ["sha256:layer"]},
+  "Size": 200
+}]
+JSON
+)"
+portable_changed="$(
+    image_runtime_fingerprint <<'JSON'
+[{
+  "Architecture": "amd64",
+  "Os": "linux",
+  "Created": "2026-07-20T00:00:00Z",
+  "Config": {"Labels": {"org.opencontainers.image.revision": "bbbbbbbb"}},
+  "RootFS": {"Type": "layers", "Layers": ["sha256:layer"]}
+}]
+JSON
+)"
+[[ "$portable_a" == "$portable_b" ]]
+[[ "$portable_a" != "$portable_changed" ]]
+
 write_images_env "$work/images.env" "$api_ref" "$arena_ref" "$web_ref"
 env_body="$(cat "$work/images.env")"
 [[ "$(env_ref "$env_body" SYBIL_API_IMAGE)" == "$api_ref" ]]

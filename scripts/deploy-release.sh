@@ -77,6 +77,34 @@ local_image_id() {
     docker image inspect --format '{{.Id}}' "$1"
 }
 
+image_runtime_fingerprint() {
+    python3 -c '
+import hashlib
+import json
+import sys
+
+images = json.load(sys.stdin)
+if len(images) != 1:
+    raise SystemExit("expected exactly one inspected image")
+image = images[0]
+portable = {
+    key: image.get(key)
+    for key in ("Architecture", "Author", "Config", "Created", "Os", "RootFS", "Variant")
+}
+encoded = json.dumps(
+    portable,
+    ensure_ascii=True,
+    separators=(",", ":"),
+    sort_keys=True,
+).encode()
+print("sha256:" + hashlib.sha256(encoded).hexdigest())
+'
+}
+
+local_image_fingerprint() {
+    docker image inspect "$1" | image_runtime_fingerprint
+}
+
 local_image_revision() {
     docker image inspect --format "{{index .Config.Labels \"$SOURCE_LABEL\"}}" "$1"
 }
@@ -84,6 +112,13 @@ local_image_revision() {
 remote_image_id() {
     local server="$1" ref="$2"
     ssh "$server" "docker image inspect --format='{{.Id}}' '$ref' 2>/dev/null" || true
+}
+
+remote_image_fingerprint() {
+    local server="$1" ref="$2"
+    ssh "$server" "docker image inspect '$ref' 2>/dev/null" \
+        | image_runtime_fingerprint 2>/dev/null \
+        || true
 }
 
 remote_image_revision() {
@@ -122,20 +157,24 @@ build_image() {
 }
 
 transfer_image() {
-    local server="$1" ref="$2" expected remote
-    expected="$(local_image_id "$ref")"
-    remote="$(remote_image_id "$server" "$ref")"
-    if [[ -n "$remote" && "$remote" != "$expected" ]]; then
-        die "immutable remote tag $ref is $remote, expected $expected"
-    fi
-    if [[ "$remote" == "$expected" ]]; then
-        info "reusing remote immutable image $ref ($expected)"
+    local server="$1" ref="$2" local_id remote_id expected actual
+    local_id="$(local_image_id "$ref")"
+    expected="$(local_image_fingerprint "$ref")"
+    remote_id="$(remote_image_id "$server" "$ref")"
+    if [[ -n "$remote_id" ]]; then
+        actual="$(remote_image_fingerprint "$server" "$ref")"
+        [[ "$actual" == "$expected" ]] \
+            || die "immutable remote tag $ref has runtime fingerprint $actual ($remote_id), expected $expected ($local_id)"
+        info "reusing remote immutable image $ref ($actual; host id $remote_id)"
         return
     fi
-    info "transferring $ref ($expected)"
+    info "transferring $ref ($expected; local id $local_id)"
     docker save "$ref" | ssh "$server" docker load
-    remote="$(remote_image_id "$server" "$ref")"
-    [[ "$remote" == "$expected" ]] || die "remote load did not preserve $ref image id"
+    remote_id="$(remote_image_id "$server" "$ref")"
+    actual="$(remote_image_fingerprint "$server" "$ref")"
+    [[ "$actual" == "$expected" ]] \
+        || die "remote load did not preserve $ref runtime fingerprint ($actual != $expected)"
+    info "verified transferred $ref as host image $remote_id"
 }
 
 ensure_remote_caddy() {
