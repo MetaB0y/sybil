@@ -19,7 +19,6 @@
 //! - `order_builder`: Convenient constructors for common order types
 //! - `state`: State indexing and payoff evaluation
 
-pub mod canonical_price;
 pub mod market;
 pub mod midprice;
 pub mod mm_constraint;
@@ -58,9 +57,6 @@ pub use types::{
 };
 
 // Re-export order_builder convenience functions
-pub use canonical_price::{
-    CanonicalPriceError, CanonicalPriceSelection, CanonicalPriceSupport, canonical_clearing_prices,
-};
 pub use order_builder::{
     bundle_sell, bundle_yes, butterfly, conditional_buy, outcome_buy, outcome_sell, ratio_spread,
     simple_no_buy, simple_yes_buy, spread, spread_sell,

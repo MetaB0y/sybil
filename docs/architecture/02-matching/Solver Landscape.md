@@ -3,7 +3,7 @@ tags: [solver, overview]
 layer: solver
 crate: matching-solver
 status: current
-last_verified: 2026-07-18
+last_verified: 2026-07-17
 ---
 
 # Solver landscape
@@ -40,17 +40,15 @@ flowchart LR
 ```
 
 Shared machinery includes the HiGHS LP oracle, an optional structure-aware
-fixed-pacing price sweep, lexicographic nearest-face allocation projection,
-integer rounding, and canonical maximum-entropy price selection from landed
-fills. The structural oracle exploits
+fixed-pacing price sweep, price normalization from duals, lexicographic
+nearest-face projection, and integer rounding. The structural oracle exploits
 one-hot single-market orders to recover a primal optimum analytically from
 price subgradients; it does not handle budget rows or replace HiGHS landing.
-Retained-cash projections preserve the certified target within the primary
-supporting face, re-solve price-dependent budget rows, and finalize only at a
-budget-consistent fixed point; the LP-SLP baseline still has a capped trimming
-path and is measured as such. Every backend discards its floating price choice
-at the integer boundary; `matching-engine` selects and `sybil-verifier`
-recomputes the same canonical point. MM sells are paced through the paper's sell-to-complementary-buy
+Retained-cash
+projections preserve the certified target within the primary supporting face,
+re-solve price-dependent budget rows, and finalize only at a budget-consistent
+fixed point; the LP-SLP baseline still has a capped trimming path and is
+measured as such. MM sells are paced through the paper's sell-to-complementary-buy
 reduction, including its exact linear complete-set correction.
 `PipelineResult::diagnostics` reports algorithm termination separately from
 integer validity: convergence, a configured iteration cap, backend failure,

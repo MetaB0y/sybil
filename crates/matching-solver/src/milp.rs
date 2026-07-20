@@ -208,6 +208,15 @@ impl MilpSolver {
                         };
                     }
                 };
+                let mut clearing_prices: HashMap<MarketId, Vec<Nanos>> = HashMap::new();
+
+                // Build clearing prices from price variables
+                for (&market, &p_yes_raw) in &landed_yes_prices {
+                    let p_yes = Nanos(p_yes_raw);
+                    let p_no = Nanos(NANOS_PER_DOLLAR.saturating_sub(p_yes.0));
+                    clearing_prices.insert(market, vec![p_yes, p_no]);
+                }
+
                 // Extract fills from solution
                 for (i, order) in active_orders.iter().enumerate() {
                     let z_val = solution.z_values.get(i).copied().unwrap_or(0.0);
@@ -233,18 +242,9 @@ impl MilpSolver {
                     }
                 }
 
-                let clearing_prices = match stabilize_milp_result(&mut result, problem) {
-                    Ok(prices) => prices,
-                    Err(message) => {
-                        return MilpResult {
-                            result: MatchingResult::new(),
-                            status: SolveStatus::Error(message),
-                            solve_time_secs: solve_time,
-                            clearing_prices: HashMap::new(),
-                            objective_welfare: 0,
-                        };
-                    }
-                };
+                let mm_order_info = build_mm_order_info(problem);
+                trim_mm_budget_overflows(&mut result, &problem.mm_constraints, &mm_order_info);
+                recompute_result_from_fills(&mut result, &active_orders);
                 let objective_welfare = result.total_welfare();
 
                 MilpResult {
@@ -808,59 +808,6 @@ fn build_mm_order_info(problem: &Problem) -> HashMap<u64, (usize, MmSide)> {
         .collect()
 }
 
-/// SCIP's price variables constrain its allocation but are not protocol price
-/// policy. Recompute the canonical integer price from landed quantities and
-/// iterate hard-budget repair until quantities and prices are stable.
-fn stabilize_milp_result(
-    result: &mut MatchingResult,
-    problem: &Problem,
-) -> Result<HashMap<MarketId, Vec<Nanos>>, String> {
-    let order_map: HashMap<_, _> = problem
-        .orders
-        .iter()
-        .map(|order| (order.id, order))
-        .collect();
-    let mm_order_info = build_mm_order_info(problem);
-    const MAX_STEPS: usize = 16;
-    for _ in 0..MAX_STEPS {
-        let selection = matching_engine::canonical_clearing_prices(
-            &problem.orders,
-            &result.fills,
-            &problem.mm_constraints,
-            &problem.market_groups,
-        )
-        .map_err(|error| error.to_string())?;
-        let prices: HashMap<_, _> = selection.prices.into_iter().collect();
-        for fill in &mut result.fills {
-            let order = order_map[&fill.order_id];
-            let market_prices = &prices[&order.markets[0]];
-            fill.fill_price = if order.payoffs[0] != 0 {
-                market_prices[0]
-            } else {
-                market_prices[1]
-            };
-        }
-
-        let before: Vec<_> = result
-            .fills
-            .iter()
-            .map(|fill| (fill.order_id, fill.fill_qty))
-            .collect();
-        trim_mm_budget_overflows(result, &problem.mm_constraints, &mm_order_info);
-        let after: Vec<_> = result
-            .fills
-            .iter()
-            .map(|fill| (fill.order_id, fill.fill_qty))
-            .collect();
-        if after == before {
-            let active_orders: Vec<_> = problem.orders.iter().collect();
-            recompute_result_from_fills(result, &active_orders);
-            return Ok(prices);
-        }
-    }
-    Err("MILP canonical-price and hard-budget landing did not stabilize in 16 steps".to_string())
-}
-
 fn trim_mm_budget_overflows(
     result: &mut MatchingResult,
     mm_constraints: &[matching_engine::MmConstraint],
@@ -887,7 +834,7 @@ fn trim_mm_budget_overflows(
             continue;
         }
 
-        mm_fills.sort_by_key(|&(index, capital)| (capital, result.fills[index].order_id));
+        mm_fills.sort_by_key(|&(_, capital)| capital);
 
         let mut remaining = total_capital;
         for &(fill_idx, _) in &mm_fills {

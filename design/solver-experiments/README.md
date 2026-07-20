@@ -17,9 +17,6 @@ protocol and source revision frozen before untouched seeds are evaluated.
 
 ## Active ledgers
 
-- [Canonical clearing-price selection](canonical-price-selection.md) — issue
-  [#190](https://github.com/MetaB0y/sybil/issues/190), rejected residual
-  heuristics, maximum-entropy rule, and integer-landing counterexamples
 - [Direct price–pacing dual](price-pacing-dual.md) — issue
   [#173](https://github.com/MetaB0y/sybil/issues/173)
 - [Structural price-sweep matching oracle](structural-price-sweep-oracle.md) —
@@ -34,3 +31,6 @@ protocol and source revision frozen before untouched seeds are evaluated.
   conditional integer-friendly retry on a certified retained-cash tangent
 - [Direct scalar pacing dual](scalar-pacing-dual.md) — rejected certified
   one-MM bisection and safeguarded semismooth variants
+- [Canonical clearing-price selection](canonical-price-selection.md) —
+  rejected consensus canonicalization, including residual-KKT relaxation and
+  hard-face centering counterexamples

@@ -3,7 +3,7 @@ tags: [concept]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-18
+last_verified: 2026-07-11
 ---
 
 Users submit orders through the [[REST API]] using the `OrderSpec` enum — a user-friendly representation that gets converted to [[Payoff Vectors]] internally. The conversion happens at the API boundary: the user thinks in terms of "buy YES on market 3 at 55 cents for 10 shares," and the system converts this to a payoff vector over atomic states with a limit price in [[Nanos and Integer Arithmetic|nanos]] and a quantity in fixed-point share-units (`10 shares = 10_000` units).
@@ -15,21 +15,14 @@ The API exposes time-in-force names, but the core order model is expiry-only. `G
 The conversion to payoff vectors is the key architectural insight. The order builder in `matching-engine` provides factory functions for common patterns: `simple_yes_buy`, `spread`, `bundle_yes`, `butterfly`, and `conditional_buy`. Each produces the same `Order` struct, keeping the API and settlement model unified even where a solver supports only a subset of shapes.
 
 > [!warning] Current clearing limit
-> The API and engine can construct multi-market vectors and price conditions,
-> but production clearing currently accepts only unconditional, one-market,
-> binary, one-hot orders. General vectors are rejected rather than projected
-> onto binary prices. Price-conditioned admission is also rejected until the
-> primary allocation solver models its union of active faces. Canonical
-> verification still handles an already-landed positive conditional fill by
-> fixing its active branch and selecting the strict integer condition boundary.
+> The API and engine can construct multi-market vectors, but the active LP-family and MILP implementations assert single-market binary orders. A new API shape may reuse the domain type, but multi-market execution still requires solver work.
 
 ## Key Properties
 - `OrderSpec` enum: BuyYes, BuyNo, SellYes, SellNo, Spread, BundleYes, BundleSell, Custom
 - Quantity fields are protocol share-units; `1000` units = 1 share
 - API time-in-force: GTC, IOC, GTD; core model: optional `expires_at_block`
 - Converted to [[Payoff Vectors]] at the API boundary
-- The domain representation is general; the production solver/verifier subset
-  is deliberately narrower
+- Solver is agnostic to order type — only sees payoff vectors + limit prices
 - Custom orders allow arbitrary payoff vector construction
 - New order types only need a conversion function, not solver changes
 

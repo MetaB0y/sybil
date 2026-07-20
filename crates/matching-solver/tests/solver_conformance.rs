@@ -419,34 +419,12 @@ mod conformance {
         assert_fill_limits(&case.problem, &pipeline)?;
         assert_mm_budgets(&case.problem, &pipeline)?;
 
-        let discovered_prices = pipeline
+        let clearing_prices = pipeline
             .price_discovery
             .as_ref()
             .map(|price_discovery| price_discovery.prices.clone())
             .unwrap_or_default();
-        assert_clearing_prices_cover_fills(&case.problem, &pipeline, &discovered_prices)?;
-        // Solvers may expose indicative prices for every order-bearing market.
-        // A consensus clearing entry is fresh only when that market has a
-        // nonzero fill; the sequencer applies this same projection before
-        // building a witness.
-        let order_map: HashMap<_, _> = case
-            .problem
-            .orders
-            .iter()
-            .map(|order| (order.id, order))
-            .collect();
-        let filled_markets: HashSet<_> = pipeline
-            .result
-            .fills
-            .iter()
-            .filter(|fill| fill.fill_qty.0 > 0)
-            .filter_map(|fill| order_map.get(&fill.order_id))
-            .map(|order| order.markets[0])
-            .collect();
-        let clearing_prices = discovered_prices
-            .into_iter()
-            .filter(|(market, _)| filled_markets.contains(market))
-            .collect();
+        assert_clearing_prices_cover_fills(&case.problem, &pipeline, &clearing_prices)?;
 
         let (pre_accounts, post_accounts, expected_balance_delta, mint_adjustments) =
             derive_account_states(case, &pipeline, &clearing_prices)?;

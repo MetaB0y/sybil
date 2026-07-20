@@ -160,12 +160,6 @@ impl<S: crate::Solver> DecomposedSolver<S> {
 
         let mut result =
             crate::component_assembly::assemble_component_results(problem, outcome.results);
-        if result.diagnostics.status == TerminationStatus::PostProcessingFailure {
-            result.total_time_secs = start.elapsed().as_secs_f64();
-            result.diagnostics.algorithm =
-                format!("decomposed-{}", self.inner.name().to_lowercase());
-            return result;
-        }
         result.total_time_secs = start.elapsed().as_secs_f64();
         result.diagnostics = SolverDiagnostics {
             algorithm: format!("decomposed-{}", self.inner.name().to_lowercase()),

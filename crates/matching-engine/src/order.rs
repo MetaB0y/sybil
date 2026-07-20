@@ -178,19 +178,6 @@ impl Order {
     /// for research and tests, but current public admission and solvers only
     /// support one binary market with exactly one ±1 payoff entry.
     pub fn validate_binary_one_hot(&self) -> Result<(), &'static str> {
-        self.validate_binary_one_hot_payoff()?;
-        if self.condition.is_some() {
-            return Err("price-conditional orders are not supported in production");
-        }
-        Ok(())
-    }
-
-    /// Validate the binary one-hot payoff itself, independent of activation.
-    ///
-    /// Canonical witness verification uses this narrower structural check for
-    /// historical conditional orders even though current production admission
-    /// rejects new price-conditioned orders.
-    pub(crate) fn validate_binary_one_hot_payoff(&self) -> Result<(), &'static str> {
         if self.num_markets != 1 {
             return Err("orders must span exactly one market");
         }

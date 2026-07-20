@@ -3,7 +3,7 @@ tags: [solver, fisher-market, market-maker, research]
 layer: solver
 crate: matching-solver
 status: current
-last_verified: 2026-07-18
+last_verified: 2026-07-17
 ---
 
 # Pacing bundle solver
@@ -62,22 +62,27 @@ recorded in `design/solver-experiments/sequencer-replay-corpus.md`.
 
 ## Integer landing
 
-The continuous mixture is not protocol state. A final pacing-supported LP
-discovers the primary matching face. A second, lexicographic LP stays on that
-face and minimizes L1 distance to the certified mixture. This prevents an
-arbitrary basis on a degenerate face from replacing the allocation—as happened
-in a development case with 67.9% retained-objective loss. Both LPs choose
-allocations only; their floating dual points are never published.
+The continuous mixture is not protocol state. A final pacing-supported LP first
+discovers the primary matching objective and market duals. A second,
+lexicographic LP stays on that primary optimal face and minimizes L1 distance
+to the certified mixture. This prevents an arbitrary basis on a degenerate face
+from replacing the allocation—as happened in a development case with 67.9%
+retained-objective loss. Published prices always come from the primary solve;
+the auxiliary distance-row duals are never treated as market prices.
 
 Normally scaled books use the exact primary face and check its activity
 directly. Deliberately wide billion-unit books instead use a `1e-8` relative
 near-face band: HiGHS can report an exact auxiliary optimum there while the
 face row is materially infeasible. Before budget projection, the implementation
 compares the nearest-face, primary-basis, and certified-target integer
-candidates after independently canonicalizing each landed allocation. It
-requires exact minting support and maximizes retained-cash objective among the
-eligible candidates. Auxiliary utility bands were tested and rejected because
-they distort the allocation face. The policy comparison is recorded in
+candidates under the primary prices. It first finds the smallest
+minting-duality residual, excludes candidates more than one microdollar above
+that value, and maximizes retained-cash objective inside the resulting
+support-equivalence band. It fails explicitly if even the best support residual
+exceeds $0.05. This gate does not call another solver or replace the primary
+price system. Auxiliary utility bands were tested and rejected because their
+shadow prices can invalidate the published market duals. The policy comparison
+is recorded in
 `design/solver-experiments/objective-aware-landing-selection.md`.
 
 The localized landing normally caps each order at the ceiling of its recovered
@@ -90,11 +95,11 @@ of a degenerate certified face without adding another core solver, changing
 published prices, or weakening the support and hard-budget gates.
 
 After rounding, the projection re-linearizes any violated hard-budget rows and
-resolves. Shared finalization then recomputes the canonical maximum-entropy
-price and performs coupled quantity repair until hard budget and minting are
-stable. Exhaustion is an explicit `PostProcessingFailure`; no different core
-solver is substituted. The benchmark reports retained-objective landing loss,
-L1 allocation movement, budget trimming, and `|C_0(D) - p·D|`.
+resolves to a budget-consistent fixed point. Exhaustion is an explicit
+`PostProcessingFailure`; no different core solver is substituted. The benchmark
+reports retained-objective landing loss, L1 allocation movement, whether budget
+quantities were trimmed, and `|C_0(D) - p·D|`, so post-price mutation cannot
+masquerade as a better allocation.
 
 Zero-budget MM orders are disabled in the retained-cash oracle. The theorem's
 pacing identity assumes `B > 0`; admitting a zero-budget order as a free atom
