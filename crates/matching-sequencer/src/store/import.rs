@@ -287,6 +287,8 @@ fn restored_state_from_witness(
         genesis_hash,
         next_order_id: next_order_id_from_witness(witness)?,
         pubkey_registry,
+        service_account_receipts: HashMap::new(),
+        public_accounts_allocated: 0,
         resting_orders: restored_resting_orders,
         data_feeds: Vec::new(),
         resolution_templates: Vec::new(),

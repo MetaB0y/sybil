@@ -46,9 +46,14 @@ impl SequencerActorState {
             }
             SequencerMsg::CreateAccount(_, reply)
             | SequencerMsg::CreateAccountWithInitialKey(_, _, _, reply)
+            | SequencerMsg::CreatePublicAccountWithInitialKey(_, _, _, _, reply)
             | SequencerMsg::FundAccount(_, _, reply)
             | SequencerMsg::SetProfileSigned(_, reply)
             | SequencerMsg::SetProfileAuthenticated(_, reply) => {
+                self.reject_integrity_halted("account", reply);
+                None
+            }
+            SequencerMsg::ProvisionServiceAccount(_, _, _, reply) => {
                 self.reject_integrity_halted("account", reply);
                 None
             }

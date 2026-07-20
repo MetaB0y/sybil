@@ -1,6 +1,19 @@
 use super::*;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct InitialAccountKeyCommand {
+    pub compressed_pubkey: Vec<u8>,
+    #[serde(default)]
+    pub auth_scheme: crate::crypto::AccountAuthScheme,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub scope: crate::crypto::KeyScope,
+    #[serde(default)]
+    pub created_at_ms: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ControlPlaneCommand {
     CreateAccount {
         initial_balance: i64,
@@ -127,6 +140,24 @@ pub enum ControlPlaneCommand {
         scope: crate::crypto::KeyScope,
         #[serde(default)]
         created_at_ms: u64,
+    },
+    /// Atomic public allocation with a durable counter independent from the
+    /// service account id space.
+    CreatePublicAccountWithInitialKey {
+        expected_public_index: u64,
+        initial_balance: i64,
+        timestamp_ms: u64,
+        initial_key: InitialAccountKeyCommand,
+    },
+    /// Genesis-bound retry-safe service allocation. The raw caller key is
+    /// retained only in the short acknowledged-write suffix so replay can
+    /// independently derive and validate the durable receipt identity.
+    ProvisionServiceAccount {
+        provisioning_key: String,
+        expected_account_id: AccountId,
+        initial_balance: i64,
+        timestamp_ms: u64,
+        initial_key: Option<InitialAccountKeyCommand>,
     },
 }
 

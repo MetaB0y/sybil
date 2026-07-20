@@ -63,21 +63,24 @@ server chooses `SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS`; unknown fields are rejected,
 so an anonymous caller cannot select its funding. A dedicated global/client
 token bucket limits request flow before key parsing and actor work.
 
-`SYBIL_PUBLIC_ACCOUNT_CAPACITY` bounds the total account-id stock visible to
-anonymous onboarding. Allocation reads the actor's durable next account id and
-holds the bootstrap lock through the one-command account/key write, so parallel
-callers cannot overshoot and restart cannot expose an acknowledged account
-without its initial key. Account ids, key history, and witness references are
-permanent protocol identities: v1 does not delete, tombstone, recycle, or
-reclaim them. The cap is therefore deliberately a lifetime stock limit, not a
-concurrent-user limit. Exhaustion returns stable error code
+`SYBIL_PUBLIC_ACCOUNT_CAPACITY` bounds a dedicated durable public-allocation
+counter owned by the sequencer. The cap check, counter increment, account
+allocation, and first key are one actor-ordered acknowledged write, so parallel
+callers cannot overshoot and service accounts do not consume anonymous stock.
+Account ids, key history, and witness references are permanent protocol
+identities: v1 does not delete, tombstone, recycle, or reclaim them. The cap is
+therefore deliberately a lifetime stock limit, not a concurrent-user limit.
+Exhaustion returns stable error code
 `PUBLIC_ACCOUNT_CAPACITY_EXHAUSTED` with HTTP 409.
 
 Explicitly funded `POST /v1/accounts` is service/dev-only. This trusted operator
-surface is intentionally outside the anonymous cap for bots, fixtures, and
-recovery operations; its use is observable in total sequencer account stock and
-also consumes ids, so it can reduce the remaining public allocation. The old
-unsigned `POST /accounts/{id}/keys` bootstrap is likewise service-only.
+surface requires a non-empty caller-stable `provisioning_key`. The sequencer
+domain-separates it with the current genesis and binds it to the exact balance
+and optional first-key parameters. An exact retry returns the original account;
+reuse with different parameters returns `ACCOUNT_PROVISIONING_CONFLICT`.
+Receipts survive both WAL replay and block snapshots and are retained for the
+chain lifetime. This path consumes account ids but not public allocation stock.
+The old unsigned `POST /accounts/{id}/keys` bootstrap is likewise service-only.
 
 An L1 deposit does not allocate an account. A deposit for an unknown Sybil key
 is capital-backed by the token transfer and L1 gas but remains in the bounded

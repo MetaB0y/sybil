@@ -146,6 +146,15 @@ pub enum SequencerError {
     /// Order/cancel signatures are chain-instance scoped; no instance hash exists yet.
     #[error("genesis hash unavailable until the genesis block is committed")]
     GenesisHashUnavailable,
+    /// A service provisioning key must be a small, non-empty caller identity.
+    #[error("account provisioning key must contain 1..={max_bytes} UTF-8 bytes")]
+    InvalidAccountProvisioningKey { max_bytes: usize },
+    /// An idempotency key was already committed for different account parameters.
+    #[error("account provisioning key is already bound to different parameters")]
+    AccountProvisioningConflict,
+    /// The durable public grant stock has reached its configured lifetime cap.
+    #[error("public account capacity {capacity} is exhausted")]
+    PublicAccountCapacityExhausted { capacity: u64 },
     /// Mempool capacity exceeded.
     #[error("mempool full")]
     MempoolFull,

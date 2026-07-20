@@ -28,10 +28,13 @@ class CreateAccountRequest:
         Attributes:
             initial_balance_nanos (str): Initial account balance. Integer nanodollars; 1_000_000_000 = $1. Example:
                 100000000000.
+            provisioning_key (str): Caller-stable retry identity. The server binds it to the current
+                genesis and exact creation parameters.
             initial_key (None | RegisterKeyRequest | Unset):
      """
 
     initial_balance_nanos: str
+    provisioning_key: str
     initial_key: None | RegisterKeyRequest | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -42,6 +45,8 @@ class CreateAccountRequest:
     def to_dict(self) -> dict[str, Any]:
         from ..models.register_key_request import RegisterKeyRequest
         initial_balance_nanos = self.initial_balance_nanos
+
+        provisioning_key = self.provisioning_key
 
         initial_key: dict[str, Any] | None | Unset
         if isinstance(self.initial_key, Unset):
@@ -56,6 +61,7 @@ class CreateAccountRequest:
         field_dict.update(self.additional_properties)
         field_dict.update({
             "initial_balance_nanos": initial_balance_nanos,
+            "provisioning_key": provisioning_key,
         })
         if initial_key is not UNSET:
             field_dict["initial_key"] = initial_key
@@ -69,6 +75,8 @@ class CreateAccountRequest:
         from ..models.register_key_request import RegisterKeyRequest
         d = dict(src_dict)
         initial_balance_nanos = d.pop("initial_balance_nanos")
+
+        provisioning_key = d.pop("provisioning_key")
 
         def _parse_initial_key(data: object) -> None | RegisterKeyRequest | Unset:
             if data is None:
@@ -92,6 +100,7 @@ class CreateAccountRequest:
 
         create_account_request = cls(
             initial_balance_nanos=initial_balance_nanos,
+            provisioning_key=provisioning_key,
             initial_key=initial_key,
         )
 

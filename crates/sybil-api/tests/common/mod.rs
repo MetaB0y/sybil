@@ -34,6 +34,23 @@ use tower::ServiceExt;
 pub mod process;
 
 static NEXT_STORE_ID: AtomicU64 = AtomicU64::new(0);
+static NEXT_PROVISIONING_ID: AtomicU64 = AtomicU64::new(0);
+
+fn add_test_provisioning_key(uri: &str, body: &mut serde_json::Value) {
+    if uri != "/v1/accounts" {
+        return;
+    }
+    let Some(object) = body.as_object_mut() else {
+        return;
+    };
+    object.entry("provisioning_key").or_insert_with(|| {
+        serde_json::Value::String(format!(
+            "api-test/{}/{}",
+            std::process::id(),
+            NEXT_PROVISIONING_ID.fetch_add(1, Ordering::Relaxed)
+        ))
+    });
+}
 
 #[allow(
     dead_code,
@@ -152,6 +169,10 @@ pub async fn test_app_with_bootstrap(
         })
         .await
         .unwrap();
+    handle
+        .produce_block()
+        .await
+        .expect("test app commits genesis before accepting writes");
 
     let config = ApiConfig {
         dev_mode,
@@ -195,6 +216,31 @@ pub async fn test_app_with_config(config: ApiConfig) -> (Router, SequencerHandle
     };
     let sequencer =
         BlockSequencer::with_default_solver(accounts, markets, vec![], sequencer_config);
+    let handle = SequencerHandle::spawn(sequencer);
+    handle
+        .produce_block()
+        .await
+        .expect("test app commits genesis before accepting writes");
+    let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new()
+        .build_recorder()
+        .handle();
+    let state = AppState::new(handle.clone(), &config, prometheus);
+    (create_router(state), handle)
+}
+
+/// Construct the one deliberately pre-genesis app used to pin the health
+/// response before the serving contract begins.
+#[allow(
+    dead_code,
+    reason = "only the health integration test exercises pre-genesis state"
+)]
+pub async fn test_app_without_genesis(config: ApiConfig) -> (Router, SequencerHandle) {
+    let sequencer = BlockSequencer::with_default_solver(
+        AccountStore::new(),
+        MarketSet::new(),
+        vec![],
+        SequencerConfig::default(),
+    );
     let handle = SequencerHandle::spawn(sequencer);
     let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()
@@ -354,7 +400,12 @@ pub async fn get(app: Router, uri: &str) -> (StatusCode, Vec<u8>) {
     dead_code,
     reason = "each integration-test crate consumes a different subset of shared helpers"
 )]
-pub async fn post_json(app: Router, uri: &str, body: serde_json::Value) -> (StatusCode, Vec<u8>) {
+pub async fn post_json(
+    app: Router,
+    uri: &str,
+    mut body: serde_json::Value,
+) -> (StatusCode, Vec<u8>) {
+    add_test_provisioning_key(uri, &mut body);
     let req = Request::builder()
         .method(Method::POST)
         .uri(uri)
@@ -405,8 +456,9 @@ pub async fn put_json(app: Router, uri: &str, body: serde_json::Value) -> (Statu
 pub async fn post_json_with_headers(
     app: Router,
     uri: &str,
-    body: serde_json::Value,
+    mut body: serde_json::Value,
 ) -> (StatusCode, HeaderMap, Vec<u8>) {
+    add_test_provisioning_key(uri, &mut body);
     let req = Request::builder()
         .method(Method::POST)
         .uri(uri)

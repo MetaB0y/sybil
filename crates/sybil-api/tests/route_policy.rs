@@ -22,6 +22,7 @@ use tower::ServiceExt;
 use common::test_app_with_config;
 
 const TOKEN: &str = "route-policy-token";
+static NEXT_PROVISIONING_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 fn render_route_policy_snapshot() -> String {
     let mut snapshot = String::new();
@@ -119,8 +120,18 @@ async fn request_json(
     method: Method,
     uri: &str,
     token: Option<&str>,
-    body: Value,
+    mut body: Value,
 ) -> (StatusCode, Vec<u8>) {
+    if uri == "/v1/accounts"
+        && let Some(object) = body.as_object_mut()
+    {
+        object.entry("provisioning_key").or_insert_with(|| {
+            Value::String(format!(
+                "route-policy/{}",
+                NEXT_PROVISIONING_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            ))
+        });
+    }
     let mut builder = Request::builder()
         .method(method)
         .uri(uri)

@@ -283,7 +283,9 @@ async fn resolve_account(
             Err(error) => return Err(error.into()),
         }
     }
-    let account = client.create_bare_account(initial_balance_nanos).await?;
+    let account = client
+        .provision_bare_account("native-mm/v1", initial_balance_nanos)
+        .await?;
     save_state(
         state_path,
         &MmState {

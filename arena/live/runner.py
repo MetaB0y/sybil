@@ -535,7 +535,10 @@ async def _resolve_bot_account(
                 bot_name,
             )
 
-    account = await client.create_account(initial_balance_nanos)
+    account = await client.create_account(
+        initial_balance_nanos,
+        provisioning_key=f"arena-bot/v1/{persona_key}/{strat_label}",
+    )
     db.save_bot_account_id(persona_key, strat_label, account.id)
     log.info(
         "Created account %d for %s ($%.2f)",

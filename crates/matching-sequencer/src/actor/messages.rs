@@ -78,6 +78,19 @@ pub enum SequencerMsg {
         RegisteredPubkey,
         RpcReplyPort<Result<Account, SequencerError>>,
     ),
+    CreatePublicAccountWithInitialKey(
+        u64,
+        i64,
+        PublicKey,
+        RegisteredPubkey,
+        RpcReplyPort<Result<Account, SequencerError>>,
+    ),
+    ProvisionServiceAccount(
+        String,
+        i64,
+        Option<(PublicKey, RegisteredPubkey)>,
+        RpcReplyPort<Result<ServiceAccountProvisioningResult, SequencerError>>,
+    ),
     FundAccount(
         AccountId,
         i64,

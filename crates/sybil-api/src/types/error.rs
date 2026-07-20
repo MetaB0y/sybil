@@ -222,6 +222,26 @@ impl From<matching_sequencer::SequencerError> for AppError {
             matching_sequencer::SequencerError::GenesisHashUnavailable => {
                 AppError::service_unavailable(format!("{}", err))
             }
+            matching_sequencer::SequencerError::InvalidAccountProvisioningKey { max_bytes } => {
+                AppError::new(
+                    StatusCode::BAD_REQUEST,
+                    format!("provisioning_key must contain between 1 and {max_bytes} UTF-8 bytes"),
+                    "INVALID_ACCOUNT_PROVISIONING_KEY",
+                )
+            }
+            matching_sequencer::SequencerError::AccountProvisioningConflict => AppError::new(
+                StatusCode::CONFLICT,
+                "provisioning_key is already bound to different account parameters",
+                "ACCOUNT_PROVISIONING_CONFLICT",
+            ),
+            matching_sequencer::SequencerError::PublicAccountCapacityExhausted { capacity } => {
+                metrics::counter!(
+                    "sybil_public_account_creation_total",
+                    "result" => "capacity_exhausted"
+                )
+                .increment(1);
+                AppError::public_account_capacity_exhausted(*capacity)
+            }
             matching_sequencer::SequencerError::MempoolFull => AppError::mempool_full(),
             matching_sequencer::SequencerError::RateLimited { retry_after_secs } => {
                 AppError::rate_limited(*retry_after_secs)

@@ -43,6 +43,9 @@ pub struct SequencerSnapshot<'a> {
     pub genesis_hash: [u8; 32],
     pub next_order_id: u64,
     pub pubkey_registry: &'a HashMap<crate::crypto::PublicKey, crate::crypto::RegisteredPubkey>,
+    pub service_account_receipts:
+        &'a HashMap<[u8; 32], crate::sequencer::ServiceAccountProvisioningReceipt>,
+    pub public_accounts_allocated: u64,
     pub analytics: AnalyticsSnapshot<'a>,
     /// Owned because the snapshot clones the live book — cheap for bounded sizes.
     pub resting_orders: Vec<RestingOrder>,
@@ -63,6 +66,7 @@ struct RedbBlockCommit {
     history_batch_committed_at_ms: Option<u64>,
     proof_job_bytes: Option<Vec<u8>>,
     pubkey_rows: Vec<(Vec<u8>, crate::crypto::RegisteredPubkey)>,
+    service_account_receipt_rows: Vec<([u8; 32], Vec<u8>)>,
     clearing_price_rows: Vec<(u32, Vec<u8>)>,
     market_volume_rows: Vec<(u32, u64)>,
     resting_orders_bytes: Vec<u8>,
@@ -295,6 +299,13 @@ fn build_redb_block_commit(
         .collect();
     fill_total_entries.sort_by_key(|(aid, _)| aid.0);
 
+    let mut service_account_receipt_rows = snapshot
+        .service_account_receipts
+        .iter()
+        .map(|(key, receipt)| Ok((*key, rmp_serde::to_vec(receipt)?)))
+        .collect::<Result<Vec<_>, StoreError>>()?;
+    service_account_receipt_rows.sort_by_key(|(key, _)| *key);
+
     Ok(RedbBlockCommit {
         height: snapshot.header.height,
         genesis_hash: snapshot.genesis_hash,
@@ -309,6 +320,7 @@ fn build_redb_block_commit(
         history_batch_committed_at_ms,
         proof_job_bytes,
         pubkey_rows,
+        service_account_receipt_rows,
         clearing_price_rows,
         market_volume_rows,
         resting_orders_bytes: rmp_serde::to_vec(&snapshot.resting_orders)?,
@@ -332,6 +344,7 @@ fn build_redb_block_commit(
             next_account_id: snapshot.accounts.next_id(),
             next_market_id: snapshot.markets.next_id() as u64,
             next_order_id: snapshot.next_order_id,
+            public_accounts_allocated: snapshot.public_accounts_allocated,
             account_state_fence: AccountStateFence {
                 height: snapshot.header.height,
                 slot: next_slot,
@@ -370,6 +383,14 @@ where
         let mut table = txn.open_table(MARKETS)?;
         for (id, bytes) in &commit.market_rows {
             table.insert(*id, bytes.as_slice())?;
+        }
+    }
+
+    {
+        let mut table = txn.open_table(SERVICE_ACCOUNT_RECEIPTS)?;
+        table.retain(|_, _| false)?;
+        for (key, receipt) in &commit.service_account_receipt_rows {
+            table.insert(key.as_slice(), receipt.as_slice())?;
         }
     }
 
@@ -727,6 +748,8 @@ impl Store {
         txn.open_table(DA_MANIFESTS)?;
         txn.open_table(PUBKEY_REGISTRY)?;
         txn.open_table(PUBKEY_AUTH_SCHEMES)?;
+        txn.open_table(PUBKEY_META)?;
+        txn.open_table(SERVICE_ACCOUNT_RECEIPTS)?;
         txn.open_table(COUNTERS)?;
         txn.open_table(CANONICAL_ARCHIVE_META)?;
         txn.open_table(CHAIN_META)?;

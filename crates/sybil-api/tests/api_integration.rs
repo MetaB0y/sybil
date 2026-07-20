@@ -16,7 +16,7 @@ use tower::ServiceExt;
 use common::{
     get, post_json, post_json_with_headers, put_json, test_app, test_app_with_config,
     test_app_with_store, test_app_with_store_api_config, test_app_with_store_config,
-    test_app_with_store_zero_caps,
+    test_app_with_store_zero_caps, test_app_without_genesis,
 };
 use matching_engine::{MarketSet, Nanos, Qty};
 use matching_sequencer::SequencerConfig;
@@ -434,8 +434,7 @@ async fn get_nonexistent_market_404() {
 #[tokio::test]
 async fn get_nonexistent_block_404() {
     let (app, _) = test_app(true).await;
-    // No blocks produced yet
-    let (status, _) = get(app, "/v1/blocks/latest").await;
+    let (status, _) = get(app, "/v1/blocks/9999").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
@@ -2304,7 +2303,11 @@ async fn fills_paginated_correctly() {
 
 #[tokio::test]
 async fn health_endpoint_is_an_atomic_chain_snapshot_and_fails_closed() {
-    let (app, handle) = test_app(true).await;
+    let (app, handle) = test_app_without_genesis(ApiConfig {
+        dev_mode: true,
+        ..ApiConfig::default()
+    })
+    .await;
 
     let (status, body) = get(app.clone(), "/v1/health").await;
     assert_eq!(status, StatusCode::OK);
@@ -2382,10 +2385,10 @@ async fn recent_blocks_returns_newest_first() {
         b1.canonical.header.height
     );
 
-    // asking for more than exist returns all produced
+    // asking for more than exist returns genesis plus the three test blocks
     let (status, body) = get(app.clone(), "/v1/blocks?limit=1000").await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(parse_json(&body).as_array().unwrap().len(), 3);
+    assert_eq!(parse_json(&body).as_array().unwrap().len(), 4);
 
     // limit=0 → empty
     let (status, body) = get(app, "/v1/blocks?limit=0").await;

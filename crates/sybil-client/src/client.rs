@@ -173,10 +173,12 @@ impl SybilClient {
     /// Service/dev creation with an explicitly chosen initial balance.
     pub async fn create_account(
         &self,
+        provisioning_key: impl Into<String>,
         initial_balance_nanos: u64,
         initial_key: RegisterKeyRequest,
     ) -> Result<AccountResponse, Error> {
         let req = CreateAccountRequest {
+            provisioning_key: provisioning_key.into(),
             initial_balance_nanos,
             initial_key: Some(initial_key),
         };
@@ -191,11 +193,13 @@ impl SybilClient {
     /// Deprecated operator-only bare account creation. This requires the
     /// service token outside dev mode; self-service callers use
     /// [`Self::onboard_account`] instead.
-    pub async fn create_bare_account(
+    pub async fn provision_bare_account(
         &self,
+        provisioning_key: impl Into<String>,
         initial_balance_nanos: u64,
     ) -> Result<AccountResponse, Error> {
         let req = CreateAccountRequest {
+            provisioning_key: provisioning_key.into(),
             initial_balance_nanos,
             initial_key: None,
         };

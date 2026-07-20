@@ -47,6 +47,11 @@ mod restore;
 mod types;
 mod views;
 
+pub(crate) use self::accounts::PreparedServiceAccountProvisioning;
+pub use self::accounts::{
+    MAX_ACCOUNT_PROVISIONING_KEY_BYTES, ServiceAccountProvisioningReceipt,
+    ServiceAccountProvisioningResult,
+};
 pub use self::config::{
     DEFAULT_MIN_RESTING_ORDER_NOTIONAL_NANOS, DEFAULT_ORDER_TTL_BLOCKS, SequencerConfig,
 };
@@ -99,6 +104,12 @@ pub struct BlockSequencer {
     pub lifecycle: crate::market_lifecycle::MarketLifecycle,
     /// P256 public key to account mapping.
     pubkey_registry: HashMap<crate::crypto::PublicKey, crate::crypto::RegisteredPubkey>,
+    /// Durable operator retry receipts. These are chain-local operational
+    /// allocation state, not consensus inputs.
+    service_account_receipts:
+        HashMap<[u8; 32], crate::sequencer::accounts::ServiceAccountProvisioningReceipt>,
+    /// Lifetime public grant allocations, independent from service accounts.
+    public_accounts_allocated: u64,
     /// Derived, non-persisted reverse index of ACTIVE read API-key hashes to
     /// their owning account (SYB-60). Rebuilt from `accounts` on restore and
     /// maintained incrementally by create/revoke; lets the bearer extractor do

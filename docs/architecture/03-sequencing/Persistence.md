@@ -90,9 +90,10 @@ Authoritative state needed to resume the exchange after a crash:
 | `redb` | `resolution_templates` | installed resolution templates referenced by market metadata |
 | `redb` | `block_headers` | canonical block header by height |
 | `redb` | `pubkey_registry` | compressed pubkey to account id |
+| `redb` | `service_account_receipts` | genesis-bound operator provisioning key/request digest to account id |
 | `redb` | `clearing_prices` | last clearing price vector per market |
 | `redb` | `market_volumes` | cumulative traded volume per market |
-| `redb` | `counters` | next IDs, store layout version, and the authoritative account-state fence |
+| `redb` | `counters` | next IDs, independent public-allocation stock, store layout version, and the authoritative account-state fence |
 | `redb` | `acknowledged_writes` | exact actor-ordered between-block suffix, authenticated by floor/next counters |
 
 The account snapshot and typed-state tree both use logical qmdb slots `A` and
@@ -143,10 +144,16 @@ feed IDs are reallocated from committed counters in the same global order;
 timestamp-bearing commands carry the acknowledged timestamp so history does
 not depend on restart time.
 
-For public account onboarding, account allocation and its initial signing key
-are one `CreateAccountWithInitialKey` control-plane command; bare service-tier
-account creation and the deprecated service-tier first-key bootstrap remain
-backward-compatible commands. Account creation and dev-mode funding stage
+For public account onboarding, the cap check, dedicated public allocation
+counter, account allocation, and initial signing key are one
+`CreatePublicAccountWithInitialKey` control-plane command. Service account
+creation uses a caller-stable `ProvisionServiceAccount` identity bound to the
+current genesis and exact parameters. Its receipt is live only after the WAL
+row is durable, reconstructs during suffix replay, and moves into the block
+snapshot before that suffix is cleared. Exact retries return the original
+account without a second grant; conflicting reuse fails before another WAL row.
+Receipts are retained for the chain lifetime because operator identity is
+small and cleanup would re-open reuse ambiguity. Account creation and dev-mode funding stage
 history facts at the same time as the pending system event. They become
 historical only when the next block commits them into
 `CommittedHistoryBatchV1`; current account state remains visible immediately
@@ -175,11 +182,14 @@ would protect template installation only until the next block; once
 `save_block()` clears the acknowledged suffix, templates must be snapshot state
 like feeds and market metadata.
 
-Store layout v3 adds the canonical market creation key. Keyed market creation
+Store layout v4 adds service provisioning receipts and the independent public
+allocation counter. It requires fresh genesis rather than guessing how many
+historical accounts came from the anonymous surface. Layout v3 added the
+canonical market creation key. Keyed market creation
 checks the live snapshot before WAL append: an exact retry is a read returning
 the existing id, while a conflict is rejected. The first creation remains
 durable-before-live and replay reconstructs the same key before any caller can
-retry. Layout v2 is rejected rather than loading unkeyed native markets and
+retry. Older layouts are rejected rather than loading unkeyed native markets and
 falling back to title/tag discovery; deployment requires a fresh genesis.
 
 ## Tier 3: Derived Views

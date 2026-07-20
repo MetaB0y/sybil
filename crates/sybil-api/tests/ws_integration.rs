@@ -353,20 +353,25 @@ async fn sybil_client_stream_blocks_uses_ws_from_block_resume() {
 async fn ws_from_block_ahead_of_head_announces_complete() {
     let (addr, _handle) = spawn_server().await;
 
-    // No blocks produced — head is None; any from_block value should result in
-    // no replay blocks and the handler transitioning straight to the live loop.
+    // Serving starts after genesis. A cursor ahead of that head gets no block
+    // rows but does receive the explicit replay boundary before live tailing.
     let url = format!("ws://{}/v2/blocks/ws?from_block=5", addr);
     let (ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
     let (mut sink, mut stream) = ws.split();
 
-    // Nothing should arrive in the first 100ms. We don't block long here —
-    // just ensure the connection is idle rather than dumping events.
-    let quick = timeout(Duration::from_millis(100), stream.next()).await;
-    assert!(
-        quick.is_err(),
-        "did not expect any message when head is None and from_block > head, got {:?}",
-        quick
-    );
+    let message = timeout(Duration::from_secs(1), stream.next())
+        .await
+        .expect("replay boundary timed out")
+        .expect("stream remains open")
+        .expect("valid websocket message");
+    let Message::Text(text) = message else {
+        panic!("expected replay_complete text envelope");
+    };
+    let event: PublicBlockStreamMessage = serde_json::from_str(&text).unwrap();
+    assert!(matches!(
+        event.payload,
+        PublicBlockStreamPayload::ReplayComplete { up_to_height: 1 }
+    ));
 
     // Clean up.
     sink.send(Message::Close(None)).await.ok();

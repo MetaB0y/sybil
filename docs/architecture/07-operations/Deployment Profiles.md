@@ -134,9 +134,10 @@ this knob affects off-block display/agent inputs only, never matching or
 committed state.
 
 Public onboarding has both a flow and a stock boundary. The route-specific
-token buckets reject bursts before cryptographic/actor work; the durable next
-account id enforces the lifetime stock cap across restarts and concurrent
-callers. With the Compose defaults, anonymous demo minting is bounded to 1,000
+token buckets reject bursts before cryptographic/actor work; a dedicated
+sequencer-owned public counter enforces the lifetime stock cap across restarts
+and concurrent callers. Service accounts share the account-id sequence but do
+not consume this anonymous grant stock. With the Compose defaults, anonymous demo minting is bounded to 1,000
 accounts × $1,000 = $1,000,000 of non-redeemable play money. Service-authenticated
 account creation remains a trusted operator bypass and is therefore not an
 anti-compromise control. Account ids are never reclaimed or reused. A real-value
@@ -393,9 +394,11 @@ checkpoint.
 
 Persisted MM accounts are replaced only after an authoritative API 404. A
 network, authentication, decode, or 5xx failure fails startup rather than
-minting another funded identity. The remaining crash window between committed
-account creation and receipt/local checkpoint requires idempotent provisioning
-([#188](https://github.com/MetaB0y/sybil/issues/188)).
+minting another funded identity. Native and Polymarket MM creation use stable
+role keys (`native-mm/v1` and `polymarket-mm/v1`) at the genesis-bound service
+provisioning endpoint. If a response is lost before the local account-id
+checkpoint, retry returns the already funded account; changed parameters
+conflict instead of creating a second identity.
 
 The initial history redb retains raw batches, fills, events, equity, prices,
 and candles without the former 30/31-day and global-row ceilings. This removes

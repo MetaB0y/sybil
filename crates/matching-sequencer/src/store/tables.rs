@@ -80,6 +80,12 @@ pub(super) const PUBKEY_AUTH_SCHEMES: TableDefinition<&[u8], u8> =
 /// block; rows for revoked keys are cleared with the registry.
 pub(super) const PUBKEY_META: TableDefinition<&[u8], &[u8]> = TableDefinition::new("pubkey_meta");
 
+/// Genesis-bound service account provisioning receipts. The key is a
+/// domain-separated digest of `(genesis_hash, caller_key)` and the value binds
+/// the exact request digest to the allocated account id.
+pub(super) const SERVICE_ACCOUNT_RECEIPTS: TableDefinition<&[u8], &[u8]> =
+    TableDefinition::new("service_account_receipts");
+
 /// Last clearing prices: market_id (u32) → msgpack(Vec<Nanos>)
 pub(super) const CLEARING_PRICES: TableDefinition<u32, &[u8]> =
     TableDefinition::new("clearing_prices");
@@ -199,8 +205,9 @@ pub(super) const KEY_CANONICAL_ARCHIVE_OLDEST_HEIGHT: &str = "blocks_full_min_he
 pub(super) const KEY_LAST_CANONICAL_ARCHIVE_MAINTENANCE_HEIGHT: &str = "last_history_prune_height";
 pub(super) const KEY_ACKNOWLEDGED_WRITE_FLOOR: &str = "acknowledged_write_floor";
 pub(super) const KEY_NEXT_ACKNOWLEDGED_WRITE_SEQ: &str = "next_acknowledged_write_seq";
+pub(super) const KEY_PUBLIC_ACCOUNTS_ALLOCATED: &str = "public_accounts_allocated";
 
-pub(super) const STORE_LAYOUT_VERSION: u64 = 3;
+pub(super) const STORE_LAYOUT_VERSION: u64 = 4;
 
 // TODO: Tier 2 tables (remaining)
 // const MM_STATE: TableDefinition<u32, &[u8]> = TableDefinition::new("mm_state");

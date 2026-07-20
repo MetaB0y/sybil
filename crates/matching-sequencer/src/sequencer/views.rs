@@ -34,6 +34,8 @@ impl BlockSequencer {
                 .expect("snapshot called before genesis hash was available"),
             next_order_id: self.next_order_id,
             pubkey_registry: &self.pubkey_registry,
+            service_account_receipts: &self.service_account_receipts,
+            public_accounts_allocated: self.public_accounts_allocated,
             analytics: self.analytics.snapshot(),
             resting_orders: self.order_book.snapshot(),
             bridge_state: &self.bridge,
@@ -96,6 +98,10 @@ impl BlockSequencer {
         &self,
     ) -> &HashMap<crate::crypto::PublicKey, crate::crypto::RegisteredPubkey> {
         &self.pubkey_registry
+    }
+
+    pub fn public_accounts_allocated(&self) -> u64 {
+        self.public_accounts_allocated
     }
 
     /// Get the oracle-tracked status for a market. Returns `Active` if not explicitly set.

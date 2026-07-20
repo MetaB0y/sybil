@@ -41,7 +41,7 @@ use crate::market_info::{MarketMetadata, MarketSearchQuery};
 use crate::portfolio::PortfolioSummary;
 use crate::sequencer::{
     BlockSequencer, LeaderboardBase, OrderSubmission, PendingOrderInfo, PreparedBlock,
-    SequencerConfig,
+    SequencerConfig, ServiceAccountProvisioningResult,
 };
 use crate::store::{
     AcknowledgedProofJobRetentionPolicy, CanonicalArchiveRetentionPolicy, ControlPlaneCommand,

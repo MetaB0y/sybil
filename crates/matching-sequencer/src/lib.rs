@@ -67,8 +67,9 @@ pub use market_info::{
 pub use portfolio::{PortfolioSummary, PositionValue};
 pub use sequencer::{
     BatchResult, BlockSequencer, DEFAULT_MIN_RESTING_ORDER_NOTIONAL_NANOS,
-    DEFAULT_ORDER_TTL_BLOCKS, LeaderboardBase, LeaderboardRow, OrderSubmission, PendingOrderInfo,
-    SequencerConfig,
+    DEFAULT_ORDER_TTL_BLOCKS, LeaderboardBase, LeaderboardRow, MAX_ACCOUNT_PROVISIONING_KEY_BYTES,
+    OrderSubmission, PendingOrderInfo, SequencerConfig, ServiceAccountProvisioningReceipt,
+    ServiceAccountProvisioningResult,
 };
 pub use store::{
     AcknowledgedProofJobPruneReport, AcknowledgedProofJobRetentionPolicy,

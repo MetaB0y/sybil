@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateAccountRequest {
+    /// Caller-stable retry identity. The server binds it to the current
+    /// genesis and exact creation parameters.
+    pub provisioning_key: String,
     /// Initial account balance. Integer nanodollars; 1_000_000_000 = $1.
     #[serde(with = "crate::wire_integer")]
     #[cfg_attr(

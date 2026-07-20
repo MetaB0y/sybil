@@ -357,7 +357,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let seq_config = sequencer_config_from_api(&config);
-    let needs_persistent_baseline = restored.is_none() && store.is_some();
+    let needs_genesis_baseline = restored.is_none();
 
     let handle = if let Some(state) = restored {
         tracing::info!(
@@ -401,15 +401,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         SequencerHandle::spawn_with_shared_store(sequencer, store.clone())
     };
 
-    if needs_persistent_baseline {
+    if needs_genesis_baseline {
         let baseline = handle.produce_block().await.map_err(|error| {
             std::io::Error::other(format!(
-                "failed to commit the initial persistence baseline: {error}"
+                "failed to commit the initial genesis baseline: {error}"
             ))
         })?;
         tracing::info!(
             height = baseline.canonical.header.height,
-            "Committed initial persistence baseline before accepting writes"
+            "Committed initial genesis baseline before accepting writes"
         );
     }
 

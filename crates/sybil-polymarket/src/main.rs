@@ -52,7 +52,9 @@ async fn resolve_mm_account(
 
     // The mirror has service authority and submits unsigned MM orders, so it
     // intentionally uses the deprecated operator-only bare-account variant.
-    let account = client.create_bare_account(balance_nanos).await?;
+    let account = client
+        .provision_bare_account("polymarket-mm/v1", balance_nanos)
+        .await?;
     {
         let mut map = mapping.write().await;
         map.set_mm_account_id(account.account_id);

@@ -83,9 +83,8 @@ def sync_detailed(
 ) -> Response[AccountResponse | Any]:
     """ POST /v1/onboarding/accounts — allocate one capped public account.
 
-     The server supplies the fixed grant. The API lock covers the durable-stock
-    read and atomic account/key command, so concurrent callers cannot overshoot
-    the lifetime ceiling.
+     The server supplies the fixed grant. The sequencer owns the durable stock
+    check and account/key allocation as one actor command.
 
     Args:
         body (OnboardAccountRequest): Public self-service account onboarding.
@@ -122,9 +121,8 @@ def sync(
 ) -> AccountResponse | Any | None:
     """ POST /v1/onboarding/accounts — allocate one capped public account.
 
-     The server supplies the fixed grant. The API lock covers the durable-stock
-    read and atomic account/key command, so concurrent callers cannot overshoot
-    the lifetime ceiling.
+     The server supplies the fixed grant. The sequencer owns the durable stock
+    check and account/key allocation as one actor command.
 
     Args:
         body (OnboardAccountRequest): Public self-service account onboarding.
@@ -156,9 +154,8 @@ async def asyncio_detailed(
 ) -> Response[AccountResponse | Any]:
     """ POST /v1/onboarding/accounts — allocate one capped public account.
 
-     The server supplies the fixed grant. The API lock covers the durable-stock
-    read and atomic account/key command, so concurrent callers cannot overshoot
-    the lifetime ceiling.
+     The server supplies the fixed grant. The sequencer owns the durable stock
+    check and account/key allocation as one actor command.
 
     Args:
         body (OnboardAccountRequest): Public self-service account onboarding.
@@ -195,9 +192,8 @@ async def asyncio(
 ) -> AccountResponse | Any | None:
     """ POST /v1/onboarding/accounts — allocate one capped public account.
 
-     The server supplies the fixed grant. The API lock covers the durable-stock
-    read and atomic account/key command, so concurrent callers cannot overshoot
-    the lifetime ceiling.
+     The server supplies the fixed grant. The sequencer owns the durable stock
+    check and account/key allocation as one actor command.
 
     Args:
         body (OnboardAccountRequest): Public self-service account onboarding.

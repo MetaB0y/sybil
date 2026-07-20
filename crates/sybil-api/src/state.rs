@@ -464,13 +464,12 @@ impl AppState {
         let owners = self.sequencer.active_api_key_owners().await?;
         *self.read_api_key_owners.write().await = Some(owners.into_iter().collect());
         *self.leaderboard_bases.write().await = Some(self.sequencer.leaderboard_bases().await?);
-        self.record_public_account_stock(self.sequencer.account_stock().await?);
+        self.record_public_account_stock(self.sequencer.public_account_stock().await?);
         Ok(())
     }
 
-    /// Publish the configured lifetime ceiling beside the durable account-id
-    /// stock. Re-running this after each allocation makes restart and live
-    /// capacity visible without maintaining a second mutable counter.
+    /// Publish the configured lifetime ceiling beside the sequencer-owned
+    /// public allocation stock.
     pub fn record_public_account_stock(&self, accounts_allocated: u64) {
         metrics::gauge!("sybil_public_account_capacity").set(self.public_account_capacity as f64);
         metrics::gauge!("sybil_public_account_stock").set(accounts_allocated as f64);

@@ -1,5 +1,25 @@
 use super::*;
 
+fn restore_initial_account_key(
+    command: crate::store::InitialAccountKeyCommand,
+    account_id: AccountId,
+) -> Result<(crate::crypto::PublicKey, crate::crypto::RegisteredPubkey), SequencerError> {
+    let pubkey = crate::crypto::PublicKey::from_compressed_bytes(&command.compressed_pubkey)
+        .ok_or_else(|| {
+            SequencerError::Persistence("invalid initial pubkey in control-plane WAL".to_string())
+        })?;
+    Ok((
+        pubkey,
+        crate::crypto::RegisteredPubkey {
+            account_id,
+            auth_scheme: command.auth_scheme,
+            label: command.label,
+            scope: command.scope,
+            created_at_ms: command.created_at_ms,
+        },
+    ))
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SequencerRestoreError {
     #[error("failed to expire stale committed resting orders during restore: {0}")]
@@ -49,6 +69,8 @@ impl BlockSequencer {
             analytics: AnalyticsState::new(&config),
             lifecycle,
             pubkey_registry: HashMap::new(),
+            service_account_receipts: HashMap::new(),
+            public_accounts_allocated: 0,
             api_key_index: HashMap::new(),
             bridge,
             pending_system_events: Vec::new(),
@@ -171,6 +193,8 @@ impl BlockSequencer {
             analytics: AnalyticsState::restore(state.analytics, &config),
             lifecycle,
             pubkey_registry: state.pubkey_registry,
+            service_account_receipts: state.service_account_receipts,
+            public_accounts_allocated: state.public_accounts_allocated,
             api_key_index: HashMap::new(),
             bridge: state.bridge_state,
             pending_system_events: Vec::new(),
@@ -511,6 +535,63 @@ impl BlockSequencer {
                     },
                 )?;
                 self.apply_prepared_account_with_initial_key(prepared);
+                Ok(())
+            }
+            ControlPlaneCommand::CreatePublicAccountWithInitialKey {
+                expected_public_index,
+                initial_balance,
+                timestamp_ms,
+                initial_key,
+            } => {
+                if self.public_accounts_allocated != expected_public_index {
+                    return Err(SequencerError::Persistence(format!(
+                        "public account WAL expected allocation index {expected_public_index}, found {}",
+                        self.public_accounts_allocated
+                    )));
+                }
+                let account_id = AccountId(self.accounts.next_id());
+                let (pubkey, meta) = restore_initial_account_key(initial_key, account_id)?;
+                let prepared = self.prepare_account_with_initial_key(
+                    initial_balance,
+                    timestamp_ms,
+                    pubkey,
+                    meta,
+                )?;
+                self.apply_prepared_public_account_with_initial_key(
+                    expected_public_index,
+                    prepared,
+                );
+                Ok(())
+            }
+            ControlPlaneCommand::ProvisionServiceAccount {
+                provisioning_key,
+                expected_account_id,
+                initial_balance,
+                timestamp_ms,
+                initial_key,
+            } => {
+                if AccountId(self.accounts.next_id()) != expected_account_id {
+                    return Err(SequencerError::Persistence(format!(
+                        "service account WAL expected account {}, found next id {}",
+                        expected_account_id.0,
+                        self.accounts.next_id()
+                    )));
+                }
+                let initial_key = initial_key
+                    .map(|command| restore_initial_account_key(command, expected_account_id))
+                    .transpose()?;
+                let prepared = self.prepare_service_account_provisioning(
+                    &provisioning_key,
+                    initial_balance,
+                    timestamp_ms,
+                    initial_key,
+                )?;
+                if !matches!(prepared, PreparedServiceAccountProvisioning::New { .. }) {
+                    return Err(SequencerError::Persistence(
+                        "service account WAL replays an existing provisioning receipt".to_string(),
+                    ));
+                }
+                self.apply_service_account_provisioning(prepared);
                 Ok(())
             }
         }

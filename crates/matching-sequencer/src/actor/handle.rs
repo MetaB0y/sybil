@@ -462,6 +462,14 @@ impl SequencerHandle {
             .await
     }
 
+    /// Number of anonymous fixed-grant accounts allocated for this chain.
+    /// Service identities use the same account-id sequence but do not consume
+    /// this independent public policy counter.
+    pub async fn public_account_stock(&self) -> Result<u64, SequencerError> {
+        self.read_query(|state| state.sequencer.public_accounts_allocated())
+            .await
+    }
+
     /// Allocate an account and install its first signing key under one actor
     /// command and one durable control-plane WAL row. `meta.account_id` is
     /// replaced with the newly allocated id.
@@ -473,6 +481,45 @@ impl SequencerHandle {
     ) -> Result<Account, SequencerError> {
         self.control_rpc(|reply| {
             SequencerMsg::CreateAccountWithInitialKey(initial_balance, pubkey, meta, reply)
+        })
+        .await?
+    }
+
+    /// Atomically enforce the public lifetime cap, allocate an account, and
+    /// install its first signing key.
+    pub async fn create_public_account_with_initial_key(
+        &self,
+        capacity: u64,
+        initial_balance: i64,
+        pubkey: PublicKey,
+        meta: RegisteredPubkey,
+    ) -> Result<Account, SequencerError> {
+        self.control_rpc(|reply| {
+            SequencerMsg::CreatePublicAccountWithInitialKey(
+                capacity,
+                initial_balance,
+                pubkey,
+                meta,
+                reply,
+            )
+        })
+        .await?
+    }
+
+    /// Retry-safe, genesis-bound service allocation.
+    pub async fn provision_service_account(
+        &self,
+        provisioning_key: String,
+        initial_balance: i64,
+        initial_key: Option<(PublicKey, RegisteredPubkey)>,
+    ) -> Result<ServiceAccountProvisioningResult, SequencerError> {
+        self.control_rpc(|reply| {
+            SequencerMsg::ProvisionServiceAccount(
+                provisioning_key,
+                initial_balance,
+                initial_key,
+                reply,
+            )
         })
         .await?
     }
@@ -3115,6 +3162,168 @@ mod tests {
         assert!(sybil_verifier::verify_full(&block.witness, false).valid);
 
         drop(handle);
+        drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn service_account_provisioning_is_retry_safe_across_wal_and_snapshot_restart() {
+        let path = temp_store_path("service-account-provisioning");
+        let store = Arc::new(crate::store::Store::open(&path).unwrap());
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(60),
+            ..SequencerConfig::default()
+        };
+        let (mut sequencer, _) = make_test_sequencer_with_config(config.clone());
+        let genesis = sequencer.produce_block(Vec::new(), 1);
+        store
+            .save_block_with_witness_and_replay_block(
+                sequencer.snapshot(),
+                &genesis.witness,
+                &genesis.sealed_block(),
+                true,
+            )
+            .await
+            .unwrap();
+        let restored = store.load_state().await.unwrap().unwrap();
+        let handle = SequencerHandle::spawn_with_store_arc(
+            BlockSequencer::restore(restored, config.clone()),
+            Some(store.clone()),
+        );
+
+        // Treat this successful return as an ambiguous/lost response. The
+        // exact retry must recover the durable allocation, not fund twice.
+        let first = handle
+            .provision_service_account("native-mm/v1".to_string(), 17, None)
+            .await
+            .unwrap();
+        assert!(!first.recovered);
+        let stock_after_first = handle.account_stock().await.unwrap();
+        let retry = handle
+            .provision_service_account("native-mm/v1".to_string(), 17, None)
+            .await
+            .unwrap();
+        assert!(retry.recovered);
+        assert_eq!(retry.account.id, first.account.id);
+        assert_eq!(retry.account.balance, 17);
+        assert_eq!(retry.account.total_deposited, 17);
+        assert_eq!(handle.account_stock().await.unwrap(), stock_after_first);
+        assert_eq!(handle.public_account_stock().await.unwrap(), 0);
+
+        let conflict = handle
+            .provision_service_account("native-mm/v1".to_string(), 18, None)
+            .await;
+        assert!(matches!(
+            conflict,
+            Err(SequencerError::AccountProvisioningConflict)
+        ));
+        assert_eq!(handle.account_stock().await.unwrap(), stock_after_first);
+
+        assert!(handle.stop_and_wait(TEST_ACTOR_TIMEOUT).await);
+        let wal_state = store.load_state().await.unwrap().unwrap();
+        let handle = SequencerHandle::spawn_with_store_arc(
+            BlockSequencer::restore(wal_state, config.clone()),
+            Some(store.clone()),
+        );
+        let after_wal_restart = handle
+            .provision_service_account("native-mm/v1".to_string(), 17, None)
+            .await
+            .unwrap();
+        assert!(after_wal_restart.recovered);
+        assert_eq!(after_wal_restart.account.id, first.account.id);
+        assert_eq!(handle.account_stock().await.unwrap(), stock_after_first);
+
+        handle.produce_block().await.unwrap();
+        assert!(handle.stop_and_wait(TEST_ACTOR_TIMEOUT).await);
+        let snapshot_state = store.load_state().await.unwrap().unwrap();
+        assert!(snapshot_state.acknowledged_writes.is_empty());
+        let handle = SequencerHandle::spawn_with_store_arc(
+            BlockSequencer::restore(snapshot_state, config),
+            Some(store.clone()),
+        );
+        let after_snapshot_restart = handle
+            .provision_service_account("native-mm/v1".to_string(), 17, None)
+            .await
+            .unwrap();
+        assert!(after_snapshot_restart.recovered);
+        assert_eq!(after_snapshot_restart.account.id, first.account.id);
+        assert_eq!(handle.account_stock().await.unwrap(), stock_after_first);
+        assert!(handle.stop_and_wait(TEST_ACTOR_TIMEOUT).await);
+
+        drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn public_account_stock_is_atomic_and_independent_from_service_accounts() {
+        let path = temp_store_path("public-account-stock");
+        let store = Arc::new(crate::store::Store::open(&path).unwrap());
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(60),
+            ..SequencerConfig::default()
+        };
+        let (mut sequencer, _) = make_test_sequencer_with_config(config.clone());
+        let genesis = sequencer.produce_block(Vec::new(), 1);
+        store
+            .save_block_with_witness_and_replay_block(
+                sequencer.snapshot(),
+                &genesis.witness,
+                &genesis.sealed_block(),
+                true,
+            )
+            .await
+            .unwrap();
+        let restored = store.load_state().await.unwrap().unwrap();
+        let handle = SequencerHandle::spawn_with_store_arc(
+            BlockSequencer::restore(restored, config.clone()),
+            Some(store.clone()),
+        );
+        handle
+            .provision_service_account("operator-a/v1".to_string(), 5, None)
+            .await
+            .unwrap();
+        assert_eq!(handle.public_account_stock().await.unwrap(), 0);
+
+        let key_a = p256::ecdsa::SigningKey::from_bytes((&[11_u8; 32]).into()).unwrap();
+        let public = handle
+            .create_public_account_with_initial_key(
+                1,
+                7,
+                PublicKey(*key_a.verifying_key()),
+                RegisteredPubkey::primary(AccountId(0), AccountAuthScheme::RawP256),
+            )
+            .await
+            .unwrap();
+        assert_eq!(public.balance, 7);
+        assert_eq!(handle.public_account_stock().await.unwrap(), 1);
+
+        handle
+            .provision_service_account("operator-b/v1".to_string(), 9, None)
+            .await
+            .unwrap();
+        assert_eq!(handle.public_account_stock().await.unwrap(), 1);
+        let key_b = p256::ecdsa::SigningKey::from_bytes((&[12_u8; 32]).into()).unwrap();
+        assert!(matches!(
+            handle
+                .create_public_account_with_initial_key(
+                    1,
+                    7,
+                    PublicKey(*key_b.verifying_key()),
+                    RegisteredPubkey::primary(AccountId(0), AccountAuthScheme::RawP256),
+                )
+                .await,
+            Err(SequencerError::PublicAccountCapacityExhausted { capacity: 1 })
+        ));
+
+        assert!(handle.stop_and_wait(TEST_ACTOR_TIMEOUT).await);
+        let restored = store.load_state().await.unwrap().unwrap();
+        let handle = SequencerHandle::spawn_with_store_arc(
+            BlockSequencer::restore(restored, config),
+            Some(store.clone()),
+        );
+        assert_eq!(handle.public_account_stock().await.unwrap(), 1);
+        assert!(handle.stop_and_wait(TEST_ACTOR_TIMEOUT).await);
+
         drop(store);
         let _ = std::fs::remove_file(path);
     }

@@ -142,5 +142,5 @@ pub use self::retention::{
 };
 pub use self::wal::{
     ACKNOWLEDGED_WRITE_ENVELOPE_VERSION, AcknowledgedWrite, ControlPlaneCommand,
-    SequencedAcknowledgedWrite,
+    InitialAccountKeyCommand, SequencedAcknowledgedWrite,
 };

@@ -6,6 +6,7 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from typing import Any
+from uuid import uuid4
 
 import httpx
 from websockets.asyncio.client import connect
@@ -149,10 +150,21 @@ class SybilClient:
 
     # === Accounts ===
 
-    async def create_account(self, initial_balance_nanos: int = 0) -> Account:
-        """Create a new account (dev mode only)."""
+    async def create_account(
+        self,
+        initial_balance_nanos: int = 0,
+        *,
+        provisioning_key: str | None = None,
+    ) -> Account:
+        """Create a service account under one caller-stable retry identity."""
+        key = provisioning_key or f"arena-ephemeral/{uuid4().hex}"
         data = await self._request(
-            "POST", "/v1/accounts", json={"initial_balance_nanos": str(initial_balance_nanos)}
+            "POST",
+            "/v1/accounts",
+            json={
+                "provisioning_key": key,
+                "initial_balance_nanos": str(initial_balance_nanos),
+            },
         )
         return self._parse_account(data)
 

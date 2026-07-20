@@ -1,5 +1,22 @@
 use super::*;
 
+pub const MAX_ACCOUNT_PROVISIONING_KEY_BYTES: usize = 128;
+
+const SERVICE_PROVISIONING_KEY_DOMAIN: &[u8] = b"sybil/service-account/key/v1";
+const SERVICE_PROVISIONING_REQUEST_DOMAIN: &[u8] = b"sybil/service-account/request/v1";
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ServiceAccountProvisioningReceipt {
+    pub request_digest: [u8; 32],
+    pub account_id: AccountId,
+}
+
+#[derive(Clone)]
+pub struct ServiceAccountProvisioningResult {
+    pub account: Account,
+    pub recovered: bool,
+}
+
 pub(crate) struct PreparedAccountWithInitialKey {
     account_id: AccountId,
     initial_balance: i64,
@@ -7,6 +24,18 @@ pub(crate) struct PreparedAccountWithInitialKey {
     pubkey: crate::crypto::PublicKey,
     meta: crate::crypto::RegisteredPubkey,
     quarantine_claim: Option<PreparedQuarantineClaim>,
+}
+
+pub(crate) enum PreparedServiceAccountProvisioning {
+    Existing(Account),
+    New {
+        receipt_key: [u8; 32],
+        request_digest: [u8; 32],
+        account_id: AccountId,
+        initial_balance: i64,
+        timestamp_ms: u64,
+        initial_key: Option<PreparedAccountWithInitialKey>,
+    },
 }
 
 struct PreparedQuarantineClaim {
@@ -17,6 +46,194 @@ struct PreparedQuarantineClaim {
 }
 
 impl BlockSequencer {
+    fn service_provisioning_identity(
+        &self,
+        provisioning_key: &str,
+        initial_balance: i64,
+        initial_key: Option<(&crate::crypto::PublicKey, &crate::crypto::RegisteredPubkey)>,
+    ) -> Result<([u8; 32], [u8; 32]), SequencerError> {
+        let provisioning_key = provisioning_key.as_bytes();
+        if provisioning_key.is_empty()
+            || provisioning_key.len() > MAX_ACCOUNT_PROVISIONING_KEY_BYTES
+        {
+            return Err(SequencerError::InvalidAccountProvisioningKey {
+                max_bytes: MAX_ACCOUNT_PROVISIONING_KEY_BYTES,
+            });
+        }
+        let genesis_hash = self
+            .genesis_hash
+            .ok_or(SequencerError::GenesisHashUnavailable)?;
+
+        let mut key_hasher = blake3::Hasher::new();
+        key_hasher.update(SERVICE_PROVISIONING_KEY_DOMAIN);
+        key_hasher.update(&genesis_hash);
+        key_hasher.update(&(provisioning_key.len() as u64).to_le_bytes());
+        key_hasher.update(provisioning_key);
+        let receipt_key = *key_hasher.finalize().as_bytes();
+
+        let mut request_hasher = blake3::Hasher::new();
+        request_hasher.update(SERVICE_PROVISIONING_REQUEST_DOMAIN);
+        request_hasher.update(&genesis_hash);
+        request_hasher.update(&initial_balance.to_le_bytes());
+        match initial_key {
+            None => {
+                request_hasher.update(&[0]);
+            }
+            Some((pubkey, meta)) => {
+                request_hasher.update(&[1]);
+                request_hasher.update(&pubkey.compressed_bytes());
+                request_hasher.update(&[meta.auth_scheme.canonical_byte()]);
+                request_hasher.update(&[match meta.scope {
+                    crate::crypto::KeyScope::Primary => 0,
+                    crate::crypto::KeyScope::Agent => 1,
+                    crate::crypto::KeyScope::Custom => 2,
+                }]);
+                match &meta.label {
+                    None => {
+                        request_hasher.update(&[0]);
+                    }
+                    Some(label) => {
+                        request_hasher.update(&[1]);
+                        request_hasher.update(&(label.len() as u64).to_le_bytes());
+                        request_hasher.update(label.as_bytes());
+                    }
+                };
+            }
+        };
+        Ok((receipt_key, *request_hasher.finalize().as_bytes()))
+    }
+
+    pub(crate) fn prepare_service_account_provisioning(
+        &self,
+        provisioning_key: &str,
+        initial_balance: i64,
+        timestamp_ms: u64,
+        initial_key: Option<(crate::crypto::PublicKey, crate::crypto::RegisteredPubkey)>,
+    ) -> Result<PreparedServiceAccountProvisioning, SequencerError> {
+        let (receipt_key, request_digest) = self.service_provisioning_identity(
+            provisioning_key,
+            initial_balance,
+            initial_key.as_ref().map(|(key, meta)| (key, meta)),
+        )?;
+        if let Some(receipt) = self.service_account_receipts.get(&receipt_key) {
+            if receipt.request_digest != request_digest {
+                return Err(SequencerError::AccountProvisioningConflict);
+            }
+            let account = self
+                .accounts
+                .get(receipt.account_id)
+                .cloned()
+                .ok_or_else(|| {
+                    SequencerError::Persistence(format!(
+                        "service account receipt points to missing account {}",
+                        receipt.account_id.0
+                    ))
+                })?;
+            return Ok(PreparedServiceAccountProvisioning::Existing(account));
+        }
+
+        let account_id = AccountId(self.accounts.next_id());
+        if account_id == AccountId::MINT {
+            return Err(SequencerError::Persistence(
+                "account id space is exhausted".to_string(),
+            ));
+        }
+        let initial_key = initial_key
+            .map(|(pubkey, meta)| {
+                self.prepare_account_with_initial_key(initial_balance, timestamp_ms, pubkey, meta)
+            })
+            .transpose()?;
+        Ok(PreparedServiceAccountProvisioning::New {
+            receipt_key,
+            request_digest,
+            account_id,
+            initial_balance,
+            timestamp_ms,
+            initial_key,
+        })
+    }
+
+    pub(crate) fn apply_service_account_provisioning(
+        &mut self,
+        prepared: PreparedServiceAccountProvisioning,
+    ) -> ServiceAccountProvisioningResult {
+        match prepared {
+            PreparedServiceAccountProvisioning::Existing(account) => {
+                ServiceAccountProvisioningResult {
+                    account,
+                    recovered: true,
+                }
+            }
+            PreparedServiceAccountProvisioning::New {
+                receipt_key,
+                request_digest,
+                account_id,
+                initial_balance,
+                timestamp_ms,
+                initial_key,
+            } => {
+                let created_id = match initial_key {
+                    Some(initial_key) => self.apply_prepared_account_with_initial_key(initial_key),
+                    None => self.create_account_at(initial_balance, timestamp_ms),
+                };
+                assert_eq!(
+                    created_id, account_id,
+                    "prevalidated service account id must remain stable inside the sequencer actor"
+                );
+                let previous = self.service_account_receipts.insert(
+                    receipt_key,
+                    ServiceAccountProvisioningReceipt {
+                        request_digest,
+                        account_id,
+                    },
+                );
+                assert!(
+                    previous.is_none(),
+                    "new service provisioning receipt must remain unique"
+                );
+                ServiceAccountProvisioningResult {
+                    account: self
+                        .accounts
+                        .get(account_id)
+                        .cloned()
+                        .expect("newly provisioned account must exist"),
+                    recovered: false,
+                }
+            }
+        }
+    }
+
+    pub(crate) fn prepare_public_account_with_initial_key(
+        &self,
+        capacity: u64,
+        initial_balance: i64,
+        timestamp_ms: u64,
+        pubkey: crate::crypto::PublicKey,
+        meta: crate::crypto::RegisteredPubkey,
+    ) -> Result<PreparedAccountWithInitialKey, SequencerError> {
+        if self.public_accounts_allocated >= capacity {
+            return Err(SequencerError::PublicAccountCapacityExhausted { capacity });
+        }
+        self.prepare_account_with_initial_key(initial_balance, timestamp_ms, pubkey, meta)
+    }
+
+    pub(crate) fn apply_prepared_public_account_with_initial_key(
+        &mut self,
+        expected_public_index: u64,
+        prepared: PreparedAccountWithInitialKey,
+    ) -> AccountId {
+        assert_eq!(
+            self.public_accounts_allocated, expected_public_index,
+            "public account allocation index must remain stable inside the sequencer actor"
+        );
+        let account_id = self.apply_prepared_account_with_initial_key(prepared);
+        self.public_accounts_allocated = self
+            .public_accounts_allocated
+            .checked_add(1)
+            .expect("public account allocation counter exhausted");
+        account_id
+    }
+
     pub fn register_pubkey(
         &mut self,
         account_id: AccountId,

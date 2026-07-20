@@ -1075,9 +1075,8 @@ export interface paths {
     put?: never;
     /**
      * POST /v1/onboarding/accounts — allocate one capped public account.
-     * @description The server supplies the fixed grant. The API lock covers the durable-stock
-     *     read and atomic account/key command, so concurrent callers cannot overshoot
-     *     the lifetime ceiling.
+     * @description The server supplies the fixed grant. The sequencer owns the durable stock
+     *     check and account/key allocation as one actor command.
      */
     post: operations["onboard_account"];
     delete?: never;
@@ -1856,6 +1855,11 @@ export interface components {
        */
       initial_balance_nanos: string;
       initial_key?: null | components["schemas"]["RegisterKeyRequest"];
+      /**
+       * @description Caller-stable retry identity. The server binds it to the current
+       *     genesis and exact creation parameters.
+       */
+      provisioning_key: string;
     };
     /**
      * @description Signed request to create a read-scoped bearer API key (SYB-60).

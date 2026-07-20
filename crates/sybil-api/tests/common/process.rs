@@ -9,6 +9,7 @@ use sybil_history::{HistoryHandle, HistoryHttpConfig, HistoryStore};
 use tokio::process::{Child, Command};
 
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
+static NEXT_PROVISIONING_ID: AtomicU64 = AtomicU64::new(0);
 
 /// Temp root for process-level API tests.
 ///
@@ -271,7 +272,23 @@ pub async fn resume_blocks(client: &reqwest::Client, base_url: &str) {
     );
 }
 
-pub async fn post_json(client: &reqwest::Client, base_url: &str, path: &str, body: Value) -> Value {
+pub async fn post_json(
+    client: &reqwest::Client,
+    base_url: &str,
+    path: &str,
+    mut body: Value,
+) -> Value {
+    if path == "/v1/accounts"
+        && let Some(object) = body.as_object_mut()
+    {
+        object.entry("provisioning_key").or_insert_with(|| {
+            Value::String(format!(
+                "process-test/{}/{}",
+                std::process::id(),
+                NEXT_PROVISIONING_ID.fetch_add(1, Ordering::Relaxed)
+            ))
+        });
+    }
     let resp = client
         .post(format!("{base_url}{path}"))
         .json(&body)

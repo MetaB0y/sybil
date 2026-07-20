@@ -63,7 +63,7 @@ fn validate_signing_key_label(label: Option<&str>) -> Result<(), AppError> {
 pub async fn get_onboarding_policy(
     State(state): State<AppState>,
 ) -> Result<Json<OnboardingPolicyResponse>, AppError> {
-    let accounts_allocated = state.sequencer.account_stock().await?;
+    let accounts_allocated = state.sequencer.public_account_stock().await?;
     state.record_public_account_stock(accounts_allocated);
     let accounts_remaining = state
         .public_account_capacity
@@ -79,9 +79,8 @@ pub async fn get_onboarding_policy(
 
 /// POST /v1/onboarding/accounts — allocate one capped public account.
 ///
-/// The server supplies the fixed grant. The API lock covers the durable-stock
-/// read and atomic account/key command, so concurrent callers cannot overshoot
-/// the lifetime ceiling.
+/// The server supplies the fixed grant. The sequencer owns the durable stock
+/// check and account/key allocation as one actor command.
 #[utoipa::path(
     tag = "routesaccounts",
     post,
@@ -111,34 +110,11 @@ pub async fn onboard_account(
         req.initial_key.webauthn_registration.as_ref(),
     )?;
 
-    let _bootstrap_guard = state.account_bootstrap_lock.lock().await;
-    if state
-        .sequencer
-        .lookup_registered_pubkey(pubkey.clone())
-        .await?
-        .is_some()
-    {
-        return Err(AppError::conflict(
-            "Initial signing key is already registered",
-        ));
-    }
-    let accounts_allocated = state.sequencer.account_stock().await?;
-    state.record_public_account_stock(accounts_allocated);
-    if accounts_allocated >= state.public_account_capacity {
-        metrics::counter!(
-            "sybil_public_account_creation_total",
-            "result" => "capacity_exhausted"
-        )
-        .increment(1);
-        return Err(AppError::public_account_capacity_exhausted(
-            state.public_account_capacity,
-        ));
-    }
-
     let key = req.initial_key;
     let account = state
         .sequencer
-        .create_account_with_initial_key(
+        .create_public_account_with_initial_key(
+            state.public_account_capacity,
             balance_nanos,
             pubkey,
             RegisteredPubkey {
@@ -150,7 +126,7 @@ pub async fn onboard_account(
             },
         )
         .await?;
-    let stock = account.id.0.saturating_add(1);
+    let stock = state.sequencer.public_account_stock().await?;
     state.record_public_account_stock(stock);
     metrics::counter!("sybil_public_account_creation_total", "result" => "created").increment(1);
     Ok(Json(account_to_response(&account, 0)))
@@ -202,45 +178,23 @@ pub async fn create_account(
         })
         .transpose()?;
 
-    let _bootstrap_guard = state.account_bootstrap_lock.lock().await;
-    if let Some((_, pubkey)) = &initial_key
-        && state
-            .sequencer
-            .lookup_registered_pubkey(pubkey.clone())
-            .await?
-            .is_some()
-    {
-        return Err(AppError::conflict(
-            "Initial signing key is already registered",
-        ));
-    }
-
-    let account = match initial_key {
-        Some((key, pubkey)) => {
-            state
-                .sequencer
-                .create_account_with_initial_key(
-                    balance_nanos,
-                    pubkey,
-                    RegisteredPubkey {
-                        // The sequencer overwrites this placeholder with the
-                        // atomically allocated account id.
-                        account_id: AccountId(0),
-                        auth_scheme: sequencer_auth_scheme(key.auth_scheme),
-                        label: key.label.clone(),
-                        scope: sequencer_key_scope(key.scope),
-                        created_at_ms: now_ms(),
-                    },
-                )
-                .await?
-        }
-        None => state.sequencer.create_account(balance_nanos).await?,
-    };
-    // Service allocations consume the same monotonic id space. Keep the public
-    // remaining-stock gauge honest even though this trusted path bypasses the
-    // anonymous admission ceiling.
-    state.record_public_account_stock(account.id.0.saturating_add(1));
-    Ok(Json(account_to_response(&account, 0)))
+    let initial_key = initial_key.map(|(key, pubkey)| {
+        (
+            pubkey,
+            RegisteredPubkey {
+                account_id: AccountId(0),
+                auth_scheme: sequencer_auth_scheme(key.auth_scheme),
+                label: key.label.clone(),
+                scope: sequencer_key_scope(key.scope),
+                created_at_ms: now_ms(),
+            },
+        )
+    });
+    let provisioned = state
+        .sequencer
+        .provision_service_account(req.provisioning_key, balance_nanos, initial_key)
+        .await?;
+    Ok(Json(account_to_response(&provisioned.account, 0)))
 }
 
 /// POST /v1/accounts/{id}/fund

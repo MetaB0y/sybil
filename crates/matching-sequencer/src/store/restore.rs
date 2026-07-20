@@ -30,6 +30,9 @@ pub struct RestoredState {
     pub genesis_hash: [u8; 32],
     pub next_order_id: u64,
     pub pubkey_registry: HashMap<crate::crypto::PublicKey, crate::crypto::RegisteredPubkey>,
+    pub service_account_receipts:
+        HashMap<[u8; 32], crate::sequencer::ServiceAccountProvisioningReceipt>,
+    pub public_accounts_allocated: u64,
     pub resting_orders: Vec<RestingOrder>,
     /// All registered data feeds.
     pub data_feeds: Vec<DataFeed>,
@@ -274,6 +277,27 @@ impl Store {
             }
             registry
         };
+
+        let service_account_receipts = {
+            let table = txn.open_table(SERVICE_ACCOUNT_RECEIPTS)?;
+            let mut receipts = HashMap::new();
+            for entry in table.iter()? {
+                let (key, value) = entry?;
+                let key: [u8; 32] = key.value().try_into().map_err(|_| {
+                    StoreError::CorruptLayout(
+                        "service account receipt key is not 32 bytes".to_string(),
+                    )
+                })?;
+                let receipt = rmp_serde::from_slice(value.value())?;
+                receipts.insert(key, receipt);
+            }
+            receipts
+        };
+
+        let public_accounts_allocated = {
+            let counters = txn.open_table(COUNTERS)?;
+            required_counter(&counters, KEY_PUBLIC_ACCOUNTS_ALLOCATED)?
+        };
         crate::digest::refresh_all_account_keys_digests(&mut accounts, &pubkey_registry);
 
         // Clearing prices
@@ -496,6 +520,8 @@ impl Store {
             genesis_hash,
             next_order_id: recovery_metadata.next_order_id,
             pubkey_registry,
+            service_account_receipts,
+            public_accounts_allocated,
             resting_orders,
             data_feeds,
             resolution_templates,
@@ -620,6 +646,7 @@ pub(super) struct PersistedCoreCounters {
     pub(super) next_account_id: u64,
     pub(super) next_market_id: u64,
     pub(super) next_order_id: u64,
+    pub(super) public_accounts_allocated: u64,
     pub(super) account_state_fence: AccountStateFence,
 }
 
@@ -688,6 +715,7 @@ pub(super) fn initialize_or_validate_layout(db: &Database) -> Result<(), StoreEr
             counters.insert(KEY_STORE_LAYOUT_VERSION, STORE_LAYOUT_VERSION)?;
             counters.insert(KEY_ACKNOWLEDGED_WRITE_FLOOR, 0)?;
             counters.insert(KEY_NEXT_ACKNOWLEDGED_WRITE_SEQ, 0)?;
+            counters.insert(KEY_PUBLIC_ACCOUNTS_ALLOCATED, 0)?;
             drop(counters);
             txn.commit()?;
         }
@@ -763,6 +791,10 @@ pub(super) fn write_core_counters(
     counters.insert(KEY_NEXT_ACCOUNT_ID, persisted.next_account_id)?;
     counters.insert(KEY_NEXT_MARKET_ID, persisted.next_market_id)?;
     counters.insert(KEY_NEXT_ORDER_ID, persisted.next_order_id)?;
+    counters.insert(
+        KEY_PUBLIC_ACCOUNTS_ALLOCATED,
+        persisted.public_accounts_allocated,
+    )?;
     counters.insert(
         KEY_ACCOUNT_STATE_HEIGHT,
         persisted.account_state_fence.height,

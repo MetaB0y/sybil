@@ -689,7 +689,10 @@ async fn first_key_bootstrap_label_limit_precedes_key_mutation() {
         app.clone(),
         "/v1/accounts",
         SERVICE_TOKEN,
-        json!({ "initial_balance_nanos": 0u64 }),
+        json!({
+            "provisioning_key": "account-management/first-key-bootstrap",
+            "initial_balance_nanos": 0u64
+        }),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));

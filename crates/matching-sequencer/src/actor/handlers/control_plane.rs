@@ -1,6 +1,19 @@
 use super::super::*;
 use super::current_timestamp_ms;
 
+fn initial_account_key_command(
+    pubkey: &PublicKey,
+    meta: &RegisteredPubkey,
+) -> crate::store::InitialAccountKeyCommand {
+    crate::store::InitialAccountKeyCommand {
+        compressed_pubkey: pubkey.compressed_bytes(),
+        auth_scheme: meta.auth_scheme,
+        label: meta.label.clone(),
+        scope: meta.scope,
+        created_at_ms: meta.created_at_ms,
+    }
+}
+
 impl SequencerActorState {
     fn validate_keyop_state_binding(
         &self,
@@ -97,6 +110,76 @@ impl SequencerActorState {
             .get(account_id)
             .cloned()
             .expect("created account should exist"))
+    }
+
+    pub(super) async fn handle_create_public_account_with_initial_key(
+        &mut self,
+        capacity: u64,
+        initial_balance: i64,
+        pubkey: PublicKey,
+        meta: RegisteredPubkey,
+    ) -> Result<Account, SequencerError> {
+        let timestamp_ms = current_timestamp_ms();
+        let expected_public_index = self.sequencer.public_accounts_allocated();
+        let prepared = self.sequencer.prepare_public_account_with_initial_key(
+            capacity,
+            initial_balance,
+            timestamp_ms,
+            pubkey.clone(),
+            meta.clone(),
+        )?;
+        self.persist_control_plane(&ControlPlaneCommand::CreatePublicAccountWithInitialKey {
+            expected_public_index,
+            initial_balance,
+            timestamp_ms,
+            initial_key: initial_account_key_command(&pubkey, &meta),
+        })
+        .await?;
+        let account_id = self
+            .sequencer
+            .apply_prepared_public_account_with_initial_key(expected_public_index, prepared);
+        Ok(self
+            .sequencer
+            .accounts
+            .get(account_id)
+            .cloned()
+            .expect("created public account should exist"))
+    }
+
+    pub(super) async fn handle_provision_service_account(
+        &mut self,
+        provisioning_key: String,
+        initial_balance: i64,
+        initial_key: Option<(PublicKey, RegisteredPubkey)>,
+    ) -> Result<ServiceAccountProvisioningResult, SequencerError> {
+        let timestamp_ms = current_timestamp_ms();
+        let prepared = self.sequencer.prepare_service_account_provisioning(
+            &provisioning_key,
+            initial_balance,
+            timestamp_ms,
+            initial_key.clone(),
+        )?;
+        if let crate::sequencer::PreparedServiceAccountProvisioning::New { account_id, .. } =
+            &prepared
+        {
+            self.persist_control_plane(&ControlPlaneCommand::ProvisionServiceAccount {
+                provisioning_key,
+                expected_account_id: *account_id,
+                initial_balance,
+                timestamp_ms,
+                initial_key: initial_key
+                    .as_ref()
+                    .map(|(pubkey, meta)| initial_account_key_command(pubkey, meta)),
+            })
+            .await?;
+        }
+        let result = self.sequencer.apply_service_account_provisioning(prepared);
+        metrics::counter!(
+            "sybil_service_account_provisioning_total",
+            "result" => if result.recovered { "recovered" } else { "created" }
+        )
+        .increment(1);
+        Ok(result)
     }
 
     pub(super) async fn handle_fund_account(
