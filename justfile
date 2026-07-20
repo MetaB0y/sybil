@@ -707,13 +707,14 @@ deploy-prelaunch-env-check:
 deploy-openrouter-env-check:
     ssh {{SERVER}} 'cd /opt/sybil && test -f arena.env && grep -q "^OPENROUTER_API_KEY=." arena.env'
 
-# Build and deploy sybil-api plus the native and Polymarket integrations.
+# Build and deploy sybil-api, its same-image history service, and the native
+# and Polymarket integrations.
 # Validity is a separate deployment boundary: the 2 GB product host does not
 # claim ZK/TEE/L1 validity and cannot safely retain the current mock job stock.
 deploy-api: deploy-sync deploy-prelaunch-env-check && deploy-verify
     DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-api
     docker save sybil-api:latest | ssh {{SERVER}} docker load
-    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_REMOTE}} up -d sybil-api sybil-native-admin sybil-native-mm sybil-polymarket'
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_REMOTE}} up -d sybil-history sybil-api sybil-native-admin sybil-native-mm sybil-polymarket'
 
 # Explicit mock-validity integration deployment. Validity artifact retention is
 # chain identity, so this always starts from fresh genesis and requires an

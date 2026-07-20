@@ -680,9 +680,18 @@ grep -Eq '^deploy-arena:.*&& deploy-verify-scoped$' justfile \
     || fail "deploy-arena does not use the scoped post-deploy verifier"
 grep -Eq '^deploy-api:.*&& deploy-verify$' justfile \
     || fail "deploy-api no longer uses the full deterministic-fill verifier"
+deploy_api_recipe=$(
+    awk '
+        /^deploy-api:/ { in_recipe = 1; next }
+        in_recipe && /^[[:alnum:]_-]+[^:]*:/ { exit }
+        in_recipe { print }
+    ' justfile
+)
+grep -Fq 'up -d sybil-history sybil-api' <<<"$deploy_api_recipe" \
+    || fail "deploy-api can leave the same-image history service on an older API contract"
 grep -Eq '^deploy-all:.*&& deploy-verify$' justfile \
     || fail "deploy-all no longer uses the full deterministic-fill verifier"
-pass "web/Arena deploys avoid persistent fill fixtures; only web skips external mirror readiness"
+pass "deploy scopes preserve their gates and API promotions update same-image history"
 
 grep -Eq '^COPY[[:space:]]+scripts/[[:space:]]+scripts/$' arena/Dockerfile \
     || fail "arena image does not include offline calibration scripts"
