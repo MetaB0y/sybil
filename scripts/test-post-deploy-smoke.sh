@@ -257,4 +257,71 @@ check_history_query_contract >/dev/null
 [[ "$FAILN" -eq 1 ]] \
     || { echo "FAIL: unavailable account history did not block promotion" >&2; exit 1; }
 
+# The live fill gate must reuse product markets/accounts, require both exact
+# order ids to appear as positive projected fills, and leave no resting order.
+reset_gate
+SERVICE_TOKEN=test-service-token
+REQUIRE_SIGNER=1
+SIGN_BIN=/bin/true
+ORDER_MARKET=7
+GENESIS_HASH="$(printf 'aa%.0s' {1..32})"
+INTERVAL=1
+account_number=40
+order_number=90
+overview_calls=0
+setup_signing() { :; }
+provision_smoke_account() {
+    account_number=$((account_number + 1))
+    SMOKE_ACCOUNT_ID=$account_number
+}
+submit_smoke_order() {
+    order_number=$((order_number + 1))
+    SMOKE_ORDER_ID=$order_number
+}
+account_fill_contains_order() { return 0; }
+cancel_smoke_order() { return 0; }
+http() {
+    local method=$1 path=$2
+    HTTP_CODE=200
+    if [[ "$method|$path" == "GET|/v1/activity/overview" ]]; then
+        overview_calls=$((overview_calls + 1))
+        if [[ "$overview_calls" -eq 1 ]]; then
+            HTTP_BODY='{"all_time":{"execution_quality":{"trader_orders_first_filled":10}}}'
+        else
+            HTTP_BODY='{"all_time":{"execution_quality":{"trader_orders_first_filled":12}}}'
+        fi
+    else
+        HTTP_BODY='[]'
+    fi
+}
+check_orders_and_fills >/dev/null
+[[ "$FAILN" -eq 0 && "$PASSN" -eq 4 && "$overview_calls" -eq 2 ]] \
+    || { echo "FAIL: signed product crossing did not satisfy the live fill gate" >&2; exit 1; }
+
+# A matcher/history regression must fail closed and attempt to remove both
+# accepted GTC orders instead of leaving active smoke state.
+reset_gate
+SERVICE_TOKEN=test-service-token
+REQUIRE_SIGNER=1
+SIGN_BIN=/bin/true
+ORDER_MARKET=7
+GENESIS_HASH="$(printf 'aa%.0s' {1..32})"
+INTERVAL=1
+account_number=40
+order_number=90
+overview_calls=0
+cancel_calls=0
+account_fill_contains_order() { return 1; }
+cancel_smoke_order() { cancel_calls=$((cancel_calls + 1)); }
+check_orders_and_fills >/dev/null
+[[ "$FAILN" -eq 1 && "$cancel_calls" -eq 2 ]] \
+    || { echo "FAIL: missing crossing fills did not fail and clean up" >&2; exit 1; }
+
+grep -Fq '"provisioning_key": f"post-deploy-smoke/{role}/v1"' scripts/post-deploy-smoke.sh \
+    || { echo "FAIL: smoke accounts are not retry-safe role identities" >&2; exit 1; }
+if grep -Eq 'SYB-247|seed_book|http POST /v1/markets' scripts/post-deploy-smoke.sh; then
+    echo "FAIL: live smoke still creates or recognizes a durable fixture market" >&2
+    exit 1
+fi
+
 echo "post-deploy smoke tests: ok"

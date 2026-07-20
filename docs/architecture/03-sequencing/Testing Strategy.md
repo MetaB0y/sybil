@@ -131,9 +131,13 @@ the highest-value deployment contract:
 
 The fixture is `SYB-247-v1`: BuyYes 0.60 × 1000 and BuyNo 0.50 × 2000. The
 partially filled NO order pins the exact YES/NO clearing vector at 0.50/0.50;
-matched volume is exactly 1000 share-units. Run id 0 is single-use on fresh
-state. Persistent devnet smoke callers choose a new numeric `--run-id`, which
-deterministically derives disjoint P256 seeds and replay nonces.
+matched volume is exactly 1000 share-units. It exists only inside the isolated
+Compose project, which is always destroyed with its volumes. API and full-stack
+deploys run that exact fixture before promotion. After promotion, the live gate
+uses retry-safe, genesis-bound smoke accounts to cross two signed orders in an
+existing product market, waits for both exact order IDs in projected history,
+and verifies that neither remains active. The live gate creates no market and
+does not require title-based filtering in product clients.
 
 ### 5. Browser and Computer-Use Acceptance
 

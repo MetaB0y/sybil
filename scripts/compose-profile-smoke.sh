@@ -609,12 +609,18 @@ grep -Fq 'post-deploy-smoke.sh --require-signer' <<<"$deploy_verify_recipe" \
 if grep -Fq -- '--require-proof-freshness' <<<"$deploy_verify_recipe"; then
     fail "product deploy verification silently requires the absent validity profile"
 fi
-if grep -Fq -- '--skip-fill-seed' <<<"$deploy_verify_recipe"; then
-    fail "deploy-verify must retain the full deterministic fill seed"
+grep -Eq '^deploy-trading-preflight: itest-compose$' justfile \
+    || fail "deployment trading preflight does not reuse the disposable exact fixture"
+grep -Eq '^deploy-api:.*deploy-trading-preflight.*&& deploy-verify$' justfile \
+    || fail "API deploy can bypass the disposable exact trading preflight"
+grep -Eq '^deploy-all:.*deploy-trading-preflight.*&& deploy-verify$' justfile \
+    || fail "full deploy can bypass the disposable exact trading preflight"
+if grep -Fq -- '--skip-fill-seed' justfile scripts/post-deploy-smoke.sh; then
+    fail "obsolete persistent fill-seed mode remains wired"
 fi
 grep -Fq -- '--service-token' <<<"$deploy_verify_recipe" \
     || fail "deploy-verify lost the valid service-token gating checks"
-pass "deploy-verify fails closed when signed order/cancel smoke cannot run"
+pass "deploys prove exact economics in disposable state, then fail closed on live signed fills"
 
 deploy_verify_validity_recipe=$(
     awk '
@@ -623,9 +629,9 @@ deploy_verify_validity_recipe=$(
         in_recipe { print }
     ' justfile
 )
-grep -Fq 'post-deploy-smoke.sh --require-signer --require-proof-freshness --skip-fill-seed' \
+grep -Fq 'post-deploy-smoke.sh --require-signer --require-proof-freshness' \
     <<<"$deploy_verify_validity_recipe" \
-    || fail "explicit validity promotion lost proof freshness or its scoped fill skip"
+    || fail "explicit validity promotion lost proof freshness or its live fill gate"
 grep -Fq 'Environment=SYBIL_SMOKE_PROOF_LAG=off' deploy/systemd/sybil-synthetic-probe.service \
     || fail "product synthetic timer does not explicitly disable absent validity"
 pass "proof freshness is required only by the explicit validity topology"
@@ -647,9 +653,9 @@ deploy_verify_scoped_recipe=$(
         in_recipe { print }
     ' justfile
 )
-grep -Fq 'post-deploy-smoke.sh --require-signer --skip-fill-seed' \
+grep -Fq 'post-deploy-smoke.sh --require-signer' \
     <<<"$deploy_verify_scoped_recipe" \
-    || fail "deploy-verify-scoped lost its scoped fill skip"
+    || fail "deploy-verify-scoped lost its signed live fill gate"
 if grep -Fq -- '--require-proof-freshness' <<<"$deploy_verify_scoped_recipe"; then
     fail "Arena deploy verification silently requires the absent validity profile"
 fi
@@ -666,9 +672,9 @@ deploy_verify_web_recipe=$(
         in_recipe { print }
     ' justfile
 )
-grep -Fq 'post-deploy-smoke.sh --require-signer --skip-fill-seed --skip-mirror-readiness' \
+grep -Fq 'post-deploy-smoke.sh --require-signer --skip-mirror-readiness' \
     <<<"$deploy_verify_web_recipe" \
-    || fail "deploy-verify-web lost its two isolated skips"
+    || fail "deploy-verify-web lost its live fill or isolated mirror behavior"
 if grep -Fq -- '--require-proof-freshness' <<<"$deploy_verify_web_recipe"; then
     fail "web deploy verification silently requires the absent validity profile"
 fi

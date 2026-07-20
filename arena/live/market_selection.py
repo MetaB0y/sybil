@@ -220,8 +220,8 @@ def select_synthetic_markets(markets: list[MarketLike]) -> list[MarketLike]:
     Native catalog markets are chain-owned and remain eligible while active.
     Mirrored markets additionally need a fresh external reference: if a
     condition leaves the curated mirror, its reference expires and synthetic
-    flow stops without relying on an old persistent mapping row. Internal smoke
-    fixtures have neither provenance tag and therefore stay out automatically.
+    flow stops without relying on an old persistent mapping row. Unknown
+    provenance is excluded because synthetic pricing has no defined anchor.
     """
 
     selected = []

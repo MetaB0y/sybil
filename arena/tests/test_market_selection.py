@@ -127,9 +127,9 @@ def test_synthetic_selection_covers_native_and_fresh_mirror_only():
     native = FakeMarket(id=1, name="Native", tags=["native"])
     mirror = market("Mirror", "Politics", id=2)
     mirror.reference_price_nanos = 500_000_000
-    fixture = FakeMarket(
+    unknown = FakeMarket(
         id=3,
-        name="SYB-247 deterministic crossing v1 run 1",
+        name="Unknown provenance",
         tags=[],
     )
     stale_mirror = market("Stale mirror", "Politics", id=4)
@@ -143,7 +143,7 @@ def test_synthetic_selection_covers_native_and_fresh_mirror_only():
     )
 
     selected = select_synthetic_markets(
-        [stale_mirror, fixture, mirror, closed_native, native]
+        [stale_mirror, unknown, mirror, closed_native, native]
     )
 
     assert [m.id for m in selected] == [1, 2]

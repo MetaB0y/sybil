@@ -111,34 +111,6 @@ test.describe("mobile viewport smoke", () => {
       .toBe("");
   });
 
-  test("deployment fixtures stay out of index and global search", async ({
-    page,
-  }) => {
-    await proxyApiForLocalRun(page);
-    await page.goto("/?q=SYB-247&closed=show");
-
-    await expect(page.getByText("no events match these filters.")).toBeVisible({
-      timeout: 30_000,
-    });
-    await expect(
-      page.locator('a[href^="/m/"]').filter({
-        hasText: /^SYB-247 deterministic crossing v1/,
-      }),
-    ).toHaveCount(0);
-
-    await page.getByRole("button", { name: "Open navigation menu" }).click();
-    const navigation = page.getByRole("dialog", { name: "Navigation menu" });
-    const search = navigation.getByRole("combobox", {
-      name: "search markets",
-    });
-    await expect(search).toBeFocused();
-    const dropdown = navigation.locator(".nav-search-dropdown");
-    await expect(dropdown).toContainText(
-      "no events or markets match “SYB-247”",
-    );
-    await expect(dropdown.getByRole("option")).toHaveCount(0);
-  });
-
   test("arena filters keep their native controls inside the mobile panel", async ({
     page,
   }) => {

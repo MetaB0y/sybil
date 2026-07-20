@@ -72,7 +72,7 @@ between the index and detail view without learning Sybil's implementation.
 
 - Stop as blocked if the environment cannot provide an ordinary active market
   and committed-history market without creating shared product state.
-- Stop as failed if the page exposes a fixture market, silently substitutes
-  mock values, or requires authentication for public discovery.
+- Stop as failed if the page silently substitutes mock values, hides a market
+  returned by public discovery, or requires authentication for discovery.
 - Stop without bypassing browser security if the deployed origin or certificate
   is not the one declared for the run.

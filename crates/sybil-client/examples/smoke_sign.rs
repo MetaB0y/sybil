@@ -15,7 +15,7 @@
 //! script can merge the fields into the REST body with `jq`.
 //!
 //! Usage:
-//!   cargo run -p sybil-client --example smoke_sign -- keygen
+//!   cargo run -p sybil-client --example smoke_sign -- keygen [--priv HEX]
 //!     -> {"private_key_hex":..,"public_key_hex":..}
 //!   cargo run -p sybil-client --example smoke_sign -- order \
 //!       --priv HEX --market N --nonce N --genesis-hash HEX32 \
@@ -132,8 +132,11 @@ fn emit_signed(key: &SigningKey, msg: &[u8]) {
     );
 }
 
-fn cmd_keygen() {
-    let key = SigningKey::generate_from_rng(&mut UnwrapErr(SysRng));
+fn cmd_keygen(flags: &HashMap<String, String>) {
+    let key = flags
+        .get("priv")
+        .map(|private_key| key_from_hex(private_key))
+        .unwrap_or_else(|| SigningKey::generate_from_rng(&mut UnwrapErr(SysRng)));
     println!(
         "{{\"private_key_hex\":\"{}\",\"public_key_hex\":\"{}\"}}",
         hex::encode(key.to_bytes()),
@@ -220,7 +223,7 @@ fn main() {
     };
     let flags = parse_flags(&args[1..]);
     match subcommand.as_str() {
-        "keygen" => cmd_keygen(),
+        "keygen" => cmd_keygen(&flags),
         "order" => cmd_order(&flags),
         "cancel" => cmd_cancel(&flags),
         "withdrawal" => cmd_withdrawal(&flags),

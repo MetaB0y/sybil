@@ -11,8 +11,8 @@
 #     class that API-only checks cannot see).
 #   * Passkey onboarding: policy discovery + unauthenticated key-only account
 #     allocation (or the stable lifetime-cap exhaustion response).
-#   * Fills-after-seed: a deterministic crossing seed MUST increase matched
-#     orders (the zero-fills regression would FAIL here, not skip).
+#   * Signed crossing: two stable operator identities MUST receive positive
+#     fills on a product market, and the history projector must serve them.
 #   * Account history: the API and private projector MUST agree on their query
 #     contract (the stale-history-image class).
 #   * Service-token gating matrix: gated routes 401 without the token and
@@ -27,7 +27,6 @@
 #                                           [--app-origin ORIGIN]
 #                                           [--block-interval SECONDS]
 #                                           [--require-signer]
-#                                           [--skip-fill-seed]
 #                                           [--skip-mirror-readiness]
 #                                           [--require-proof-freshness]
 #
@@ -64,12 +63,6 @@
 #                                        signer is unavailable. Deploy recipes
 #                                        always set this because they run from
 #                                        a source checkout with Cargo available.
-#   --skip-fill-seed / SYBIL_SMOKE_SKIP_FILL_SEED=1
-#                                        Skip only the persistent deterministic
-#                                        market/fill fixture. Scoped web/Arena
-#                                        promotions use this because the matcher
-#                                        image did not change; API/all-stack
-#                                        promotions always run the full gate.
 #   --skip-mirror-readiness / SYBIL_SMOKE_SKIP_MIRROR_READINESS=1
 #                                        Skip the external mirror gate only for
 #                                        a web-only image promotion.
@@ -81,7 +74,6 @@
 #                            (e.g. root@172.104.31.54) instead of local docker.
 #   SYBIL_COMPOSE_PROJECT    compose project label to enumerate (default sybil).
 #   SYBIL_SMOKE_SIGN_BIN     path to a prebuilt smoke_sign binary (skips cargo).
-#   SYBIL_SMOKE_SEED_BIN     path to a prebuilt seed_book binary (skips cargo).
 #
 # Exit: 0 only if FAIL=0. Any FAIL exits 1 and blocks promotion.
 
@@ -102,7 +94,6 @@ PROOF_POLL="${SYBIL_SMOKE_PROOF_POLL:-5}"
 PROOF_LAG_MAX="${SYBIL_SMOKE_PROOF_LAG_MAX:-30}"
 REQUIRE_SIGNER="${SYBIL_SMOKE_REQUIRE_SIGNER:-0}"
 REQUIRE_PROOF_FRESHNESS="${SYBIL_SMOKE_REQUIRE_PROOF_FRESHNESS:-0}"
-SKIP_FILL_SEED="${SYBIL_SMOKE_SKIP_FILL_SEED:-0}"
 SKIP_MIRROR_READINESS="${SYBIL_SMOKE_SKIP_MIRROR_READINESS:-0}"
 DOCKER_SSH="${SYBIL_SMOKE_DOCKER_SSH:-}"
 COMPOSE_PROJECT="${SYBIL_COMPOSE_PROJECT:-sybil}"
@@ -120,7 +111,6 @@ while [[ $# -gt 0 ]]; do
         --app-origin) APP_ORIGIN="${2:-}"; shift 2 ;;
         --block-interval) INTERVAL="${2:-10}"; shift 2 ;;
         --require-signer) REQUIRE_SIGNER=1; shift ;;
-        --skip-fill-seed) SKIP_FILL_SEED=1; shift ;;
         --skip-mirror-readiness) SKIP_MIRROR_READINESS=1; shift ;;
         --require-proof-freshness) REQUIRE_PROOF_FRESHNESS=1; shift ;;
         --*) echo "unknown flag: $1" >&2; usage 2 ;;
@@ -144,7 +134,7 @@ for timeout in "$STARTUP_TIMEOUT" "$MIRROR_TIMEOUT" "$PROOF_TIMEOUT"; do
         exit 2
     fi
 done
-for flag in "$SKIP_FILL_SEED" "$SKIP_MIRROR_READINESS" "$REQUIRE_PROOF_FRESHNESS"; do
+for flag in "$SKIP_MIRROR_READINESS" "$REQUIRE_PROOF_FRESHNESS"; do
     if [[ "$flag" != "0" && "$flag" != "1" ]]; then
         echo "error: smoke skip flags must be 0 or 1" >&2
         exit 2
@@ -776,83 +766,257 @@ check_markets() {
     [[ -n "$ORDER_MARKET" ]] && info "trading against market_id=$ORDER_MARKET"
 }
 
-# ── 5. Order placement + deterministic fills gate ────────────────────────────
-# Delegate the account/key/funding/market/order fixture to SYB-247's shared
-# seed_book example. This block intentionally contains no duplicate seed logic.
-SEED_BIN="${SYBIL_SMOKE_SEED_BIN:-}"
-setup_seed_book() {
-    if [[ -n "$SEED_BIN" && -x "$SEED_BIN" ]]; then return; fi
-    local prebuilt="$REPO_ROOT/target/debug/examples/seed_book"
+# ── 5. Signed product-market crossing + projected fills ──────────────────────
+# The exact 0.50 fixture runs before promotion in disposable Compose state.
+# Live verification reuses stable, genesis-bound operator accounts and never
+# creates a market. Fully crossing orders leave no resting product state.
+SIGN_BIN="${SYBIL_SMOKE_SIGN_BIN:-}"
+SMOKE_ACCOUNT_ID=""
+SMOKE_ORDER_ID=""
+HISTORY_ACCOUNT=""
+SMOKE_ACCOUNT_BALANCE_NANOS=1000000000000
+SMOKE_BUY_YES_PRIV=000000000000000000000000000000000000000000000000000000000000607d
+SMOKE_BUY_NO_PRIV=000000000000000000000000000000000000000000000000000000000000607e
+SMOKE_CANCEL_PRIV=000000000000000000000000000000000000000000000000000000000000607f
+
+setup_signing() {
+    if [[ -n "$SIGN_BIN" && -x "$SIGN_BIN" ]]; then return; fi
+    local prebuilt="$REPO_ROOT/target/debug/examples/smoke_sign"
     if ! command -v cargo >/dev/null 2>&1 \
-       || [[ ! -f "$REPO_ROOT/crates/sybil-client/examples/seed_book.rs" ]]; then
+       || [[ ! -f "$REPO_ROOT/crates/sybil-client/examples/smoke_sign.rs" ]]; then
         if [[ -x "$prebuilt" ]]; then
-            SEED_BIN="$prebuilt"
+            SIGN_BIN="$prebuilt"
         else
-            SEED_BIN=""
+            SIGN_BIN=""
         fi
         return
     fi
-    info "ensuring seed_book deterministic seeder matches this checkout (cargo)..."
+    info "ensuring smoke_sign signing helper matches this checkout (cargo)..."
     if cargo build -q --manifest-path "$REPO_ROOT/Cargo.toml" \
-        -p sybil-client --example seed_book 2>"$TMP/seed-build.log"; then
-        SEED_BIN="$prebuilt"
+        -p sybil-client --example smoke_sign 2>"$TMP/build.log"; then
+        SIGN_BIN="$prebuilt"
     else
-        SEED_BIN=""
-        sed 's/^/       /' "$TMP/seed-build.log" | tail -10
+        SIGN_BIN=""
+        sed 's/^/       /' "$TMP/build.log" | tail -10
     fi
 }
 
+provision_smoke_account() {
+    local role="$1" priv="$2" kp pub body
+    SMOKE_ACCOUNT_ID=""
+    if [[ -z "$SERVICE_TOKEN" ]]; then
+        fail "stable smoke account '$role' requires the service token"
+        return 1
+    fi
+    kp="$("$SIGN_BIN" keygen --priv "$priv" 2>/dev/null)"
+    pub="$(echo "$kp" | jget public_key_hex)"
+    if [[ -z "$pub" ]]; then
+        fail "smoke signer could not derive the '$role' public key"
+        return 1
+    fi
+    body="$(python3 - "$role" "$pub" "$SMOKE_ACCOUNT_BALANCE_NANOS" <<'PY'
+import json
+import sys
+
+role, public_key, balance = sys.argv[1], sys.argv[2], int(sys.argv[3])
+print(json.dumps({
+    "provisioning_key": f"post-deploy-smoke/{role}/v1",
+    "initial_balance_nanos": balance,
+    "initial_key": {
+        "public_key_hex": public_key,
+        "label": f"post-deploy {role}",
+        "scope": "agent",
+    },
+}))
+PY
+)"
+    http POST /v1/accounts "$body" token
+    SMOKE_ACCOUNT_ID="$(echo "$HTTP_BODY" | jget account_id)"
+    if ! is_2xx "$HTTP_CODE" || [[ -z "$SMOKE_ACCOUNT_ID" ]]; then
+        fail "stable smoke account '$role' -> $HTTP_CODE: $HTTP_BODY"
+        return 1
+    fi
+    return 0
+}
+
+submit_smoke_order() {
+    local priv="$1" payoffs="$2" price="$3" quantity="$4" nonce="$5"
+    local signed public_key signature body
+    SMOKE_ORDER_ID=""
+    signed="$("$SIGN_BIN" order --priv "$priv" --market "$ORDER_MARKET" \
+        --nonce "$nonce" --price "$price" --qty "$quantity" --payoffs "$payoffs" \
+        --genesis-hash "$GENESIS_HASH" 2>/dev/null)"
+    public_key="$(echo "$signed" | jget signer_pubkey_hex)"
+    signature="$(echo "$signed" | jget signature_hex)"
+    body="$(python3 - "$public_key" "$signature" "$ORDER_MARKET" "$nonce" \
+        "$price" "$quantity" "$payoffs" <<'PY'
+import json
+import sys
+
+public_key, signature = sys.argv[1], sys.argv[2]
+market, nonce, price, quantity = map(int, sys.argv[3:7])
+payoffs = [int(value) for value in sys.argv[7].split(",")]
+print(json.dumps({
+    "signer_pubkey_hex": public_key,
+    "order": {
+        "market_ids": [market],
+        "payoffs": payoffs,
+        "limit_price_nanos": price,
+        "max_fill": quantity,
+    },
+    "time_in_force": "GTC",
+    "nonce": nonce,
+    "signature_hex": signature,
+}))
+PY
+    )"
+    http POST /v1/orders/signed "$body" none
+    SMOKE_ORDER_ID="$(echo "$HTTP_BODY" | python3 -c \
+        'import json,sys; ids=json.load(sys.stdin).get("order_ids") or []; print(ids[0] if ids else "")' \
+        2>/dev/null)"
+}
+
+cancel_smoke_order() {
+    local priv="$1" account="$2" order_id="$3" nonce="$4"
+    local signed public_key signature body
+    signed="$("$SIGN_BIN" cancel --priv "$priv" --account "$account" --order "$order_id" \
+        --nonce "$nonce" --genesis-hash "$GENESIS_HASH" 2>/dev/null)" || return 1
+    public_key="$(echo "$signed" | jget signer_pubkey_hex)"
+    signature="$(echo "$signed" | jget signature_hex)"
+    body="$(python3 - "$public_key" "$signature" "$account" "$order_id" "$nonce" <<'PY'
+import json
+import sys
+
+public_key, signature = sys.argv[1], sys.argv[2]
+account, order_id, nonce = map(int, sys.argv[3:6])
+print(json.dumps({
+    "signer_pubkey_hex": public_key,
+    "account_id": account,
+    "order_id": order_id,
+    "nonce": nonce,
+    "signature_hex": signature,
+}))
+PY
+)"
+    http POST /v1/orders/cancel/signed "$body" none
+    is_2xx "$HTTP_CODE" && [[ "$(echo "$HTTP_BODY" | jget cancelled)" == "true" ]]
+}
+
+account_fill_contains_order() {
+    local account="$1" order_id="$2"
+    http GET "/v1/accounts/$account/fills?market_id=$ORDER_MARKET&limit=100" "" token
+    is_2xx "$HTTP_CODE" && echo "$HTTP_BODY" | python3 -c '
+import json
+import sys
+
+order_id = int(sys.argv[1])
+page = json.load(sys.stdin)
+matches = [
+    fill for fill in page.get("fills", [])
+    if fill.get("order_id") == order_id and int(fill.get("fill_qty") or 0) > 0
+]
+raise SystemExit(0 if matches else 1)
+' "$order_id" 2>/dev/null
+}
+
 check_orders_and_fills() {
-    section "5. Order placement + fills-after-seed gate"
-    setup_seed_book
-    if [[ -z "$SEED_BIN" ]]; then
-        skip "seed_book unavailable (cargo/repo absent or build failed); shared deterministic fills seed not run"
+    section "5. Signed crossing + history-projected fills"
+    setup_signing
+    if [[ -z "$SIGN_BIN" ]]; then
+        if [[ "$REQUIRE_SIGNER" == "1" ]]; then
+            fail "signer unavailable but --require-signer set"
+        else
+            skip "signer unavailable; live crossing not run"
+        fi
+        return
+    fi
+    if [[ -z "$ORDER_MARKET" || -z "$GENESIS_HASH" || -z "$SERVICE_TOKEN" ]]; then
+        fail "live crossing requires market, genesis, and service token"
         return
     fi
 
     http GET /v1/activity/overview
-    local before; before="$(echo "$HTTP_BODY" | jget all_time.orders.matched)"
-    [[ -z "$before" ]] && before=0
-    info "baseline all_time.orders.matched = $before"
+    local before
+    before="$(echo "$HTTP_BODY" | jget all_time.execution_quality.trader_orders_first_filled)"
+    [[ "$before" =~ ^[0-9]+$ ]] || before=0
 
-    # post-deploy-smoke is itself an explicit operator-authorized mutation of
-    # the demo/devnet. Use a fresh deterministic run id so repeated deploy
-    # verification does not reuse P256 identities or replay nonces.
-    local run_id seed_summary
-    run_id="$(date +%s%N)"
-    local -a seed_args=(--base-url "$BASE" --run-id "$run_id" --i-know-this-is-dev)
-    [[ -n "$SERVICE_TOKEN" ]] && seed_args+=(--service-token "$SERVICE_TOKEN")
-    if ! seed_summary="$("$SEED_BIN" "${seed_args[@]}" 2>"$TMP/seed-book.log")"; then
-        fail "shared seed_book failed: $(tail -5 "$TMP/seed-book.log" | tr '\n' ' ')"
+    provision_smoke_account crossing-buy-yes "$SMOKE_BUY_YES_PRIV" || return
+    local yes_account="$SMOKE_ACCOUNT_ID"
+    HISTORY_ACCOUNT="$yes_account"
+    provision_smoke_account crossing-buy-no "$SMOKE_BUY_NO_PRIV" || return
+    local no_account="$SMOKE_ACCOUNT_ID"
+
+    local nonce yes_order no_order
+    nonce="$(date +%s%3N)"
+    submit_smoke_order "$SMOKE_BUY_YES_PRIV" 1,0 990000000 1000 "$nonce"
+    yes_order="$SMOKE_ORDER_ID"
+    if [[ -z "$yes_order" ]]; then
+        fail "signed BuyYes crossing order was not accepted: $HTTP_CODE $HTTP_BODY"
         return
     fi
-    if [[ "$(echo "$seed_summary" | jget schema)" != "sybil.seed_book.v1" \
-       || "$(echo "$seed_summary" | jget expected.matched_volume)" != "1000" \
-       || "$(echo "$seed_summary" | jget expected.yes_price_nanos)" != "500000000" \
-       || "$(echo "$seed_summary" | jget expected.no_price_nanos)" != "500000000" ]]; then
-        fail "shared seed_book returned an unexpected summary: $seed_summary"
+    submit_smoke_order "$SMOKE_BUY_NO_PRIV" 0,1 990000000 1000 "$nonce"
+    no_order="$SMOKE_ORDER_ID"
+    if [[ -z "$no_order" ]]; then
+        cancel_smoke_order "$SMOKE_BUY_YES_PRIV" "$yes_account" "$yes_order" "$((nonce + 1))" || true
+        fail "signed BuyNo crossing order was not accepted: $HTTP_CODE $HTTP_BODY"
         return
     fi
-    pass "shared seed_book accepted exact fixture (run=$run_id, matched_volume=1000, YES/NO=500000000)"
+    pass "signed crossing orders accepted on product market $ORDER_MARKET (orders $yes_order/$no_order)"
 
-    # Poll for matched to increase over ~ a few blocks.
-    local deadline after now
-    deadline="$(python3 -c "import time;print(round(time.time()+$INTERVAL*4+5,2))")"
-    after="$before"
-    info "polling all_time.orders.matched to exceed $before (up to $(python3 -c "print(round($INTERVAL*4+5))")s)..."
-    while :; do
-        sleep 3
-        http GET /v1/activity/overview
-        after="$(echo "$HTTP_BODY" | jget all_time.orders.matched)"
-        [[ -z "$after" ]] && after=0
-        now="$(python3 -c "import time;print(round(time.time(),2))")"
-        [[ "$after" -gt "$before" ]] && break
-        python3 -c "import sys;sys.exit(0 if $now < $deadline else 1)" || break
+    local deadline wait_seconds yes_filled=0 no_filled=0
+    wait_seconds="$(python3 - "$INTERVAL" <<'PY'
+import math
+import sys
+
+print(math.ceil(float(sys.argv[1]) * 6 + 10))
+PY
+)"
+    deadline=$((SECONDS + wait_seconds))
+    while (( SECONDS < deadline )); do
+        account_fill_contains_order "$yes_account" "$yes_order" && yes_filled=1
+        account_fill_contains_order "$no_account" "$no_order" && no_filled=1
+        [[ "$yes_filled" -eq 1 && "$no_filled" -eq 1 ]] && break
+        sleep 2
     done
-    if [[ "$after" -gt "$before" ]]; then
-        pass "FILLS gate: matched increased $before -> $after after deterministic seed"
+
+    if [[ "$yes_filled" -eq 1 && "$no_filled" -eq 1 ]]; then
+        pass "both signed product orders have positive history-projected fills"
     else
-        fail "FILLS gate: matched did NOT increase ($before -> $after) — matching engine not filling crossing orders"
+        cancel_smoke_order "$SMOKE_BUY_YES_PRIV" "$yes_account" "$yes_order" "$((nonce + 1))" || true
+        cancel_smoke_order "$SMOKE_BUY_NO_PRIV" "$no_account" "$no_order" "$((nonce + 1))" || true
+        fail "signed crossing did not produce both fills (BuyYes=$yes_filled BuyNo=$no_filled)"
+        return
+    fi
+
+    http GET /v1/activity/overview
+    local after
+    after="$(echo "$HTTP_BODY" | jget all_time.execution_quality.trader_orders_first_filled)"
+    if [[ "$after" =~ ^[0-9]+$ && "$after" -ge $((before + 2)) ]]; then
+        pass "trader execution metric credited both first fills ($before -> $after)"
+    else
+        fail "trader execution metric did not credit both fills ($before -> ${after:-missing})"
+    fi
+
+    local pending=0 account
+    for account in "$yes_account" "$no_account"; do
+        http GET "/v1/accounts/$account/orders" "" token
+        if ! is_2xx "$HTTP_CODE"; then
+            pending=1
+        elif ! echo "$HTTP_BODY" | python3 -c '
+import json
+import sys
+
+order_ids = {int(value) for value in sys.argv[1:]}
+orders = json.load(sys.stdin)
+raise SystemExit(0 if all(order.get("order_id") not in order_ids for order in orders) else 1)
+' "$yes_order" "$no_order" 2>/dev/null; then
+            pending=1
+        fi
+    done
+    if [[ "$pending" -eq 0 ]]; then
+        pass "signed crossing left no active smoke orders"
+    else
+        fail "signed crossing left a smoke order resting"
     fi
 }
 
@@ -865,7 +1029,8 @@ check_gating() {
     # no-token/wrong-token assertions are evaluated before handler lookup.
     local acct=""
     if [[ -n "$SERVICE_TOKEN" ]]; then
-        http POST /v1/accounts '{"initial_balance_nanos":1000000000}' token
+        http POST /v1/accounts \
+            '{"provisioning_key":"post-deploy-smoke/gating/v1","initial_balance_nanos":1000000000}' token
         acct="$(echo "$HTTP_BODY" | jget account_id)"
     fi
     [[ -z "$acct" ]] && acct=1
@@ -931,95 +1096,100 @@ HISTORY_ACCOUNT=""
 setup_signing() {
     if [[ -n "$SIGN_BIN" && -x "$SIGN_BIN" ]]; then return; fi
     local prebuilt="$REPO_ROOT/target/debug/examples/smoke_sign"
-    if [[ -x "$prebuilt" ]]; then SIGN_BIN="$prebuilt"; return; fi
     if ! command -v cargo >/dev/null 2>&1 \
        || [[ ! -f "$REPO_ROOT/crates/sybil-client/examples/smoke_sign.rs" ]]; then
-        SIGN_BIN=""; return
+        if [[ -x "$prebuilt" ]]; then
+            SIGN_BIN="$prebuilt"
+        else
+            SIGN_BIN=""
+        fi
+        return
     fi
-    info "building smoke_sign signing helper (cargo)..."
+    info "ensuring smoke_sign signing helper matches this checkout (cargo)..."
     if cargo build -q --manifest-path "$REPO_ROOT/Cargo.toml" \
         -p sybil-client --example smoke_sign 2>"$TMP/build.log"; then
-        SIGN_BIN="$REPO_ROOT/target/debug/examples/smoke_sign"
+        SIGN_BIN="$prebuilt"
     else
         SIGN_BIN=""
         sed 's/^/       /' "$TMP/build.log" | tail -10
     fi
 }
-
-# Operator smoke accounts use the explicitly funded service route whenever the
-# deploy credential is present. A direct devnet diagnostic without that token
-# falls back to the bounded public fixed-grant route.
-create_funded_smoke_account() {
-    local pub="$1"
-    if [[ -n "$SERVICE_TOKEN" ]]; then
-        http POST /v1/accounts \
-            "{\"initial_balance_nanos\":1000000000000,\"initial_key\":{\"public_key_hex\":\"$pub\"}}" token
-    else
-        http POST /v1/onboarding/accounts \
-            "{\"initial_key\":{\"public_key_hex\":\"$pub\"}}" none
-    fi
-}
-
-check_signed_order() {
-    section "7. Signed order acceptance"
-    setup_signing
-    if [[ -z "$SIGN_BIN" ]]; then
-        if [[ "$REQUIRE_SIGNER" == "1" ]]; then
-            fail "signer unavailable but --require-signer set (build smoke_sign in the deploy checkout)"
-        else
-            skip "signer (smoke_sign) unavailable; set SYBIL_SMOKE_REQUIRE_SIGNER=1 in the deploy gate to make this a hard check"
-        fi
-        return
-    fi
-    if [[ -z "$ORDER_MARKET" || -z "$GENESIS_HASH" ]]; then
-        fail "cannot build signed order (market=$ORDER_MARKET genesis=${GENESIS_HASH:0:8})"
-        return
-    fi
-
-    # Fresh operator-funded account created atomically with its signing key.
-    local kp priv pub
-    kp="$("$SIGN_BIN" keygen 2>/dev/null)"
-    priv="$(echo "$kp" | jget private_key_hex)"
-    pub="$(echo "$kp" | jget public_key_hex)"
-    create_funded_smoke_account "$pub"
-    local acct; acct="$(echo "$HTTP_BODY" | jget account_id)"
-    if ! is_2xx "$HTTP_CODE" || [[ -z "$acct" ]]; then
-        fail "signed-order prep: atomic create -> $HTTP_CODE: $HTTP_BODY"; return
-    fi
+ 
+ # Operator smoke accounts use the explicitly funded service route whenever the
+ # deploy credential is present. A direct devnet diagnostic without that token
+ # falls back to the bounded public fixed-grant route.
+ create_funded_smoke_account() {
+     local pub="$1"
+     if [[ -n "$SERVICE_TOKEN" ]]; then
+         http POST /v1/accounts \
+             "{\"initial_balance_nanos\":1000000000000,\"initial_key\":{\"public_key_hex\":\"$pub\"}}" token
+     else
+         http POST /v1/onboarding/accounts \
+             "{\"initial_key\":{\"public_key_hex\":\"$pub\"}}" none
+     fi
+ }
+ 
+ check_signed_order() {
+     section "7. Signed order acceptance"
+     setup_signing
+     if [[ -z "$SIGN_BIN" ]]; then
+         if [[ "$REQUIRE_SIGNER" == "1" ]]; then
+             fail "signer unavailable but --require-signer set (build smoke_sign in the deploy checkout)"
+         else
+             skip "signer (smoke_sign) unavailable; set SYBIL_SMOKE_REQUIRE_SIGNER=1 in the deploy gate to make this a hard check"
+         fi
+         return
+     fi
+     if [[ -z "$ORDER_MARKET" || -z "$GENESIS_HASH" ]]; then
+         fail "cannot build signed order (market=$ORDER_MARKET genesis=${GENESIS_HASH:0:8})"
+         return
+     fi
+ 
+     # Fresh operator-funded account created atomically with its signing key.
+     local kp priv pub
+     kp="$("$SIGN_BIN" keygen 2>/dev/null)"
+     priv="$(echo "$kp" | jget private_key_hex)"
+     pub="$(echo "$kp" | jget public_key_hex)"
+     create_funded_smoke_account "$pub"
+     local acct; acct="$(echo "$HTTP_BODY" | jget account_id)"
+     if ! is_2xx "$HTTP_CODE" || [[ -z "$acct" ]]; then
+         fail "signed-order prep: atomic create -> $HTTP_CODE: $HTTP_BODY"; return
+     fi
     HISTORY_ACCOUNT="$acct"
-
-    local nonce osig ospk ossig obody
-    nonce="$(date +%s%3N)"
-    osig="$("$SIGN_BIN" order --priv "$priv" --market "$ORDER_MARKET" --nonce "$nonce" \
-        --price 10000000 --qty 1000 --genesis-hash "$GENESIS_HASH" 2>/dev/null)"
-    ospk="$(echo "$osig" | jget signer_pubkey_hex)"
-    ossig="$(echo "$osig" | jget signature_hex)"
-    if [[ -z "$ossig" ]]; then
-        fail "signer produced no signature (smoke_sign order failed)"; return
-    fi
-    obody="$(python3 - "$ospk" "$ossig" "$ORDER_MARKET" "$nonce" <<'PY'
-import sys, json
-pk, sig, m, n = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
-print(json.dumps({"signer_pubkey_hex": pk,
-    "order": {"market_ids": [m], "payoffs": [1, 0], "limit_price_nanos": 10000000, "max_fill": 1000},
-    "nonce": n, "signature_hex": sig}))
-PY
-)"
-    http POST /v1/orders/signed "$obody" none
-    if is_2xx "$HTTP_CODE" && [[ "$(echo "$HTTP_BODY" | jget accepted)" == "true" ]]; then
-        pass "signed order accepted (acct $acct, nonce $nonce)"
-    else
-        fail "signed order -> $HTTP_CODE: $HTTP_BODY"
-    fi
-}
-
+ 
+     local nonce osig ospk ossig obody
+     nonce="$(date +%s%3N)"
+     osig="$("$SIGN_BIN" order --priv "$priv" --market "$ORDER_MARKET" --nonce "$nonce" \
+         --price 10000000 --qty 1000 --genesis-hash "$GENESIS_HASH" 2>/dev/null)"
+     ospk="$(echo "$osig" | jget signer_pubkey_hex)"
+     ossig="$(echo "$osig" | jget signature_hex)"
+     if [[ -z "$ossig" ]]; then
+         fail "signer produced no signature (smoke_sign order failed)"; return
+     fi
+     obody="$(python3 - "$ospk" "$ossig" "$ORDER_MARKET" "$nonce" <<'PY'
+ import sys, json
+ pk, sig, m, n = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+ print(json.dumps({"signer_pubkey_hex": pk,
+     "order": {"market_ids": [m], "payoffs": [1, 0], "limit_price_nanos": 10000000, "max_fill": 1000},
+     "nonce": n, "signature_hex": sig}))
+ PY
+ )"
+     http POST /v1/orders/signed "$obody" none
+     if is_2xx "$HTTP_CODE" && [[ "$(echo "$HTTP_BODY" | jget accepted)" == "true" ]]; then
+         pass "signed order accepted (acct $acct, nonce $nonce)"
+     else
+         fail "signed order -> $HTTP_CODE: $HTTP_BODY"
+     fi
+ }
+ 
 # ── 7b. Signed cancel lifecycle + reservation release ────────────────────────
+# ── 7. Signed cancel lifecycle + reservation release ─────────────────────────
 # Exercises the full client cancel path the web app uses: place a deep
 # out-of-market resting order (holds a balance reservation), cancel it with a
 # signed request, and assert it disappears AND the reservation is released
 # (available balance restored). Guards the SYB reservation-accounting path.
 check_signed_cancel_lifecycle() {
-    section "7b. Signed cancel lifecycle + reservation release"
+    section "7. Signed cancel lifecycle + reservation release"
     setup_signing
     if [[ -z "$SIGN_BIN" ]]; then
         if [[ "$REQUIRE_SIGNER" == "1" ]]; then
@@ -1034,16 +1204,8 @@ check_signed_cancel_lifecycle() {
         return
     fi
 
-    # Fresh operator-funded account created atomically with its signing key.
-    local kp priv pub
-    kp="$("$SIGN_BIN" keygen 2>/dev/null)"
-    priv="$(echo "$kp" | jget private_key_hex)"
-    pub="$(echo "$kp" | jget public_key_hex)"
-    create_funded_smoke_account "$pub"
-    local acct; acct="$(echo "$HTTP_BODY" | jget account_id)"
-    if ! is_2xx "$HTTP_CODE" || [[ -z "$acct" ]]; then
-        fail "cancel-lifecycle prep: atomic create -> $HTTP_CODE: $HTTP_BODY"; return
-    fi
+    provision_smoke_account cancellation "$SMOKE_CANCEL_PRIV" || return
+    local priv="$SMOKE_CANCEL_PRIV" acct="$SMOKE_ACCOUNT_ID"
 
     # Deep out-of-market resting BuyYes at $0.01 so it never crosses (stays cancellable).
     local nonce osig ospk ossig obody oid
@@ -1093,7 +1255,7 @@ PY
 
     # Signed cancel.
     local cnonce csig cspk cssig cbody
-    cnonce="$(date +%s%3N)"
+    cnonce="$((nonce + 1))"
     csig="$("$SIGN_BIN" cancel --priv "$priv" --account "$acct" --order "$oid" --nonce "$cnonce" --genesis-hash "$GENESIS_HASH" 2>/dev/null)"
     cspk="$(echo "$csig" | jget signer_pubkey_hex)"
     cssig="$(echo "$csig" | jget signature_hex)"
@@ -1190,7 +1352,7 @@ echo "  API base   : $BASE"
 echo "  app origin : $APP_ORIGIN"
 echo "  block time : ${INTERVAL}s   service-token: $([[ -n "$SERVICE_TOKEN" ]] && echo present || echo absent)"
 echo "  docker     : $([[ -n "$DOCKER_SSH" ]] && echo "ssh $DOCKER_SSH" || echo local)"
-echo "  fill seed  : $([[ "$SKIP_FILL_SEED" == "1" ]] && echo scoped-skip || echo required)"
+echo "  fill gate  : signed crossing on an existing product market"
 echo "  mirror gate: $([[ "$SKIP_MIRROR_READINESS" == "1" ]] && echo web-only-skip || echo required)"
 echo "  proof gate : $([[ "$REQUIRE_PROOF_FRESHNESS" == "1" ]] && echo "required (lag <= $PROOF_LAG_MAX)" || echo optional)"
 
@@ -1202,14 +1364,8 @@ check_web_app
 check_cors
 check_onboarding
 check_markets
-if [[ "$SKIP_FILL_SEED" == "1" ]]; then
-    section "5. Order placement + fills-after-seed gate"
-    skip "deterministic market seed is out of scope for a non-API promotion"
-else
-    check_orders_and_fills
-fi
+check_orders_and_fills
 check_gating
-check_signed_order
 check_signed_cancel_lifecycle
 check_history_query_contract
 check_bots

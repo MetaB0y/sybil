@@ -9,8 +9,6 @@ import {
   isClosed,
   isMirror,
   isNative,
-  isInternalFixtureMarket,
-  publicMarkets,
   toIndexMarket,
   useMarketsIndex,
   type IndexMarket,
@@ -71,35 +69,10 @@ describe("markets/use-markets helpers", () => {
     ).toBe(false);
   });
 
-  it("keeps deterministic deployment fixtures out of public market discovery", () => {
-    const fixture = mk({
-      market_id: 247,
-      name: "SYB-247 deterministic crossing v1 run 1783836058392115051",
-    });
-    const real = mk({ market_id: 8, name: "Will the devnet launch?" });
-
-    expect(isInternalFixtureMarket(fixture)).toBe(true);
-    expect(isInternalFixtureMarket(real)).toBe(false);
-    expect(publicMarkets([fixture, real])).toEqual([real]);
-
-    const rawBundle = assemble([fixture, real]);
-    expect(rawBundle.total).toBe(2);
-    expect(rawBundle.byId.get(fixture.market_id)).toEqual(fixture);
-
-    const publicBundle = assemble(publicMarkets([fixture, real]));
-    expect(publicBundle.total).toBe(1);
-    expect(publicBundle.byId.has(fixture.market_id)).toBe(false);
-    expect(publicBundle.byId.get(real.market_id)).toEqual(real);
-  });
-
-  it("filters a raw shared cache only at the public discovery observer", () => {
+  it("does not apply title-based discovery filtering", () => {
     const client = new QueryClient();
-    const fixture = mk({
-      market_id: 247,
-      name: "SYB-247 deterministic crossing v1 run 1",
-    });
-    const real = mk({ market_id: 8, name: "Real market" });
-    client.setQueryData(["markets", "all"], [fixture, real]);
+    const market = mk({ market_id: 8, name: "Any operator-chosen title" });
+    client.setQueryData(["markets", "all"], [market]);
 
     function Probe() {
       const { bundle } = useMarketsIndex();
@@ -120,9 +93,8 @@ describe("markets/use-markets helpers", () => {
       ),
     );
 
-    expect(html).toContain("Real market");
-    expect(html).not.toContain("SYB-247 deterministic crossing");
-    expect(client.getQueryData(["markets", "all"])).toEqual([fixture, real]);
+    expect(html).toContain("Any operator-chosen title");
+    expect(client.getQueryData(["markets", "all"])).toEqual([market]);
   });
 
   it("assemble keeps closed markets in byId and groups", () => {

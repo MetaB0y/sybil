@@ -50,29 +50,6 @@ export const INDEX_MARKET_FIELDS = [
 
 export type IndexMarket = Pick<Market, (typeof INDEX_MARKET_FIELDS)[number]>;
 
-/**
- * Deployment verification creates isolated markets whose only purpose is to
- * prove that the live matcher fills a deterministic crossing pair. They stay
- * addressable by id for operator evidence, but must never masquerade as user
- * markets in public discovery surfaces. Keep the legacy v1 prefix because
- * persistent devnets already contain those fixtures.
- */
-const INTERNAL_FIXTURE_MARKET_PREFIXES = [
-  "SYB-247 deterministic crossing v1",
-] as const;
-
-export function isInternalFixtureMarket(market: Pick<Market, "name">): boolean {
-  return INTERNAL_FIXTURE_MARKET_PREFIXES.some((prefix) =>
-    market.name.startsWith(prefix),
-  );
-}
-
-export function publicMarkets<M extends Pick<Market, "name">>(
-  markets: readonly M[],
-): M[] {
-  return markets.filter((market) => !isInternalFixtureMarket(market));
-}
-
 /** Keep null/undefined optionals out of the serialized RSC payload entirely. */
 export function toIndexMarket(market: Market): IndexMarket {
   return Object.fromEntries(
@@ -173,13 +150,7 @@ export function useMarketsIndex(initialData?: IndexMarket[]) {
 
   const isPending = marketsQ.isPending;
   const error = marketsQ.error;
-  // This observer powers public discovery (the index and global nav search).
-  // Filter at the observer boundary, not in the shared query/cache or generic
-  // assembler: portfolio/event/detail consumers still need the complete
-  // market registry, including operator fixtures addressed directly by id.
-  const bundle = marketsQ.data
-    ? assemble(publicMarkets(marketsQ.data))
-    : null;
+  const bundle = marketsQ.data ? assemble(marketsQ.data) : null;
 
   return {
     bundle,
