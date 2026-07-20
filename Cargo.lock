@@ -6880,6 +6880,7 @@ dependencies = [
  "futures-util",
  "goose",
  "reqwest 0.13.4",
+ "rustls",
  "serde_json",
  "sybil-client",
  "tokio",

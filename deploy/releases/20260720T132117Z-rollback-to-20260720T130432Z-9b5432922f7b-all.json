@@ -1,0 +1,45 @@
+{
+  "schema": "sybil.rollback.v1",
+  "action_id": "20260720T132117Z-rollback-to-20260720T130432Z-9b5432922f7b-all",
+  "target_release_id": "20260720T130432Z-9b5432922f7b-all",
+  "verified_at": "2026-07-20T13:21:17Z",
+  "rebuilt_images": false,
+  "verified_containers": {
+    "sybil-api": {
+      "image_id": "sha256:81321a9eb38502b8fe9eab0a427c4ea63bdd997946618aa36bafc2491909eeb1",
+      "state": "running"
+    },
+    "sybil-history": {
+      "image_id": "sha256:81321a9eb38502b8fe9eab0a427c4ea63bdd997946618aa36bafc2491909eeb1",
+      "state": "running"
+    },
+    "sybil-native-admin": {
+      "image_id": "sha256:81321a9eb38502b8fe9eab0a427c4ea63bdd997946618aa36bafc2491909eeb1",
+      "state": "exited:0"
+    },
+    "sybil-native-mm": {
+      "image_id": "sha256:81321a9eb38502b8fe9eab0a427c4ea63bdd997946618aa36bafc2491909eeb1",
+      "state": "running"
+    },
+    "sybil-polymarket": {
+      "image_id": "sha256:81321a9eb38502b8fe9eab0a427c4ea63bdd997946618aa36bafc2491909eeb1",
+      "state": "running"
+    },
+    "sybil-arena": {
+      "image_id": "sha256:01fcd857006c1e9ae332381500a985c3a4ce068d185d73197c1e59a5beabb3ee",
+      "state": "running"
+    },
+    "sybil-arena-dashboard": {
+      "image_id": "sha256:01fcd857006c1e9ae332381500a985c3a4ce068d185d73197c1e59a5beabb3ee",
+      "state": "running"
+    },
+    "sybil-web": {
+      "image_id": "sha256:69cbc64f13e5ac2d4ae5353d855bb8932d3e48b0e232b3df209409f706469141",
+      "state": "running"
+    },
+    "caddy": {
+      "image_id": "sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648",
+      "state": "running"
+    }
+  }
+}

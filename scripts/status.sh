@@ -2,7 +2,7 @@
 set -euo pipefail
 
 S=${SYBIL_STATUS_SSH:-root@172.104.31.54}
-COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile integrations --profile validity --profile ops"
+COMPOSE="docker compose --env-file .env --env-file releases/current.env -f docker-compose.yml -f docker-compose.prod.yml --profile integrations --profile ops"
 
 remote_api_get() {
     local path=$1
@@ -21,7 +21,8 @@ import sys
 
 for block in json.load(sys.stdin):
     marker = " <<<" if block["fill_count"] > 0 else ""
-    welfare = block["total_welfare_nanos"] / 1_000_000_000
+    # Protocol nanos are exact decimal strings on the JSON boundary.
+    welfare = int(block["total_welfare_nanos"]) / 1_000_000_000
     print(
         f"  Block {block['"'"'height'"'"']}: {block['"'"'order_count'"'"']} orders, "
         f"{block['"'"'fill_count'"'"']} fills, {block['"'"'rejection_count'"'"']} rej, "
@@ -33,16 +34,17 @@ else
 fi
 echo ""
 
-echo "=== Trader Activity ==="
+echo "=== LLM Strategy Activity ==="
 LOGS=$(ssh "$S" "cd /opt/sybil && $COMPOSE logs --tail 1000 sybil-arena 2>&1" | grep -v httpx || true)
 count_logs() {
     local pattern=$1
     grep -c "$pattern" <<<"$LOGS" || true
 }
 echo "  LLM calls:      $(count_logs 'LLM response')"
+echo "  Provider fails: $(count_logs 'LLM provider failure')"
 echo "  Parse failures: $(count_logs 'Failed to parse')"
-echo "  Trade orders:   $(count_logs 'Buy')"
-echo "  HOLDs:          $(count_logs 'HOLD')"
+echo "  Trade decisions: $(count_logs 'Buy')"
+echo "  HOLD decisions:  $(count_logs 'HOLD')"
 echo ""
 
 echo "=== News Pipeline ==="

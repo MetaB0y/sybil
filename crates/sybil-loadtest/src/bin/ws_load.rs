@@ -4,15 +4,18 @@ use std::env;
 use std::error::Error;
 use std::io;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use serde_json::json;
 use sybil_client::{Error as SybilError, PublicBlockStreamEvent, SybilClient};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{Semaphore, mpsc, watch};
 use tokio::task::JoinSet;
 
 type AnyError = Box<dyn Error + Send + Sync>;
+
+const CONNECTION_CONCURRENCY: usize = 8;
 
 #[derive(Clone, Debug)]
 struct Config {
@@ -171,6 +174,10 @@ struct SubscriberStats {
 
 #[tokio::main]
 async fn main() -> Result<(), AnyError> {
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .map_err(|_| invalid_input("failed to install the rustls ring crypto provider"))?;
+
     let config = Config::from_env()?;
     let http = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
@@ -194,11 +201,16 @@ async fn main() -> Result<(), AnyError> {
 
     let (ready_tx, mut ready_rx) = mpsc::channel(config.subscribers);
     let (start_tx, start_rx) = watch::channel(false);
+    // Keep DNS/TLS establishment from becoming a same-instant load test of
+    // the generator's resolver. Measurement starts only after all subscribers
+    // are connected, so the target still carries the full concurrent cohort.
+    let connection_gate = Arc::new(Semaphore::new(CONNECTION_CONCURRENCY));
     let mut tasks = JoinSet::new();
     for id in 0..config.subscribers {
         let host = config.host.clone();
         let ready_tx = ready_tx.clone();
         let start_rx = start_rx.clone();
+        let connection_gate = Arc::clone(&connection_gate);
         let slow = id < config.slow_subscribers;
         let slow_read_stall = config.slow_read_stall;
         let run_duration = config.run_duration;
@@ -213,6 +225,7 @@ async fn main() -> Result<(), AnyError> {
                 from_block,
                 ready_tx,
                 start_rx,
+                connection_gate,
             )
             .await
         });
@@ -275,9 +288,14 @@ async fn run_subscriber(
     first_from_block: u64,
     ready_tx: mpsc::Sender<Result<usize, String>>,
     mut start_rx: watch::Receiver<bool>,
+    connection_gate: Arc<Semaphore>,
 ) -> Result<SubscriberStats, String> {
     let client = SybilClient::with_defaults(host, None);
     let mut from_block = first_from_block;
+    let connection_permit = Arc::clone(&connection_gate)
+        .acquire_owned()
+        .await
+        .map_err(|_| "subscriber connection gate closed".to_string())?;
     let mut stream = match client
         .stream_block_events_from_block(Some(from_block))
         .await
@@ -289,6 +307,7 @@ async fn run_subscriber(
             return Err(message);
         }
     };
+    drop(connection_permit);
     ready_tx
         .send(Ok(id))
         .await
@@ -384,6 +403,10 @@ async fn run_subscriber(
                 expected_height = from_block;
                 connection_number = connection_number.saturating_add(1);
                 connection_replay_complete = false;
+                let connection_permit = Arc::clone(&connection_gate)
+                    .acquire_owned()
+                    .await
+                    .map_err(|_| "subscriber connection gate closed".to_string())?;
                 stream = Box::pin(
                     client
                         .stream_block_events_from_block(Some(from_block))
@@ -392,6 +415,7 @@ async fn run_subscriber(
                             format!("subscriber {id} reconnect from {from_block} failed: {error}")
                         })?,
                 );
+                drop(connection_permit);
             }
             Err(SybilError::RetentionGap {
                 requested_height,

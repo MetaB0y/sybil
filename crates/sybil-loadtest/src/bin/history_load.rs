@@ -86,6 +86,10 @@ impl LoadConfig {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .map_err(|_| invalid_input("failed to install the rustls ring crypto provider"))?;
+
     let config = LoadConfig::from_env()?;
     let baseline_p95_ms = measure_baseline(&config).await?;
     TARGET

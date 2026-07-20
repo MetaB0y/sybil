@@ -17,6 +17,7 @@ path = "src/bin/ws_load.rs"
 futures-util = "0.3"
 goose = { version = "0.18.1", default-features = false, features = ["rustls-tls"] }
 reqwest = { workspace = true }
+rustls = { version = "0.23", features = ["ring"] }
 serde_json = { workspace = true }
 sybil-client = { path = "../sybil-client" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
