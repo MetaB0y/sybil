@@ -40,17 +40,20 @@ pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpe
     if let Some(compaction) = generated.compaction {
         orders.extend(compaction);
     }
-    orders.extend(generated.ordinary);
+    orders.extend(generated.baseline);
+    orders.extend(generated.inventory);
     orders
 }
 
 struct MarketQuotes {
-    ordinary: Vec<OrderSpec>,
+    baseline: Vec<OrderSpec>,
+    inventory: Vec<OrderSpec>,
     compaction: Option<[OrderSpec; 2]>,
 }
 
 fn generate_market_quotes(input: &QuoteInput, config: &QuoteConfig) -> MarketQuotes {
-    let mut ordinary = Vec::new();
+    let mut baseline = Vec::new();
+    let mut inventory = Vec::new();
     let (reservation_min, reservation_max, yes_order_min, yes_order_max) =
         if let Some(range) = input.quote_range {
             (range.min, range.max, range.min, range.max)
@@ -103,7 +106,7 @@ fn generate_market_quotes(input: &QuoteInput, config: &QuoteConfig) -> MarketQuo
     if yes_buy_cap > 0 && price_in_band(yes_bid, yes_order_min, yes_order_max) {
         let quantity = shares_to_qty_units(buy_size / yes_bid).min(yes_buy_cap);
         if quantity > 0 {
-            ordinary.push(OrderSpec::BuyYes {
+            baseline.push(OrderSpec::BuyYes {
                 market_id: input.market_id,
                 limit_price_nanos: (yes_bid * NANOS_PER_DOLLAR as f64) as u64,
                 quantity,
@@ -114,7 +117,7 @@ fn generate_market_quotes(input: &QuoteInput, config: &QuoteConfig) -> MarketQuo
     if yes_residual > 0 && price_in_band(yes_ask, yes_order_min, yes_order_max) {
         let max_sell = yes_residual as u64;
         let desired = shares_to_qty_units(sell_size / yes_ask);
-        ordinary.push(OrderSpec::SellYes {
+        inventory.push(OrderSpec::SellYes {
             market_id: input.market_id,
             limit_price_nanos: (yes_ask * NANOS_PER_DOLLAR as f64) as u64,
             quantity: desired.min(max_sell),
@@ -138,7 +141,7 @@ fn generate_market_quotes(input: &QuoteInput, config: &QuoteConfig) -> MarketQuo
     if no_buy_cap > 0 && price_in_band(no_bid, no_order_min, no_order_max) {
         let quantity = shares_to_qty_units(buy_size / no_bid).min(no_buy_cap);
         if quantity > 0 {
-            ordinary.push(OrderSpec::BuyNo {
+            baseline.push(OrderSpec::BuyNo {
                 market_id: input.market_id,
                 limit_price_nanos: (no_bid * NANOS_PER_DOLLAR as f64) as u64,
                 quantity,
@@ -149,7 +152,7 @@ fn generate_market_quotes(input: &QuoteInput, config: &QuoteConfig) -> MarketQuo
     if no_residual > 0 && price_in_band(no_ask, no_order_min, no_order_max) {
         let max_sell = no_residual as u64;
         let desired = shares_to_qty_units(sell_size / no_ask);
-        ordinary.push(OrderSpec::SellNo {
+        inventory.push(OrderSpec::SellNo {
             market_id: input.market_id,
             limit_price_nanos: (no_ask * NANOS_PER_DOLLAR as f64) as u64,
             quantity: desired.min(max_sell),
@@ -180,7 +183,8 @@ fn generate_market_quotes(input: &QuoteInput, config: &QuoteConfig) -> MarketQuo
     });
 
     MarketQuotes {
-        ordinary,
+        baseline,
+        inventory,
         compaction,
     }
 }
@@ -189,11 +193,12 @@ fn price_in_band(price: f64, min: f64, max: f64) -> bool {
     price > 0.01 && price < 0.99 && price >= min && price <= max
 }
 
-/// Select a bounded, rotating slice of quotes for one block.
+/// Select a bounded, rotating quote batch for one block.
 ///
-/// The default cap fits the current full catalog. Rotation remains the
-/// deterministic overflow behavior when an operator lowers the cap or the
-/// catalog grows beyond it.
+/// Cash-backed baseline quotes are selected for the whole eligible catalog
+/// before complete-set compaction and extra inventory depth consume spare
+/// capacity. Rotation remains deterministic overflow behavior when even the
+/// baseline cannot fit or when optional work exceeds the remaining capacity.
 pub fn select_rotating_quotes(
     quote_inputs: &[QuoteInput],
     quote_config: &QuoteConfig,
@@ -207,13 +212,17 @@ pub fn select_rotating_quotes(
     let start = start_index % quote_inputs.len();
     let mut orders = Vec::new();
     let mut group_quotes = HashMap::<String, GroupQuoteState>::new();
-    let mut considered = 0;
+    let generated: Vec<_> = quote_inputs
+        .iter()
+        .map(|input| generate_market_quotes(input, quote_config))
+        .collect();
 
+    // Baseline pass: protect catalog-wide liquidity from accumulated
+    // inventory and compaction work.
     for offset in 0..quote_inputs.len() {
         let idx = (start + offset) % quote_inputs.len();
         let input = &quote_inputs[idx];
-        let generated = generate_market_quotes(input, quote_config);
-        let mut market_orders = generated.ordinary;
+        let mut market_orders = generated[idx].baseline.clone();
         if input.group_key.is_some() {
             market_orders.sort_by_key(|order| match order {
                 OrderSpec::BuyNo { .. } => 0,
@@ -221,21 +230,10 @@ pub fn select_rotating_quotes(
                 _ => 2,
             });
         }
-        considered = offset + 1;
-
-        if market_orders.is_empty() && generated.compaction.is_none() {
-            continue;
-        }
-
-        if let Some(compaction) = generated.compaction
-            && orders.len().saturating_add(compaction.len()) <= max_orders
-        {
-            orders.extend(compaction);
-        }
 
         for order in market_orders {
             if orders.len() >= max_orders {
-                break;
+                return (orders, idx);
             }
             if would_self_cross_group(input, &order, &group_quotes) {
                 continue;
@@ -243,14 +241,35 @@ pub fn select_rotating_quotes(
             record_group_quote(input, &order, &mut group_quotes);
             orders.push(order);
         }
+    }
 
-        if orders.len() >= max_orders {
-            break;
+    // Compaction pass: complete sets are always selected as an atomic pair.
+    for offset in 0..quote_inputs.len() {
+        let idx = (start + offset) % quote_inputs.len();
+        let Some(compaction) = generated[idx].compaction.clone() else {
+            continue;
+        };
+        if orders.len().saturating_add(compaction.len()) > max_orders {
+            return (orders, idx);
+        }
+        orders.extend(compaction);
+    }
+
+    // Inventory pass: residual sells add depth only after every baseline quote
+    // and every collateral-releasing compaction pair that fits.
+    for offset in 0..quote_inputs.len() {
+        let idx = (start + offset) % quote_inputs.len();
+        let input = &quote_inputs[idx];
+        for order in generated[idx].inventory.iter().cloned() {
+            if orders.len() >= max_orders {
+                return (orders, idx);
+            }
+            record_group_quote(input, &order, &mut group_quotes);
+            orders.push(order);
         }
     }
 
-    let next_index = (start + considered.max(1)) % quote_inputs.len();
-    (orders, next_index)
+    (orders, start)
 }
 
 #[derive(Clone, Default)]

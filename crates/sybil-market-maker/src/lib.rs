@@ -888,7 +888,12 @@ impl MmActor {
             self.config.mm_max_orders_per_block,
         );
         self.state.next_quote_index = next_quote_index;
-        let capacity_limited = !quote_inputs.is_empty() && next_quote_index != start_index;
+        let quoted_markets = orders
+            .iter()
+            .map(order_market_id)
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        let capacity_limited = quoted_markets < quote_inputs.len();
         self.record_quote_selection(quote_inputs.len(), &orders, capacity_limited);
         if capacity_limited {
             warn!(
@@ -1745,6 +1750,41 @@ mod tests {
 
         assert_eq!(orders.len(), 412);
         assert_eq!(next_index, 0);
+    }
+
+    #[test]
+    fn accumulated_inventory_cannot_displace_catalog_baseline_quotes() {
+        let runtime_config = MmConfig::default();
+        let quote_config = default_config();
+        let inputs: Vec<_> = (1..=206)
+            .map(|market_id| {
+                let mut input = default_input(0.5);
+                input.market_id = market_id;
+                input.yes_position = q(100);
+                input.no_position = q(100);
+                input
+            })
+            .collect();
+
+        let (orders, next_index) = select_rotating_quotes(
+            &inputs,
+            &quote_config,
+            0,
+            runtime_config.mm_max_orders_per_block,
+        );
+
+        for market_id in 1..=206 {
+            assert!(orders.iter().any(|order| matches!(
+                order,
+                OrderSpec::BuyYes { market_id: id, .. } if *id == market_id
+            )));
+            assert!(orders.iter().any(|order| matches!(
+                order,
+                OrderSpec::BuyNo { market_id: id, .. } if *id == market_id
+            )));
+        }
+        assert_eq!(orders.len(), runtime_config.mm_max_orders_per_block);
+        assert_eq!(next_index, 50);
     }
 
     #[test]
