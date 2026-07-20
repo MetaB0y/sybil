@@ -781,15 +781,19 @@ SEED_BIN="${SYBIL_SMOKE_SEED_BIN:-}"
 setup_seed_book() {
     if [[ -n "$SEED_BIN" && -x "$SEED_BIN" ]]; then return; fi
     local prebuilt="$REPO_ROOT/target/debug/examples/seed_book"
-    if [[ -x "$prebuilt" ]]; then SEED_BIN="$prebuilt"; return; fi
     if ! command -v cargo >/dev/null 2>&1 \
        || [[ ! -f "$REPO_ROOT/crates/sybil-client/examples/seed_book.rs" ]]; then
-        SEED_BIN=""; return
+        if [[ -x "$prebuilt" ]]; then
+            SEED_BIN="$prebuilt"
+        else
+            SEED_BIN=""
+        fi
+        return
     fi
-    info "building seed_book deterministic seeder (cargo)..."
+    info "ensuring seed_book deterministic seeder matches this checkout (cargo)..."
     if cargo build -q --manifest-path "$REPO_ROOT/Cargo.toml" \
         -p sybil-client --example seed_book 2>"$TMP/seed-build.log"; then
-        SEED_BIN="$REPO_ROOT/target/debug/examples/seed_book"
+        SEED_BIN="$prebuilt"
     else
         SEED_BIN=""
         sed 's/^/       /' "$TMP/seed-build.log" | tail -10
