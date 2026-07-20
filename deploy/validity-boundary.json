@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fingerprint": "sha256:2d94779ef560e32084a1043b4939a69d242e5ac70f36f18f240e52405ed4891f",
+  "fingerprint": "sha256:9fb0c12b5a361d9f11e1ed2ea88a2a768a1e03db3d54f77b5d89be49d18d7db7",
   "inputs": {
     "commonware_packages": [
       {
@@ -74,13 +74,13 @@
     "guests": {
       "state_transition": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "9cc66fb050a831a1a338e45ab759eeec9b471e6b2827b25d26671bddf07c4b44",
+        "source_sha256": "8c9dd78a7062264618470ea0a4936d9bd625a9458563a4bbcb151259eecab581",
         "app_exe_commit": "0x00837ae158d26c9265be2096f50d2864efb51225c116ddcee794dc8294d45369",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       },
       "escape_claim": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "c18ad39cc7a2a462256c632707c626c540fba402c6f5879aa75c07b0db946ce5",
+        "source_sha256": "1ced6574e9423d720b245938427262e5c1651dc30966c2f717829140e04cb8b5",
         "app_exe_commit": "0x00026aa313d5f7c0158118be7a9ed89883625bb6b9622f0976377c0ae9173351",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       }
@@ -98,7 +98,7 @@
   },
   "decision": {
     "action": "fresh_genesis",
-    "reason": "Witness v12 canonical market-group identity; rebuilt main and escape guest commitments from the final source tree",
+    "reason": "Witness v12 market-group identity plus final MM settlement source; rebuilt both guests from the post-rebase tree",
     "reference": "docs/runbooks/fresh-genesis-redeploy.md"
   }
 }
