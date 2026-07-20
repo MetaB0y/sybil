@@ -269,6 +269,14 @@ async fn replace_snapshot(
     db.commit()
         .await
         .map_err(|error| StoreError::Qmdb(format!("failed to commit qmdb batch: {error}")))?;
+    // This database is a fenced current-state snapshot, not a historical
+    // operation archive. Once the new snapshot is durable, discard operations
+    // below qMDB's safe boundary. The active A/B keyspace and root are
+    // unchanged, while old journal sections can be reclaimed.
+    let prune_to = db.sync_boundary();
+    db.prune(prune_to)
+        .await
+        .map_err(|error| StoreError::Qmdb(format!("failed to prune qmdb history: {error}")))?;
     Ok(())
 }
 
@@ -380,4 +388,72 @@ fn decode_u64(value: &[u8], label: &str) -> Result<u64, StoreError> {
     let mut raw = [0u8; 8];
     raw.copy_from_slice(value);
     Ok(u64::from_le_bytes(raw))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use super::*;
+
+    static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_dir(prefix: &str) -> PathBuf {
+        let unique = NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("sybil-{prefix}-{}-{unique}", std::process::id()))
+    }
+
+    fn data_blob_count(path: &Path) -> usize {
+        fs::read_dir(path.join("accounts-log_data"))
+            .expect("account qMDB data directory should exist")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+            .count()
+    }
+
+    #[tokio::test]
+    async fn account_snapshot_journal_stays_bounded_and_both_slots_recover() {
+        let path = temp_dir("qmdb-account-pruning");
+        let qmdb = QmdbAccounts::open(&path).unwrap();
+        let mut accounts = AccountStore::new();
+        for _ in 0..38 {
+            accounts.create_account(1_000_000_000);
+        }
+
+        for height in 1..=400 {
+            for (_, account) in accounts.iter_mut() {
+                account.balance = account.balance.saturating_add(1);
+                account.events_digest[0] = height as u8;
+            }
+            qmdb.persist(
+                if height % 2 == 0 {
+                    AccountSnapshotSlot::A
+                } else {
+                    AccountSnapshotSlot::B
+                },
+                &accounts,
+                height,
+                accounts.next_id(),
+            )
+            .await
+            .unwrap();
+        }
+
+        // Without pruning, this workload creates roughly fifteen 1,024-item
+        // journal sections. qMDB retains only the small tail required by its
+        // current-state grafting boundary.
+        assert!(
+            data_blob_count(&path) <= 3,
+            "account snapshot operation journal retained too many data sections"
+        );
+
+        for (slot, height) in [(AccountSnapshotSlot::A, 400), (AccountSnapshotSlot::B, 399)] {
+            let loaded = qmdb.load(slot).await.unwrap();
+            assert_eq!(loaded.height, Some(height));
+            assert_eq!(loaded.next_account_id, Some(accounts.next_id()));
+            assert_eq!(loaded.accounts.len(), accounts.iter().count());
+        }
+    }
 }

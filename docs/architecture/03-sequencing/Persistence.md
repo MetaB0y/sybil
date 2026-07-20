@@ -2,7 +2,7 @@
 tags: [infrastructure, storage]
 layer: sequencer
 status: current
-last_verified: 2026-07-16
+last_verified: 2026-07-20
 ---
 
 # Persistence
@@ -98,6 +98,14 @@ Authoritative state needed to resume the exchange after a crash:
 
 The account snapshot and typed-state tree both use logical qmdb slots `A` and
 `B`. Only one slot is committed at a time; redb records which one.
+
+Both qMDB roles retain current fenced state rather than an implicit
+chain-history archive. Typed-state slots rebuild into a new generation and
+delete the previous generation on every reuse. The shared account-snapshot
+qMDB prunes its historical operation journal to qMDB's safe boundary after
+each snapshot commit; pruning preserves the current A/B keyspace and root.
+Historical state/proof retention requires an explicit policy and must not
+emerge accidentally from an unbounded current-state journal.
 
 ## Tier 2: Order State
 
