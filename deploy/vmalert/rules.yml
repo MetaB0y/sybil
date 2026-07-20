@@ -165,7 +165,94 @@ groups:
           component: native-mm
         annotations:
           summary: "Native market-maker quote loop is not ready"
-          description: "The native MM has had no markets or no completed quote cycle within its health window for 2m. Inspect tracked markets, last progress, and submission failures."
+          description: "The native MM has failed its full operating contract for 2m: fresh progress, eligible markets, quote coverage, normal risk mode, and recent accepted submissions are all required. Follow the MM liveness runbook."
+
+      - alert: NativeMarketMakerNoQuotes
+        expr: |
+          sybil_native_mm_eligible_quote_markets > 0
+          and
+          sybil_native_mm_quoted_markets == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: native-mm
+        annotations:
+          summary: "Native MM is eligible but submitting no quotes"
+          description: "The native MM has eligible markets but its selected quote set has covered zero markets for 1m. Check risk mode, position sync, and quote-generation diagnostics."
+
+      - alert: NativeMarketMakerCoverageLow
+        expr: |
+          sybil_native_mm_eligible_quote_markets > 0
+          and
+          (
+            sybil_native_mm_quoted_markets
+            / clamp_min(sybil_native_mm_eligible_quote_markets, 1)
+          ) < 0.95
+        for: 3m
+        labels:
+          severity: warning
+          component: native-mm
+        annotations:
+          summary: "Native MM quote coverage is below 95%"
+          description: "Fewer than 95% of eligible native markets have a quote. Compare eligible, quoted, two-sided, and order-cap metrics."
+
+      - alert: NativeMarketMakerTwoSidedCoverageLow
+        expr: |
+          sybil_native_mm_eligible_quote_markets > 0
+          and
+          (
+            sybil_native_mm_two_sided_quote_markets
+            / clamp_min(sybil_native_mm_eligible_quote_markets, 1)
+          ) < 0.95
+          and on(job, instance)
+          sybil_native_mm_mode{mode="normal"} == 1
+        for: 3m
+        labels:
+          severity: warning
+          component: native-mm
+        annotations:
+          summary: "Native MM two-sided coverage is below 95%"
+          description: "The native MM is in normal mode, but fewer than 95% of eligible markets have both YES and NO cash-backed quotes. Check per-market position caps and generated order capacity."
+
+      - alert: NativeMarketMakerSubmissionStalled
+        expr: |
+          sybil_native_mm_submission_lag_blocks > 2
+          or
+          (
+            sybil_native_mm_last_submission_attempt_block
+            unless
+            sybil_native_mm_last_successful_submission_block
+          )
+        for: 2m
+        labels:
+          severity: critical
+          component: native-mm
+        annotations:
+          summary: "Native MM quote bundles are not being accepted"
+          description: "The native MM is attempting non-empty bundles but has no accepted submission within two observed blocks. Inspect structured API rejection logs and submission failure counters."
+
+      - alert: NativeMarketMakerReduceOnly
+        expr: sybil_native_mm_mode{mode="reduce_only"} == 1
+        for: 5m
+        labels:
+          severity: warning
+          component: native-mm
+        annotations:
+          summary: "Native MM remains in reduce-only mode"
+          description: "Directional exposure has remained above the configured cap for 5m. The MM is still unwinding, but is not providing normal two-sided liquidity."
+
+      - alert: NativeMarketMakerPairedInventoryStuck
+        expr: |
+          min_over_time(sybil_native_mm_paired_position_units[15m]) > 1000000
+          and
+          delta(sybil_native_mm_paired_position_units[15m]) >= 0
+        for: 5m
+        labels:
+          severity: warning
+          component: native-mm
+        annotations:
+          summary: "Native MM complete-set inventory is not draining"
+          description: "More than 1,000 redeemable YES+NO shares have persisted without a net decrease over 15m. Check compaction orders, MM budget admission, and settlement."
 
       - alert: NativeMarketMakerQuoteCapacityLimited
         expr: sybil_native_mm_quote_capacity_limited == 1
@@ -194,8 +281,95 @@ groups:
           severity: critical
           component: polymarket
         annotations:
-          summary: "Polymarket integration actor progress is stale"
-          description: "At least one required Polymarket sync, feed, MM, or enabled resolution actor has not produced successful progress inside its cadence-derived health window for 2m."
+          summary: "Polymarket integration is not ready"
+          description: "At least one required sync, feed, MM, or resolution invariant has failed for 2m. MM readiness includes quote coverage, normal risk mode, and accepted-submission freshness."
+
+      - alert: PolymarketMarketMakerNoQuotes
+        expr: |
+          sybil_polymarket_mm_eligible_quote_markets > 0
+          and
+          sybil_polymarket_mm_quoted_markets == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: polymarket
+        annotations:
+          summary: "Polymarket MM is eligible but submitting no quotes"
+          description: "The mirror MM has eligible markets but its selected quote set has covered zero markets for 1m. Check feed eligibility, risk mode, position sync, and quote generation."
+
+      - alert: PolymarketMarketMakerCoverageLow
+        expr: |
+          sybil_polymarket_mm_eligible_quote_markets > 0
+          and
+          (
+            sybil_polymarket_mm_quoted_markets
+            / clamp_min(sybil_polymarket_mm_eligible_quote_markets, 1)
+          ) < 0.95
+        for: 3m
+        labels:
+          severity: warning
+          component: polymarket
+        annotations:
+          summary: "Polymarket MM quote coverage is below 95%"
+          description: "Fewer than 95% of eligible mirrored markets have a quote. Compare tracked, eligibility-reason, quoted, and order-cap metrics."
+
+      - alert: PolymarketMarketMakerTwoSidedCoverageLow
+        expr: |
+          sybil_polymarket_mm_eligible_quote_markets > 0
+          and
+          (
+            sybil_polymarket_mm_two_sided_quote_markets
+            / clamp_min(sybil_polymarket_mm_eligible_quote_markets, 1)
+          ) < 0.95
+          and on(job, instance)
+          sybil_polymarket_mm_mode{mode="normal"} == 1
+        for: 3m
+        labels:
+          severity: warning
+          component: polymarket
+        annotations:
+          summary: "Polymarket MM two-sided coverage is below 95%"
+          description: "The mirror MM is in normal mode, but fewer than 95% of eligible markets have both YES and NO cash-backed quotes. Check position caps and order capacity."
+
+      - alert: PolymarketMarketMakerSubmissionStalled
+        expr: |
+          sybil_polymarket_mm_submission_lag_blocks > 2
+          or
+          (
+            sybil_polymarket_mm_last_submission_attempt_block
+            unless
+            sybil_polymarket_mm_last_successful_submission_block
+          )
+        for: 2m
+        labels:
+          severity: critical
+          component: polymarket
+        annotations:
+          summary: "Polymarket MM quote bundles are not being accepted"
+          description: "The mirror MM is attempting non-empty bundles but has no accepted submission within two observed blocks. Inspect structured API rejection logs and submission failure counters."
+
+      - alert: PolymarketMarketMakerReduceOnly
+        expr: sybil_polymarket_mm_mode{mode="reduce_only"} == 1
+        for: 5m
+        labels:
+          severity: warning
+          component: polymarket
+        annotations:
+          summary: "Polymarket MM remains in reduce-only mode"
+          description: "Directional exposure has remained above the configured cap for 5m. The MM is still unwinding, but is not providing normal two-sided liquidity."
+
+      - alert: PolymarketMarketMakerPairedInventoryStuck
+        expr: |
+          min_over_time(sybil_polymarket_mm_paired_position_units[15m]) > 1000000
+          and
+          delta(sybil_polymarket_mm_paired_position_units[15m]) >= 0
+        for: 5m
+        labels:
+          severity: warning
+          component: polymarket
+        annotations:
+          summary: "Polymarket MM complete-set inventory is not draining"
+          description: "More than 1,000 redeemable YES+NO shares have persisted without a net decrease over 15m. Check compaction orders, MM budget admission, and settlement."
 
       - alert: PolymarketMarketMakerQuoteCapacityLimited
         expr: sybil_polymarket_mm_quote_capacity_limited == 1

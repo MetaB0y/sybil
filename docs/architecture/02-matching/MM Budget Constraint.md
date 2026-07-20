@@ -2,7 +2,7 @@
 tags: [concept, economics]
 layer: solver
 status: current
-last_verified: 2026-07-13
+last_verified: 2026-07-20
 ---
 
 An explicit market-maker budget is the source of non-convexity in the original
@@ -25,6 +25,22 @@ oracle. [[LP Solver|LP-SLP]] remains a one-pass budget-linearization baseline;
 for the same convex objective; [[Conic Solver|Conic]] is an independent exponential-cone reference;
 [[MILP Solver|MILP]] attacks the original bilinear model on small instances;
 [[Decomposed Solver|decomposition]] coordinates a spanning MM across components.
+
+## Runtime actor policy
+
+The off-chain shared MM actor submits its configured flash-liquidity budget
+unchanged on every non-empty live block. A separate directional-exposure cap
+switches quote generation to risk-reducing orders; it never shrinks the budget
+to zero. Matched YES+NO inventory is a redeemable complete set, not directional
+exposure. The actor submits atomic paired sells whose limits sum to one dollar
+minus one nano so settlement burns the pair and returns collateral. Baseline
+cash-backed quotes are selected across the eligible catalog before compaction
+or extra inventory orders consume the remaining order capacity.
+
+Owner-process readiness requires fresh quote progress, nonzero eligibility,
+full selected-market coverage, normal-mode two-sided coverage, and an accepted
+submission within two observed blocks. See
+[`market-maker-liveness.md`](../../runbooks/market-maker-liveness.md).
 
 ## Key Properties
 - In YES-price coordinates: BuyYes/SellNo = `p_yes * qty_units / SHARE_SCALE`, SellYes/BuyNo = `(1 - p_yes) * qty_units / SHARE_SCALE`; the engine API instead receives each order's actual outcome fill price

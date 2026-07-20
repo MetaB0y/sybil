@@ -902,16 +902,80 @@
       }
     },
     {
+      "title": "Native MM Quote Coverage",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 151 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "sybil_native_mm_tracked_markets", "legendFormat": "tracked", "refId": "A" },
+        { "expr": "sybil_native_mm_eligible_quote_markets", "legendFormat": "eligible", "refId": "B" },
+        { "expr": "sybil_native_mm_quoted_markets", "legendFormat": "quoted", "refId": "C" },
+        { "expr": "sybil_native_mm_two_sided_quote_markets", "legendFormat": "two-sided", "refId": "D" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 12 } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Native MM Inventory & Redemption",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 151 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "sybil_native_mm_paired_position_units / 1000", "legendFormat": "paired inventory", "refId": "A" },
+        { "expr": "sybil_native_mm_directional_position_units / 1000", "legendFormat": "directional inventory", "refId": "B" },
+        { "expr": "sybil_native_mm_compaction_quantity_units / 1000", "legendFormat": "redemption submitted", "refId": "C" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 12 } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Native MM Account Value",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 159 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "sybil_native_mm_balance_nanos / 1e9", "legendFormat": "cash", "refId": "A" },
+        { "expr": "sybil_native_mm_conservative_floor_nanos / 1e9", "legendFormat": "cash + complete sets", "refId": "B" },
+        { "expr": "sybil_native_mm_portfolio_value_nanos / 1e9", "legendFormat": "marked portfolio", "refId": "C" },
+        { "expr": "sybil_native_mm_total_deposited_nanos / 1e9", "legendFormat": "deposited", "refId": "D" },
+        { "expr": "sybil_native_mm_pnl_nanos / 1e9", "legendFormat": "PnL", "refId": "E" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "currencyUSD", "custom": { "drawStyle": "line", "fillOpacity": 8 } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Native MM Diagnostics",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 159 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "sybil_native_mm_submission_lag_blocks", "legendFormat": "submission lag (blocks)", "refId": "A" },
+        { "expr": "sybil_native_mm_ineligible_markets", "legendFormat": "ineligible: {{reason}}", "refId": "B" },
+        { "expr": "sybil_native_mm_quote_capacity_limited", "legendFormat": "capacity limited", "refId": "C" },
+        { "expr": "sybil_native_mm_mode{mode=\"reduce_only\"}", "legendFormat": "reduce only", "refId": "D" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 12 } },
+        "overrides": []
+      }
+    },
+    {
       "title": "Polymarket Integration",
       "type": "row",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 151 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 167 },
       "collapsed": false,
       "panels": []
     },
     {
       "title": "Polymarket Ready",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 152 },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 168 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [{ "expr": "sybil_polymarket_ready", "refId": "A" }],
       "fieldConfig": {
@@ -925,7 +989,7 @@
     {
       "title": "Polymarket Feed Tokens",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 152 },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 168 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [{ "expr": "sybil_polymarket_feed_tracked_tokens", "refId": "A" }],
       "fieldConfig": {
@@ -936,7 +1000,7 @@
     {
       "title": "Polymarket MM Markets",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 152 },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 168 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [{ "expr": "sybil_polymarket_mm_tracked_markets", "refId": "A" }],
       "fieldConfig": {
@@ -947,7 +1011,7 @@
     {
       "title": "Polymarket MM Failures",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 152 },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 168 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [{ "expr": "sybil_polymarket_mm_submissions_failed_total", "refId": "A" }],
       "fieldConfig": {
@@ -961,7 +1025,7 @@
     {
       "title": "Polymarket Actor Progress",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 156 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 172 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [
         { "expr": "time() - sybil_polymarket_sync_cycles_last_success_timestamp_seconds", "legendFormat": "sync age", "refId": "A" },
@@ -977,7 +1041,7 @@
     {
       "title": "Polymarket Actor Failures",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 156 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 172 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [
         { "expr": "rate(sybil_polymarket_sync_cycles_failed_total[5m])", "legendFormat": "sync", "refId": "A" },
@@ -991,16 +1055,80 @@
       }
     },
     {
+      "title": "Polymarket MM Quote Coverage",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 180 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "sybil_polymarket_mm_tracked_markets", "legendFormat": "tracked", "refId": "A" },
+        { "expr": "sybil_polymarket_mm_eligible_quote_markets", "legendFormat": "eligible", "refId": "B" },
+        { "expr": "sybil_polymarket_mm_quoted_markets", "legendFormat": "quoted", "refId": "C" },
+        { "expr": "sybil_polymarket_mm_two_sided_quote_markets", "legendFormat": "two-sided", "refId": "D" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 12 } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Polymarket MM Inventory & Redemption",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 180 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "sybil_polymarket_mm_paired_position_units / 1000", "legendFormat": "paired inventory", "refId": "A" },
+        { "expr": "sybil_polymarket_mm_directional_position_units / 1000", "legendFormat": "directional inventory", "refId": "B" },
+        { "expr": "sybil_polymarket_mm_compaction_quantity_units / 1000", "legendFormat": "redemption submitted", "refId": "C" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 12 } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Polymarket MM Account Value",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 188 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "sybil_polymarket_mm_balance_nanos / 1e9", "legendFormat": "cash", "refId": "A" },
+        { "expr": "sybil_polymarket_mm_conservative_floor_nanos / 1e9", "legendFormat": "cash + complete sets", "refId": "B" },
+        { "expr": "sybil_polymarket_mm_portfolio_value_nanos / 1e9", "legendFormat": "marked portfolio", "refId": "C" },
+        { "expr": "sybil_polymarket_mm_total_deposited_nanos / 1e9", "legendFormat": "deposited", "refId": "D" },
+        { "expr": "sybil_polymarket_mm_pnl_nanos / 1e9", "legendFormat": "PnL", "refId": "E" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "currencyUSD", "custom": { "drawStyle": "line", "fillOpacity": 8 } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Polymarket MM Diagnostics",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 188 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "sybil_polymarket_mm_submission_lag_blocks", "legendFormat": "submission lag (blocks)", "refId": "A" },
+        { "expr": "sybil_polymarket_mm_ineligible_markets", "legendFormat": "ineligible: {{reason}}", "refId": "B" },
+        { "expr": "sybil_polymarket_mm_quote_capacity_limited", "legendFormat": "capacity limited", "refId": "C" },
+        { "expr": "sybil_polymarket_mm_mode{mode=\"reduce_only\"}", "legendFormat": "reduce only", "refId": "D" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 12 } },
+        "overrides": []
+      }
+    },
+    {
       "title": "Arena LLM Provider",
       "type": "row",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 164 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 196 },
       "collapsed": false,
       "panels": []
     },
     {
       "title": "LLM Callers Degraded",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 165 },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 197 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [{
         "expr": "sum(sybil_arena_llm_provider_degraded)",
@@ -1018,7 +1146,7 @@
     {
       "title": "LLM Provider Last-Success Age",
       "type": "timeseries",
-      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 165 },
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 197 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [{
         "expr": "time() - sybil_arena_llm_provider_last_success_timestamp_seconds > 0",
@@ -1033,7 +1161,7 @@
     {
       "title": "LLM Provider Failures",
       "type": "timeseries",
-      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 165 },
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 197 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [{
         "expr": "sum by (component, kind) (increase(sybil_arena_llm_provider_failures_total[10m]))",
@@ -1048,7 +1176,7 @@
     {
       "title": "Arena Orders Suppressed Before Submission",
       "type": "timeseries",
-      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 169 },
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 201 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [{
         "expr": "sum by (reason) (increase(sybil_arena_orders_suppressed_total[10m]))",

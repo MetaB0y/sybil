@@ -1,0 +1,46 @@
+# Prometheus-compatible tests for mirrored market-maker quote health.
+
+rule_files:
+  - ../rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: eligible Polymarket MM with no quotes pages
+    interval: 1m
+    input_series:
+      - series: 'sybil_polymarket_mm_eligible_quote_markets{job="sybil-polymarket",instance="sybil-polymarket:9105"}'
+        values: "10+0x4"
+      - series: 'sybil_polymarket_mm_quoted_markets{job="sybil-polymarket",instance="sybil-polymarket:9105"}'
+        values: "0+0x4"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: PolymarketMarketMakerNoQuotes
+        exp_alerts:
+          - exp_labels:
+              job: sybil-polymarket
+              instance: "sybil-polymarket:9105"
+              severity: critical
+              component: polymarket
+            exp_annotations:
+              summary: "Polymarket MM is eligible but submitting no quotes"
+              description: "The mirror MM has eligible markets but its selected quote set has covered zero markets for 1m. Check feed eligibility, risk mode, position sync, and quote generation."
+
+  - name: Polymarket MM reduce-only mode warns
+    interval: 1m
+    input_series:
+      - series: 'sybil_polymarket_mm_mode{job="sybil-polymarket",instance="sybil-polymarket:9105",mode="reduce_only"}'
+        values: "1+0x8"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: PolymarketMarketMakerReduceOnly
+        exp_alerts:
+          - exp_labels:
+              job: sybil-polymarket
+              instance: "sybil-polymarket:9105"
+              mode: reduce_only
+              severity: warning
+              component: polymarket
+            exp_annotations:
+              summary: "Polymarket MM remains in reduce-only mode"
+              description: "Directional exposure has remained above the configured cap for 5m. The MM is still unwinding, but is not providing normal two-sided liquidity."

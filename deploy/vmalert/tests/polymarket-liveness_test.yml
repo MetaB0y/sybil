@@ -47,5 +47,5 @@ tests:
               severity: critical
               component: polymarket
             exp_annotations:
-              summary: "Polymarket integration actor progress is stale"
-              description: "At least one required Polymarket sync, feed, MM, or enabled resolution actor has not produced successful progress inside its cadence-derived health window for 2m."
+              summary: "Polymarket integration is not ready"
+              description: "At least one required sync, feed, MM, or resolution invariant has failed for 2m. MM readiness includes quote coverage, normal risk mode, and accepted-submission freshness."
