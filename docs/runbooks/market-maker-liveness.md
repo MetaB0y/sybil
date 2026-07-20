@@ -63,8 +63,9 @@ Grafana. Negative PnL alone is not an incident in prelaunch.
      directional inventory is falling. Do not raise the cap merely to clear
      the alert without understanding the accumulated position.
    - **Paired inventory stuck:** compaction quantity should be nonzero while
-     paired inventory falls. If it does not, inspect MM budget admission and
-     settlement; paired YES+NO is collateral, not directional exposure.
+     paired inventory falls. If it does not, inspect compaction failures,
+     ordinary IOC admission, and settlement; paired YES+NO is collateral, not
+     directional exposure and redemption does not use the MM quote budget.
 
 4. Correlate actual market activity separately. If trader submissions are
    present but fills remain zero, `LiveTradingNoFills` identifies a matching or

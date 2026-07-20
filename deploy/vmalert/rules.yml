@@ -252,7 +252,7 @@ groups:
           component: native-mm
         annotations:
           summary: "Native MM complete-set inventory is not draining"
-          description: "More than 1,000 redeemable YES+NO shares have persisted without a net decrease over 15m. Check compaction orders, MM budget admission, and settlement."
+          description: "More than 1,000 redeemable YES+NO shares have persisted without a net decrease over 15m. Check compaction submission failures, ordinary IOC admission, and settlement."
 
       - alert: NativeMarketMakerQuoteCapacityLimited
         expr: sybil_native_mm_quote_capacity_limited == 1
@@ -369,7 +369,7 @@ groups:
           component: polymarket
         annotations:
           summary: "Polymarket MM complete-set inventory is not draining"
-          description: "More than 1,000 redeemable YES+NO shares have persisted without a net decrease over 15m. Check compaction orders, MM budget admission, and settlement."
+          description: "More than 1,000 redeemable YES+NO shares have persisted without a net decrease over 15m. Check compaction submission failures, ordinary IOC admission, and settlement."
 
       - alert: PolymarketMarketMakerQuoteCapacityLimited
         expr: sybil_polymarket_mm_quote_capacity_limited == 1

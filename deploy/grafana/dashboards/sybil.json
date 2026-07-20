@@ -958,7 +958,8 @@
         { "expr": "sybil_native_mm_submission_lag_blocks", "legendFormat": "submission lag (blocks)", "refId": "A" },
         { "expr": "sybil_native_mm_ineligible_markets", "legendFormat": "ineligible: {{reason}}", "refId": "B" },
         { "expr": "sybil_native_mm_quote_capacity_limited", "legendFormat": "capacity limited", "refId": "C" },
-        { "expr": "sybil_native_mm_mode{mode=\"reduce_only\"}", "legendFormat": "reduce only", "refId": "D" }
+        { "expr": "sybil_native_mm_mode{mode=\"reduce_only\"}", "legendFormat": "reduce only", "refId": "D" },
+        { "expr": "rate(sybil_native_mm_compactions_failed_total[5m])", "legendFormat": "redemption failures", "refId": "E" }
       ],
       "fieldConfig": {
         "defaults": { "unit": "none", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 12 } },
@@ -1111,7 +1112,8 @@
         { "expr": "sybil_polymarket_mm_submission_lag_blocks", "legendFormat": "submission lag (blocks)", "refId": "A" },
         { "expr": "sybil_polymarket_mm_ineligible_markets", "legendFormat": "ineligible: {{reason}}", "refId": "B" },
         { "expr": "sybil_polymarket_mm_quote_capacity_limited", "legendFormat": "capacity limited", "refId": "C" },
-        { "expr": "sybil_polymarket_mm_mode{mode=\"reduce_only\"}", "legendFormat": "reduce only", "refId": "D" }
+        { "expr": "sybil_polymarket_mm_mode{mode=\"reduce_only\"}", "legendFormat": "reduce only", "refId": "D" },
+        { "expr": "rate(sybil_polymarket_mm_compactions_failed_total[5m])", "legendFormat": "redemption failures", "refId": "E" }
       ],
       "fieldConfig": {
         "defaults": { "unit": "none", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 12 } },

@@ -1139,6 +1139,59 @@ proptest! {
 // Property 6: complete-set mint/burn round trip
 // ---------------------------------------------------------------------------
 
+#[test]
+fn one_mm_account_can_redeem_its_complete_set_with_paired_sells() {
+    let markets = make_markets();
+    let market = MarketId::new(0);
+    let qty = shares_to_qty(100);
+    let face_value = oracle_notional(NANOS_PER_DOLLAR, qty.0).unwrap();
+    let initial_cash = 10 * NANOS_PER_DOLLAR as i64;
+    let mut accounts = AccountStore::new();
+    let mm = accounts.create_account(initial_cash);
+    let account = accounts.get_mut(mm).unwrap();
+    account.positions.insert((market, 0), qty.0 as i64);
+    account.positions.insert((market, 1), qty.0 as i64);
+    let mut seq = BlockSequencer::with_default_solver(
+        accounts,
+        markets.clone(),
+        vec![],
+        SequencerConfig {
+            min_resting_order_notional_nanos: 0,
+            ..SequencerConfig::default()
+        },
+    );
+
+    let yes_limit = 630_000_000;
+    let no_limit = NANOS_PER_DOLLAR - 100_000_000 - yes_limit;
+    let production = seq.produce_block(
+        vec![OrderSubmission {
+            account_id: mm,
+            orders: vec![
+                outcome_sell(&markets, 0, market, 0, yes_limit, qty.0),
+                outcome_sell(&markets, 1, market, 1, no_limit, qty.0),
+            ],
+            mm_constraint: None,
+        }],
+        1_000,
+    );
+
+    assert!(production.block.rejections.is_empty());
+    assert_eq!(production.witness.fills.len(), 2);
+    assert!(
+        production
+            .witness
+            .fills
+            .iter()
+            .all(|fill| fill.fill_qty == qty)
+    );
+    assert_eq!(production.witness.minting_cost, -face_value);
+    let account = seq.accounts.get(mm).unwrap();
+    assert_eq!(account.position(market, 0), 0);
+    assert_eq!(account.position(market, 1), 0);
+    assert_eq!(account.balance, initial_cash + face_value);
+    assert!(sybil_verifier::verify_full(&production.witness, false).valid);
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
 

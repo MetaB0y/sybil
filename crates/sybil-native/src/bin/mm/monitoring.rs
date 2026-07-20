@@ -37,11 +37,15 @@ struct ReadinessResponse {
     last_completed_quote_block: Option<u64>,
     last_submission_attempt_block: Option<u64>,
     last_successful_submission_block: Option<u64>,
+    last_compaction_attempt_block: Option<u64>,
+    last_successful_compaction_block: Option<u64>,
     submission_lag_blocks: Option<u64>,
     last_progress_timestamp_ms: u64,
     progress_age_ms: Option<u64>,
     successful_submissions: u64,
     failed_submissions: u64,
+    successful_compactions: u64,
+    failed_compactions: u64,
 }
 
 impl MonitoringState {
@@ -68,10 +72,16 @@ impl MonitoringState {
             "no_eligible_markets"
         } else if progress.last_quoted_markets == 0 {
             "no_quotes"
-        } else if progress.last_quoted_markets < progress.last_eligible_quote_markets {
+        } else if below_coverage_bar(
+            progress.last_quoted_markets,
+            progress.last_eligible_quote_markets,
+        ) {
             "partial_coverage"
         } else if progress.mode == MmMode::Normal
-            && progress.last_two_sided_quote_markets < progress.last_eligible_quote_markets
+            && below_coverage_bar(
+                progress.last_two_sided_quote_markets,
+                progress.last_eligible_quote_markets,
+            )
         {
             "partial_two_sided_coverage"
         } else if submission_is_stalled(&progress) {
@@ -100,11 +110,15 @@ impl MonitoringState {
             last_completed_quote_block: progress.last_completed_quote_block,
             last_submission_attempt_block: progress.last_submission_attempt_block,
             last_successful_submission_block: progress.last_successful_submission_block,
+            last_compaction_attempt_block: progress.last_compaction_attempt_block,
+            last_successful_compaction_block: progress.last_successful_compaction_block,
             submission_lag_blocks,
             last_progress_timestamp_ms: progress.last_progress_timestamp_ms,
             progress_age_ms,
             successful_submissions: progress.successful_submissions,
             failed_submissions: progress.failed_submissions,
+            successful_compactions: progress.successful_compactions,
+            failed_compactions: progress.failed_compactions,
         }
     }
 
@@ -158,7 +172,7 @@ impl MonitoringState {
         gauge(
             &mut out,
             "sybil_native_mm_compaction_markets",
-            "Markets with an atomic complete-set redemption pair in the latest native MM bundle.",
+            "Markets with a paired complete-set redemption request in the latest native MM cycle.",
             progress
                 .last_compaction_markets
                 .try_into()
@@ -167,7 +181,7 @@ impl MonitoringState {
         gauge(
             &mut out,
             "sybil_native_mm_compaction_quantity_units",
-            "Complete-set share-units submitted for redemption in the latest native MM bundle.",
+            "Complete-set share-units submitted for redemption in the latest native MM cycle.",
             progress.last_compaction_quantity_units,
         );
         reason_metrics(
@@ -200,6 +214,18 @@ impl MonitoringState {
             "sybil_native_mm_last_observed_block",
             "Latest live block observed by the MM actor.",
             progress.last_observed_block,
+        );
+        optional_gauge(
+            &mut out,
+            "sybil_native_mm_last_compaction_attempt_block",
+            "Latest block on which the native MM attempted complete-set redemption.",
+            progress.last_compaction_attempt_block,
+        );
+        optional_gauge(
+            &mut out,
+            "sybil_native_mm_last_successful_compaction_block",
+            "Latest block on which the API accepted native MM complete-set redemption.",
+            progress.last_successful_compaction_block,
         );
         optional_gauge(
             &mut out,
@@ -236,6 +262,18 @@ impl MonitoringState {
             "sybil_native_mm_submissions_success_total",
             "Native MM IOC bundles accepted by the API in this process.",
             progress.successful_submissions,
+        );
+        counter(
+            &mut out,
+            "sybil_native_mm_compactions_success_total",
+            "Native MM complete-set redemption bundles accepted by the API.",
+            progress.successful_compactions,
+        );
+        counter(
+            &mut out,
+            "sybil_native_mm_compactions_failed_total",
+            "Native MM complete-set redemption bundle submission failures.",
+            progress.failed_compactions,
         );
         counter(
             &mut out,
@@ -299,6 +337,10 @@ impl MonitoringState {
         );
         out
     }
+}
+
+fn below_coverage_bar(covered: usize, eligible: usize) -> bool {
+    covered.saturating_mul(100) < eligible.saturating_mul(95)
 }
 
 pub(super) async fn serve(
@@ -530,6 +572,7 @@ mod tests {
         assert!(metrics.contains("sybil_native_mm_submissions_failed_total 2"));
         assert!(metrics.contains("sybil_native_mm_mode{mode=\"normal\"} 1"));
         assert!(metrics.contains("sybil_native_mm_paired_position_units 0"));
+        assert!(metrics.contains("sybil_native_mm_compactions_failed_total 0"));
     }
 
     #[test]
@@ -568,6 +611,14 @@ mod tests {
         progress.last_two_sided_quote_markets = 3;
         state.progress = watch::channel(progress).1;
         assert_eq!(state.readiness_at(now).status, "partial_coverage");
+
+        let mut progress = healthy.clone();
+        progress.tracked_markets = 20;
+        progress.last_eligible_quote_markets = 20;
+        progress.last_quoted_markets = 19;
+        progress.last_two_sided_quote_markets = 19;
+        state.progress = watch::channel(progress).1;
+        assert_eq!(state.readiness_at(now).status, "ok");
 
         let mut progress = healthy;
         progress.last_observed_block = Some(24);

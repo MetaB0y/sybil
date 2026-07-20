@@ -10,7 +10,8 @@ use sybil_client::{PublicBlockStreamEvent, SybilClient};
 mod quotes;
 
 pub use quotes::{
-    QuoteConfig, QuoteInput, QuoteSelection, generate_quotes, select_rotating_quotes,
+    CompactionSelection, QuoteConfig, QuoteInput, QuoteSelection, generate_quotes,
+    select_rotating_compactions, select_rotating_quotes,
 };
 
 /// Reference-price update source, retained for provider diagnostics.
@@ -63,8 +64,12 @@ pub struct MmProgress {
     pub last_completed_quote_block: Option<u64>,
     pub last_submission_attempt_block: Option<u64>,
     pub last_successful_submission_block: Option<u64>,
+    pub last_compaction_attempt_block: Option<u64>,
+    pub last_successful_compaction_block: Option<u64>,
     pub successful_submissions: u64,
     pub failed_submissions: u64,
+    pub successful_compactions: u64,
+    pub failed_compactions: u64,
     pub last_progress_timestamp_ms: u64,
 }
 
@@ -431,6 +436,7 @@ struct MmState {
     markets: HashMap<u32, MarketState>,
     last_sync_block: u64,
     next_quote_index: usize,
+    next_compaction_index: usize,
     progress: MmProgress,
 }
 
@@ -440,6 +446,7 @@ impl MmState {
             markets: HashMap::new(),
             last_sync_block: 0,
             next_quote_index: 0,
+            next_compaction_index: 0,
             progress: MmProgress::default(),
         }
     }
@@ -507,14 +514,15 @@ impl MmActor {
         &mut self,
         eligible_markets: usize,
         selection: &QuoteSelection,
+        compaction: &CompactionSelection,
         capacity_limited: bool,
     ) {
         self.state.progress.last_eligible_quote_markets = eligible_markets;
         self.state.progress.last_quoted_markets = selection.quoted_markets;
         self.state.progress.last_two_sided_quote_markets = selection.two_sided_markets;
         self.state.progress.last_quote_orders = selection.orders.len();
-        self.state.progress.last_compaction_markets = selection.compaction_markets;
-        self.state.progress.last_compaction_quantity_units = selection.compaction_quantity_units;
+        self.state.progress.last_compaction_markets = compaction.markets;
+        self.state.progress.last_compaction_quantity_units = compaction.quantity_units;
         self.state.progress.quote_capacity_limited = capacity_limited;
         if capacity_limited {
             self.state.progress.capacity_limited_quote_cycles = self
@@ -880,11 +888,37 @@ impl MmActor {
         let staleness_ms = self.config.mm_staleness_ms;
         let mut ref_prices = HashMap::new();
         let mut quote_inputs = Vec::new();
+        let mut compaction_inputs = Vec::new();
         let mut missing_price_markets = 0usize;
         let mut stale_price_markets = 0usize;
         let mut out_of_band_markets = 0usize;
 
         for ms in self.state.markets.values_mut() {
+            let (compaction_mid, compaction_range) = match &ms.price_source {
+                PriceSource::Mirror { yes_token_id } => (
+                    snapshot
+                        .midpoints
+                        .get(yes_token_id)
+                        .copied()
+                        .unwrap_or_else(|| ms.budget_mid(&snapshot)),
+                    None,
+                ),
+                PriceSource::Native { quote_range, .. } => {
+                    (ms.budget_mid(&snapshot), Some(*quote_range))
+                }
+            };
+            compaction_inputs.push(QuoteInput {
+                market_id: ms.sybil_market_id,
+                mid: compaction_mid,
+                sigma_sq: ms.variance(),
+                net_inventory: ms.net_inventory(),
+                yes_position: ms.yes_position,
+                no_position: ms.no_position,
+                group_key: ms.group_key.clone(),
+                group_size: ms.group_size,
+                quote_range: compaction_range,
+            });
+
             let (mid, quote_range) = match &ms.price_source {
                 PriceSource::Mirror { yes_token_id } => {
                     let Some(&mid) = snapshot.midpoints.get(yes_token_id) else {
@@ -940,6 +974,7 @@ impl MmActor {
             });
         }
         quote_inputs.sort_by_key(|input| input.market_id);
+        compaction_inputs.sort_by_key(|input| input.market_id);
         self.state.progress.last_missing_price_markets = missing_price_markets;
         self.state.progress.last_stale_price_markets = stale_price_markets;
         self.state.progress.last_out_of_band_markets = out_of_band_markets;
@@ -964,9 +999,20 @@ impl MmActor {
             start_index,
             self.config.mm_max_orders_per_block,
         );
+        let compaction = select_rotating_compactions(
+            &compaction_inputs,
+            self.state.next_compaction_index,
+            self.config.mm_max_orders_per_block,
+        );
         self.state.next_quote_index = selection.next_index;
+        self.state.next_compaction_index = compaction.next_index;
         let capacity_limited = selection.quoted_markets < quote_inputs.len();
-        self.record_quote_selection(quote_inputs.len(), &selection, capacity_limited);
+        self.record_quote_selection(
+            quote_inputs.len(),
+            &selection,
+            &compaction,
+            capacity_limited,
+        );
         if capacity_limited {
             warn!(
                 eligible_markets = quote_inputs.len(),
@@ -977,18 +1023,44 @@ impl MmActor {
             );
         }
 
-        // 5. Submit (IO). A whole-batch rejection that names a non-tradeable
-        //    market lets us drop the poison defensively (PM-1 defence in depth)
-        //    even if we never saw its `MarketResolved` (e.g. missed block, or a
-        //    market that became untradeable for another reason).
+        // 5. Redeem complete sets outside the MM retained-cash constraint.
+        //    These are ordinary paired IOC sells backed by live YES+NO
+        //    holdings; a matched pair burns and returns face-value cash.
         if cancel.is_cancelled() {
             return;
         }
+        if !compaction.orders.is_empty() {
+            self.state.progress.last_compaction_attempt_block = Some(block.height);
+        }
+        match self
+            .submit_orders(&compaction.orders, None, block.height)
+            .await
+        {
+            SubmissionOutcome::Skipped => {}
+            SubmissionOutcome::Succeeded => {
+                self.state.progress.successful_compactions =
+                    self.state.progress.successful_compactions.saturating_add(1);
+                self.state.progress.last_successful_compaction_block = Some(block.height);
+            }
+            SubmissionOutcome::Failed { poisoned_market } => {
+                self.state.progress.failed_compactions =
+                    self.state.progress.failed_compactions.saturating_add(1);
+                if let Some(poisoned) = poisoned_market {
+                    self.untrack_market(poisoned, "compaction_rejected_untradeable");
+                }
+            }
+        }
+        if cancel.is_cancelled() {
+            return;
+        }
+
+        // 6. Submit the flash-liquidity quote bundle. A whole-batch rejection
+        //    naming a non-tradeable market lets us drop the poison defensively.
         if !selection.orders.is_empty() {
             self.state.progress.last_submission_attempt_block = Some(block.height);
         }
         match self
-            .submit_orders(&selection.orders, budget_nanos, block.height)
+            .submit_orders(&selection.orders, Some(budget_nanos), block.height)
             .await
         {
             SubmissionOutcome::Skipped => {}
@@ -1009,7 +1081,7 @@ impl MmActor {
             return;
         }
 
-        // 6. Push reference prices (IO)
+        // 7. Push reference prices (IO)
         if !ref_prices.is_empty() {
             let update_result = tokio::select! {
                 biased;
@@ -1045,7 +1117,7 @@ impl MmActor {
     async fn submit_orders(
         &self,
         orders: &[OrderSpec],
-        budget_nanos: u64,
+        mm_budget_nanos: Option<u64>,
         block_height: u64,
     ) -> SubmissionOutcome {
         if orders.is_empty() {
@@ -1056,7 +1128,7 @@ impl MmActor {
             orders: orders.to_vec(),
             time_in_force: TimeInForce::Ioc,
             expires_at_block: None,
-            mm_budget_nanos: Some(budget_nanos),
+            mm_budget_nanos,
         };
         match self.sybil_client.submit_orders(&req).await {
             Ok(order_ids) => {
@@ -1064,8 +1136,11 @@ impl MmActor {
                     block = block_height,
                     order_count = orders.len(),
                     order_ids = ?order_ids,
-                    budget_dollars = budget_nanos as f64 / NANOS_PER_DOLLAR as f64,
-                    "submitted MM orders"
+                    budget_dollars = mm_budget_nanos.map(|budget| {
+                        budget as f64 / NANOS_PER_DOLLAR as f64
+                    }),
+                    kind = if mm_budget_nanos.is_some() { "quote" } else { "compaction" },
+                    "submitted market-maker orders"
                 );
                 SubmissionOutcome::Succeeded
             }
@@ -1364,11 +1439,15 @@ mod tests {
             next_index: 0,
             quoted_markets: 2,
             two_sided_markets: 1,
-            compaction_markets: 0,
-            compaction_quantity_units: 0,
+        };
+        let compaction = CompactionSelection {
+            orders: vec![],
+            next_index: 0,
+            markets: 0,
+            quantity_units: 0,
         };
 
-        actor.record_quote_selection(5, &selection, true);
+        actor.record_quote_selection(5, &selection, &compaction, true);
         actor.publish_progress();
 
         let progress = progress_rx.borrow();
@@ -1644,7 +1723,7 @@ mod tests {
     }
 
     #[test]
-    fn paired_inventory_generates_an_atomic_complete_set_burn() {
+    fn paired_inventory_generates_both_complete_set_sell_legs() {
         let mut input = default_input(0.63);
         input.yes_position = q(100);
         input.no_position = q(80);
@@ -1669,9 +1748,9 @@ mod tests {
 
         assert_eq!(paired_sells.len(), 2);
         assert_eq!(paired_sells[0].1, q(80) as u64);
-        assert_eq!(
-            paired_sells.iter().map(|(price, _)| price).sum::<u64>(),
-            NANOS_PER_DOLLAR - 1
+        assert!(
+            paired_sells.iter().map(|(price, _)| price).sum::<u64>()
+                <= NANOS_PER_DOLLAR - 100_000_000
         );
     }
 
@@ -1681,7 +1760,7 @@ mod tests {
         input.yes_position = q(10);
         input.no_position = q(10);
 
-        let selection = select_rotating_quotes(&[input], &default_config(), 0, 1);
+        let selection = select_rotating_compactions(&[input], 0, 1);
 
         assert!(
             selection.orders.iter().all(|order| !matches!(
@@ -1689,6 +1768,40 @@ mod tests {
                 OrderSpec::SellYes { .. } | OrderSpec::SellNo { .. }
             ))
         );
+    }
+
+    #[test]
+    fn complete_set_redemption_does_not_require_an_eligible_quote_price() {
+        let mut input = default_input(0.0);
+        input.yes_position = q(10);
+        input.no_position = q(10);
+
+        let selection = select_rotating_compactions(&[input], 0, 2);
+
+        assert_eq!(selection.markets, 1);
+        assert_eq!(selection.orders.len(), 2);
+        assert_eq!(selection.quantity_units, q(10) as u64);
+        assert!(selection.orders.iter().all(|order| match order {
+            OrderSpec::SellYes {
+                limit_price_nanos, ..
+            }
+            | OrderSpec::SellNo {
+                limit_price_nanos, ..
+            } => *limit_price_nanos >= 10_000_000,
+            _ => false,
+        }));
+    }
+
+    #[test]
+    fn complete_set_redemption_ignores_sub_share_dust() {
+        let mut input = default_input(0.5);
+        input.yes_position = q(1) - 1;
+        input.no_position = q(1) - 1;
+
+        let selection = select_rotating_compactions(&[input], 0, 2);
+
+        assert_eq!(selection.markets, 0);
+        assert!(selection.orders.is_empty());
     }
 
     #[test]
@@ -1826,7 +1939,6 @@ mod tests {
             0,
             runtime_config.mm_max_orders_per_block,
         );
-
         assert_eq!(selection.orders.len(), 412);
         assert_eq!(selection.quoted_markets, 206);
         assert_eq!(selection.two_sided_markets, 206);
@@ -1853,6 +1965,8 @@ mod tests {
             0,
             runtime_config.mm_max_orders_per_block,
         );
+        let compaction =
+            select_rotating_compactions(&inputs, 0, runtime_config.mm_max_orders_per_block);
         let orders = &selection.orders;
 
         for market_id in 1..=206 {
@@ -1865,11 +1979,12 @@ mod tests {
                 OrderSpec::BuyNo { market_id: id, .. } if *id == market_id
             )));
         }
-        assert_eq!(orders.len(), runtime_config.mm_max_orders_per_block);
+        assert_eq!(orders.len(), 412);
         assert_eq!(selection.quoted_markets, 206);
         assert_eq!(selection.two_sided_markets, 206);
-        assert_eq!(selection.compaction_markets, 50);
-        assert_eq!(selection.next_index, 50);
+        assert_eq!(compaction.markets, 206);
+        assert_eq!(compaction.orders.len(), 412);
+        assert_eq!(selection.next_index, 0);
     }
 
     #[test]

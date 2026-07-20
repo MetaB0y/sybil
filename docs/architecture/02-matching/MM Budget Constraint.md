@@ -32,13 +32,17 @@ The off-chain shared MM actor submits its configured flash-liquidity budget
 unchanged on every non-empty live block. A separate directional-exposure cap
 switches quote generation to risk-reducing orders; it never shrinks the budget
 to zero. Matched YES+NO inventory is a redeemable complete set, not directional
-exposure. The actor submits atomic paired sells whose limits sum to one dollar
-minus one nano so settlement burns the pair and returns collateral. Baseline
-cash-backed quotes are selected across the eligible catalog before compaction
-or extra inventory orders consume the remaining order capacity.
+exposure. The actor submits paired sells as a separate ordinary IOC request,
+outside the retained-cash constraint, so the matcher can burn the pair and
+return collateral or execute either owned leg against regular demand. A visible
+willingness surplus prevents integer landing from rounding a pure redemption to
+zero, while clearing prices still sum to exactly one dollar. Sub-share dust is
+not submitted, preventing a tiny leg from invalidating the whole request under
+minimum-notional admission. Baseline cash-backed quotes are selected across the
+eligible catalog before extra inventory orders consume quote capacity.
 
 Owner-process readiness requires fresh quote progress, nonzero eligibility,
-full selected-market coverage, normal-mode two-sided coverage, and an accepted
+at least 95% selected-market and normal-mode two-sided coverage, and an accepted
 submission within two observed blocks. See
 [`market-maker-liveness.md`](../../runbooks/market-maker-liveness.md).
 

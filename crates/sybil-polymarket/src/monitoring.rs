@@ -141,6 +141,8 @@ struct ReadinessResponse {
     last_mm_progress_timestamp_ms: u64,
     last_mm_submission_attempt_block: Option<u64>,
     last_mm_successful_submission_block: Option<u64>,
+    last_mm_compaction_attempt_block: Option<u64>,
+    last_mm_successful_compaction_block: Option<u64>,
     mm_submission_lag_blocks: Option<u64>,
     last_resolution_success_timestamp_ms: Option<u64>,
     sync_age_ms: Option<u64>,
@@ -198,11 +200,14 @@ impl MonitoringState {
             } else if mm.last_quoted_markets == 0 {
                 problems.push("mm_has_no_quotes");
             } else {
-                if mm.last_quoted_markets < mm.last_eligible_quote_markets {
+                if below_coverage_bar(mm.last_quoted_markets, mm.last_eligible_quote_markets) {
                     problems.push("mm_partial_coverage");
                 }
                 if mm.mode == MmMode::Normal
-                    && mm.last_two_sided_quote_markets < mm.last_eligible_quote_markets
+                    && below_coverage_bar(
+                        mm.last_two_sided_quote_markets,
+                        mm.last_eligible_quote_markets,
+                    )
                 {
                     problems.push("mm_partial_two_sided_coverage");
                 }
@@ -253,6 +258,8 @@ impl MonitoringState {
             last_mm_progress_timestamp_ms: mm.last_progress_timestamp_ms,
             last_mm_submission_attempt_block: mm.last_submission_attempt_block,
             last_mm_successful_submission_block: mm.last_successful_submission_block,
+            last_mm_compaction_attempt_block: mm.last_compaction_attempt_block,
+            last_mm_successful_compaction_block: mm.last_successful_compaction_block,
             mm_submission_lag_blocks: submission_lag_blocks(&mm),
             last_resolution_success_timestamp_ms: self
                 .resolution_enabled
@@ -366,13 +373,13 @@ impl MonitoringState {
         gauge(
             &mut out,
             "sybil_polymarket_mm_compaction_markets",
-            "Markets with an atomic complete-set redemption pair in the latest MM bundle.",
+            "Markets with a paired complete-set redemption request in the latest MM cycle.",
             mm.last_compaction_markets.try_into().unwrap_or(u64::MAX),
         );
         gauge(
             &mut out,
             "sybil_polymarket_mm_compaction_quantity_units",
-            "Complete-set share-units submitted for redemption in the latest MM bundle.",
+            "Complete-set share-units submitted for redemption in the latest MM cycle.",
             mm.last_compaction_quantity_units,
         );
         reason_metrics(
@@ -399,6 +406,18 @@ impl MonitoringState {
             "sybil_polymarket_mm_last_observed_block",
             "Latest live Sybil block observed by the MM actor.",
             mm.last_observed_block,
+        );
+        optional_gauge(
+            &mut out,
+            "sybil_polymarket_mm_last_compaction_attempt_block",
+            "Latest block on which the Polymarket MM attempted complete-set redemption.",
+            mm.last_compaction_attempt_block,
+        );
+        optional_gauge(
+            &mut out,
+            "sybil_polymarket_mm_last_successful_compaction_block",
+            "Latest block on which the API accepted Polymarket MM complete-set redemption.",
+            mm.last_successful_compaction_block,
         );
         optional_gauge(
             &mut out,
@@ -435,6 +454,18 @@ impl MonitoringState {
             "sybil_polymarket_mm_submissions_success_total",
             "Polymarket MM IOC bundles accepted by the API in this process.",
             mm.successful_submissions,
+        );
+        counter(
+            &mut out,
+            "sybil_polymarket_mm_compactions_success_total",
+            "Polymarket MM complete-set redemption bundles accepted by the API.",
+            mm.successful_compactions,
+        );
+        counter(
+            &mut out,
+            "sybil_polymarket_mm_compactions_failed_total",
+            "Polymarket MM complete-set redemption bundle submission failures.",
+            mm.failed_compactions,
         );
         gauge(
             &mut out,
@@ -506,6 +537,10 @@ impl MonitoringState {
         window_metric(&mut out, "resolution", self.windows.resolution_ms);
         out
     }
+}
+
+fn below_coverage_bar(covered: usize, eligible: usize) -> bool {
+    covered.saturating_mul(100) < eligible.saturating_mul(95)
 }
 
 pub async fn serve(
@@ -810,6 +845,7 @@ mod tests {
         assert!(metrics.contains("sybil_polymarket_mm_submissions_success_total 8"));
         assert!(metrics.contains("sybil_polymarket_mm_mode{mode=\"normal\"} 1"));
         assert!(metrics.contains("sybil_polymarket_mm_paired_position_units 0"));
+        assert!(metrics.contains("sybil_polymarket_mm_compactions_failed_total 0"));
         assert!(metrics.contains("sybil_polymarket_resolution_ticks_success_total 4"));
     }
 
@@ -864,5 +900,11 @@ mod tests {
         assert_eq!(windows.feed_ms, 60_000);
         assert_eq!(windows.mm_ms, 60_000);
         assert_eq!(windows.resolution_ms, 360_000);
+    }
+
+    #[test]
+    fn mm_readiness_uses_the_95_percent_coverage_bar() {
+        assert!(!below_coverage_bar(19, 20));
+        assert!(below_coverage_bar(18, 20));
     }
 }

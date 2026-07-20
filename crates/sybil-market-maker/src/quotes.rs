@@ -7,6 +7,9 @@ use super::{MmMode, QuoteRange, shares_to_qty_units, whole_shares_to_qty_units};
 // Pure pricing logic, independent of discovery and reference-price providers.
 // --------------------------------------------------------------------------- //
 
+const COMPACTION_HALF_EDGE_NANOS: u64 = 50_000_000;
+const COMPACTION_MIN_LIMIT_NANOS: u64 = 10_000_000;
+
 /// Inputs to the quoting engine for one market.
 #[derive(Clone, Debug)]
 pub struct QuoteInput {
@@ -58,8 +61,14 @@ pub struct QuoteSelection {
     pub next_index: usize,
     pub quoted_markets: usize,
     pub two_sided_markets: usize,
-    pub compaction_markets: usize,
-    pub compaction_quantity_units: u64,
+}
+
+#[derive(Debug)]
+pub struct CompactionSelection {
+    pub orders: Vec<OrderSpec>,
+    pub next_index: usize,
+    pub markets: usize,
+    pub quantity_units: u64,
 }
 
 fn generate_market_quotes(input: &QuoteInput, config: &QuoteConfig) -> MarketQuotes {
@@ -93,7 +102,6 @@ fn generate_market_quotes(input: &QuoteInput, config: &QuoteConfig) -> MarketQuo
     // absolute per-token position cap still applies until that burn lands.
     let yes_position = input.yes_position.max(0);
     let no_position = input.no_position.max(0);
-    let paired_position = yes_position.min(no_position);
     let yes_residual = yes_position.saturating_sub(no_position);
     let no_residual = no_position.saturating_sub(yes_position);
     let max_position_units = whole_shares_to_qty_units(config.max_position);
@@ -170,15 +178,37 @@ fn generate_market_quotes(input: &QuoteInput, config: &QuoteConfig) -> MarketQuo
         });
     }
 
-    // Selling a complete set with limits summing to one dollar minus one nano
+    // Selling a complete set with limits summing below one dollar
     // is always jointly executable at a valid binary clearing price. The
     // sequencer burns the matched YES+NO pair and returns its $1 collateral.
-    // Keeping the pair atomic avoids accidentally selling only one outcome.
-    let compaction = (paired_position > 0).then(|| {
-        let yes_limit = (input.mid.clamp(0.0, 1.0) * NANOS_PER_DOLLAR as f64)
+    // A visible surplus is required so integer landing does not round a
+    // theoretically positive one-nano redemption down to zero. It affects
+    // willingness limits, not the $1 clearing-price sum or returned cash.
+    // Keeping both legs in selection avoids submitting only one outcome.
+    let compaction = generate_compaction(input);
+
+    MarketQuotes {
+        baseline,
+        inventory,
+        compaction,
+    }
+}
+
+fn generate_compaction(input: &QuoteInput) -> Option<[OrderSpec; 2]> {
+    let paired_position = input.yes_position.max(0).min(input.no_position.max(0));
+    (paired_position >= super::SHARE_SCALE_I64).then(|| {
+        let min_midpoint = COMPACTION_HALF_EDGE_NANOS + COMPACTION_MIN_LIMIT_NANOS;
+        let max_midpoint = NANOS_PER_DOLLAR - min_midpoint;
+        let midpoint = (input.mid.clamp(0.0, 1.0) * NANOS_PER_DOLLAR as f64)
             .floor()
-            .clamp(1.0, (NANOS_PER_DOLLAR - 2) as f64) as u64;
-        let no_limit = NANOS_PER_DOLLAR - 1 - yes_limit;
+            .clamp(min_midpoint as f64, max_midpoint as f64) as u64;
+        let yes_limit = midpoint
+            .saturating_sub(COMPACTION_HALF_EDGE_NANOS)
+            .max(COMPACTION_MIN_LIMIT_NANOS);
+        let no_limit = NANOS_PER_DOLLAR
+            .saturating_sub(midpoint)
+            .saturating_sub(COMPACTION_HALF_EDGE_NANOS)
+            .max(COMPACTION_MIN_LIMIT_NANOS);
         [
             OrderSpec::SellYes {
                 market_id: input.market_id,
@@ -191,13 +221,7 @@ fn generate_market_quotes(input: &QuoteInput, config: &QuoteConfig) -> MarketQuo
                 quantity: paired_position as u64,
             },
         ]
-    });
-
-    MarketQuotes {
-        baseline,
-        inventory,
-        compaction,
-    }
+    })
 }
 
 fn price_in_band(price: f64, min: f64, max: f64) -> bool {
@@ -207,9 +231,9 @@ fn price_in_band(price: f64, min: f64, max: f64) -> bool {
 /// Select a bounded, rotating quote batch for one block.
 ///
 /// Cash-backed baseline quotes are selected for the whole eligible catalog
-/// before complete-set compaction and extra inventory depth consume spare
-/// capacity. Rotation remains deterministic overflow behavior when even the
-/// baseline cannot fit or when optional work exceeds the remaining capacity.
+/// before extra inventory depth consumes spare quote capacity. Complete-set
+/// compaction is returned as a separate ordinary IOC bundle so redemption
+/// cannot consume the MM's retained-cash budget.
 pub fn select_rotating_quotes(
     quote_inputs: &[QuoteInput],
     quote_config: &QuoteConfig,
@@ -222,8 +246,6 @@ pub fn select_rotating_quotes(
             next_index: start_index,
             quoted_markets: 0,
             two_sided_markets: 0,
-            compaction_markets: 0,
-            compaction_quantity_units: 0,
         };
     }
 
@@ -232,8 +254,6 @@ pub fn select_rotating_quotes(
     let mut group_quotes = HashMap::<String, GroupQuoteState>::new();
     let mut baseline_sides = HashMap::<u32, (bool, bool)>::new();
     let mut quoted_markets = std::collections::HashSet::new();
-    let mut compaction_markets = 0usize;
-    let mut compaction_quantity_units = 0u64;
     let generated: Vec<_> = quote_inputs
         .iter()
         .map(|input| generate_market_quotes(input, quote_config))
@@ -255,14 +275,7 @@ pub fn select_rotating_quotes(
 
         for order in market_orders {
             if orders.len() >= max_orders {
-                return selection(
-                    orders,
-                    idx,
-                    quoted_markets,
-                    baseline_sides,
-                    compaction_markets,
-                    compaction_quantity_units,
-                );
+                return selection(orders, idx, quoted_markets, baseline_sides);
             }
             if would_self_cross_group(input, &order, &group_quotes) {
                 continue;
@@ -274,43 +287,14 @@ pub fn select_rotating_quotes(
         }
     }
 
-    // Compaction pass: complete sets are always selected as an atomic pair.
-    for offset in 0..quote_inputs.len() {
-        let idx = (start + offset) % quote_inputs.len();
-        let Some(compaction) = generated[idx].compaction.clone() else {
-            continue;
-        };
-        if orders.len().saturating_add(compaction.len()) > max_orders {
-            return selection(
-                orders,
-                idx,
-                quoted_markets,
-                baseline_sides,
-                compaction_markets,
-                compaction_quantity_units,
-            );
-        }
-        let quantity = order_quantity(&compaction[0]);
-        orders.extend(compaction);
-        compaction_markets = compaction_markets.saturating_add(1);
-        compaction_quantity_units = compaction_quantity_units.saturating_add(quantity);
-    }
-
     // Inventory pass: residual sells add depth only after every baseline quote
-    // and every collateral-releasing compaction pair that fits.
+    // that fits.
     for offset in 0..quote_inputs.len() {
         let idx = (start + offset) % quote_inputs.len();
         let input = &quote_inputs[idx];
         for order in generated[idx].inventory.iter().cloned() {
             if orders.len() >= max_orders {
-                return selection(
-                    orders,
-                    idx,
-                    quoted_markets,
-                    baseline_sides,
-                    compaction_markets,
-                    compaction_quantity_units,
-                );
+                return selection(orders, idx, quoted_markets, baseline_sides);
             }
             record_group_quote(input, &order, &mut group_quotes);
             quoted_markets.insert(input.market_id);
@@ -318,14 +302,7 @@ pub fn select_rotating_quotes(
         }
     }
 
-    selection(
-        orders,
-        start,
-        quoted_markets,
-        baseline_sides,
-        compaction_markets,
-        compaction_quantity_units,
-    )
+    selection(orders, start, quoted_markets, baseline_sides)
 }
 
 fn selection(
@@ -333,8 +310,6 @@ fn selection(
     next_index: usize,
     quoted_markets: std::collections::HashSet<u32>,
     baseline_sides: HashMap<u32, (bool, bool)>,
-    compaction_markets: usize,
-    compaction_quantity_units: u64,
 ) -> QuoteSelection {
     QuoteSelection {
         orders,
@@ -344,8 +319,52 @@ fn selection(
             .values()
             .filter(|(yes, no)| *yes && *no)
             .count(),
-        compaction_markets,
-        compaction_quantity_units,
+    }
+}
+
+/// Select complete-set sell pairs independently of quote eligibility. Stale or
+/// near-resolved reference prices must not strand already-owned collateral.
+pub fn select_rotating_compactions(
+    inputs: &[QuoteInput],
+    start_index: usize,
+    max_orders: usize,
+) -> CompactionSelection {
+    if inputs.is_empty() || max_orders < 2 {
+        return CompactionSelection {
+            orders: Vec::new(),
+            next_index: start_index,
+            markets: 0,
+            quantity_units: 0,
+        };
+    }
+
+    let start = start_index % inputs.len();
+    let mut orders = Vec::new();
+    let mut markets = 0usize;
+    let mut quantity_units = 0u64;
+    for offset in 0..inputs.len() {
+        let idx = (start + offset) % inputs.len();
+        let Some(compaction) = generate_compaction(&inputs[idx]) else {
+            continue;
+        };
+        if orders.len().saturating_add(compaction.len()) > max_orders {
+            return CompactionSelection {
+                orders,
+                next_index: idx,
+                markets,
+                quantity_units,
+            };
+        }
+        quantity_units = quantity_units.saturating_add(order_quantity(&compaction[0]));
+        orders.extend(compaction);
+        markets = markets.saturating_add(1);
+    }
+
+    CompactionSelection {
+        orders,
+        next_index: start,
+        markets,
+        quantity_units,
     }
 }
 
