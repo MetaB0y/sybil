@@ -49,6 +49,15 @@ pub struct MmProgress {
     pub last_progress_timestamp_ms: u64,
 }
 
+/// Runtime risk posture. Crossing a configured exposure cap never disables
+/// the actor; it switches the order set to trades that can only reduce risk.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum MmMode {
+    #[default]
+    Normal,
+    ReduceOnly,
+}
+
 impl PriceSnapshot {
     pub fn record_midpoint(&mut self, token_id: String, price: f64, now_ms: u64) {
         self.token_updated_ms.insert(token_id.clone(), now_ms);
@@ -118,7 +127,7 @@ impl MmConfig {
         finite_nonnegative("mm_gamma", self.mm_gamma)?;
         nonzero("mm_max_position", self.mm_max_position)?;
         nonzero("mm_max_orders_per_block", self.mm_max_orders_per_block)?;
-        finite_positive("mm_max_exposure_dollars", self.mm_max_exposure_dollars)?;
+        finite_nonnegative("mm_max_exposure_dollars", self.mm_max_exposure_dollars)?;
         if self.mm_vol_window < 3 {
             return Err(invalid(
                 "mm_vol_window",
@@ -366,11 +375,16 @@ impl MarketState {
         var.max(DEFAULT_VARIANCE)
     }
 
-    /// Dollar exposure for this market given a reference mid price.
-    fn exposure(&self, mid: f64) -> f64 {
-        let yes_val = qty_units_to_shares(self.yes_position) * mid;
-        let no_val = qty_units_to_shares(self.no_position) * (1.0 - mid);
-        yes_val.abs() + no_val.abs()
+    /// Directional dollar exposure at the reference midpoint. Paired YES+NO
+    /// units are complete sets with a fixed $1 payoff and therefore carry no
+    /// outcome risk.
+    fn directional_exposure(&self, mid: f64) -> f64 {
+        let residual = self.yes_position.saturating_sub(self.no_position);
+        if residual >= 0 {
+            qty_units_to_shares(residual) * mid
+        } else {
+            qty_units_to_shares(residual.saturating_abs()) * (1.0 - mid)
+        }
     }
 
     fn budget_mid(&self, snapshot: &PriceSnapshot) -> f64 {
@@ -412,8 +426,8 @@ impl MmState {
 /// Inventory-aware market maker. Adapts Avellaneda-Stoikov for FBA:
 /// - Reservation price skewed by inventory × γ × σ²
 /// - Two-sided quotes (BuyYes + SellYes for groups, full four-sided for standalone)
-/// - Dynamic budget that shrinks as exposure grows
-/// - Position limits with unwind-only mode
+/// - Fixed per-batch budget with directional exposure limits
+/// - Automatic complete-set compaction and reduce-only risk mode
 pub struct MmActor {
     config: MmConfig,
     sybil_client: SybilClient,
@@ -726,26 +740,29 @@ impl MmActor {
         true
     }
 
-    // ----- Budget computation --------------------------------------------- //
+    // ----- Risk and budget ------------------------------------------------ //
 
-    fn compute_budget(&self, snapshot: &PriceSnapshot) -> u64 {
+    fn compute_budget(&self) -> u64 {
+        (self.config.mm_budget_dollars * NANOS_PER_DOLLAR as f64) as u64
+    }
+
+    fn risk_mode(&self, snapshot: &PriceSnapshot) -> MmMode {
         let max_exposure = self.config.mm_max_exposure_dollars;
-        if max_exposure <= 0.0 {
-            return (self.config.mm_budget_dollars * NANOS_PER_DOLLAR as f64) as u64;
+        if max_exposure == 0.0 {
+            return MmMode::Normal;
         }
-
         let total_exposure: f64 = self
             .state
             .markets
             .values()
-            .map(|ms| ms.exposure(ms.budget_mid(snapshot)))
+            .map(|ms| ms.directional_exposure(ms.budget_mid(snapshot)))
             .sum();
 
-        let ratio = (total_exposure / max_exposure).min(1.0);
-        let scale = (1.0 - ratio).powi(2); // Quadratic decay
-        let budget = self.config.mm_budget_dollars * scale;
-
-        (budget * NANOS_PER_DOLLAR as f64) as u64
+        if total_exposure >= max_exposure {
+            MmMode::ReduceOnly
+        } else {
+            MmMode::Normal
+        }
     }
 
     /// Untrack every market the block reports resolved. Pure state mutation
@@ -784,14 +801,10 @@ impl MmActor {
             return;
         }
 
-        // 2. Dynamic budget
-        let budget_nanos = self.compute_budget(&snapshot);
-        if budget_nanos == 0 {
-            debug!("budget exhausted (exposure at max), skipping block");
-            self.record_quote_selection(0, &[], false);
-            self.complete_quote_cycle(block.height);
-            return;
-        }
+        // 2. Fixed flash-liquidity budget and directional risk posture. Risk
+        //    caps reduce inventory; they never silence the actor.
+        let budget_nanos = self.compute_budget();
+        let mode = self.risk_mode(&snapshot);
 
         // 3. Update state (mutation pass): push prices, collect reference prices.
         //    Staleness is now evaluated per token (PM-4): a single frozen token
@@ -861,6 +874,7 @@ impl MmActor {
             min_spread: self.config.mm_min_spread,
             max_position: self.config.mm_max_position as i64,
             quote_size_dollars: self.config.mm_quote_size_dollars,
+            mode,
         };
         let start_index = if quote_inputs.is_empty() {
             0
@@ -1070,7 +1084,7 @@ mod tests {
         cases.push(("mm_max_orders_per_block", config));
 
         let config = MmConfig {
-            mm_max_exposure_dollars: 0.0,
+            mm_max_exposure_dollars: -1.0,
             ..MmConfig::default()
         };
         cases.push(("mm_max_exposure_dollars", config));
@@ -1378,6 +1392,7 @@ mod tests {
             min_spread: 0.005,
             max_position: 5000,
             quote_size_dollars: 100.0,
+            mode: MmMode::Normal,
         }
     }
 
@@ -1506,7 +1521,7 @@ mod tests {
     }
 
     #[test]
-    fn budget_decays_to_zero_at_max_exposure() {
+    fn exposure_cap_switches_to_reduce_only_without_removing_budget() {
         let (live_tx, _live_rx) = watch::channel(MmProgress::default());
         let (mut actor, _price_tx) = test_actor(live_tx);
         actor.config.mm_max_exposure_dollars = 100.0;
@@ -1517,7 +1532,97 @@ mod tests {
         let mut snapshot = PriceSnapshot::default();
         snapshot.midpoints.insert("token-1".to_string(), 0.5);
 
-        assert_eq!(actor.compute_budget(&snapshot), 0);
+        assert_eq!(actor.risk_mode(&snapshot), MmMode::ReduceOnly);
+        assert_eq!(actor.compute_budget(), 1_000 * NANOS_PER_DOLLAR);
+    }
+
+    #[test]
+    fn paired_complete_sets_do_not_consume_directional_exposure() {
+        let (live_tx, _live_rx) = watch::channel(MmProgress::default());
+        let (mut actor, _price_tx) = test_actor(live_tx);
+        actor.config.mm_max_exposure_dollars = 1.0;
+        track(&mut actor, 1);
+        let market = actor.state.markets.get_mut(&1).unwrap();
+        market.yes_position = q(10_000);
+        market.no_position = q(10_000);
+
+        assert_eq!(actor.risk_mode(&PriceSnapshot::default()), MmMode::Normal);
+    }
+
+    #[test]
+    fn zero_exposure_cap_disables_the_cap() {
+        let (live_tx, _live_rx) = watch::channel(MmProgress::default());
+        let (mut actor, _price_tx) = test_actor(live_tx);
+        actor.config.mm_max_exposure_dollars = 0.0;
+        track(&mut actor, 1);
+        actor.state.markets.get_mut(&1).unwrap().yes_position = q(1_000_000);
+
+        assert_eq!(actor.risk_mode(&PriceSnapshot::default()), MmMode::Normal);
+    }
+
+    #[test]
+    fn paired_inventory_generates_an_atomic_complete_set_burn() {
+        let mut input = default_input(0.63);
+        input.yes_position = q(100);
+        input.no_position = q(80);
+
+        let orders = generate_quotes(&input, &default_config());
+        let paired_sells: Vec<_> = orders
+            .iter()
+            .filter_map(|order| match order {
+                OrderSpec::SellYes {
+                    limit_price_nanos,
+                    quantity,
+                    ..
+                }
+                | OrderSpec::SellNo {
+                    limit_price_nanos,
+                    quantity,
+                    ..
+                } if *quantity == q(80) as u64 => Some((*limit_price_nanos, *quantity)),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(paired_sells.len(), 2);
+        assert_eq!(paired_sells[0].1, q(80) as u64);
+        assert_eq!(
+            paired_sells.iter().map(|(price, _)| price).sum::<u64>(),
+            NANOS_PER_DOLLAR - 1
+        );
+    }
+
+    #[test]
+    fn complete_set_burn_is_never_partially_selected() {
+        let mut input = default_input(0.5);
+        input.yes_position = q(10);
+        input.no_position = q(10);
+
+        let (orders, _) = select_rotating_quotes(&[input], &default_config(), 0, 1);
+
+        assert!(
+            orders.iter().all(|order| !matches!(
+                order,
+                OrderSpec::SellYes { .. } | OrderSpec::SellNo { .. }
+            ))
+        );
+    }
+
+    #[test]
+    fn reduce_only_quotes_cannot_increase_directional_inventory() {
+        let mut config = default_config();
+        config.mode = MmMode::ReduceOnly;
+        let mut input = default_input(0.5);
+        input.yes_position = q(100);
+
+        let orders = generate_quotes(&input, &config);
+
+        assert!(
+            orders
+                .iter()
+                .all(|order| matches!(order, OrderSpec::BuyNo { .. } | OrderSpec::SellYes { .. }))
+        );
+        assert!(!orders.is_empty());
     }
 
     #[test]
@@ -1822,7 +1927,7 @@ mod tests {
         actor.state.markets.get_mut(&99).unwrap().yes_position = q(50);
 
         assert_eq!(live_rx.borrow().tracked_markets, 1);
-        let budget = actor.compute_budget(&PriceSnapshot::default());
+        let budget = actor.compute_budget();
         assert!(budget > 0, "native budget should not require feed prices");
     }
 }

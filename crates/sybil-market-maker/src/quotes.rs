@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use sybil_api_types::{NANOS_PER_DOLLAR, OrderSpec};
 
-use super::{QuoteRange, shares_to_qty_units, whole_shares_to_qty_units};
+use super::{MmMode, QuoteRange, shares_to_qty_units, whole_shares_to_qty_units};
 
 // Pure pricing logic, independent of discovery and reference-price providers.
 // --------------------------------------------------------------------------- //
@@ -30,11 +30,27 @@ pub struct QuoteConfig {
     /// Position cap in full shares, not protocol share-units.
     pub max_position: i64,
     pub quote_size_dollars: f64,
+    pub mode: MmMode,
 }
 
 /// Generate orders for one market. Pure function — no IO, no state mutation.
 pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpec> {
+    let generated = generate_market_quotes(input, config);
     let mut orders = Vec::new();
+    if let Some(compaction) = generated.compaction {
+        orders.extend(compaction);
+    }
+    orders.extend(generated.ordinary);
+    orders
+}
+
+struct MarketQuotes {
+    ordinary: Vec<OrderSpec>,
+    compaction: Option<[OrderSpec; 2]>,
+}
+
+fn generate_market_quotes(input: &QuoteInput, config: &QuoteConfig) -> MarketQuotes {
+    let mut ordinary = Vec::new();
     let (reservation_min, reservation_max, yes_order_min, yes_order_max) =
         if let Some(range) = input.quote_range {
             (range.min, range.max, range.min, range.max)
@@ -58,10 +74,17 @@ pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpe
     let half_spread =
         vol_spread.clamp(config.min_spread, (edge_room - 0.01).max(config.min_spread));
 
-    // Position limits
+    // A matched YES+NO pair is a complete set worth exactly $1 in every
+    // outcome. It carries no directional risk and is compacted below. The
+    // absolute per-token position cap still applies until that burn lands.
+    let yes_position = input.yes_position.max(0);
+    let no_position = input.no_position.max(0);
+    let paired_position = yes_position.min(no_position);
+    let yes_residual = yes_position.saturating_sub(no_position);
+    let no_residual = no_position.saturating_sub(yes_position);
     let max_position_units = whole_shares_to_qty_units(config.max_position);
-    let yes_buy_room = max_position_units.saturating_sub(input.yes_position.max(0)) as u64;
-    let no_buy_room = max_position_units.saturating_sub(input.no_position.max(0)) as u64;
+    let yes_buy_room = max_position_units.saturating_sub(yes_position) as u64;
+    let no_buy_room = max_position_units.saturating_sub(no_position) as u64;
 
     // Inventory-adjusted sizing
     let inv_ratio = (input.net_inventory.abs() / config.max_position as f64).min(1.0);
@@ -72,10 +95,15 @@ pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpe
     let yes_bid = r - half_spread;
     let yes_ask = r + half_spread;
 
-    if yes_buy_room > 0 && price_in_band(yes_bid, yes_order_min, yes_order_max) {
-        let quantity = shares_to_qty_units(buy_size / yes_bid).min(yes_buy_room);
+    let yes_buy_cap = match config.mode {
+        MmMode::Normal => yes_buy_room,
+        MmMode::ReduceOnly if no_residual > 0 => yes_buy_room.min(no_residual as u64),
+        MmMode::ReduceOnly => 0,
+    };
+    if yes_buy_cap > 0 && price_in_band(yes_bid, yes_order_min, yes_order_max) {
+        let quantity = shares_to_qty_units(buy_size / yes_bid).min(yes_buy_cap);
         if quantity > 0 {
-            orders.push(OrderSpec::BuyYes {
+            ordinary.push(OrderSpec::BuyYes {
                 market_id: input.market_id,
                 limit_price_nanos: (yes_bid * NANOS_PER_DOLLAR as f64) as u64,
                 quantity,
@@ -83,10 +111,10 @@ pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpe
         }
     }
 
-    if input.yes_position > 0 && price_in_band(yes_ask, yes_order_min, yes_order_max) {
-        let max_sell = input.yes_position as u64;
+    if yes_residual > 0 && price_in_band(yes_ask, yes_order_min, yes_order_max) {
+        let max_sell = yes_residual as u64;
         let desired = shares_to_qty_units(sell_size / yes_ask);
-        orders.push(OrderSpec::SellYes {
+        ordinary.push(OrderSpec::SellYes {
             market_id: input.market_id,
             limit_price_nanos: (yes_ask * NANOS_PER_DOLLAR as f64) as u64,
             quantity: desired.min(max_sell),
@@ -102,10 +130,15 @@ pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpe
     let no_bid = (1.0 - r) - half_spread;
     let no_ask = (1.0 - r) + half_spread;
 
-    if no_buy_room > 0 && price_in_band(no_bid, no_order_min, no_order_max) {
-        let quantity = shares_to_qty_units(buy_size / no_bid).min(no_buy_room);
+    let no_buy_cap = match config.mode {
+        MmMode::Normal => no_buy_room,
+        MmMode::ReduceOnly if yes_residual > 0 => no_buy_room.min(yes_residual as u64),
+        MmMode::ReduceOnly => 0,
+    };
+    if no_buy_cap > 0 && price_in_band(no_bid, no_order_min, no_order_max) {
+        let quantity = shares_to_qty_units(buy_size / no_bid).min(no_buy_cap);
         if quantity > 0 {
-            orders.push(OrderSpec::BuyNo {
+            ordinary.push(OrderSpec::BuyNo {
                 market_id: input.market_id,
                 limit_price_nanos: (no_bid * NANOS_PER_DOLLAR as f64) as u64,
                 quantity,
@@ -113,17 +146,43 @@ pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpe
         }
     }
 
-    if input.no_position > 0 && price_in_band(no_ask, no_order_min, no_order_max) {
-        let max_sell = input.no_position as u64;
+    if no_residual > 0 && price_in_band(no_ask, no_order_min, no_order_max) {
+        let max_sell = no_residual as u64;
         let desired = shares_to_qty_units(sell_size / no_ask);
-        orders.push(OrderSpec::SellNo {
+        ordinary.push(OrderSpec::SellNo {
             market_id: input.market_id,
             limit_price_nanos: (no_ask * NANOS_PER_DOLLAR as f64) as u64,
             quantity: desired.min(max_sell),
         });
     }
 
-    orders
+    // Selling a complete set with limits summing to one dollar minus one nano
+    // is always jointly executable at a valid binary clearing price. The
+    // sequencer burns the matched YES+NO pair and returns its $1 collateral.
+    // Keeping the pair atomic avoids accidentally selling only one outcome.
+    let compaction = (paired_position > 0).then(|| {
+        let yes_limit = (input.mid.clamp(0.0, 1.0) * NANOS_PER_DOLLAR as f64)
+            .floor()
+            .clamp(1.0, (NANOS_PER_DOLLAR - 2) as f64) as u64;
+        let no_limit = NANOS_PER_DOLLAR - 1 - yes_limit;
+        [
+            OrderSpec::SellYes {
+                market_id: input.market_id,
+                limit_price_nanos: yes_limit,
+                quantity: paired_position as u64,
+            },
+            OrderSpec::SellNo {
+                market_id: input.market_id,
+                limit_price_nanos: no_limit,
+                quantity: paired_position as u64,
+            },
+        ]
+    });
+
+    MarketQuotes {
+        ordinary,
+        compaction,
+    }
 }
 
 fn price_in_band(price: f64, min: f64, max: f64) -> bool {
@@ -153,7 +212,8 @@ pub fn select_rotating_quotes(
     for offset in 0..quote_inputs.len() {
         let idx = (start + offset) % quote_inputs.len();
         let input = &quote_inputs[idx];
-        let mut market_orders = generate_quotes(input, quote_config);
+        let generated = generate_market_quotes(input, quote_config);
+        let mut market_orders = generated.ordinary;
         if input.group_key.is_some() {
             market_orders.sort_by_key(|order| match order {
                 OrderSpec::BuyNo { .. } => 0,
@@ -163,8 +223,14 @@ pub fn select_rotating_quotes(
         }
         considered = offset + 1;
 
-        if market_orders.is_empty() {
+        if market_orders.is_empty() && generated.compaction.is_none() {
             continue;
+        }
+
+        if let Some(compaction) = generated.compaction
+            && orders.len().saturating_add(compaction.len()) <= max_orders
+        {
+            orders.extend(compaction);
         }
 
         for order in market_orders {
