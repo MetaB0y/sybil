@@ -2075,12 +2075,39 @@ mod tests {
     }
 
     #[test]
-    fn edge_price_suppresses_yes_bid() {
+    fn edge_price_is_clamped_to_the_quote_floor() {
         let config = default_config();
-        // Price near 0 → reservation clamps to 0.02, YES bid likely below threshold
         let orders = generate_quotes(&default_input(0.005), &config);
-        // YES bid should be suppressed (too low), but NO side may still generate
-        assert!(!orders.iter().any(|o| matches!(o, OrderSpec::BuyYes { .. })));
+        assert!(orders.iter().any(|order| matches!(
+            order,
+            OrderSpec::BuyYes {
+                limit_price_nanos: 10_000_000,
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn inventory_skew_cannot_remove_an_edge_baseline_side() {
+        let config = default_config();
+        let mut input = default_input(0.03);
+        input.net_inventory = 1_000.0;
+        input.yes_position = q(1_000);
+
+        let orders = generate_quotes(&input, &config);
+
+        assert!(orders.iter().any(|order| matches!(
+            order,
+            OrderSpec::BuyYes {
+                limit_price_nanos: 10_000_000,
+                ..
+            }
+        )));
+        assert!(
+            orders
+                .iter()
+                .any(|order| matches!(order, OrderSpec::BuyNo { .. }))
+        );
     }
 
     #[test]

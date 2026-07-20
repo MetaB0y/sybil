@@ -114,8 +114,8 @@ fn generate_market_quotes(input: &QuoteInput, config: &QuoteConfig) -> MarketQuo
     let sell_size = config.quote_size_dollars * (1.0 + inv_ratio * 0.5);
 
     // ── YES side ──
-    let yes_bid = r - half_spread;
-    let yes_ask = r + half_spread;
+    let yes_bid = (r - half_spread).clamp(yes_order_min, yes_order_max);
+    let yes_ask = (r + half_spread).clamp(yes_order_min, yes_order_max);
 
     let yes_buy_cap = match config.mode {
         MmMode::Normal => yes_buy_room,
@@ -149,8 +149,8 @@ fn generate_market_quotes(input: &QuoteInput, config: &QuoteConfig) -> MarketQuo
     // the YES ask without requiring existing YES inventory. This matters most
     // for Polymarket NegRisk groups: disabling the NO side left the live MM as
     // a one-sided YES bidder on the mirrored multi-outcome markets.
-    let no_bid = (1.0 - r) - half_spread;
-    let no_ask = (1.0 - r) + half_spread;
+    let no_bid = ((1.0 - r) - half_spread).clamp(no_order_min, no_order_max);
+    let no_ask = ((1.0 - r) + half_spread).clamp(no_order_min, no_order_max);
 
     let no_buy_cap = match config.mode {
         MmMode::Normal => no_buy_room,
@@ -225,7 +225,7 @@ fn generate_compaction(input: &QuoteInput) -> Option<[OrderSpec; 2]> {
 }
 
 fn price_in_band(price: f64, min: f64, max: f64) -> bool {
-    price > 0.01 && price < 0.99 && price >= min && price <= max
+    price > 0.0 && price < 1.0 && price >= min && price <= max
 }
 
 /// Select a bounded, rotating quote batch for one block.
