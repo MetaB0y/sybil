@@ -724,7 +724,9 @@ deploy_api_recipe=$(
         in_recipe { print }
     ' justfile
 )
-grep -Fq 'up -d sybil-history sybil-api' <<<"$deploy_api_recipe" \
+grep -Fq './scripts/deploy-release.sh promote api' <<<"$deploy_api_recipe" \
+    && grep -Fq 'sybil-history sybil-api sybil-native-admin sybil-native-mm sybil-polymarket' \
+        scripts/deploy-release.sh \
     || fail "deploy-api can leave the same-image history service on an older API contract"
 grep -Eq '^deploy-all:.*&& deploy-verify$' justfile \
     || fail "deploy-all no longer uses the full deterministic-fill verifier"
