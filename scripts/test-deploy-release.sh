@@ -94,6 +94,29 @@ grep -qx sybil-native-admin <<<"$api_services"
 grep -qx sybil-native-mm <<<"$api_services"
 grep -qx sybil-polymarket <<<"$api_services"
 
+verified_services="$(
+    ssh() {
+        [[ "$1" == "-n" ]] || {
+            echo "read-only SSH call can consume a service-list loop" >&2
+            return 2
+        }
+        shift
+        local server="$1" command="$2"
+        [[ "$server" == "test-host" ]]
+        if [[ "$command" == docker\ ps* ]]; then
+            sed -n "s/.*service=\\([^']*\\)'.*/cid-\\1/p" <<<"$command"
+        else
+            printf '%s\n' "$image_id"
+        fi
+    }
+    export -f ssh
+    verify_running test-host api "$image_id" "$image_id" "$image_id" "$image_id"
+)"
+for service in sybil-api sybil-history sybil-native-admin sybil-native-mm sybil-polymarket; do
+    grep -qx "$service=$image_id" <<<"$verified_services"
+done
+[[ "$(wc -l <<<"$verified_services")" -eq 5 ]]
+
 rollback_body="$(
     awk '
         /^rollback\(\)/ { in_body = 1 }

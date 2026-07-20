@@ -111,19 +111,19 @@ local_image_revision() {
 
 remote_image_id() {
     local server="$1" ref="$2"
-    ssh "$server" "docker image inspect --format='{{.Id}}' '$ref' 2>/dev/null" || true
+    ssh -n "$server" "docker image inspect --format='{{.Id}}' '$ref' 2>/dev/null" || true
 }
 
 remote_image_fingerprint() {
     local server="$1" ref="$2"
-    ssh "$server" "docker image inspect '$ref' 2>/dev/null" \
+    ssh -n "$server" "docker image inspect '$ref' 2>/dev/null" \
         | image_runtime_fingerprint 2>/dev/null \
         || true
 }
 
 remote_image_revision() {
     local server="$1" ref="$2"
-    ssh "$server" \
+    ssh -n "$server" \
         "docker image inspect --format='{{index .Config.Labels \"$SOURCE_LABEL\"}}' '$ref' 2>/dev/null" \
         || true
 }
@@ -355,9 +355,9 @@ verify_running() {
     local service expected actual cid rows=""
     while IFS= read -r service; do
         expected="$(expected_id_for_service "$service" "$api_id" "$arena_id" "$web_id" "$caddy_id")"
-        cid="$(ssh "$server" "docker ps --filter 'label=com.docker.compose.project=sybil' --filter 'label=com.docker.compose.service=$service' --format='{{.ID}}'")"
+        cid="$(ssh -n "$server" "docker ps --filter 'label=com.docker.compose.project=sybil' --filter 'label=com.docker.compose.service=$service' --format='{{.ID}}'")"
         [[ -n "$cid" && "$cid" != *$'\n'* ]] || die "expected one running $service container"
-        actual="$(ssh "$server" "docker inspect --format='{{.Image}}' '$cid'")"
+        actual="$(ssh -n "$server" "docker inspect --format='{{.Image}}' '$cid'")"
         [[ "$actual" == "$expected" ]] \
             || die "$service runs $actual, expected immutable image $expected"
         rows+="${service}=${actual}"$'\n'

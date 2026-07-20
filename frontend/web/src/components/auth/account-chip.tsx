@@ -130,6 +130,7 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={`Account menu. Portfolio ${total}, cash ${cash}`}
       >
         <span
           className="account-chip-balance"

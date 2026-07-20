@@ -209,17 +209,14 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   ).toBeVisible();
   await createBtn.click();
 
-  // 3. On success the modal closes and the nav chip flips to connected. The
-  //    connected chip is the menu button whose title recaps the portfolio
-  //    (distinguishes it from the "Dev Zone" nav menu, which shares the role).
+  // 3. On success the modal closes and the nav chip flips to the labeled
+  //    account menu (distinguishes it from the "Dev Zone" nav menu).
   await expect(connectDialog).toBeHidden({ timeout: 30_000 });
   expect(
     injectedStaleBootstrapBinding,
     "onboarding should retry the intentionally stale bootstrap revoke",
   ).toBe(true);
-  const accountMenu = page.locator(
-    'button[aria-haspopup="menu"][title*="Portfolio"]',
-  );
+  const accountMenu = page.getByRole("button", { name: /account menu/i });
   await expect(
     accountMenu,
     "passkey registration should connect the account",
