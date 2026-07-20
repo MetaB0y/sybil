@@ -368,8 +368,8 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
     authenticatorId: authenticator.authenticatorId,
   });
 
-  // 5. Disconnect. This deliberately clears every sybil:auth localStorage key
-  //    while leaving only the backup authenticator available.
+  // 5. Disconnect. This deliberately clears the persistent identity and the
+  //    session-scoped read token while leaving only the backup authenticator.
   await accountMenu.click();
   const accountDropdown = page.getByRole("menu");
   await accountDropdown.getByRole("menuitem", { name: "Disconnect" }).click();
@@ -382,7 +382,7 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
     "disconnect should clear the locally saved account",
   ).toBeNull();
   expect(
-    await page.evaluate(() => localStorage.getItem("sybil:auth:read_api_key")),
+    await page.evaluate(() => sessionStorage.getItem("sybil:auth:read_api_key")),
     "disconnect should clear the read API key",
   ).toBeNull();
 
@@ -414,11 +414,16 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
     "discoverable sign-in should recover the same account",
   ).toBe(accountId);
   const readToken = await page.evaluate(() =>
-    localStorage.getItem("sybil:auth:read_api_key"),
+    sessionStorage.getItem("sybil:auth:read_api_key"),
   );
-  expect(readToken, "passkey login should mint and persist a read key").toMatch(
-    /^sybk_/,
-  );
+  expect(
+    readToken,
+    "passkey login should mint a session-scoped read key",
+  ).toMatch(/^sybk_/);
+  expect(
+    await page.evaluate(() => localStorage.getItem("sybil:auth:read_api_key")),
+    "bearer read keys must not cross the persistent-storage boundary",
+  ).toBeNull();
 
   // 7. Complete recovery from the backup session: the connected backup key is
   //    deliberately not revocable, while the original browser passkey is.
@@ -492,13 +497,12 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   ).toBeGreaterThan(0n);
 
   // 9. Open a market that has a price.
-  const { priced, nullPrice } = await pickMarkets(request);
+  const { priced } = await pickMarkets(request);
   expect(priced, "need an active market with a price").toBeTruthy();
-  expect(
-    nullPrice,
-    "need an active never-traded market for deterministic cancel coverage",
-  ).toBeTruthy();
   const market = priced!;
+  // The compact layout opens the reviewed order sheet; desktop Lite exposes
+  // direct bet controls instead of a separate "Place order" button.
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/m/${market.market_id}`);
 
   const placeOrder = page.getByRole("button", { name: "Place order" });
@@ -508,9 +512,12 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   const orderDialog = page.getByRole("dialog", { name: "Place order" });
   await expect(orderDialog).toBeVisible();
 
-  // A priced market must present a real indicative estimate (not the null-price
-  // seed-the-book copy) — sanity that we picked a live market.
-  await expect(orderDialog).toContainText(/est\. fill · next batch/i);
+  // A priced market must present its real indicative anchor (not the
+  // null-price seed-the-book copy) — sanity that we picked a live market.
+  await expect(orderDialog).toContainText(/indicative \d+¢/i);
+  await expect(orderDialog).not.toContainText(
+    /no indicative yet|seed the book/i,
+  );
 
   // 10. Submit a signed BUY YES (default BuyBox state: buy / YES / $25 / GTC).
   //    Clicking the CTA runs a WebAuthn assertion → POST /v1/orders/signed.
@@ -589,12 +596,10 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
     ).toBeTruthy();
   }).toPass({ timeout: 30_000, intervals: [1_000, 2_000, 3_000] });
 
-  // 13. Create a deliberately non-crossing GTC order on the never-traded
-  //     market. The first priced order above may fill immediately, so it cannot
-  //     provide deterministic cancel coverage. A 1c BUY YES on a null-price
-  //     market stays resting and gives the UI an authoritative order id to
-  //     cancel with a second WebAuthn assertion.
-  const cancelMarket = nullPrice!;
+  // 13. Create a 1c GTC order immediately after a fresh batch, then cancel it
+  //     before the next batch. This gives the UI an authoritative resting order
+  //     id without assuming a busy deployment still has a never-traded market.
+  const cancelMarket = market;
   await page.goto(`/m/${cancelMarket.market_id}`);
   const cancelMarketPlaceOrder = page
     .getByRole("button", { name: "Place order" })
@@ -603,11 +608,33 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   await cancelMarketPlaceOrder.click();
 
   const cancelOrderDialog = page.getByRole("dialog", { name: "Place order" });
-  await expect(cancelOrderDialog).toContainText(/seed the book/i);
   const limitSlider = cancelOrderDialog.getByRole("slider");
   await limitSlider.focus();
   await limitSlider.press("Home");
   await expect(limitSlider).toHaveValue("1");
+
+  const heightBefore = (
+    await getJson<{ height: number }>(
+      request,
+      `${REQUEST_API_BASE}/v1/blocks/latest`,
+    )
+  ).height;
+  await expect
+    .poll(
+      async () =>
+        (
+          await getJson<{ height: number }>(
+            request,
+            `${REQUEST_API_BASE}/v1/blocks/latest`,
+          )
+        ).height,
+      {
+        message: "need a fresh batch boundary before cancel coverage",
+        timeout: 20_000,
+        intervals: [500, 1_000],
+      },
+    )
+    .toBeGreaterThan(heightBefore);
 
   const queueCancelCandidate = cancelOrderDialog.getByRole("button", {
     name: /review buy|queue buy/i,
@@ -669,7 +696,10 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
     /new withdrawal requests are not enabled/i,
   );
   await expect(withdrawals).toContainText(
-    /does not by itself release L1 funds/i,
+    /relay, delayed L1 finalization, and confirmed-log indexing are separate steps/i,
+  );
+  await expect(withdrawals).toContainText(
+    /accept-all mock relay is not real-funds proof security/i,
   );
   await page.getByRole("tab", { name: /open orders/i }).click();
   const cancelRow = page.locator(`[data-order-id="${cancelOrderId}"]`);
