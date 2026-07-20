@@ -3100,6 +3100,53 @@ fn market_creation_key_is_idempotent_and_conflict_safe() {
 }
 
 #[test]
+fn market_group_creation_key_is_canonical_idempotent_and_conflict_safe() {
+    let mut markets = MarketSet::new();
+    let m0 = markets.add_binary("A");
+    let m1 = markets.add_binary("B");
+    let mut seq = BlockSequencer::with_default_solver(
+        AccountStore::new(),
+        markets,
+        vec![],
+        SequencerConfig::default(),
+    );
+
+    let key = Some("native:event:election".to_string());
+    let (group_id, group) = seq
+        .create_market_group_with_key("Election".to_string(), key.clone(), vec![m1, m0, m1])
+        .unwrap();
+    assert_eq!(group_id, 0);
+    assert_eq!(group.creation_key, key);
+    assert_eq!(group.markets, vec![m0, m1]);
+
+    let retry = seq
+        .create_market_group_with_key(
+            "Election".to_string(),
+            Some("native:event:election".to_string()),
+            vec![m1, m0],
+        )
+        .unwrap();
+    assert_eq!(retry, (group_id, group.clone()));
+    assert_eq!(seq.market_groups().len(), 1);
+
+    let conflict = seq
+        .create_market_group_with_key(
+            "Different copy".to_string(),
+            Some("native:event:election".to_string()),
+            vec![m0, m1],
+        )
+        .unwrap_err();
+    assert!(matches!(
+        conflict,
+        SequencerError::MarketGroupCreationKeyConflict {
+            existing_group_id: 0,
+            ..
+        }
+    ));
+    assert_eq!(seq.market_groups(), &[group]);
+}
+
+#[test]
 fn extending_market_group_is_idempotent_and_rejects_cross_group_member() {
     let mut markets = MarketSet::new();
     let m0 = markets.add_binary("A");

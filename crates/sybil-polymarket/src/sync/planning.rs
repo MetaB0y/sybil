@@ -28,6 +28,16 @@ pub(super) fn polymarket_market_creation_key(condition_id: &str) -> String {
     format!("polymarket:{}", hasher.finalize().to_hex())
 }
 
+/// Stable operator identity for a mirrored NegRisk event group.
+pub(super) fn polymarket_group_creation_key(event_id: &str) -> String {
+    let normalized = event_id.trim().to_ascii_lowercase();
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"sybil/polymarket-group-creation/v1");
+    hasher.update(&(normalized.len() as u64).to_le_bytes());
+    hasher.update(normalized.as_bytes());
+    format!("polymarket-group:{}", hasher.finalize().to_hex())
+}
+
 pub(super) fn plan_negrisk_group_action(
     event: &GammaEvent,
     active_mapped_ids: &[u32],
@@ -69,34 +79,12 @@ pub(super) fn plan_market_group_action(
 
 pub(super) fn matching_sybil_group_id(
     groups: &[MarketGroupResponse],
-    existing_group: &GroupInfo,
+    creation_key: &str,
 ) -> Option<u64> {
     groups
         .iter()
-        .filter(|group| group.name == existing_group.group_name)
-        .filter_map(|group| {
-            let overlap = group
-                .market_ids
-                .iter()
-                .filter(|id| existing_group.sybil_market_ids.contains(id))
-                .count();
-            if overlap == 0 {
-                return None;
-            }
-
-            let stored_subset_of_server = existing_group
-                .sybil_market_ids
-                .iter()
-                .all(|id| group.market_ids.contains(id));
-            let server_subset_of_stored = group
-                .market_ids
-                .iter()
-                .all(|id| existing_group.sybil_market_ids.contains(id));
-            (stored_subset_of_server || server_subset_of_stored)
-                .then_some((group.group_id, overlap))
-        })
-        .max_by_key(|(_, overlap)| *overlap)
-        .map(|(group_id, _)| group_id)
+        .find(|group| group.creation_key.as_deref() == Some(creation_key))
+        .map(|group| group.group_id)
 }
 
 pub(super) fn mm_group_membership(

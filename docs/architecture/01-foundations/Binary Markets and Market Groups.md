@@ -23,6 +23,14 @@ flowchart TB
 
 The event is *not* one three-way market — it is three independent binary markets stitched together by a single group constraint. Each is atomic and easy to settle; the group only adds the sum-to-$1 coupling on top.
 
+Each protocol group may carry one bounded operator `creation_key`. The key is
+canonical authenticated state and provides retry-safe identity across crashes
+and local checkpoint loss; it does not affect the solver objective. The group
+name remains display copy and must never be used to rediscover identity.
+Creation-key reuse with different initial name or membership is a conflict.
+Later membership growth remains the explicit, witnessed group-extension
+operation.
+
 Display-event membership is not sufficient to create a protocol market group.
 Nested threshold ladders such as “value ≥ 10” and “value ≥ 20” share event
 metadata in the API/frontend, but remain independent binary markets because both
@@ -36,6 +44,7 @@ This design trades off expressiveness for simplicity. A binary market is the ato
 ## Key Properties
 - Each market has outcomes YES (0) and NO (1) — exactly one resolves to $1
 - Market groups = mutually exclusive binary markets
+- Optional canonical creation key gives operator groups durable identity without making display copy an identifier
 - Correlated or nested markets may share display-event metadata without joining a market group
 - Sum-to-$1 constraint: `sum(YES_price_m for m in group) <= $1`
 - Groups enable cheaper [[Minting|group minting]] and price consistency

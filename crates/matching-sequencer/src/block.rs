@@ -350,6 +350,7 @@ fn market_group_snapshots(groups: &[MarketGroup]) -> Vec<sybil_verifier::MarketG
             sybil_verifier::MarketGroupSnapshot {
                 group_id: index as u64,
                 name: group.name.clone(),
+                creation_key: group.creation_key.clone(),
                 markets,
             }
         })

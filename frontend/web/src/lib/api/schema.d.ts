@@ -1935,6 +1935,11 @@ export interface components {
       vault_address_hex: string;
     };
     CreateMarketGroupRequest: {
+      /**
+       * @description Optional stable operator identity. Exact retries return the original
+       *     group; reuse with different creation fields is rejected.
+       */
+      creation_key?: string | null;
       /** @description Market IDs in the group. */
       market_ids: number[];
       /**
@@ -2233,6 +2238,7 @@ export interface components {
       window: string;
     };
     MarketGroupResponse: {
+      creation_key?: string | null;
       /** Format: int64 */
       group_id: number;
       market_ids: number[];

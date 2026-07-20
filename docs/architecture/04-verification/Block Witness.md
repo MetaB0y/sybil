@@ -8,7 +8,7 @@ last_verified: 2026-07-16
 
 # Block Witness Format
 
-`BlockWitness` v11 is the canonical private audit package for a Sybil block. The
+`BlockWitness` v12 is the canonical private audit package for a Sybil block. The
 sequencer persists the latest witness for recovery in every chain mode, native
 verification replays it, and the OpenVM epoch
 guest receives one witness per streamed `StateTransitionGuestInput`. Each
@@ -44,7 +44,9 @@ verification. GitHub #73 moves the format to v10 by appending the committed
 `ClientActionAuthorized(Order|Cancel)` events carrying exact RawP256/WebAuthn
 envelopes. GitHub #117 then moved the format to v11 by reducing canonical market lifecycle
 state to `Active | Resolved`, removing proposal/challenge/void encodings, and
-compacting completed resolution records. See
+compacting completed resolution records. GitHub #129 moves the format to v12
+by adding the optional operator creation key to both solver market groups and
+authenticated market-group snapshots. See
 the historical `design/archive/implemented/witness-v6-keys-transition.md` and
 `docs/adr/0015-deposit-quarantine.md`.
 
@@ -74,11 +76,11 @@ Primitive encodings:
 
 ## Layout
 
-The first byte is the format version. For v11 it is `0x0b`.
+The first byte is the format version. For v12 it is `0x0c`.
 
 ```text
 canonical_witness_bytes =
-    version:u8 = 0x0b
+    version:u8 = 0x0c
  || header
  || previous_header_tag:u8                     // 0 = none, 1 = present
  || previous_header?                           // if tag == 1
@@ -364,7 +366,7 @@ compute_state_root_with_sidecar(post_state, state_sidecar)
 
 ## Versioning And Compatibility
 
-The version byte is the first byte of `canonical_witness_bytes`. v11 is `0x0b`.
+The version byte is the first byte of `canonical_witness_bytes`. v12 is `0x0c`.
 Unknown versions must fail closed. This repo does not maintain dual witness
 decoders for devnet schema changes; ADR-0011 rejects compatibility wrappers
 before launch because they double validity-critical encoder surface.

@@ -46,6 +46,8 @@ pub enum ControlPlaneCommand {
     },
     CreateMarketGroup {
         name: String,
+        #[serde(default)]
+        creation_key: Option<String>,
         market_ids: Vec<MarketId>,
     },
     CancelPendingOrder {

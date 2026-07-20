@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use sybil_api_types::{CreateMarketGroupRequest, ExtendMarketGroupRequest};
 use sybil_client::SybilClient;
 
-use crate::{Error, NativeMarketCatalog, NativeMarketSpec, NativeQuoteRange};
+use crate::{Error, NativeMarketCatalog, NativeMarketSpec, NativeQuoteRange, native_group_key};
 
 pub const NATIVE_DEPLOYMENT_SCHEMA_VERSION: u32 = 1;
 
@@ -130,16 +130,17 @@ async fn ensure_groups(
             .find(|spec| spec.template_id == template_id)
             .map(NativeMarketSpec::group_name)
             .ok_or_else(|| Error::Deployment(format!("missing template {template_id}")))?;
-        let named: Vec<_> = groups
+        let creation_key = native_group_key(template_id);
+        let keyed: Vec<_> = groups
             .iter()
-            .filter(|group| group.name == group_name)
+            .filter(|group| group.creation_key.as_deref() == Some(creation_key.as_str()))
             .collect();
-        if named.len() > 1 {
+        if keyed.len() > 1 {
             return Err(Error::Deployment(format!(
-                "multiple market groups match native template {template_id}"
+                "multiple market groups have native creation key {creation_key:?}"
             )));
         }
-        if let Some(group) = named.first() {
+        if let Some(group) = keyed.first() {
             let current: BTreeSet<u32> = group.market_ids.iter().copied().collect();
             if !current.is_subset(&target) {
                 return Err(Error::Deployment(format!(
@@ -157,6 +158,7 @@ async fn ensure_groups(
             let response = client
                 .create_market_group(&CreateMarketGroupRequest {
                     name: group_name.to_string(),
+                    creation_key: Some(creation_key),
                     market_ids: target.iter().copied().collect(),
                 })
                 .await?;

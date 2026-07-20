@@ -1,7 +1,8 @@
 use super::*;
 
 impl BlockSequencer {
-    pub const MAX_MARKET_CREATION_KEY_BYTES: usize = 128;
+    pub const MAX_MARKET_CREATION_KEY_BYTES: usize =
+        matching_engine::MAX_OPERATOR_CREATION_KEY_BYTES;
 
     pub fn create_market(&mut self, name: String) -> MarketId {
         self.markets.add_binary(name)
@@ -58,13 +59,67 @@ impl BlockSequencer {
         name: String,
         market_ids: Vec<MarketId>,
     ) -> (u64, MarketGroup) {
+        self.create_market_group_with_key(name, None, market_ids)
+            .expect("an unkeyed market group has no identity conflict")
+    }
+
+    pub fn create_market_group_with_key(
+        &mut self,
+        name: String,
+        creation_key: Option<String>,
+        mut market_ids: Vec<MarketId>,
+    ) -> Result<(u64, MarketGroup), SequencerError> {
+        market_ids.sort_by_key(|market_id| market_id.0);
+        market_ids.dedup();
+        if let Some(existing) =
+            self.existing_market_group_for_creation(&name, creation_key.as_deref(), &market_ids)?
+        {
+            return Ok(existing);
+        }
+
         let group_id = self.market_groups.len() as u64;
         let mut group = MarketGroup::new(&name);
+        group.creation_key = creation_key;
         for market_id in market_ids {
             group.add_market(market_id);
         }
         self.market_groups.push(group.clone());
-        (group_id, group)
+        Ok((group_id, group))
+    }
+
+    pub(crate) fn existing_market_group_for_creation(
+        &self,
+        name: &str,
+        creation_key: Option<&str>,
+        market_ids: &[MarketId],
+    ) -> Result<Option<(u64, MarketGroup)>, SequencerError> {
+        let Some(key) = creation_key else {
+            return Ok(None);
+        };
+        validate_market_group_creation_key(key)?;
+
+        let Some((existing_group_id, existing)) = self
+            .market_groups
+            .iter()
+            .enumerate()
+            .find(|(_, group)| group.creation_key.as_deref() == Some(key))
+        else {
+            return Ok(None);
+        };
+
+        let mut existing_markets = existing.markets.clone();
+        existing_markets.sort_by_key(|market_id| market_id.0);
+        existing_markets.dedup();
+        let mut requested_markets = market_ids.to_vec();
+        requested_markets.sort_by_key(|market_id| market_id.0);
+        requested_markets.dedup();
+        if existing.name == name && existing_markets == requested_markets {
+            return Ok(Some((existing_group_id as u64, existing.clone())));
+        }
+        Err(SequencerError::MarketGroupCreationKeyConflict {
+            key: key.to_string(),
+            existing_group_id: existing_group_id as u64,
+        })
     }
 
     /// Add a market to an existing mutually-exclusive group.
@@ -268,24 +323,26 @@ impl BlockSequencer {
 }
 
 fn validate_market_creation_key(key: &str) -> Result<(), SequencerError> {
+    validate_creation_key_shape(key).map_err(SequencerError::InvalidMarketCreationKey)
+}
+
+fn validate_market_group_creation_key(key: &str) -> Result<(), SequencerError> {
+    validate_creation_key_shape(key).map_err(SequencerError::InvalidMarketGroupCreationKey)
+}
+
+fn validate_creation_key_shape(key: &str) -> Result<(), String> {
     if key.is_empty() {
-        return Err(SequencerError::InvalidMarketCreationKey(
-            "key must not be empty".to_string(),
-        ));
+        return Err("key must not be empty".to_string());
     }
     if key.len() > BlockSequencer::MAX_MARKET_CREATION_KEY_BYTES {
-        return Err(SequencerError::InvalidMarketCreationKey(format!(
+        return Err(format!(
             "key is {} bytes; maximum is {}",
             key.len(),
             BlockSequencer::MAX_MARKET_CREATION_KEY_BYTES
-        )));
-    }
-    if !key.bytes().all(|byte| {
-        byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b':' | b'.' | b'/')
-    }) {
-        return Err(SequencerError::InvalidMarketCreationKey(
-            "key must use ASCII letters, digits, '-', '_', ':', '.', or '/'".to_string(),
         ));
+    }
+    if !matching_engine::operator_creation_key_is_valid(key) {
+        return Err("key must use ASCII letters, digits, '-', '_', ':', '.', or '/'".to_string());
     }
     Ok(())
 }

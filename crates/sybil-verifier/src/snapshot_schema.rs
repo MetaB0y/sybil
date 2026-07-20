@@ -70,6 +70,7 @@ impl<'a> SnapshotByteVisitor<'a> {
     fn append_market_group_fields(&mut self, group: &MarketGroupSnapshot) {
         append_u64(self.out, group.group_id);
         append_string(self.out, &group.name);
+        append_optional_string(self.out, group.creation_key.as_deref());
 
         let mut markets = group.markets.clone();
         markets.sort_by_key(|market| market.0);
@@ -114,6 +115,16 @@ impl<'a> SnapshotByteVisitor<'a> {
                 append_u64(self.out, *feed_id);
             }
         }
+    }
+}
+
+fn append_optional_string(out: &mut Vec<u8>, value: Option<&str>) {
+    match value {
+        Some(value) => {
+            out.push(1);
+            append_string(out, value);
+        }
+        None => out.push(0),
     }
 }
 

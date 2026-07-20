@@ -172,6 +172,7 @@ pub enum SequencerMsg {
     CreateMarket(String, RpcReplyPort<Result<MarketId, SequencerError>>),
     CreateMarketGroup(
         String,
+        Option<String>,
         Vec<MarketId>,
         RpcReplyPort<Result<(u64, MarketGroup), SequencerError>>,
     ),

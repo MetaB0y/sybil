@@ -1163,6 +1163,7 @@ mod tests {
         let market_group = MarketGroupSnapshot {
             group_id: 2,
             name: "Group".to_string(),
+            creation_key: None,
             markets: vec![MarketId::new(3)],
         };
         let withdrawal = WithdrawalSnapshot {

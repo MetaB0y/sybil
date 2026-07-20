@@ -4,7 +4,7 @@
   "status": "pending_redeploy",
   "desired": {
     "state_transition": {
-      "app_exe_commit": "0x008338d19cef2fc5cf6a2fa6f8c7388b019569255f120be6c948dd393918c08e",
+      "app_exe_commit": "0x0093f2791f6a17eb45d84a9b89b362c621a43a42b5c3c53518ed94112dd6ef8a",
       "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
     },
     "escape_claim": {

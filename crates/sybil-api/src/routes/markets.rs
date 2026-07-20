@@ -520,6 +520,7 @@ pub async fn list_market_groups(
         .map(|(group_id, g)| MarketGroupResponse {
             group_id: group_id as u64,
             name: g.name.clone(),
+            creation_key: g.creation_key.clone(),
             market_ids: g.markets.iter().map(|m| m.0).collect(),
         })
         .collect();
@@ -544,12 +545,13 @@ pub async fn create_market_group(
     let market_ids: Vec<MarketId> = req.market_ids.iter().map(|&id| MarketId::new(id)).collect();
     let (group_id, group) = state
         .sequencer
-        .create_market_group(req.name, market_ids)
+        .create_market_group_with_key(req.name, req.creation_key, market_ids)
         .await?;
 
     Ok(Json(MarketGroupResponse {
         group_id,
         name: group.name,
+        creation_key: group.creation_key,
         market_ids: group.markets.iter().map(|m| m.0).collect(),
     }))
 }
@@ -582,6 +584,7 @@ pub async fn extend_market_group(
     Ok(Json(MarketGroupResponse {
         group_id,
         name: group.name,
+        creation_key: group.creation_key,
         market_ids: group.markets.iter().map(|m| m.0).collect(),
     }))
 }

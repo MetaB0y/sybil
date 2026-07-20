@@ -381,10 +381,13 @@ impl BlockSequencer {
                 self.create_market_with_metadata(name, metadata)?;
                 Ok(())
             }
-            ControlPlaneCommand::CreateMarketGroup { name, market_ids } => {
-                self.create_market_group(name, market_ids);
-                Ok(())
-            }
+            ControlPlaneCommand::CreateMarketGroup {
+                name,
+                creation_key,
+                market_ids,
+            } => self
+                .create_market_group_with_key(name, creation_key, market_ids)
+                .map(|_| ()),
             ControlPlaneCommand::ExtendMarketGroup {
                 group_id,
                 market_id,

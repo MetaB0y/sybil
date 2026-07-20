@@ -11,7 +11,7 @@ last_verified: 2026-07-20
 > [!summary] In one paragraph
 > Accounts have a committed set of P256 signing keys. Raw agent keys sign
 > canonical action bytes directly; passkeys sign a WebAuthn assertion whose
-> challenge is the hash of those same bytes. Witness v11 carries key mutations
+> challenge is the hash of those same bytes. Witness v12 carries key mutations
 > and ordinary order/cancel authorization envelopes in actor order. Native and
 > guest-safe verification replay the active key set, RawP256/WebAuthn signature,
 > exact action, genesis domain, and committed trading nonce. The deployed guest

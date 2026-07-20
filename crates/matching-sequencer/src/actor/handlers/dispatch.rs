@@ -357,8 +357,12 @@ impl Actor for SequencerActor {
             SequencerMsg::CreateMarket(name, reply) => {
                 let _ = reply.send(state.handle_create_market(name).await);
             }
-            SequencerMsg::CreateMarketGroup(name, market_ids, reply) => {
-                let _ = reply.send(state.handle_create_market_group(name, market_ids).await);
+            SequencerMsg::CreateMarketGroup(name, creation_key, market_ids, reply) => {
+                let _ = reply.send(
+                    state
+                        .handle_create_market_group(name, creation_key, market_ids)
+                        .await,
+                );
             }
             SequencerMsg::ExtendMarketGroup(group_id, market_id, reply) => {
                 let _ = reply.send(state.handle_extend_market_group(group_id, market_id).await);

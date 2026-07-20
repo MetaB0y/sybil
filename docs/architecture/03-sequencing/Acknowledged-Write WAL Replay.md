@@ -61,6 +61,10 @@ AcknowledgedWrite =
   | BridgeL1Input(BridgeL1Input)
 ```
 
+`CreateMarketGroup` carries the optional canonical operator creation key.
+Before append, an exact keyed retry returns the existing group and conflicting
+reuse fails; replay therefore never needs a display-name recovery heuristic.
+
 The variant enum is append-only within an envelope version. Breaking changes
 require a new envelope/store layout under the fresh-genesis policy.
 

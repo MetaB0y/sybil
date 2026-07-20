@@ -253,14 +253,24 @@ impl SequencerActorState {
     pub(super) async fn handle_create_market_group(
         &mut self,
         name: String,
+        creation_key: Option<String>,
         market_ids: Vec<MarketId>,
     ) -> Result<(u64, MarketGroup), SequencerError> {
+        if let Some(existing) = self.sequencer.existing_market_group_for_creation(
+            &name,
+            creation_key.as_deref(),
+            &market_ids,
+        )? {
+            return Ok(existing);
+        }
         self.persist_control_plane(&ControlPlaneCommand::CreateMarketGroup {
             name: name.clone(),
+            creation_key: creation_key.clone(),
             market_ids: market_ids.clone(),
         })
         .await?;
-        Ok(self.sequencer.create_market_group(name, market_ids))
+        self.sequencer
+            .create_market_group_with_key(name, creation_key, market_ids)
     }
 
     pub(super) async fn handle_extend_market_group(

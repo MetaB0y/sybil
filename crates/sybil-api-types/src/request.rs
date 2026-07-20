@@ -425,6 +425,10 @@ pub struct CreateMarketGroupRequest {
     /// Name for the group of mutually exclusive markets.
     #[cfg_attr(feature = "openapi", schema(example = "2024 Election"))]
     pub name: String,
+    /// Optional stable operator identity. Exact retries return the original
+    /// group; reuse with different creation fields is rejected.
+    #[serde(default)]
+    pub creation_key: Option<String>,
     /// Market IDs in the group.
     pub market_ids: Vec<u32>,
 }

@@ -25,7 +25,7 @@ use crate::types::{
     WitnessOrder, WitnessRejection,
 };
 
-pub const WITNESS_FORMAT_VERSION: u8 = 11;
+pub const WITNESS_FORMAT_VERSION: u8 = 12;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum WitnessDecodeError {
@@ -37,7 +37,7 @@ pub enum WitnessDecodeError {
     },
     #[error("trailing bytes after canonical witness at offset {offset}: {trailing} bytes")]
     TrailingBytes { offset: usize, trailing: usize },
-    #[error("unknown witness format version {0}; only v9 is supported")]
+    #[error("unknown witness format version {0}; only v12 is supported")]
     UnknownVersion(u8),
     #[error("invalid tag for {field} at offset {offset}: {tag}")]
     InvalidTag {
@@ -764,6 +764,7 @@ impl<'a> WitnessReader<'a> {
     fn read_market_group(&mut self) -> Result<MarketGroup, WitnessDecodeError> {
         Ok(MarketGroup {
             name: self.read_string("market_group.name")?,
+            creation_key: self.read_optional_string("market_group.creation_key")?,
             markets: self.read_vec("market_group.markets", |reader| reader.read_market_id())?,
         })
     }
@@ -871,10 +872,23 @@ impl<'a> WitnessReader<'a> {
         Ok(MarketGroupSnapshot {
             group_id: self.read_u64()?,
             name: self.read_string("sidecar.market_group.name")?,
+            creation_key: self.read_optional_string("sidecar.market_group.creation_key")?,
             markets: self.read_vec("sidecar.market_group.markets", |reader| {
                 reader.read_market_id()
             })?,
         })
+    }
+
+    fn read_optional_string(
+        &mut self,
+        field: &'static str,
+    ) -> Result<Option<String>, WitnessDecodeError> {
+        let offset = self.offset;
+        match self.read_tag(field)? {
+            0 => Ok(None),
+            1 => self.read_string(field).map(Some),
+            tag => Err(WitnessDecodeError::InvalidTag { field, tag, offset }),
+        }
     }
 
     fn read_market_status(&mut self) -> Result<MarketStatusSnapshot, WitnessDecodeError> {
@@ -1090,12 +1104,23 @@ fn append_market_groups(out: &mut Vec<u8>, groups: &[MarketGroup]) {
     append_u64(out, groups.len() as u64);
     for group in groups {
         append_string(out, &group.name);
+        append_optional_string(out, group.creation_key.as_deref());
         let mut markets = group.markets.clone();
         markets.sort_by_key(|market| market.0);
         append_u64(out, markets.len() as u64);
         for market in markets {
             append_market_id(out, market);
         }
+    }
+}
+
+fn append_optional_string(out: &mut Vec<u8>, value: Option<&str>) {
+    match value {
+        Some(value) => {
+            out.push(1);
+            append_string(out, value);
+        }
+        None => out.push(0),
     }
 }
 
@@ -1432,6 +1457,7 @@ mod tests {
             ],
             market_groups: vec![MarketGroup {
                 name: "Weather basket".to_string(),
+                creation_key: Some("operator:weather".to_string()),
                 markets: vec![market_a, market_b],
             }],
             pre_state: vec![account_snapshot(1001), account_snapshot(1002)],
@@ -1551,6 +1577,7 @@ mod tests {
             market_groups: vec![MarketGroupSnapshot {
                 group_id: 5,
                 name: "Weather basket".to_string(),
+                creation_key: Some("operator:weather".to_string()),
                 markets: vec![MarketId::new(3), MarketId::new(9)],
             }],
             resting_orders: vec![RestingOrderSnapshot {

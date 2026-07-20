@@ -221,6 +221,7 @@ impl SolverReplayCaseV1 {
             .enumerate()
             .map(|(index, market_ids)| MarketGroup {
                 name: format!("replay-group-{index}"),
+                creation_key: None,
                 markets: market_ids.clone(),
             })
             .collect();

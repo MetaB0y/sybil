@@ -8,6 +8,7 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..types import UNSET, Unset
 from typing import cast
 
 
@@ -25,10 +26,13 @@ class CreateMarketGroupRequest:
         Attributes:
             market_ids (list[int]): Market IDs in the group.
             name (str): Name for the group of mutually exclusive markets. Example: 2024 Election.
+            creation_key (None | str | Unset): Optional stable operator identity. Exact retries return the original
+                group; reuse with different creation fields is rejected.
      """
 
     market_ids: list[int]
     name: str
+    creation_key: None | str | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
@@ -42,6 +46,12 @@ class CreateMarketGroupRequest:
 
         name = self.name
 
+        creation_key: None | str | Unset
+        if isinstance(self.creation_key, Unset):
+            creation_key = UNSET
+        else:
+            creation_key = self.creation_key
+
 
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
@@ -49,6 +59,8 @@ class CreateMarketGroupRequest:
             "market_ids": market_ids,
             "name": name,
         })
+        if creation_key is not UNSET:
+            field_dict["creation_key"] = creation_key
 
         return field_dict
 
@@ -62,9 +74,20 @@ class CreateMarketGroupRequest:
 
         name = d.pop("name")
 
+        def _parse_creation_key(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        creation_key = _parse_creation_key(d.pop("creation_key", UNSET))
+
+
         create_market_group_request = cls(
             market_ids=market_ids,
             name=name,
+            creation_key=creation_key,
         )
 
 

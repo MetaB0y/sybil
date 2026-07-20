@@ -986,6 +986,7 @@ fn byte_identity_witness() -> BlockWitness {
         ],
         market_groups: vec![MarketGroup {
             name: "Weather basket".to_string(),
+            creation_key: Some("operator:weather".to_string()),
             markets: vec![market_b, market_a],
         }],
         pre_state: vec![account_snapshot(1002), account_snapshot(1001)],
@@ -1089,6 +1090,7 @@ fn state_sidecar(resting_order: Order) -> StateSidecarSnapshot {
         market_groups: vec![MarketGroupSnapshot {
             group_id: 5,
             name: "Weather basket".to_string(),
+            creation_key: Some("operator:weather".to_string()),
             markets: vec![MarketId::new(9), MarketId::new(3)],
         }],
         resting_orders: vec![RestingOrderSnapshot {

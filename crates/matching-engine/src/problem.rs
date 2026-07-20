@@ -4,6 +4,16 @@ use std::collections::HashSet;
 
 use crate::{MarketId, MarketSet, MmConstraint, Order};
 
+pub const MAX_OPERATOR_CREATION_KEY_BYTES: usize = 128;
+
+pub fn operator_creation_key_is_valid(key: &str) -> bool {
+    !key.is_empty()
+        && key.len() <= MAX_OPERATOR_CREATION_KEY_BYTES
+        && key.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b':' | b'.' | b'/')
+        })
+}
+
 /// A group of mutually exclusive markets (exactly one resolves YES).
 ///
 /// Used to model multi-outcome events like elections where
@@ -20,10 +30,16 @@ use crate::{MarketId, MarketSet, MmConstraint, Order};
 /// ```
 ///
 /// The solver enforces: sum of P(market_i YES) = 1 for each group.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MarketGroup {
     /// Name of this group (e.g., "2024 Election")
     pub name: String,
+    /// Stable operator-supplied identity for retry-safe creation.
+    ///
+    /// This is canonical state, but has no effect on solver economics. Display
+    /// names remain product copy rather than serving as identity.
+    #[serde(default)]
+    pub creation_key: Option<String>,
     /// Markets in this group (mutually exclusive)
     pub markets: Vec<MarketId>,
 }
@@ -32,8 +48,14 @@ impl MarketGroup {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
+            creation_key: None,
             markets: Vec::new(),
         }
+    }
+
+    pub fn with_creation_key(mut self, creation_key: impl Into<String>) -> Self {
+        self.creation_key = Some(creation_key.into());
+        self
     }
 
     pub fn with_market(mut self, market: MarketId) -> Self {
@@ -132,8 +154,19 @@ impl Problem {
             }
         }
 
-        // Check all market_group market IDs exist
+        // Check all market_group identities and market IDs.
+        let mut group_creation_keys = HashSet::new();
         for group in &self.market_groups {
+            if let Some(key) = group.creation_key.as_deref() {
+                if !operator_creation_key_is_valid(key) {
+                    errors.push(format!(
+                        "market group '{}' has invalid creation key",
+                        group.name
+                    ));
+                } else if !group_creation_keys.insert(key) {
+                    errors.push(format!("duplicate market group creation key: {key}"));
+                }
+            }
             for &market_id in &group.markets {
                 if self.markets.get(market_id).is_none() {
                     errors.push(format!(

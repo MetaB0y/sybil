@@ -228,6 +228,14 @@ pub enum SequencerError {
         key: String,
         existing_market_id: MarketId,
     },
+    /// An operator market-group creation key is malformed.
+    #[error("invalid market group creation key: {0}")]
+    InvalidMarketGroupCreationKey(String),
+    /// A creation key already identifies a different immutable group spec.
+    #[error(
+        "market group creation key {key:?} already identifies group {existing_group_id} with different creation fields"
+    )]
+    MarketGroupCreationKeyConflict { key: String, existing_group_id: u64 },
     /// The requested market group was not found.
     #[error("market group not found")]
     MarketGroupNotFound,

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fingerprint": "sha256:9074bffc304052cebf286ad021f920f6b601e7a16a79b2c2055bb6a1ff34d0cb",
+  "fingerprint": "sha256:8c925e5191734ece7a0f524cb29100a84d3e88735342466b346905e24f8d64ab",
   "inputs": {
     "commonware_packages": [
       {
@@ -70,24 +70,24 @@
         "checksum": "dfad44dd2c8e97d55dbe271802740e919d2ce8839277ea53d958381caab92a44"
       }
     ],
-    "golden_vectors_sha256": "53398ec0d15858d1923cba2d10ceb868e63b2d1e60c97e052ef48e35630edc8f",
+    "golden_vectors_sha256": "ba98f64935a9b87f1d0ec61db56470fd90898e215121410b11c19b8542eb975b",
     "guests": {
       "state_transition": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "ac2712ba0dbfd6c6c4a1ccaa1389a8eea4978770a46b1d094b1bd51dc1167c35",
-        "app_exe_commit": "0x008338d19cef2fc5cf6a2fa6f8c7388b019569255f120be6c948dd393918c08e",
+        "source_sha256": "d2500a7472870c57789176ade9fbe3a2950b1d550095fb7181d8cf6486459ec2",
+        "app_exe_commit": "0x0093f2791f6a17eb45d84a9b89b362c621a43a42b5c3c53518ed94112dd6ef8a",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       },
       "escape_claim": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "58009c4ebee06872a35327287a3df2be83797990e79dcc6c36e82427c312c98b",
+        "source_sha256": "6829e35a791e4c68beb81922b56746137c0cb4c1a8a3757ea8070541ee749533",
         "app_exe_commit": "0x008c8f972e57f4b15163aa7bb8d5ca89c5532212c091bb85c1c19a1428a53ffd",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       }
     },
     "desired_validity_pins": {
       "state_transition": {
-        "app_exe_commit": "0x008338d19cef2fc5cf6a2fa6f8c7388b019569255f120be6c948dd393918c08e",
+        "app_exe_commit": "0x0093f2791f6a17eb45d84a9b89b362c621a43a42b5c3c53518ed94112dd6ef8a",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       },
       "escape_claim": {
@@ -98,7 +98,7 @@
   },
   "decision": {
     "action": "fresh_genesis",
-    "reason": "Remove consensus canonical-price equality; witnesses built against the prior verifier are incompatible",
+    "reason": "Witness v12 adds canonical market-group creation identity and signed-action domains changed; prior witnesses and state roots are intentionally incompatible",
     "reference": "docs/runbooks/fresh-genesis-redeploy.md"
   }
 }

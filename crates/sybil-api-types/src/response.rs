@@ -455,6 +455,8 @@ pub struct MarketSummaryResponse {
 pub struct MarketGroupResponse {
     pub group_id: u64,
     pub name: String,
+    #[serde(default)]
+    pub creation_key: Option<String>,
     pub market_ids: Vec<u32>,
 }
 

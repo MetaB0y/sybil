@@ -921,6 +921,12 @@ fn verify_market_group_transition(witness: &BlockWitness, violations: &mut Vec<V
                 details: format!("market group {group_id} name was silently edited"),
             });
         }
+        if pre_group.creation_key != post_group.creation_key {
+            violations.push(Violation {
+                kind: ViolationKind::SidecarMarketGroupMismatch,
+                details: format!("market group {group_id} creation identity was silently edited"),
+            });
+        }
 
         let allowed_additions = extensions
             .iter()
@@ -1065,7 +1071,24 @@ fn keyed_market_groups<'a>(
     violations: &mut Vec<Violation>,
 ) -> BTreeMap<u64, &'a MarketGroupSnapshot> {
     let mut out = BTreeMap::new();
+    let mut creation_keys = BTreeSet::new();
     for group in groups {
+        if let Some(key) = group.creation_key.as_deref() {
+            if !matching_engine::operator_creation_key_is_valid(key) {
+                violations.push(Violation {
+                    kind: ViolationKind::SidecarMarketGroupMismatch,
+                    details: format!(
+                        "market group {} has invalid creation key {key:?}",
+                        group.group_id
+                    ),
+                });
+            } else if !creation_keys.insert(key) {
+                violations.push(Violation {
+                    kind: ViolationKind::SidecarMarketGroupMismatch,
+                    details: format!("duplicate market group creation key {key:?}"),
+                });
+            }
+        }
         if out.insert(group.group_id, group).is_some() {
             violations.push(Violation {
                 kind: ViolationKind::SidecarMarketGroupMismatch,
@@ -1367,6 +1390,7 @@ mod tests {
         MarketGroupSnapshot {
             group_id,
             name: format!("G{group_id}"),
+            creation_key: None,
             markets,
         }
     }
@@ -1643,6 +1667,38 @@ mod tests {
                 .iter()
                 .any(|v| v.kind == ViolationKind::SidecarMarketGroupMismatch)
         );
+    }
+
+    #[test]
+    fn sidecar_market_group_creation_identity_is_valid_unique_and_immutable() {
+        let mut pre = empty_sidecar();
+        let mut group = market_group(3, vec![MarketId::new(1), MarketId::new(2)]);
+        group.creation_key = Some("native:event".to_string());
+        pre.market_groups = vec![group];
+        let mut post = pre.clone();
+        post.market_groups[0].creation_key = Some("native:other".to_string());
+
+        let changed = verify_sidecar(&witness_with_pre_post_sidecars(pre, post));
+        assert!(!changed.valid);
+        assert!(changed.violations.iter().any(|violation| {
+            violation.kind == ViolationKind::SidecarMarketGroupMismatch
+                && violation.details.contains("creation identity")
+        }));
+
+        let mut duplicate = empty_sidecar();
+        let mut first = market_group(1, vec![MarketId::new(1), MarketId::new(2)]);
+        first.creation_key = Some("native:event".to_string());
+        let mut second = market_group(2, vec![MarketId::new(3), MarketId::new(4)]);
+        second.creation_key = first.creation_key.clone();
+        duplicate.market_groups = vec![first, second];
+        let duplicate = verify_sidecar(&witness_with_sidecar(duplicate));
+        assert!(!duplicate.valid);
+        assert!(duplicate.violations.iter().any(|violation| {
+            violation.kind == ViolationKind::SidecarMarketGroupMismatch
+                && violation
+                    .details
+                    .contains("duplicate market group creation key")
+        }));
     }
 
     #[test]

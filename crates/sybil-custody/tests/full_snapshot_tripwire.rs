@@ -57,6 +57,7 @@ fn canonical_da_payload_is_a_self_contained_full_state_snapshot() {
         market_groups: vec![MarketGroupSnapshot {
             group_id: 5,
             name: "Tripwire group".to_string(),
+            creation_key: None,
             markets: vec![MarketId(3)],
         }],
         resting_orders: vec![RestingOrderSnapshot {

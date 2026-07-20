@@ -473,6 +473,7 @@ fn market_state_from_sidecar(
                 group.group_id,
                 MarketGroup {
                     name: group.name.clone(),
+                    creation_key: group.creation_key.clone(),
                     markets: group.markets.clone(),
                 },
             )

@@ -499,6 +499,8 @@ pub struct MarketSnapshot {
 pub struct MarketGroupSnapshot {
     pub group_id: u64,
     pub name: String,
+    #[serde(default)]
+    pub creation_key: Option<String>,
     pub markets: Vec<MarketId>,
 }
 

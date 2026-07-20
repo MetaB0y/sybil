@@ -8,7 +8,7 @@ last_verified: 2026-07-16
 # Threat model
 
 > [!summary] In one paragraph
-> Sybil minimizes trust in transition correctness. Witness v11 and shared
+> Sybil minimizes trust in transition correctness. Witness v12 and shared
 > native/guest verification check state transitions, key mutations, ordinary
 > RawP256/WebAuthn order/cancel intent, and committed cross-block trading
 > nonces. The deployed guest commitment still requires the coordinated epoch
@@ -24,7 +24,7 @@ This note distinguishes **implemented cryptographic controls** from **controls t
 flowchart TB
     subgraph crypto["🟢 Implemented controls"]
         INTENT["Trading and key intent<br/>state-bound keys/nonces · P256/WebAuthn"]
-        TRANS["State transition<br/>witness v11 · settlement · sidecar · exact qMDB proofs"]
+        TRANS["State transition<br/>witness v12 · settlement · sidecar · exact qMDB proofs"]
         BRIDGE["Bridge accounting<br/>deposit inclusion · checkpoint · quarantine · withdrawal nullifiers"]
         SHAPES["Value safety<br/>unsupported order shapes rejected at every boundary"]
     end
@@ -56,8 +56,8 @@ flowchart TB
 
 | Attack | Status | Control / residual trust |
 |---|---|---|
-| Forge a key registration/revocation | 🟢 | Witness v11 binds `genesis_hash`, the active key universe, state digests, key operation, and RawP256/WebAuthn envelope; shared native/guest verification replays authorization. |
-| Forge an ordinary order/cancellation | 🟢 | Witness v11 retains the exact action envelope in actor order. Verification checks the active scheme-matching key, genesis/action binding, RawP256/WebAuthn policy and signature, committed trading nonce, and corresponding order/cancel effect. |
+| Forge a key registration/revocation | 🟢 | Witness v12 binds `genesis_hash`, the active key universe, state digests, key operation, and RawP256/WebAuthn envelope; shared native/guest verification replays authorization. |
+| Forge an ordinary order/cancellation | 🟢 | Witness v12 retains the exact action envelope in actor order. Verification checks the active scheme-matching key, genesis/action binding, RawP256/WebAuthn policy and signature, committed trading nonce, and corresponding order/cancel effect. |
 | Insert an unsupported multi-market/custom value path | 🟢 | Unsupported shapes are rejected at API, admission, solver, and verification boundaries. The expressive payoff-vector type is not treated as execution support. |
 | Forge balances, positions, reservations, or market/bridge sidecar | 🟢 / 🟡 | Native and guest transition checks cover the witness and exact post-state keyspace. This becomes a production guarantee only when the real pinned verifier—not `UnsafeAcceptAllVerifierAdapter` or a mock prover—is deployed. |
 | Credit an unbacked or misdirected deposit | 🟢 | Guest-verified deposit inclusion, vault checkpoint binding, ordered cursor, and witnessed credit-or-quarantine disposition. |

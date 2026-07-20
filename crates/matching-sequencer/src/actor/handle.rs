@@ -549,8 +549,20 @@ impl SequencerHandle {
         name: String,
         market_ids: Vec<MarketId>,
     ) -> Result<(u64, MarketGroup), SequencerError> {
-        self.control_rpc(|reply| SequencerMsg::CreateMarketGroup(name, market_ids, reply))
-            .await?
+        self.create_market_group_with_key(name, None, market_ids)
+            .await
+    }
+
+    pub async fn create_market_group_with_key(
+        &self,
+        name: String,
+        creation_key: Option<String>,
+        market_ids: Vec<MarketId>,
+    ) -> Result<(u64, MarketGroup), SequencerError> {
+        self.control_rpc(|reply| {
+            SequencerMsg::CreateMarketGroup(name, creation_key, market_ids, reply)
+        })
+        .await?
     }
 
     pub async fn extend_market_group(
@@ -2042,11 +2054,28 @@ mod tests {
             .await
             .unwrap();
         let (group_id, group) = handle
-            .create_market_group("wal group".to_string(), vec![group_market])
+            .create_market_group_with_key(
+                "wal group".to_string(),
+                Some("native:wal-group".to_string()),
+                vec![group_market],
+            )
             .await
             .unwrap();
         assert_eq!(group_id, 0);
+        assert_eq!(group.creation_key.as_deref(), Some("native:wal-group"));
         assert_eq!(group.markets, vec![group_market]);
+        assert_eq!(
+            handle
+                .create_market_group_with_key(
+                    "wal group".to_string(),
+                    Some("native:wal-group".to_string()),
+                    vec![group_market],
+                )
+                .await
+                .unwrap(),
+            (group_id, group.clone()),
+            "an exact keyed retry should not append another control-plane write"
+        );
         let (extended_group, inserted) = handle
             .extend_market_group(group_id, metadata_market)
             .await
@@ -2126,6 +2155,7 @@ mod tests {
                     .market_groups()
                     .iter()
                     .any(|group| group.name == "wal group"
+                        && group.creation_key.as_deref() == Some("native:wal-group")
                         && group.markets == vec![group_market, metadata_market]),
                 "market group extension was acknowledged but not replayed after restore"
             );

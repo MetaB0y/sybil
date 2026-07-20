@@ -38,7 +38,10 @@ pub use order::{
     derive_order_direction,
 };
 pub use order_builder::OrderBuilder;
-pub use problem::{MarketGroup, Problem, ProblemSummary};
+pub use problem::{
+    MAX_OPERATOR_CREATION_KEY_BYTES, MarketGroup, Problem, ProblemSummary,
+    operator_creation_key_is_valid,
+};
 pub use settlement::{
     MintAdjustment, SettlementArithmeticError, SettlementDelta, compute_fill_settlement,
     compute_fill_settlement_checked, derive_minting, derive_minting_checked,

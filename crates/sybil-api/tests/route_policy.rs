@@ -736,11 +736,45 @@ async fn service_routes_succeed_with_token_in_prod() {
         Method::POST,
         "/v1/markets/groups",
         Some(TOKEN),
-        json!({"name": "service group", "market_ids": [market_id]}),
+        json!({
+            "name": "service group",
+            "creation_key": "service:test-group",
+            "market_ids": [market_id]
+        }),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
     let group_id = parse_json(&body)["group_id"].as_u64().unwrap();
+    assert_eq!(parse_json(&body)["creation_key"], "service:test-group");
+
+    let (status, body) = request_json(
+        app.clone(),
+        Method::POST,
+        "/v1/markets/groups",
+        Some(TOKEN),
+        json!({
+            "name": "service group",
+            "creation_key": "service:test-group",
+            "market_ids": [market_id]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(parse_json(&body)["group_id"], group_id);
+
+    let (status, _) = request_json(
+        app.clone(),
+        Method::POST,
+        "/v1/markets/groups",
+        Some(TOKEN),
+        json!({
+            "name": "different group",
+            "creation_key": "service:test-group",
+            "market_ids": [market_id]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
 
     let (status, body) = request_json(
         app.clone(),

@@ -696,11 +696,13 @@ mod tests {
         let first_group = MarketGroupSnapshot {
             group_id: 1,
             name: "Group B".to_string(),
+            creation_key: None,
             markets: vec![MarketId::new(2), MarketId::new(1)],
         };
         let second_group = MarketGroupSnapshot {
             group_id: 0,
             name: "Group A".to_string(),
+            creation_key: None,
             markets: vec![MarketId::new(3), MarketId::new(1)],
         };
         let sidecar_a = StateSidecarSnapshot {

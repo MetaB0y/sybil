@@ -182,6 +182,13 @@ without appending another acknowledged write; the server-generated creation
 timestamp is deliberately not a caller field. Reusing the key for a different
 contract returns 409. Omitting the key retains allocate-on-every-call behavior.
 
+Trusted `POST /v1/markets/groups` has the same optional bounded
+`creation_key` contract. Exact retries return the original `group_id` without
+another WAL append; a different name or initial member set returns 409. Group
+responses expose the key so native and mirror operators recover by durable
+identity rather than guessing from a title or overlapping membership. Member
+growth remains `POST /v1/markets/groups/{group_id}/members`.
+
 Market raw price history is served through
 `GET /v1/markets/{id}/prices/history`, backed by the private history projector.
 The endpoint is bounded by `limit` and pages older committed points with

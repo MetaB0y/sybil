@@ -96,7 +96,7 @@ impl SequencerActorState {
                 self.reject_integrity_halted("market", reply);
                 None
             }
-            SequencerMsg::CreateMarketGroup(_, _, reply) => {
+            SequencerMsg::CreateMarketGroup(_, _, _, reply) => {
                 self.reject_integrity_halted("market", reply);
                 None
             }

@@ -480,21 +480,13 @@ impl SyncActor {
             };
             match group_action {
                 NegRiskGroupAction::Create(market_ids) => {
-                    let expected_group = GroupInfo {
-                        group_name: event.title.clone(),
-                        sybil_market_ids: market_ids.clone(),
-                        neg_risk: true,
-                    };
-                    // Group creation has no server-side idempotency key. Read
-                    // before writing and adopt an overlapping same-name group
-                    // left by a crash after the prior response but before the
-                    // local mapping checkpoint.
+                    let creation_key = polymarket_group_creation_key(&event.id);
                     let groups = tokio::select! {
                         biased;
                         _ = cancel.cancelled() => return Ok(SyncCycle::Cancelled),
                         result = self.sybil_client.list_market_groups() => result?,
                     };
-                    if let Some(group_id) = matching_sybil_group_id(&groups, &expected_group) {
+                    if let Some(group_id) = matching_sybil_group_id(&groups, &creation_key) {
                         let recovered = groups
                             .iter()
                             .find(|group| group.group_id == group_id)
@@ -522,6 +514,7 @@ impl SyncActor {
                     } else {
                         let group_req = CreateMarketGroupRequest {
                             name: event.title.clone(),
+                            creation_key: Some(creation_key),
                             market_ids: market_ids.clone(),
                         };
                         match self.sybil_client.create_market_group(&group_req).await {
@@ -573,7 +566,7 @@ impl SyncActor {
                             Vec::new()
                         }
                     };
-                    let Some(existing_group) = existing_group.as_ref() else {
+                    let Some(_existing_group) = existing_group.as_ref() else {
                         warn!(
                             event_id = &event.id,
                             missing_market_ids = ?missing_market_ids,
@@ -581,7 +574,8 @@ impl SyncActor {
                         );
                         continue;
                     };
-                    let Some(group_id) = matching_sybil_group_id(&groups, existing_group) else {
+                    let creation_key = polymarket_group_creation_key(&event.id);
+                    let Some(group_id) = matching_sybil_group_id(&groups, &creation_key) else {
                         warn!(
                             event_id = &event.id,
                             missing_market_ids = ?missing_market_ids,
@@ -823,32 +817,31 @@ mod tests {
     }
 
     #[test]
-    fn sybil_group_lookup_handles_h13_shrink_and_prior_extension() {
-        let existing_group = GroupInfo {
-            group_name: "Election".to_string(),
-            sybil_market_ids: vec![0, 1, 2],
-            neg_risk: true,
-        };
+    fn sybil_group_lookup_uses_creation_identity_not_copy_or_membership() {
+        let creation_key = polymarket_group_creation_key("event-1");
         let groups = vec![
             MarketGroupResponse {
                 group_id: 7,
-                name: "Other".to_string(),
+                name: "Election".to_string(),
+                creation_key: Some(polymarket_group_creation_key("other-event")),
                 market_ids: vec![0, 1],
             },
             MarketGroupResponse {
                 group_id: 8,
-                name: "Election".to_string(),
-                market_ids: vec![0, 1],
+                name: "Copy may change".to_string(),
+                creation_key: Some(creation_key.clone()),
+                market_ids: vec![99],
             },
         ];
-        assert_eq!(matching_sybil_group_id(&groups, &existing_group), Some(8));
+        assert_eq!(matching_sybil_group_id(&groups, &creation_key), Some(8));
 
         let groups = vec![MarketGroupResponse {
             group_id: 9,
             name: "Election".to_string(),
+            creation_key: None,
             market_ids: vec![0, 1, 2, 3],
         }];
-        assert_eq!(matching_sybil_group_id(&groups, &existing_group), Some(9));
+        assert_eq!(matching_sybil_group_id(&groups, &creation_key), None);
     }
 
     #[test]
@@ -869,6 +862,11 @@ mod tests {
         assert!(lower.bytes().all(|byte| {
             byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b':' | b'.' | b'/')
         }));
+
+        let group_lower = polymarket_group_creation_key(" EVENT-1 ");
+        let group_upper = polymarket_group_creation_key("event-1");
+        assert_eq!(group_lower, group_upper);
+        assert!(group_lower.len() <= 128);
     }
 
     #[test]
