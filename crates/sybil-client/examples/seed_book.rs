@@ -195,10 +195,12 @@ fn string_field<'a>(value: &'a Value, field: &str) -> Result<&'a str, String> {
 }
 
 fn u64_field(value: &Value, field: &str) -> Result<u64, String> {
-    value
+    let raw = value
         .get(field)
-        .and_then(Value::as_u64)
-        .ok_or_else(|| format!("response is missing u64 field {field:?}: {value}"))
+        .ok_or_else(|| format!("response is missing u64 field {field:?}: {value}"))?;
+    raw.as_u64()
+        .or_else(|| raw.as_str()?.parse().ok())
+        .ok_or_else(|| format!("response has invalid u64 field {field:?}: {value}"))
 }
 
 fn safe_environment_marker(health: &Value) -> bool {
@@ -649,5 +651,18 @@ mod tests {
             explicit_production_marker(&json!({"network": "mainnet"})),
             Some("network=mainnet".to_string())
         );
+    }
+
+    #[test]
+    fn u64_field_accepts_json_and_wire_encoded_integers() {
+        assert_eq!(u64_field(&json!({"value": 42}), "value"), Ok(42));
+        assert_eq!(u64_field(&json!({"value": "42"}), "value"), Ok(42));
+    }
+
+    #[test]
+    fn u64_field_rejects_non_decimal_and_overflowing_values() {
+        assert!(u64_field(&json!({"value": "-1"}), "value").is_err());
+        assert!(u64_field(&json!({"value": "18446744073709551616"}), "value").is_err());
+        assert!(u64_field(&json!({"value": "42.0"}), "value").is_err());
     }
 }
