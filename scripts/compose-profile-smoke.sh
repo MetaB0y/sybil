@@ -522,24 +522,50 @@ expected_local_webauthn=$(printf '%s\n' \
     || fail "local Compose WebAuthn RP/origin do not match the published web app"
 pass "local Compose passkeys use the published localhost:3005 web origin"
 
-# `deploy-all` builds every application image locally. Keep its save/load stream
-# in lockstep so the host cannot silently restart an older image after a build.
-deploy_all_save=$(
-    awk '
-        /^deploy-all:/ { in_recipe = 1; next }
-        in_recipe && /^[[:alnum:]_-]+[^:]*:/ { exit }
-        in_recipe && /docker save / { print; exit }
-    ' justfile
-)
-[[ -n "$deploy_all_save" ]] || fail "deploy-all has no docker save command"
-
-for image in sybil-api:latest sybil-arena:latest sybil-web:latest; do
-    grep -Eq "(^|[[:space:]])${image}([[:space:]]|$)" <<<"$deploy_all_save" \
-        || fail "deploy-all does not transfer $image"
+# Application promotions have one artifact-identity owner. Compose consumes a
+# complete revision-tagged set, and the helper refuses tag drift before load,
+# records image IDs outside the host, and verifies every running consumer.
+for assignment in SYBIL_API_IMAGE SYBIL_ARENA_IMAGE SYBIL_WEB_IMAGE; do
+    grep -Fq "\${${assignment}:-" docker-compose.yml \
+        || fail "base Compose does not accept immutable $assignment"
 done
-grep -Fq '| ssh {{SERVER}} docker load' <<<"$deploy_all_save" \
-    || fail "deploy-all does not stream its images to the remote Docker daemon"
-pass "deploy-all transfers every locally built application image"
+if grep -Eq 'image:[[:space:]]+sybil-(api|arena|web):latest' \
+    docker-compose.yml docker-compose.prod.yml; then
+    fail "production application service still hard-codes a mutable latest tag"
+fi
+grep -Eq 'SYBIL_CADDY_IMAGE.*@sha256:[0-9a-f]{64}' docker-compose.prod.yml \
+    || fail "production Caddy is not pinned by digest"
+for dockerfile in Dockerfile arena/Dockerfile frontend/web/Dockerfile; do
+    grep -Fq 'org.opencontainers.image.revision' "$dockerfile" \
+        || fail "$dockerfile does not record its source revision"
+done
+for scope in api arena web all; do
+    grep -Fq "deploy-release.sh promote $scope {{SERVER}}" justfile \
+        || fail "deploy-$scope bypasses immutable release promotion"
+done
+for expected in \
+    'docker save "$ref" | ssh "$server" docker load' \
+    'immutable remote tag $ref' \
+    'deploy/releases/' \
+    'verify_running' \
+    'rollback reuses an already recorded host image set and never builds'; do
+    grep -Fqi "$expected" scripts/deploy-release.sh \
+        || fail "immutable release helper is missing: $expected"
+done
+rollback_body=$(
+    awk '
+        /^rollback\(\)/ { in_body = 1 }
+        in_body && /^verify_current\(\)/ { exit }
+        in_body { print }
+    ' scripts/deploy-release.sh
+)
+if grep -Eq 'build_image|docker[ -]compose build|docker build' <<<"$rollback_body"; then
+    fail "rollback path can rebuild an image"
+fi
+grep -Fq 'sybil-history sybil-api sybil-native-admin sybil-native-mm sybil-polymarket' \
+    scripts/deploy-release.sh \
+    || fail "API promotion does not recreate every product consumer of sybil-api"
+pass "deployment pins, records, and verifies one immutable application image set"
 
 reset_recipe=$(
     awk '

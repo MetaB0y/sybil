@@ -2,7 +2,7 @@
 tags: [testing, infrastructure]
 layer: sequencer
 status: current
-last_verified: 2026-07-15
+last_verified: 2026-07-20
 ---
 
 # Testing Strategy

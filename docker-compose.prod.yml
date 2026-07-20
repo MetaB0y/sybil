@@ -155,7 +155,7 @@ services:
     # time to the public web domain when passkeys are served off a subdomain.
     logging: *default-logging
   caddy:
-    image: caddy:latest
+    image: "${SYBIL_CADDY_IMAGE:-caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648}"
     mem_limit: "128m"
     memswap_limit: "128m"
     ports:

@@ -4,8 +4,8 @@
 # volumes from the base file cannot enter its project or `down -v` cleanup.
 services:
   sybil-api:
-    # Test-scoped tag: never clobber the deployable sybil-api:latest on the
-    # local daemon (a deploy without rebuild would otherwise ship a test image).
+    # Test-scoped tag: never clobber ordinary local latest or an immutable
+    # revision-tagged release image on the operator daemon.
     image: sybil-api:itest
     build:
       context: .

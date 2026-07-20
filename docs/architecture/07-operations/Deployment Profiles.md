@@ -431,6 +431,24 @@ effective path and volume mount.
 The separate remaining deployment-profile gap is that prod runs the mock
 prover (see Prover section above).
 
+## Release identity
+
+The locked host never selects an application image through `latest`. API,
+history, native, Polymarket, and optional validity binaries share one
+revision-tagged `sybil-api` artifact; Arena runner/dashboard share another, and
+web has a third. Each carries `org.opencontainers.image.revision`. Compose reads
+the complete set plus a digest-pinned Caddy reference from
+`/opt/sybil/releases/current.env`.
+
+Promotion refuses an existing revision tag with another image ID, records the
+complete set under a release id, atomically activates it, and compares every
+running container's image ID with the manifest. Scoped promotion may replace
+one application artifact only after a complete immutable set exists. The
+matching non-secret JSON record is committed under `deploy/releases/`, outside
+the host. Rollback only reactivates a retained verified set; it cannot build.
+State compatibility remains a separate operator invariant, and a
+consensus-incompatible rollback requires the matching backup/genesis domain.
+
 ## WebAuthn validity pins
 
 Locked-profile startup requires the API WebAuthn policy to equal the values compiled

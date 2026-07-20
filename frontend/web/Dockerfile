@@ -49,6 +49,8 @@ RUN pnpm build
 # ── runner: minimal non-root runtime ──────────────────────────────────────────
 FROM node:${NODE_VERSION}-slim AS runner
 WORKDIR /app
+ARG SYBIL_SOURCE_REVISION=unknown
+LABEL org.opencontainers.image.revision="${SYBIL_SOURCE_REVISION}"
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \

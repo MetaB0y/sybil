@@ -2,7 +2,7 @@ version: "2.4"
 
 services:
   sybil-api:
-    image: sybil-api:latest
+    image: "${SYBIL_API_IMAGE:-sybil-api:latest}"
     environment:
       SYBIL_PORT: "3000"
       SYBIL_DEV_MODE: "true"
@@ -24,7 +24,7 @@ services:
     restart: "no"
 
   sybil-prover:
-    image: sybil-api:latest
+    image: "${SYBIL_API_IMAGE:-sybil-api:latest}"
     entrypoint: ["sybil-prover"]
     command:
       - "daemon"

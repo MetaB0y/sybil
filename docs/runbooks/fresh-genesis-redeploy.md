@@ -128,19 +128,21 @@ switch `SYBIL_RETAIN_VALIDITY_ARTIFACTS` on an existing chain.
 
 ## 4. Deploy one revision
 
-Use the normal deployment recipes from the same checkout:
+Push the selected clean revision to `main`, then create one complete immutable
+application release from that checkout:
 
 ```bash
-just deploy-api
-just deploy-web
-just deploy-arena
+just deploy-all
 just deploy-monitoring
-just deploy-caddy
+just deploy-release-verify
 ```
 
-`deploy-api`, `deploy-web`, `deploy-arena`, and `deploy-all` run the post-deploy
-gate. `deploy-all` builds all application images locally, transfers the API,
-arena, and web images to the host, and starts the complete Compose stack.
+`deploy-all` tags the API, Arena, and web images with the full source revision,
+records their image IDs and OCI revision labels, atomically activates one
+Compose image set, recreates every application consumer, and verifies the
+running container image IDs before the post-deploy product gate. Commit the
+generated `deploy/releases/<release-id>.json` record after deployment so the
+evidence exists outside the host.
 
 ## 5. Verify before reopening
 
@@ -148,7 +150,8 @@ arena, and web images to the host, and starts the complete Compose stack.
 2. Confirm health, a low/rising block height, and a new genesis hash.
 3. Confirm WebAuthn origin/RP configuration by completing the deployed passkey
    journey.
-4. Submit deterministic crossing orders and observe a fill after the reset.
+4. Confirm the disposable pre-promotion fixture passed, then observe the live
+   signed product-market crossing and both exact fills in projected history.
 5. Confirm `/proofs/latest` follows the new height and the DA manifest/payload
    are available for a new block.
 6. Check the deployed normal and escape adapter pins against the recorded
@@ -170,6 +173,20 @@ A fresh genesis is a new chain domain, not an in-place migration. Rollback means
 stopping the new chain and deliberately restoring the complete old deployment:
 binary revision, contracts/adapters, named volumes, configuration, and genesis
 identity. Never mix state or proofs across the two domains.
+
+For a state-compatible application rollback, select an already recorded image
+set without rebuilding:
+
+```bash
+just deploy-rollback <release-id> CONFIRM
+```
+
+The command validates every retained image ID, atomically switches
+`releases/current.env`, force-recreates the full application stack, verifies
+the running image IDs, and runs the live deployment gate. Commit the generated
+`sybil.rollback.v1` record. If protocol/state interpretation changed, do not use
+this in place: restore the matching volume/configuration/genesis set described
+above.
 
 See [Store backup and restore](store-backup-restore.md), [[Deployment Profiles]],
 [[Proof Architecture]], and [ADR-0009](../adr/0009-fresh-genesis-for-consensus-changes.md).

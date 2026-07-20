@@ -236,10 +236,11 @@ replacement has passed verification.
 5. Replace only the contents of `sybil-data` with the candidate:
 
    ```bash
+   API_IMAGE="$(sed -n 's/^SYBIL_API_IMAGE=//p' /opt/sybil/releases/current.env)"
    docker run --rm \
      -v sybil-data:/data \
      -v /opt/sybil/backups/sybil-store-<UTC>-<pid>/store:/restore:ro \
-     --entrypoint sh sybil-api:latest -c \
+     --entrypoint sh "$API_IMAGE" -c \
      'find /data -mindepth 1 -maxdepth 1 -exec rm -rf {} + && cp -a /restore/. /data/'
    ```
 

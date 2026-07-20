@@ -6,7 +6,7 @@ x-default-logging: &default-logging
 
 services:
   sybil-api:
-    image: sybil-api:latest
+    image: "${SYBIL_API_IMAGE:-sybil-api:latest}"
     # Cold-start restore replays the full durable log to rebuild in-memory
     # sequencer state; its transient peak exceeds steady-state RSS. At 900m with
     # memswap==mem (swap denied) a mature chain OOM-loops on boot and can never
@@ -71,7 +71,7 @@ services:
       start_period: 10s
 
   sybil-history:
-    image: sybil-api:latest
+    image: "${SYBIL_API_IMAGE:-sybil-api:latest}"
     mem_limit: "256m"
     memswap_limit: "384m"
     entrypoint: ["sybil-history"]
@@ -99,7 +99,7 @@ services:
   # volume is deployment identity and must never be shared across vaults.
   sybil-l1-indexer:
     profiles: ["l1-indexer"]
-    image: sybil-api:latest
+    image: "${SYBIL_API_IMAGE:-sybil-api:latest}"
     mem_limit: "256m"
     memswap_limit: "384m"
     entrypoint: ["sybil-l1-indexer"]
@@ -136,7 +136,7 @@ services:
   sybil-web:
     # Next.js frontend (standalone server, non-root). NEXT_PUBLIC_* are baked at
     # BUILD time, so the API/WS base URLs are build args, not runtime env.
-    image: sybil-web:latest
+    image: "${SYBIL_WEB_IMAGE:-sybil-web:latest}"
     build:
       context: ./frontend/web
       args:
@@ -157,7 +157,7 @@ services:
     logging: *default-logging
   sybil-polymarket:
     profiles: ["integrations"]
-    image: sybil-api:latest
+    image: "${SYBIL_API_IMAGE:-sybil-api:latest}"
     mem_limit: "256m"
     memswap_limit: "256m"
     entrypoint: ["sybil-polymarket"]
@@ -199,7 +199,7 @@ services:
     logging: *default-logging
   sybil-native-admin:
     profiles: ["integrations"]
-    image: sybil-api:latest
+    image: "${SYBIL_API_IMAGE:-sybil-api:latest}"
     mem_limit: "128m"
     memswap_limit: "192m"
     entrypoint: ["sybil-native-admin"]
@@ -221,7 +221,7 @@ services:
 
   sybil-native-mm:
     profiles: ["integrations"]
-    image: sybil-api:latest
+    image: "${SYBIL_API_IMAGE:-sybil-api:latest}"
     mem_limit: "192m"
     memswap_limit: "256m"
     entrypoint: ["sybil-native-mm"]
@@ -253,7 +253,7 @@ services:
 
   sybil-prover:
     profiles: ["validity"]
-    image: sybil-api:latest
+    image: "${SYBIL_API_IMAGE:-sybil-api:latest}"
     # Integration-only safety ceiling, not a steady-state capacity claim. The
     # daemon's retained job stock exceeded this budget in the live soak (#137),
     # so prelaunch excludes this profile until retention is bounded.
@@ -292,7 +292,7 @@ services:
     logging: *default-logging
   sybil-arena:
     profiles: ["integrations"]
-    image: sybil-arena:latest
+    image: "${SYBIL_ARENA_IMAGE:-sybil-arena:latest}"
     mem_limit: "512m"
     memswap_limit: "512m"
     command:
@@ -320,7 +320,7 @@ services:
     logging: *default-logging
   sybil-arena-dashboard:
     profiles: ["integrations"]
-    image: sybil-arena:latest
+    image: "${SYBIL_ARENA_IMAGE:-sybil-arena:latest}"
     mem_limit: "512m"
     memswap_limit: "512m"
     entrypoint: ["uv", "run", "--no-sync", "streamlit", "run", "live/dashboard.py"]

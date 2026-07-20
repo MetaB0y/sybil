@@ -108,9 +108,9 @@ docker exec "$CONTAINER" test -d "$DATA_DIR/sybil.qmdb" \
     || { echo "error: $DATA_DIR/sybil.qmdb not found in $CONTAINER" >&2; exit 2; }
 
 SOURCE_IMAGE="$(docker inspect --format '{{.Config.Image}}' "$CONTAINER")"
-# `.Config.Image` is a mutable tag such as `sybil-api:latest`; deployment may
-# advance it while this older container remains live. Validate the backup with
-# the immutable image ID actually running in the source container.
+# Modern releases set `.Config.Image` to a revision tag; older backups may
+# still observe a mutable legacy tag. In both cases validate against the image
+# ID actually running in the source container.
 SOURCE_IMAGE_ID="$(docker inspect --format '{{.Image}}' "$CONTAINER")"
 [[ -n "$SOURCE_IMAGE_ID" ]] \
     || { echo "error: source container has no immutable image ID" >&2; exit 2; }

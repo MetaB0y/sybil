@@ -606,6 +606,7 @@ monitoring-check: compose-smoke
     set -euo pipefail
     bash scripts/test-smoke-common.sh
     bash scripts/test-post-deploy-smoke.sh
+    bash scripts/test-deploy-release.sh
     if command -v promtool >/dev/null 2>&1; then
         promtool check config deploy/prometheus.yml
         promtool check rules deploy/vmalert/rules.yml
@@ -634,7 +635,6 @@ itest-compose:
 deploy-trading-preflight: itest-compose
 
 LOCAL_COMPOSE := "docker-compose"
-DEPLOY_PLATFORM := "linux/amd64"
 
 # Build Docker image
 docker-build:
@@ -673,11 +673,11 @@ polymarket-dev port="3001" max_events="10":
 # docker-compose.override.yml (build contexts) is NOT shipped to the server.
 
 SERVER := "root@172.104.31.54"
-COMPOSE_REMOTE := "docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile integrations --profile ops"
-COMPOSE_REMOTE_VALIDITY := "docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.validity.yml --profile integrations --profile ops --profile validity"
-COMPOSE_REMOTE_L1 := "docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.l1.yml --profile integrations --profile ops --profile l1-indexer"
-COMPOSE_TELEGRAM := "docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.telegram.yml --profile integrations --profile ops"
-COMPOSE_TELEGRAM_VALIDITY := "docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.validity.yml -f docker-compose.telegram.yml --profile integrations --profile ops --profile validity"
+COMPOSE_REMOTE := "docker compose --env-file .env --env-file releases/current.env -f docker-compose.yml -f docker-compose.prod.yml --profile integrations --profile ops"
+COMPOSE_REMOTE_VALIDITY := "docker compose --env-file .env --env-file releases/current.env -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.validity.yml --profile integrations --profile ops --profile validity"
+COMPOSE_REMOTE_L1 := "docker compose --env-file .env --env-file releases/current.env -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.l1.yml --profile integrations --profile ops --profile l1-indexer"
+COMPOSE_TELEGRAM := "docker compose --env-file .env --env-file releases/current.env -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.telegram.yml --profile integrations --profile ops"
+COMPOSE_TELEGRAM_VALIDITY := "docker compose --env-file .env --env-file releases/current.env -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.validity.yml -f docker-compose.telegram.yml --profile integrations --profile ops --profile validity"
 
 # Post-deploy verification gates (SYB-248) run against the LIVE stack as the
 # final step of application deploy recipes. API/all-stack promotions first run
@@ -692,7 +692,7 @@ COMPOSE_TELEGRAM_VALIDITY := "docker compose -f docker-compose.yml -f docker-com
 
 # Sync compose configs + deploy/ directory to server
 deploy-sync:
-    ssh {{SERVER}} 'mkdir -p /opt/sybil/scripts/lib /opt/sybil/crates/sybil-polymarket /opt/sybil/crates/sybil-native && touch /opt/sybil/arena.env'
+    ssh {{SERVER}} 'mkdir -p /opt/sybil/scripts/lib /opt/sybil/crates/sybil-polymarket /opt/sybil/crates/sybil-native /opt/sybil/releases && touch /opt/sybil/arena.env'
     scp docker-compose.yml docker-compose.prod.yml docker-compose.validity.yml docker-compose.l1.yml docker-compose.telegram.yml {{SERVER}}:/opt/sybil/
     scp -r deploy {{SERVER}}:/opt/sybil/
     scp crates/sybil-polymarket/curated_markets.json {{SERVER}}:/opt/sybil/crates/sybil-polymarket/
@@ -712,21 +712,23 @@ deploy-prelaunch-env-check:
 deploy-openrouter-env-check:
     ssh {{SERVER}} 'cd /opt/sybil && test -f arena.env && grep -q "^OPENROUTER_API_KEY=." arena.env'
 
-# Build and deploy sybil-api, its same-image history service, and the native
-# and Polymarket integrations.
+# Require a complete, previously activated immutable application image set.
+deploy-release-env-check:
+    ssh {{SERVER}} 'cd /opt/sybil && test -f releases/current.env && grep -q "^SYBIL_API_IMAGE=sybil-api:[0-9a-f]\{40\}$" releases/current.env && grep -q "^SYBIL_ARENA_IMAGE=sybil-arena:[0-9a-f]\{40\}$" releases/current.env && grep -q "^SYBIL_WEB_IMAGE=sybil-web:[0-9a-f]\{40\}$" releases/current.env && grep -q "^SYBIL_CADDY_IMAGE=caddy:.*@sha256:[0-9a-f]\{64\}$" releases/current.env'
+
+# Build and deploy one immutable sybil-api artifact across the API, history,
+# native, and Polymarket services that execute binaries from that image.
 # Validity is a separate deployment boundary: the 2 GB product host does not
 # claim ZK/TEE/L1 validity and cannot safely retain the current mock job stock.
 deploy-api: deploy-sync deploy-prelaunch-env-check deploy-trading-preflight && deploy-verify
-    DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-api
-    docker save sybil-api:latest | ssh {{SERVER}} docker load
-    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_REMOTE}} up -d sybil-history sybil-api sybil-native-admin sybil-native-mm sybil-polymarket'
+    ./scripts/deploy-release.sh promote api {{SERVER}}
 
 # Explicit mock-validity integration deployment. Validity artifact retention is
 # chain identity, so this always starts from fresh genesis and requires an
 # explicit destructive confirmation. This is not part of prelaunch:
 # issue #137 owns bounded prover retention before it can soak indefinitely, and
 # real STARK mode requires measured prover hardware.
-deploy-prover-daemon confirm: deploy-sync deploy-prelaunch-env-check && deploy-verify-validity
+deploy-prover-daemon confirm: deploy-sync deploy-prelaunch-env-check deploy-release-env-check && deploy-verify-validity
     @test "{{confirm}}" = "CONFIRM" || (echo 'Refusing to reset into validity mode. Run: just deploy-prover-daemon CONFIRM' >&2; exit 2)
     ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} --profile validity --profile l1-indexer down; else {{COMPOSE_REMOTE}} --profile validity --profile l1-indexer down; fi'
     ssh {{SERVER}} 'docker volume rm sybil-data history-data polymarket-data native-data arena-data prover-data prover-artifacts prover-jobs sybil_prover-jobs sybil_prover-artifacts l1-indexer-data vmdata || true'
@@ -735,7 +737,7 @@ deploy-prover-daemon confirm: deploy-sync deploy-prelaunch-env-check && deploy-v
 # Destructively reset prelaunch app state, then restart services.
 # This removes old markets, projected history, mirror mappings, Arena bot DB,
 # prover/L1 cursors and artifacts, and metric history. Pass CONFIRM explicitly.
-deploy-reset-state confirm: deploy-prelaunch-env-check
+deploy-reset-state confirm: deploy-prelaunch-env-check deploy-release-env-check
     @test "{{confirm}}" = "CONFIRM" || (echo 'Refusing to reset prelaunch state. Run: just deploy-reset-state CONFIRM' >&2; exit 2)
     ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} --profile validity --profile l1-indexer down; else {{COMPOSE_REMOTE}} --profile validity --profile l1-indexer down; fi'
     ssh {{SERVER}} 'docker volume rm sybil-data history-data polymarket-data native-data arena-data prover-data prover-artifacts prover-jobs sybil_prover-jobs sybil_prover-artifacts l1-indexer-data vmdata || true'
@@ -743,19 +745,17 @@ deploy-reset-state confirm: deploy-prelaunch-env-check
 
 # Build and deploy arena bots + dashboard. Requires OPENROUTER_API_KEY in /opt/sybil/arena.env.
 deploy-arena: deploy-sync deploy-prelaunch-env-check deploy-openrouter-env-check && deploy-verify-scoped
-    DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-arena
-    docker save sybil-arena:latest | ssh {{SERVER}} docker load
-    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_REMOTE}} up -d sybil-arena sybil-arena-dashboard caddy'
+    ./scripts/deploy-release.sh promote arena {{SERVER}}
 
 # Deploy observability stack (node-exporter + VictoriaMetrics + vmalert + Grafana)
 # Recreate the processes even when Compose wiring is unchanged: VictoriaMetrics
 # scrape config and vmalert local rule files are read into process memory and a
 # bind-mount update alone does not reliably activate them.
-deploy-monitoring: deploy-install-synthetic-probe deploy-prelaunch-env-check
+deploy-monitoring: deploy-install-synthetic-probe deploy-prelaunch-env-check deploy-release-env-check
     ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --force-recreate --remove-orphans node-exporter victoriametrics vmalert grafana telegram-alerts; else {{COMPOSE_REMOTE}} up -d --force-recreate --remove-orphans node-exporter victoriametrics vmalert grafana; fi'
 
 # Enable Telegram delivery for vmalert alerts. Requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in /opt/sybil/.env on the server.
-deploy-telegram-alerts: deploy-sync deploy-prelaunch-env-check
+deploy-telegram-alerts: deploy-sync deploy-prelaunch-env-check deploy-release-env-check
     ssh {{SERVER}} 'cd /opt/sybil && test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env && {{COMPOSE_TELEGRAM}} up -d telegram-alerts vmalert'
 
 # Build and deploy the Next.js web frontend, then reload Caddy for its vhost.
@@ -765,19 +765,25 @@ deploy-telegram-alerts: deploy-sync deploy-prelaunch-env-check
 #   NEXT_PUBLIC_WS_BASE=wss://api.sybil.exchange \
 #   NEXT_PUBLIC_WEBAUTHN_RP_ID=sybil.exchange just deploy-web
 deploy-web: deploy-sync deploy-prelaunch-env-check && deploy-verify-web
-    DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-web
-    docker save sybil-web:latest | ssh {{SERVER}} docker load
-    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_REMOTE}} up -d sybil-web caddy'
+    ./scripts/deploy-release.sh promote web {{SERVER}}
 
 # Deploy Caddy HTTPS reverse proxy
-deploy-caddy: deploy-sync deploy-prelaunch-env-check
+deploy-caddy: deploy-sync deploy-prelaunch-env-check deploy-release-env-check
     ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_REMOTE}} up -d caddy'
 
-# Deploy everything
+# Deploy one source revision as a complete immutable application image set.
 deploy-all: deploy-install-synthetic-probe deploy-prelaunch-env-check deploy-openrouter-env-check deploy-trading-preflight && deploy-verify
-    DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} --profile integrations --profile ops build
-    docker save sybil-api:latest sybil-arena:latest sybil-web:latest | ssh {{SERVER}} docker load
-    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --remove-orphans; else {{COMPOSE_REMOTE}} up -d --remove-orphans; fi'
+    ./scripts/deploy-release.sh promote all {{SERVER}}
+
+# Re-activate an already recorded image set and recreate the full stack without
+# building. State/schema compatibility is an operator decision; pass CONFIRM.
+deploy-rollback release confirm: deploy-prelaunch-env-check && deploy-verify
+    @test "{{confirm}}" = "CONFIRM" || (echo 'Refusing rollback. Run: just deploy-rollback <release-id> CONFIRM' >&2; exit 2)
+    ./scripts/deploy-release.sh rollback {{release}} {{SERVER}} {{confirm}}
+
+# Prove that every running application container matches the active manifest.
+deploy-release-verify:
+    ./scripts/deploy-release.sh verify {{SERVER}}
 
 # Post-deploy smoke GATE against the LIVE stack (SYB-248). Fail-closed: exits
 # non-zero if any core flow is broken (health, CORS, passkey onboarding,

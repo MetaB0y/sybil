@@ -62,6 +62,9 @@ RUN --mount=type=cache,id=sybil-cargo-registry,target=/usr/local/cargo/registry,
 # Runtime stage
 FROM debian:bookworm-slim
 
+ARG SYBIL_SOURCE_REVISION=unknown
+LABEL org.opencontainers.image.revision="${SYBIL_SOURCE_REVISION}"
+
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/bin/sybil-api /usr/local/bin/sybil-api

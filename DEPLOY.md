@@ -2,7 +2,9 @@
 
 Prelaunch is a single Linode host running Docker Compose from `/opt/sybil`.
 Images are built locally, transferred with `docker save | ssh docker load`, and
-started with the `deploy-*` recipes in the `justfile`.
+started with the `deploy-*` recipes in the `justfile`. Application releases use
+full source-revision tags; production Compose reads one recorded image set from
+`/opt/sybil/releases/current.env`.
 
 ## Public Surface
 
@@ -158,9 +160,29 @@ just deploy-all
 ```
 
 `deploy-all` builds the API, arena, and web images locally, transfers all three
-to the host, and starts the complete Compose stack. Because `NEXT_PUBLIC_*`
-values are baked into `sybil-web`, export any overrides before running either
-`just deploy-web` or `just deploy-all`.
+to the host, atomically activates their immutable references, starts the
+complete Compose stack, and verifies each running image ID. Because
+`NEXT_PUBLIC_*` values are baked into `sybil-web`, export any overrides before
+running either `just deploy-web` or `just deploy-all`.
+
+Every successful promotion writes
+`deploy/releases/<release-id>.json`. Commit that non-secret record after the
+deployment; it is the outside-host evidence for the source revision, image
+references, image IDs, and running-container verification. Scoped API, Arena,
+and web promotions preserve the other two recorded references and refuse to
+bootstrap from mutable images.
+
+Inspect the active set or roll back to a retained set without rebuilding:
+
+```bash
+just deploy-release-verify
+just deploy-rollback <release-id> CONFIRM
+```
+
+Rollback force-recreates the complete application stack and then runs the live
+gate. It is appropriate only when the selected binary set can interpret the
+current state. A consensus/state-incompatible rollback requires the matching
+backup and fresh-genesis procedure.
 
 `deploy-arena` and `deploy-all` require `OPENROUTER_API_KEY` in
 `/opt/sybil/arena.env`. The recipes check only for the presence of required variable
