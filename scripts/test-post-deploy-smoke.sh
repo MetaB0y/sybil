@@ -21,6 +21,7 @@ proof_root="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 reset_gate() {
     PASSN=0; FAILN=0; SKIPN=0; RESULTS=(); ORDER_MARKET=""
+    HISTORY_ACCOUNT=""
     VIRTUAL_SLEEP_CALLS=0
     SECONDS=0
 }
@@ -231,5 +232,29 @@ REQUIRE_PROOF_FRESHNESS=0
 check_proof_freshness >/dev/null
 [[ "$FAILN" -eq 0 && "$SKIPN" -eq 1 ]] \
     || { echo "FAIL: optional proof check did not report an explicit skip" >&2; exit 1; }
+
+# The promotion gate must distinguish a healthy history process from a usable
+# API-to-history query contract. This catches a stale same-image sidecar.
+reset_gate
+SERVICE_TOKEN=smoke-service
+HISTORY_ACCOUNT=42
+http() {
+    HTTP_CODE=200
+    HTTP_BODY='{"fills":[],"history_scope":"remote"}'
+}
+check_history_query_contract >/dev/null
+[[ "$FAILN" -eq 0 && "$PASSN" -eq 1 ]] \
+    || { echo "FAIL: compatible account history contract did not pass" >&2; exit 1; }
+
+reset_gate
+SERVICE_TOKEN=smoke-service
+HISTORY_ACCOUNT=42
+http() {
+    HTTP_CODE=503
+    HTTP_BODY='{"error":"Historical data is temporarily unavailable","code":"HISTORY_UNAVAILABLE"}'
+}
+check_history_query_contract >/dev/null
+[[ "$FAILN" -eq 1 ]] \
+    || { echo "FAIL: unavailable account history did not block promotion" >&2; exit 1; }
 
 echo "post-deploy smoke tests: ok"

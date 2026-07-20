@@ -13,6 +13,8 @@
 #     allocation (or the stable lifetime-cap exhaustion response).
 #   * Fills-after-seed: a deterministic crossing seed MUST increase matched
 #     orders (the zero-fills regression would FAIL here, not skip).
+#   * Account history: the API and private projector MUST agree on their query
+#     contract (the stale-history-image class).
 #   * Service-token gating matrix: gated routes 401 without the token and
 #     2xx/auth-pass with it; public routes stay public.
 #
@@ -925,6 +927,7 @@ check_gating() {
 
 # ── 7. Signed order acceptance (extra; hard when signer required) ────────────
 SIGN_BIN="${SYBIL_SMOKE_SIGN_BIN:-}"
+HISTORY_ACCOUNT=""
 setup_signing() {
     if [[ -n "$SIGN_BIN" && -x "$SIGN_BIN" ]]; then return; fi
     local prebuilt="$REPO_ROOT/target/debug/examples/smoke_sign"
@@ -983,6 +986,7 @@ check_signed_order() {
     if ! is_2xx "$HTTP_CODE" || [[ -z "$acct" ]]; then
         fail "signed-order prep: atomic create -> $HTTP_CODE: $HTTP_BODY"; return
     fi
+    HISTORY_ACCOUNT="$acct"
 
     local nonce osig ospk ossig obody
     nonce="$(date +%s%3N)"
@@ -1129,6 +1133,32 @@ PY
     fi
 }
 
+# ── 7c. API-to-history query contract ───────────────────────────────────────
+check_history_query_contract() {
+    section "7c. API-to-history query contract"
+    if [[ -z "$SERVICE_TOKEN" ]]; then
+        skip "service token unavailable; account history contract cannot be authenticated"
+        return
+    fi
+    if [[ -z "$HISTORY_ACCOUNT" ]]; then
+        fail "no smoke account available for the account history contract"
+        return
+    fi
+
+    http GET "/v1/accounts/$HISTORY_ACCOUNT/fills?limit=1" "" token
+    local scope
+    scope="$(echo "$HTTP_BODY" | jget history_scope)"
+    if is_2xx "$HTTP_CODE" \
+       && [[ "$scope" == "remote" ]] \
+       && echo "$HTTP_BODY" | python3 -c \
+            'import json,sys; value=json.load(sys.stdin); raise SystemExit(0 if isinstance(value.get("fills"), list) else 1)' \
+            2>/dev/null; then
+        pass "account fills query reached the remote history projector"
+    else
+        fail "account fills history contract -> $HTTP_CODE (scope=${scope:-missing}): $HTTP_BODY"
+    fi
+}
+
 # ── 8. Bot decisions (public) ────────────────────────────────────────────────
 check_bots() {
     section "8. Bot decisions"
@@ -1181,6 +1211,7 @@ fi
 check_gating
 check_signed_order
 check_signed_cancel_lifecycle
+check_history_query_contract
 check_bots
 
 section "Summary"
