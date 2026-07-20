@@ -32,6 +32,7 @@ pub enum SignerError {
 pub struct ResolutionSigner {
     key: SigningKey,
     pubkey_hex: String,
+    genesis_hash: [u8; 32],
 }
 
 impl ResolutionSigner {
@@ -39,7 +40,7 @@ impl ResolutionSigner {
     /// If the file doesn't exist, generates one and writes it. This is a
     /// developer convenience; production deployments should pre-provision the
     /// key out-of-band.
-    pub fn load_or_create(path: &Path) -> Result<Self, SignerError> {
+    pub fn load_or_create(path: &Path, genesis_hash: [u8; 32]) -> Result<Self, SignerError> {
         use p256::elliptic_curve::rand_core::UnwrapErr;
 
         let key = if path.exists() {
@@ -65,7 +66,11 @@ impl ResolutionSigner {
 
         let vk = key.verifying_key();
         let pubkey_hex = hex::encode(vk.to_sec1_point(true).as_bytes());
-        Ok(Self { key, pubkey_hex })
+        Ok(Self {
+            key,
+            pubkey_hex,
+            genesis_hash,
+        })
     }
 
     pub fn pubkey_hex(&self) -> &str {
@@ -84,7 +89,7 @@ impl ResolutionSigner {
             payout_nanos,
             nonce,
         };
-        let msg = canonical_attestation_bytes(&att);
+        let msg = canonical_attestation_bytes(&att, self.genesis_hash);
         let signature: Signature = self.key.sign(&msg);
         SignedAttestationDto {
             pubkey_hex: self.pubkey_hex.clone(),
@@ -104,8 +109,8 @@ mod tests {
         let path = dir.join(format!("sybil-test-signer-{}.key", std::process::id()));
         let _ = std::fs::remove_file(&path);
 
-        let signer_a = ResolutionSigner::load_or_create(&path).unwrap();
-        let signer_b = ResolutionSigner::load_or_create(&path).unwrap();
+        let signer_a = ResolutionSigner::load_or_create(&path, [0xab; 32]).unwrap();
+        let signer_b = ResolutionSigner::load_or_create(&path, [0xab; 32]).unwrap();
         assert_eq!(signer_a.pubkey_hex(), signer_b.pubkey_hex());
 
         let att = signer_a.sign_attestation(3, 1_000_000_000, 42);

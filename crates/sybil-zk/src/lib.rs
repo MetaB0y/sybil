@@ -903,14 +903,14 @@ mod tests {
         Db as OrderedVariableDb, KeyValueProof,
     };
     use commonware_storage::translator::OneCap;
-    use matching_engine::{MarketId, Order};
+    use matching_engine::{Fill, MarketId, Nanos, Order, Qty};
     use p256::ecdsa::{Signature, SigningKey, signature::hazmat::PrehashSigner as _};
     use sha2::Sha256;
     use sybil_verifier::{
         AccountReservationSnapshot, AccountSnapshot, BridgeStateSnapshot,
         DepositAccumulatorWitness, KeyOpAuth, KeyRecord, MarketGroupSnapshot, MarketSnapshot,
         MarketStatusSnapshot, StateSidecarSnapshot, SystemEventWitness, WithdrawalSnapshot,
-        WitnessBlockHeader,
+        WitnessBlockHeader, WitnessOrder,
         commitments::{event_schema, state_schema},
     };
 
@@ -1508,6 +1508,40 @@ mod tests {
         input.witness.header.events_root =
             events_root_from_event_bytes(&events).expect("event root");
         input.public_inputs = public_inputs_from_witness(&input.witness);
+    }
+
+    #[test]
+    fn guest_rejects_zero_quantity_fill() {
+        let mut input = empty_guest_input();
+        let mut order = Order::new(7);
+        order.max_fill = Qty(1);
+        order.limit_price = Nanos(500_000_000);
+        input.witness.orders.push(WitnessOrder {
+            order,
+            account_id: 0,
+            is_mm: true,
+        });
+        input.witness.fills.push(Fill {
+            order_id: 7,
+            fill_qty: Qty::ZERO,
+            fill_price: Nanos(500_000_000),
+            account_id: 0,
+        });
+        input.witness.header.order_count = 1;
+        input.witness.header.fill_count = 1;
+        recompute_roots_and_public_inputs(&mut input);
+
+        let native = sybil_verifier::verify_match(&input.witness, false);
+        assert!(
+            native
+                .violations
+                .iter()
+                .any(|violation| violation.kind == sybil_verifier::ViolationKind::ZeroQuantityFill)
+        );
+        assert!(matches!(
+            verify_state_transition_input(&input),
+            Err(ZkTransitionError::VerificationLayerFailed { layer: "match", .. })
+        ));
     }
 
     fn l1_deposit_guest_input() -> StateTransitionGuestInput {

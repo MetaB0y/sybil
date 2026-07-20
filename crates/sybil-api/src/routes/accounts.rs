@@ -699,11 +699,17 @@ pub async fn set_profile(
     let account_id = AccountId(id);
     let (display_name, avatar_seed) = validate_profile_fields(req.display_name, req.avatar_seed)?;
     let signer = parse_signer(&req.signer_pubkey_hex)?;
+    let genesis_hash = state
+        .sequencer
+        .get_genesis_hash()
+        .await?
+        .ok_or(matching_sequencer::SequencerError::GenesisHashUnavailable)?;
     let canonical = canonical_profile_update_bytes(
         account_id,
         display_name.as_deref(),
         avatar_seed.as_deref(),
         req.nonce,
+        genesis_hash,
     );
 
     match req.auth_scheme {
@@ -952,7 +958,13 @@ pub async fn create_api_key(
             "API-key label exceeds {MAX_API_KEY_LABEL_BYTES} bytes"
         )));
     }
-    let canonical = canonical_api_key_create_bytes(account_id, label.as_deref(), req.nonce);
+    let genesis_hash = state
+        .sequencer
+        .get_genesis_hash()
+        .await?
+        .ok_or(matching_sequencer::SequencerError::GenesisHashUnavailable)?;
+    let canonical =
+        canonical_api_key_create_bytes(account_id, label.as_deref(), req.nonce, genesis_hash);
 
     let signer = match req.auth_scheme {
         AuthScheme::RawP256 => {
@@ -1079,7 +1091,13 @@ pub async fn revoke_api_key(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let account_id = AccountId(id);
     let signer = parse_signer(&req.signer_pubkey_hex)?;
-    let canonical = canonical_api_key_revoke_bytes(account_id, req.api_key_id, req.nonce);
+    let genesis_hash = state
+        .sequencer
+        .get_genesis_hash()
+        .await?
+        .ok_or(matching_sequencer::SequencerError::GenesisHashUnavailable)?;
+    let canonical =
+        canonical_api_key_revoke_bytes(account_id, req.api_key_id, req.nonce, genesis_hash);
 
     let revoked_hash = state
         .sequencer

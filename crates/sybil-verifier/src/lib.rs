@@ -98,9 +98,8 @@ pub(crate) fn test_events_root() -> [u8; 32] {
 
 /// Verify fill-level and market-level invariants.
 ///
-/// Core checks (ZK invariants) always run. Diagnostic checks (quality metrics
-/// like zero-fill rejection and market group sum constraints) only run when
-/// `diagnostics` is true.
+/// Validity checks always run. `diagnostics` enables additional quality
+/// statistics and never changes the validity verdict.
 pub fn verify_match(witness: &BlockWitness, diagnostics: bool) -> VerificationResult {
     match_verifier::verify_match(witness, diagnostics)
 }

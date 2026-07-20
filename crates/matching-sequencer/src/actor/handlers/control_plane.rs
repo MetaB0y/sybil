@@ -218,7 +218,11 @@ impl SequencerActorState {
         market_id: MarketId,
         signed: SignedAttestation,
     ) -> Result<ResolutionRecord, SequencerError> {
-        crate::crypto::verify_signed_attestation(&signed)?;
+        let genesis_hash = self
+            .sequencer
+            .genesis_hash()
+            .ok_or(SequencerError::GenesisHashUnavailable)?;
+        crate::crypto::verify_signed_attestation(&signed, genesis_hash)?;
         let timestamp_ms = current_timestamp_ms();
         let mut validation = self.sequencer.clone();
         validation.resolve_market_attested(market_id, &signed, timestamp_ms)?;
@@ -396,7 +400,11 @@ impl SequencerActorState {
         &mut self,
         signed: SignedProfileUpdate,
     ) -> Result<Account, SequencerError> {
-        verify_signed_profile_update(&signed)?;
+        let genesis_hash = self
+            .sequencer
+            .genesis_hash()
+            .ok_or(SequencerError::GenesisHashUnavailable)?;
+        verify_signed_profile_update(&signed, genesis_hash)?;
         self.handle_authenticated_profile_update(AuthenticatedProfileUpdate {
             account_id: signed.account_id,
             display_name: signed.display_name,
@@ -491,7 +499,11 @@ impl SequencerActorState {
         &mut self,
         signed: SignedApiKeyCreate,
     ) -> Result<u64, SequencerError> {
-        verify_signed_api_key_create(&signed)?;
+        let genesis_hash = self
+            .sequencer
+            .genesis_hash()
+            .ok_or(SequencerError::GenesisHashUnavailable)?;
+        verify_signed_api_key_create(&signed, genesis_hash)?;
         self.handle_authenticated_api_key_create(AuthenticatedApiKeyCreate {
             account_id: signed.account_id,
             label: signed.label,
@@ -535,7 +547,11 @@ impl SequencerActorState {
         &mut self,
         signed: SignedApiKeyRevoke,
     ) -> Result<(), SequencerError> {
-        verify_signed_api_key_revoke(&signed)?;
+        let genesis_hash = self
+            .sequencer
+            .genesis_hash()
+            .ok_or(SequencerError::GenesisHashUnavailable)?;
+        verify_signed_api_key_revoke(&signed, genesis_hash)?;
         self.handle_authenticated_api_key_revoke(AuthenticatedApiKeyRevoke {
             account_id: signed.account_id,
             api_key_id: signed.api_key_id,

@@ -56,11 +56,13 @@ export interface SetProfileArgs extends SettingsSignerArgs {
  */
 export async function setProfile(args: SetProfileArgs): Promise<void> {
   const nonce = args.nonce ?? nextReplayNonce(args.accountId);
+  const genesisHash = await getGenesisHashBytes();
   const canonical = canonicalProfileUpdateBytes(
     BigInt(args.accountId),
     args.displayName,
     args.avatarSeed,
     nonce,
+    genesisHash,
   );
 
   const body = {
@@ -301,10 +303,12 @@ export async function createApiKey(
   args: CreateApiKeyArgs,
 ): Promise<CreatedApiKey> {
   const nonce = args.nonce ?? nextReplayNonce(args.accountId);
+  const genesisHash = await getGenesisHashBytes();
   const canonical = canonicalApiKeyCreateBytes(
     BigInt(args.accountId),
     args.label ?? null,
     nonce,
+    genesisHash,
   );
 
   const unsignedBody = {
@@ -358,10 +362,12 @@ export interface RevokeApiKeyArgs extends SettingsSignerArgs {
 /** POST /v1/accounts/{id}/api-keys/revoke — revoke a read API key (signed). */
 export async function revokeApiKey(args: RevokeApiKeyArgs): Promise<void> {
   const nonce = args.nonce ?? nextReplayNonce(args.accountId);
+  const genesisHash = await getGenesisHashBytes();
   const canonical = canonicalApiKeyRevokeBytes(
     BigInt(args.accountId),
     BigInt(args.apiKeyId),
     nonce,
+    genesisHash,
   );
 
   const body = {

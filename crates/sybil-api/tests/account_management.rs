@@ -304,7 +304,8 @@ async fn post_with_bearer(
 
 #[tokio::test]
 async fn signed_profile_set_updates_account_response() {
-    let (app, _handle) = test_app(true).await;
+    let (app, handle) = test_app(true).await;
+    let genesis_hash = ensure_genesis(&handle).await;
     let (account_id, key) = account_with_key(&app, 11).await;
 
     let nonce = 1_700_000_000_000u64;
@@ -315,6 +316,7 @@ async fn signed_profile_set_updates_account_response() {
         Some(display_name),
         Some(avatar_seed),
         nonce,
+        genesis_hash,
     ));
     let (status, body) = post_json(
         app.clone(),
@@ -344,7 +346,8 @@ async fn signed_profile_set_updates_account_response() {
 
 #[tokio::test]
 async fn profile_set_rejects_bad_signature_and_replay() {
-    let (app, _handle) = test_app(true).await;
+    let (app, handle) = test_app(true).await;
+    let genesis_hash = ensure_genesis(&handle).await;
     let (account_id, key) = account_with_key(&app, 12).await;
     let other = signing_key(99);
 
@@ -355,6 +358,7 @@ async fn profile_set_rejects_bad_signature_and_replay() {
         Some("X"),
         None,
         nonce,
+        genesis_hash,
     ));
     let (status, _) = post_json(
         app.clone(),
@@ -375,6 +379,7 @@ async fn profile_set_rejects_bad_signature_and_replay() {
         Some("Ok"),
         None,
         nonce,
+        genesis_hash,
     ));
     let payload = json!({
         "display_name": "Ok",
@@ -984,7 +989,8 @@ async fn authenticated_register_is_state_bound_and_one_shot() {
 
 #[tokio::test]
 async fn api_key_create_show_once_then_gate_private_summary() {
-    let (app, _handle) = test_app(true).await;
+    let (app, handle) = test_app(true).await;
+    let genesis_hash = ensure_genesis(&handle).await;
     let (account_id, key) = account_with_key(&app, 15).await;
 
     // Create a read API key (signed). The token is shown exactly once.
@@ -994,6 +1000,7 @@ async fn api_key_create_show_once_then_gate_private_summary() {
         AccountId(account_id),
         Some(label),
         nonce,
+        genesis_hash,
     ));
     let (status, body) = post_json(
         app.clone(),
@@ -1081,6 +1088,7 @@ async fn api_key_create_show_once_then_gate_private_summary() {
         AccountId(account_id),
         key_id,
         nonce,
+        genesis_hash,
     ));
     let (status, _) = post_json(
         app.clone(),

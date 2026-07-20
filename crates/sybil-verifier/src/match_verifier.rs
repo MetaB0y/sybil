@@ -1,8 +1,10 @@
 //! Layer 1: Fill-level and market-level match verification.
 //!
-//! Checks that every fill is consistent with its order and that market-level
-//! price invariants (UCP, complementarity, market groups) hold. Position
-//! solvency is checked by settlement verification through the MINT account.
+//! Checks that every fill is consistent with its order and that validity-level
+//! market price invariants (UCP and binary complementarity) hold. Market-group
+//! price coherence is a quality diagnostic, not a finite-liquidity validity
+//! invariant. Position solvency is checked by settlement verification through
+//! the MINT account.
 
 use std::collections::{HashMap, HashSet};
 
@@ -14,8 +16,8 @@ use crate::violations::{VerificationResult, VerificationStats, Violation, Violat
 
 /// Verify all fill-level and market-level invariants.
 ///
-/// Core checks (ZK invariants) always run. Diagnostic checks (quality metrics)
-/// only run when `diagnostics` is true.
+/// Validity checks always run. Optional diagnostics add quality statistics but
+/// can never change the validity verdict.
 pub fn verify_match(witness: &BlockWitness, diagnostics: bool) -> VerificationResult {
     let mut violations = Vec::new();
     let mut stats = VerificationStats::default();
@@ -30,7 +32,6 @@ pub fn verify_match(witness: &BlockWitness, diagnostics: bool) -> VerificationRe
     verify_fills(
         &witness.fills,
         &order_map,
-        diagnostics,
         witness.total_welfare,
         witness.minting_cost,
         &mut violations,
@@ -55,20 +56,10 @@ pub fn verify_match(witness: &BlockWitness, diagnostics: bool) -> VerificationRe
     // single-market fills at the final clearing price after iteration completes.
     verify_uniform_clearing_prices(witness, &order_map, &mut violations);
 
-    // Diagnostic-only checks:
-    //
-    // Market group constraint: With finite liquidity, clearing prices in a market
-    // group may sum > $1 (or < $1). This represents unexploited arbitrage that
-    // the solver couldn't close due to insufficient liquidity, not a correctness
-    // bug. Use verify_match stats to check avg |sum - 1| instead.
-    if diagnostics {
-        verify_market_group_constraints(witness, &mut violations);
-    }
-
     stats.reported_welfare = witness.total_welfare;
 
     // Compute market group price quality metric: avg |sum_YES_prices - $1|
-    if !witness.market_groups.is_empty() {
+    if diagnostics && !witness.market_groups.is_empty() {
         let mut total_delta: u64 = 0;
         for group in &witness.market_groups {
             let mut sum: u64 = 0;
@@ -96,7 +87,6 @@ pub fn verify_match(witness: &BlockWitness, diagnostics: bool) -> VerificationRe
 fn verify_fills(
     fills: &[Fill],
     order_map: &HashMap<u64, &Order>,
-    diagnostics: bool,
     reported_welfare: i64,
     minting_cost: i64,
     violations: &mut Vec<Violation>,
@@ -137,8 +127,10 @@ fn verify_fills(
             });
         }
 
-        // 4. Zero fill (diagnostic only)
-        if fill.fill_qty == matching_engine::Qty::ZERO && diagnostics {
+        // 4. A fill is a positive execution, not a placeholder. Solvers omit
+        // zero allocations; accepting one would make canonical fill counts and
+        // downstream history depend on meaningless records.
+        if fill.fill_qty == matching_engine::Qty::ZERO {
             violations.push(Violation {
                 kind: ViolationKind::ZeroQuantityFill,
                 details: format!("Order {}: zero quantity fill", fill.order_id),
@@ -470,37 +462,7 @@ fn verify_price_complementarity(witness: &BlockWitness, violations: &mut Vec<Vio
     }
 }
 
-/// Check 14: Market group constraint — sum of YES clearing prices <= $1.
-fn verify_market_group_constraints(witness: &BlockWitness, violations: &mut Vec<Violation>) {
-    for group in &witness.market_groups {
-        let mut sum: u64 = 0;
-        for &market in &group.markets {
-            if let Some(prices) = witness.clearing_prices.get(&market)
-                && let Some(&yes_price) = prices.first()
-            {
-                let Some(updated) = sum.checked_add(yes_price.0) else {
-                    violations.push(Violation {
-                        kind: ViolationKind::SettlementOverflow,
-                        details: format!("Market group {}: YES price sum overflowed", group.name),
-                    });
-                    continue;
-                };
-                sum = updated;
-            }
-        }
-        if sum > NANOS_PER_DOLLAR {
-            violations.push(Violation {
-                kind: ViolationKind::MarketGroupConstraintViolation,
-                details: format!(
-                    "Group '{}': sum of YES prices = {} > {}",
-                    group.name, sum, NANOS_PER_DOLLAR
-                ),
-            });
-        }
-    }
-}
-
-/// Check 15: No fills/orders on resolved markets.
+/// Check 14: No fills/orders on resolved markets.
 fn verify_resolved_markets(
     witness: &BlockWitness,
     order_map: &HashMap<u64, &Order>,
@@ -589,9 +551,9 @@ mod tests {
     use super::*;
     use crate::types::{WitnessBlockHeader, WitnessOrder};
     use matching_engine::{
-        ConditionDir, MarketSet, MmConstraint, MmId, MmSide, Nanos, Qty, conditional_buy,
-        gross_welfare_from_fills, minting_cost_from_fills, net_welfare, outcome_sell,
-        shares_to_qty, simple_no_buy, simple_yes_buy,
+        ConditionDir, MarketGroup, MarketSet, MmConstraint, MmId, MmSide, Nanos, Qty,
+        conditional_buy, gross_welfare_from_fills, minting_cost_from_fills, net_welfare,
+        outcome_sell, shares_to_qty, simple_no_buy, simple_yes_buy,
     };
 
     fn empty_header() -> WitnessBlockHeader {
@@ -1145,7 +1107,7 @@ mod tests {
     }
 
     #[test]
-    fn test_zero_fill_diagnostic_mode() {
+    fn zero_fill_is_invalid_independent_of_diagnostics() {
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("M0");
 
@@ -1156,15 +1118,46 @@ mod tests {
         witness.total_welfare = 0;
 
         let core_only = verify_match(&witness, false);
-        assert!(core_only.valid);
-
         let with_diagnostics = verify_match(&witness, true);
+        assert!(!core_only.valid);
         assert!(!with_diagnostics.valid);
-        assert!(
-            with_diagnostics
-                .violations
-                .iter()
-                .any(|v| v.kind == ViolationKind::ZeroQuantityFill)
+        for result in [&core_only, &with_diagnostics] {
+            assert!(
+                result
+                    .violations
+                    .iter()
+                    .any(|v| v.kind == ViolationKind::ZeroQuantityFill)
+            );
+        }
+    }
+
+    #[test]
+    fn market_group_quality_diagnostics_do_not_change_validity() {
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("M0");
+        let m1 = markets.add_binary("M1");
+        let mut witness = make_witness(vec![], vec![]);
+        witness
+            .clearing_prices
+            .insert(m0, vec![Nanos(700_000_000), Nanos(300_000_000)]);
+        witness
+            .clearing_prices
+            .insert(m1, vec![Nanos(500_000_000), Nanos(500_000_000)]);
+        witness.market_groups = vec![
+            MarketGroup::new("finite-liquidity group")
+                .with_market(m0)
+                .with_market(m1),
+        ];
+
+        let without_diagnostics = verify_match(&witness, false);
+        let with_diagnostics = verify_match(&witness, true);
+
+        assert!(without_diagnostics.valid);
+        assert!(with_diagnostics.valid);
+        assert_eq!(without_diagnostics.stats.market_group_avg_delta, None);
+        assert_eq!(
+            with_diagnostics.stats.market_group_avg_delta,
+            Some(200_000_000)
         );
     }
 

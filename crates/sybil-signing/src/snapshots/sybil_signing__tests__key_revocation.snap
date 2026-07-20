@@ -1,5 +1,0 @@
----
-source: crates/sybil-signing/src/lib.rs
-expression: "hex::encode(canonical_key_revocation_bytes(GENESIS_HASH, 7, &target, 42))"
----
-abababababababababababababababababababababababababababababababab0700000000000000210000000202020202020202020202020202020202020202020202020202020202020202022a00000000000000

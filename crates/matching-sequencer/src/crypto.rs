@@ -378,8 +378,15 @@ pub fn canonical_profile_update_bytes(
     display_name: Option<&str>,
     avatar_seed: Option<&str>,
     nonce: u64,
+    genesis_hash: [u8; 32],
 ) -> Vec<u8> {
-    sybil_signing::canonical_profile_update_bytes(account_id.0, display_name, avatar_seed, nonce)
+    sybil_signing::canonical_profile_update_bytes(
+        account_id.0,
+        display_name,
+        avatar_seed,
+        nonce,
+        genesis_hash,
+    )
 }
 
 /// Canonical bytes for a signed signing-key revocation (SYB-60).
@@ -407,8 +414,9 @@ pub fn canonical_api_key_create_bytes(
     account_id: crate::account::AccountId,
     label: Option<&str>,
     nonce: u64,
+    genesis_hash: [u8; 32],
 ) -> Vec<u8> {
-    sybil_signing::canonical_api_key_create_bytes(account_id.0, label, nonce)
+    sybil_signing::canonical_api_key_create_bytes(account_id.0, label, nonce, genesis_hash)
 }
 
 /// Canonical bytes for a signed signing-key registration (SYB-229).
@@ -435,17 +443,22 @@ pub fn canonical_api_key_revoke_bytes(
     account_id: crate::account::AccountId,
     api_key_id: u64,
     nonce: u64,
+    genesis_hash: [u8; 32],
 ) -> Vec<u8> {
-    sybil_signing::canonical_api_key_revoke_bytes(account_id.0, api_key_id, nonce)
+    sybil_signing::canonical_api_key_revoke_bytes(account_id.0, api_key_id, nonce, genesis_hash)
 }
 
 /// Verify a signed profile update's P256 ECDSA signature (SYB-60).
-pub fn verify_signed_profile_update(signed: &SignedProfileUpdate) -> Result<(), SequencerError> {
+pub fn verify_signed_profile_update(
+    signed: &SignedProfileUpdate,
+    genesis_hash: [u8; 32],
+) -> Result<(), SequencerError> {
     let msg = canonical_profile_update_bytes(
         signed.account_id,
         signed.display_name.as_deref(),
         signed.avatar_seed.as_deref(),
         signed.nonce,
+        genesis_hash,
     );
     signed
         .signer
@@ -504,9 +517,16 @@ pub fn verify_signed_key_registration(
 }
 
 /// Verify a signed API-key creation's P256 ECDSA signature (SYB-60).
-pub fn verify_signed_api_key_create(signed: &SignedApiKeyCreate) -> Result<(), SequencerError> {
-    let msg =
-        canonical_api_key_create_bytes(signed.account_id, signed.label.as_deref(), signed.nonce);
+pub fn verify_signed_api_key_create(
+    signed: &SignedApiKeyCreate,
+    genesis_hash: [u8; 32],
+) -> Result<(), SequencerError> {
+    let msg = canonical_api_key_create_bytes(
+        signed.account_id,
+        signed.label.as_deref(),
+        signed.nonce,
+        genesis_hash,
+    );
     signed
         .signer
         .0
@@ -515,8 +535,16 @@ pub fn verify_signed_api_key_create(signed: &SignedApiKeyCreate) -> Result<(), S
 }
 
 /// Verify a signed API-key revocation's P256 ECDSA signature (SYB-60).
-pub fn verify_signed_api_key_revoke(signed: &SignedApiKeyRevoke) -> Result<(), SequencerError> {
-    let msg = canonical_api_key_revoke_bytes(signed.account_id, signed.api_key_id, signed.nonce);
+pub fn verify_signed_api_key_revoke(
+    signed: &SignedApiKeyRevoke,
+    genesis_hash: [u8; 32],
+) -> Result<(), SequencerError> {
+    let msg = canonical_api_key_revoke_bytes(
+        signed.account_id,
+        signed.api_key_id,
+        signed.nonce,
+        genesis_hash,
+    );
     signed
         .signer
         .0
@@ -594,18 +622,21 @@ fn to_canonical_attestation(att: &ResolutionAttestation) -> CanonicalAttestation
 }
 
 /// Deterministic canonical byte encoding of a `ResolutionAttestation` for signing.
-pub fn canonical_attestation_bytes(att: &ResolutionAttestation) -> Vec<u8> {
-    sybil_signing::canonical_attestation_bytes(&to_canonical_attestation(att))
+pub fn canonical_attestation_bytes(att: &ResolutionAttestation, genesis_hash: [u8; 32]) -> Vec<u8> {
+    sybil_signing::canonical_attestation_bytes(&to_canonical_attestation(att), genesis_hash)
 }
 
 /// Verify the signature on a [`SignedAttestation`]. Does NOT check that the
 /// signer is a registered feed — callers do that via the feed registry.
-pub fn verify_signed_attestation(signed: &SignedAttestation) -> Result<PublicKey, SequencerError> {
+pub fn verify_signed_attestation(
+    signed: &SignedAttestation,
+    genesis_hash: [u8; 32],
+) -> Result<PublicKey, SequencerError> {
     let pubkey = PublicKey::from_compressed_bytes(&signed.signer.0)
         .ok_or(SequencerError::InvalidSignature)?;
     let signature =
         Signature::from_der(&signed.signature_der).map_err(|_| SequencerError::InvalidSignature)?;
-    let msg = canonical_attestation_bytes(&signed.attestation);
+    let msg = canonical_attestation_bytes(&signed.attestation, genesis_hash);
     pubkey
         .0
         .verify(&msg, &signature)
@@ -614,8 +645,12 @@ pub fn verify_signed_attestation(signed: &SignedAttestation) -> Result<PublicKey
 }
 
 /// Sign a `ResolutionAttestation` with a P256 signing key (testing / signer use).
-pub fn sign_attestation(attestation: ResolutionAttestation, key: &SigningKey) -> SignedAttestation {
-    let msg = canonical_attestation_bytes(&attestation);
+pub fn sign_attestation(
+    attestation: ResolutionAttestation,
+    genesis_hash: [u8; 32],
+    key: &SigningKey,
+) -> SignedAttestation {
+    let msg = canonical_attestation_bytes(&attestation, genesis_hash);
     let signature: Signature = key.sign(&msg);
     let pubkey = PublicKey(*key.verifying_key());
     SignedAttestation {
@@ -678,6 +713,7 @@ pub fn sign_profile_update(
     display_name: Option<String>,
     avatar_seed: Option<String>,
     nonce: u64,
+    genesis_hash: [u8; 32],
     key: &SigningKey,
 ) -> SignedProfileUpdate {
     let msg = canonical_profile_update_bytes(
@@ -685,6 +721,7 @@ pub fn sign_profile_update(
         display_name.as_deref(),
         avatar_seed.as_deref(),
         nonce,
+        genesis_hash,
     );
     let signature: Signature = key.sign(&msg);
     SignedProfileUpdate {
@@ -776,9 +813,10 @@ pub fn sign_api_key_create(
     label: Option<String>,
     token_hash: [u8; 32],
     nonce: u64,
+    genesis_hash: [u8; 32],
     key: &SigningKey,
 ) -> SignedApiKeyCreate {
-    let msg = canonical_api_key_create_bytes(account_id, label.as_deref(), nonce);
+    let msg = canonical_api_key_create_bytes(account_id, label.as_deref(), nonce, genesis_hash);
     let signature: Signature = key.sign(&msg);
     SignedApiKeyCreate {
         account_id,
@@ -795,9 +833,10 @@ pub fn sign_api_key_revoke(
     account_id: crate::account::AccountId,
     api_key_id: u64,
     nonce: u64,
+    genesis_hash: [u8; 32],
     key: &SigningKey,
 ) -> SignedApiKeyRevoke {
-    let msg = canonical_api_key_revoke_bytes(account_id, api_key_id, nonce);
+    let msg = canonical_api_key_revoke_bytes(account_id, api_key_id, nonce, genesis_hash);
     let signature: Signature = key.sign(&msg);
     SignedApiKeyRevoke {
         account_id,

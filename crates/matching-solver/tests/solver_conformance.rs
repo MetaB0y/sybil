@@ -415,6 +415,16 @@ mod conformance {
             solver.name(),
             pipeline.diagnostics
         );
+        prop_assert!(
+            pipeline
+                .result
+                .fills
+                .iter()
+                .all(|fill| fill.fill_qty != Qty::ZERO),
+            "{} emitted a zero-quantity fill: {:?}",
+            solver.name(),
+            pipeline.result.fills
+        );
         assert_fill_totals(&pipeline)?;
         assert_fill_limits(&case.problem, &pipeline)?;
         assert_mm_budgets(&case.problem, &pipeline)?;
@@ -443,7 +453,7 @@ mod conformance {
         let match_result = verify_match(&witness, true);
         prop_assert!(
             match_result.valid,
-            "{} sybil_verifier::verify_match(strict diagnostics) failed: {}",
+            "{} sybil_verifier::verify_match validity failed: {}",
             solver.name(),
             format_violations(&match_result.violations)
         );

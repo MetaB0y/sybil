@@ -16,6 +16,19 @@ export const MAX_STATES = 32;
 export const MARKET_NONE = 0xffffffff;
 export const GENESIS_HASH_LEN = 32;
 
+const encoder = new TextEncoder();
+const ORDER_DOMAIN = encoder.encode("sybil/signing/order/v1");
+const CANCEL_DOMAIN = encoder.encode("sybil/signing/cancel/v1");
+const PROFILE_UPDATE_DOMAIN = encoder.encode(
+  "sybil/signing/profile-update/v1",
+);
+const API_KEY_CREATE_DOMAIN = encoder.encode(
+  "sybil/signing/read-api-key-create/v1",
+);
+const API_KEY_REVOKE_DOMAIN = encoder.encode(
+  "sybil/signing/read-api-key-revoke/v1",
+);
+
 const PRICE_CONDITION_SCHEMA = {
   struct: {
     market: "u32",
@@ -139,7 +152,10 @@ export function canonicalOrderBytes(input: CanonicalOrderInput): Uint8Array {
   };
   // borsh-js types are loose; ORDER_SCHEMA is structurally correct but its
   // literal type doesn't satisfy the Schema union.
-  return new Uint8Array(serialize(ORDER_PAYLOAD_SCHEMA as never, value));
+  return concatBytes(
+    ORDER_DOMAIN,
+    new Uint8Array(serialize(ORDER_PAYLOAD_SCHEMA as never, value)),
+  );
 }
 
 export function canonicalCancelBytes(
@@ -148,13 +164,16 @@ export function canonicalCancelBytes(
   nonce: bigint,
   genesisHash: Uint8Array,
 ): Uint8Array {
-  return new Uint8Array(
-    serialize(CANCEL_SCHEMA as never, {
-      genesis_hash: encodeGenesisHash(genesisHash),
-      account_id: accountId,
-      order_id: orderId,
-      nonce,
-    }),
+  return concatBytes(
+    CANCEL_DOMAIN,
+    new Uint8Array(
+      serialize(CANCEL_SCHEMA as never, {
+        genesis_hash: encodeGenesisHash(genesisHash),
+        account_id: accountId,
+        order_id: orderId,
+        nonce,
+      }),
+    ),
   );
 }
 
@@ -169,6 +188,7 @@ export function canonicalCancelBytes(
 
 const PROFILE_UPDATE_SCHEMA = {
   struct: {
+    genesis_hash: { array: { type: "u8", len: GENESIS_HASH_LEN } },
     account_id: "u64",
     display_name: { option: "string" },
     avatar_seed: { option: "string" },
@@ -223,6 +243,7 @@ const FULL_CAPABILITY_MASK_LE = new Uint8Array([0xff, 0xff, 0xff, 0xff]);
 
 const API_KEY_CREATE_SCHEMA = {
   struct: {
+    genesis_hash: { array: { type: "u8", len: GENESIS_HASH_LEN } },
     account_id: "u64",
     label: { option: "string" },
     nonce: "u64",
@@ -231,6 +252,7 @@ const API_KEY_CREATE_SCHEMA = {
 
 const API_KEY_REVOKE_SCHEMA = {
   struct: {
+    genesis_hash: { array: { type: "u8", len: GENESIS_HASH_LEN } },
     account_id: "u64",
     api_key_id: "u64",
     nonce: "u64",
@@ -246,14 +268,19 @@ export function canonicalProfileUpdateBytes(
   displayName: string | null,
   avatarSeed: string | null,
   nonce: bigint,
+  genesisHash: Uint8Array,
 ): Uint8Array {
-  return new Uint8Array(
-    serialize(PROFILE_UPDATE_SCHEMA as never, {
-      account_id: accountId,
-      display_name: displayName,
-      avatar_seed: avatarSeed,
-      nonce,
-    }),
+  return concatBytes(
+    PROFILE_UPDATE_DOMAIN,
+    new Uint8Array(
+      serialize(PROFILE_UPDATE_SCHEMA as never, {
+        genesis_hash: encodeGenesisHash(genesisHash),
+        account_id: accountId,
+        display_name: displayName,
+        avatar_seed: avatarSeed,
+        nonce,
+      }),
+    ),
   );
 }
 
@@ -317,13 +344,18 @@ export function canonicalApiKeyCreateBytes(
   accountId: bigint,
   label: string | null,
   nonce: bigint,
+  genesisHash: Uint8Array,
 ): Uint8Array {
-  return new Uint8Array(
-    serialize(API_KEY_CREATE_SCHEMA as never, {
-      account_id: accountId,
-      label,
-      nonce,
-    }),
+  return concatBytes(
+    API_KEY_CREATE_DOMAIN,
+    new Uint8Array(
+      serialize(API_KEY_CREATE_SCHEMA as never, {
+        genesis_hash: encodeGenesisHash(genesisHash),
+        account_id: accountId,
+        label,
+        nonce,
+      }),
+    ),
   );
 }
 
@@ -335,13 +367,18 @@ export function canonicalApiKeyRevokeBytes(
   accountId: bigint,
   apiKeyId: bigint,
   nonce: bigint,
+  genesisHash: Uint8Array,
 ): Uint8Array {
-  return new Uint8Array(
-    serialize(API_KEY_REVOKE_SCHEMA as never, {
-      account_id: accountId,
-      api_key_id: apiKeyId,
-      nonce,
-    }),
+  return concatBytes(
+    API_KEY_REVOKE_DOMAIN,
+    new Uint8Array(
+      serialize(API_KEY_REVOKE_SCHEMA as never, {
+        genesis_hash: encodeGenesisHash(genesisHash),
+        account_id: accountId,
+        api_key_id: apiKeyId,
+        nonce,
+      }),
+    ),
   );
 }
 

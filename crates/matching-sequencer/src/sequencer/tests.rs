@@ -3014,6 +3014,7 @@ fn attested_resolution_dissolves_two_market_group() {
             payout_nanos: Nanos(NANOS_PER_DOLLAR),
             nonce: 1,
         },
+        [0x42; 32],
         &signing_key,
     );
     let template = "attested_test";

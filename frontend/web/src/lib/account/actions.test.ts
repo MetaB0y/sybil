@@ -7,6 +7,9 @@ import {
 } from "./store";
 
 const mocks = vi.hoisted(() => ({
+  apiGet: vi.fn(async () => ({
+    data: { genesis_hash: "ab".repeat(32) },
+  })),
   apiPost: vi.fn(),
   clearStoredAccount: vi.fn(),
   clearStoredReadApiKey: vi.fn(),
@@ -20,7 +23,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/api/client", () => ({
-  api: { GET: vi.fn(), POST: mocks.apiPost },
+  api: { GET: mocks.apiGet, POST: mocks.apiPost },
 }));
 
 vi.mock("@/lib/auth/webauthn", () => ({

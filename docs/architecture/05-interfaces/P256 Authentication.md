@@ -3,7 +3,7 @@ tags: [api, authentication, passkeys, security]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-16
+last_verified: 2026-07-20
 ---
 
 # P256 and WebAuthn authentication
@@ -59,9 +59,11 @@ are validity-checked, not merely accepted by the server.
 
 ## Ordinary signed actions
 
-Public signed endpoints include orders and cancellations. Their canonical bytes
-bind the action, nonce, and chain `genesis_hash`; cancellation bytes also bind
-the account and order ID. The API retains the exact RawP256/WebAuthn envelope,
+Every canonical signed action begins with a unique versioned domain and binds
+the chain `genesis_hash`. This includes orders, cancellations, profile and read
+API-key mutations, bridge withdrawals, key operations, and resolution
+attestations. Cancellation bytes also bind the account and order ID. For signed
+orders and cancellations, the API retains the exact RawP256/WebAuthn envelope,
 and the sequencer appends the action, envelope, and nonce in one acknowledged
 WAL record before acknowledgement. Recovery reconstructs the same
 `ClientActionAuthorized` event.
@@ -71,9 +73,11 @@ verification require each witnessed order/cancel nonce to be strictly greater
 than the authenticated prior value; gaps are allowed. Key mutations and client
 actions share actor acknowledgement order, so an action must be authorized by a
 scheme-matching key active at that exact point. The action event is then bound
-to the accepted/rejected/resting order or later cancellation effect. Profile,
-read-key, bridge, and other operational actions continue to use the broader
-sequencer `last_nonce` and are outside this first trading-intent proof scope.
+to the accepted/rejected/resting order or later cancellation effect. Profile
+and read-key actions continue to use the broader sequencer `last_nonce`; bridge
+and resolution paths have their own state machines. They share canonical
+domain/genesis protection but remain outside this first trading-intent proof
+scope.
 
 Unsigned `POST /v1/orders` is a service route: in production it requires the
 service token; dev mode skips that service bearer for local workflows. It is not

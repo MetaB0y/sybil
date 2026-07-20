@@ -20,6 +20,12 @@ interface OrderVector {
 
 const GENESIS_HASH = new Uint8Array(32).fill(0xab);
 const GENESIS_HEX = "ab".repeat(32);
+const ORDER_DOMAIN_HEX = toHex(
+  new TextEncoder().encode("sybil/signing/order/v1"),
+);
+const CANCEL_DOMAIN_HEX = toHex(
+  new TextEncoder().encode("sybil/signing/cancel/v1"),
+);
 
 const ORDER_VECTORS: OrderVector[] = [
   {
@@ -33,6 +39,7 @@ const ORDER_VECTORS: OrderVector[] = [
       genesisHash: GENESIS_HASH,
     },
     expectedHex:
+      ORDER_DOMAIN_HEX +
       GENESIS_HEX +
       "07000000ffffffffffffffffffffffffffffffff010100000000000000000000000000000000000000000000000000000000000000028055c820000000000a0000000000000000000700000000000000",
   },
@@ -47,6 +54,7 @@ const ORDER_VECTORS: OrderVector[] = [
       genesisHash: GENESIS_HASH,
     },
     expectedHex:
+      ORDER_DOMAIN_HEX +
       GENESIS_HEX +
       "07000000ffffffffffffffffffffffffffffffff01ff000000000000000000000000000000000000000000000000000000000000000240fc541900000000030000000000000000000700000000000000",
   },
@@ -61,6 +69,7 @@ const ORDER_VECTORS: OrderVector[] = [
       genesisHash: GENESIS_HASH,
     },
     expectedHex:
+      ORDER_DOMAIN_HEX +
       GENESIS_HEX +
       "0300000009000000ffffffffffffffffffffffff0200ff010000000000000000000000000000000000000000000000000000000000044059730700000000050000000000000000000700000000000000",
   },
@@ -75,6 +84,7 @@ const ORDER_VECTORS: OrderVector[] = [
       genesisHash: GENESIS_HASH,
     },
     expectedHex:
+      ORDER_DOMAIN_HEX +
       GENESIS_HEX +
       "010000000200000004000000ffffffffffffffff0300000000000000010000000000000000000000000000000000000000000000000800a3e11100000000020000000000000000000700000000000000",
   },
@@ -94,6 +104,7 @@ const ORDER_VECTORS: OrderVector[] = [
       genesisHash: GENESIS_HASH,
     },
     expectedHex:
+      ORDER_DOMAIN_HEX +
       GENESIS_HEX +
       "05000000ffffffffffffffffffffffffffffffff0101000000000000000000000000000000000000000000000000000000000000000280dc5b24000000000900000000000000010b00000080ce341d0000000000000700000000000000",
   },
@@ -141,14 +152,18 @@ describe("canonicalCancelBytes", () => {
     // 42 LE u64: 2a00000000000000
     // 11 LE u64: 0b00000000000000
     expect(got).toBe(
-      GENESIS_HEX + "07000000000000002a000000000000000b00000000000000",
+      CANCEL_DOMAIN_HEX +
+        GENESIS_HEX +
+        "07000000000000002a000000000000000b00000000000000",
     );
   });
 
   it("encodes large account_id correctly", () => {
     const got = toHex(canonicalCancelBytes(0xdeadbeefn, 1n, 2n, GENESIS_HASH));
     expect(got).toBe(
-      GENESIS_HEX + "efbeadde0000000001000000000000000200000000000000",
+      CANCEL_DOMAIN_HEX +
+        GENESIS_HEX +
+        "efbeadde0000000001000000000000000200000000000000",
     );
   });
 });

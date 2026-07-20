@@ -31,7 +31,7 @@ pub enum ViolationKind {
     WelfareMismatch,
     /// Market maker capital used exceeds budget.
     MmBudgetExceeded,
-    /// Zero-quantity fill (diagnostic only).
+    /// A canonical fill has zero executed quantity.
     ZeroQuantityFill,
     /// Net position delta != 0 for a market (minting invariant broken).
 
@@ -40,8 +40,6 @@ pub enum ViolationKind {
     UniformClearingPriceViolation,
     /// `clearing_price_YES + clearing_price_NO != NANOS_PER_DOLLAR`.
     PriceComplementarityViolation,
-    /// Sum of YES clearing prices in a group exceeds `NANOS_PER_DOLLAR`.
-    MarketGroupConstraintViolation,
     /// Fill or order references a resolved/voided market.
     ResolvedMarketViolation,
     /// Duplicate order IDs in the witness.

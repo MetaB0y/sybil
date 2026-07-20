@@ -82,8 +82,20 @@ async fn create_owner_with_read_key(app: axum::Router, key_byte: u8) -> (u64, St
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
     let account_id = parse_json(&body)["account_id"].as_u64().unwrap();
 
+    let (status, body) =
+        request_json(app.clone(), Method::GET, "/v1/health", None, json!(null)).await;
+    assert_eq!(status, StatusCode::OK);
+    let genesis_hash: [u8; 32] = hex::decode(
+        parse_json(&body)["genesis_hash"]
+            .as_str()
+            .expect("health genesis hash"),
+    )
+    .unwrap()
+    .try_into()
+    .unwrap();
     let nonce = 1_000 + u64::from(key_byte);
-    let canonical = canonical_api_key_create_bytes(AccountId(account_id), None, nonce);
+    let canonical =
+        canonical_api_key_create_bytes(AccountId(account_id), None, nonce, genesis_hash);
     let signature: Signature = signing_key.sign(&canonical);
     let (status, body) = request_json(
         app,

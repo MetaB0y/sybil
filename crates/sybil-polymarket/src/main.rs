@@ -161,6 +161,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let genesis_hash = health
         .genesis_hash
         .ok_or_else(|| std::io::Error::other("healthy Sybil API returned no genesis hash"))?;
+    let genesis_hash_bytes: [u8; 32] = hex::decode(&genesis_hash)?
+        .try_into()
+        .map_err(|_| std::io::Error::other("Sybil genesis hash is not 32 bytes"))?;
 
     // Mapping identity is explicit: a file is valid for exactly one canonical
     // Sybil chain and never inferred from whichever market ids happen to exist.
@@ -421,8 +424,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let cancel_idle = cancel.clone();
         tasks.spawn(async move { cancel_idle.cancelled().await })
     } else {
-        let signer =
-            ResolutionSigner::load_or_create(std::path::Path::new(&config.signer_key_path))?;
+        let signer = ResolutionSigner::load_or_create(
+            std::path::Path::new(&config.signer_key_path),
+            genesis_hash_bytes,
+        )?;
         info!(
             pubkey = signer.pubkey_hex(),
             "loaded resolution signer; register this pubkey as the polymarket_mirror feed on sybil-api"

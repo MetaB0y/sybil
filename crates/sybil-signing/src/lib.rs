@@ -5,6 +5,14 @@ pub const MAX_MARKETS_PER_ORDER: usize = 5;
 pub const MAX_STATES: usize = 32;
 pub type GenesisHash = [u8; 32];
 
+pub const ORDER_DOMAIN: &[u8] = b"sybil/signing/order/v1";
+pub const CANCEL_DOMAIN: &[u8] = b"sybil/signing/cancel/v1";
+pub const PROFILE_UPDATE_DOMAIN: &[u8] = b"sybil/signing/profile-update/v1";
+pub const API_KEY_CREATE_DOMAIN: &[u8] = b"sybil/signing/read-api-key-create/v1";
+pub const API_KEY_REVOKE_DOMAIN: &[u8] = b"sybil/signing/read-api-key-revoke/v1";
+pub const BRIDGE_WITHDRAWAL_DOMAIN: &[u8] = b"sybil/signing/bridge-withdrawal/v1";
+pub const RESOLUTION_ATTESTATION_DOMAIN: &[u8] = b"sybil/signing/resolution-attestation/v1";
+
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
 )]
@@ -62,46 +70,10 @@ struct CancelRequest {
 /// intents are covered by the signature so a relay cannot forge either.
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 struct ProfileUpdate {
+    genesis_hash: GenesisHash,
     account_id: u64,
     display_name: Option<String>,
     avatar_seed: Option<String>,
-    nonce: u64,
-}
-
-/// Canonical, stable byte layout of a signing-key revocation (SYB-60).
-///
-/// `target_pubkey` is the 33-byte compressed SEC1 point of the key being
-/// revoked. Covering it by signature prevents a relay from redirecting the
-/// revocation at a different key. Like orders/cancels (SYB-224) and key
-/// registrations (SYB-229), the payload is domain-separated by `genesis_hash`
-/// (SYB-231) so a revocation signature cannot be replayed onto a different
-/// chain/genesis after a fresh-genesis redeploy.
-#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
-struct KeyRevocation {
-    genesis_hash: GenesisHash,
-    account_id: u64,
-    target_pubkey: Vec<u8>,
-    nonce: u64,
-}
-
-/// Canonical, stable byte layout of a signing-key registration (SYB-229).
-///
-/// A signed key registration is required whenever the target account already
-/// has at least one registered key (the first key is bootstrapped over the
-/// service tier). Like orders/cancels (SYB-224), the payload is domain-separated
-/// by `genesis_hash` so a registration signature cannot be replayed onto a
-/// different chain/genesis. `new_key_auth_scheme` is `0` for raw P256 and `1`
-/// for WebAuthn. Both `new_key_pubkey` and `signer_pubkey` are 33-byte
-/// compressed SEC1 points; covering both by signature binds the new key to the
-/// authorizing signer so a relay can neither swap in a different key nor
-/// redirect the authorization.
-#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
-struct KeyRegistration {
-    genesis_hash: GenesisHash,
-    account_id: u64,
-    new_key_auth_scheme: u8,
-    new_key_pubkey: Vec<u8>,
-    signer_pubkey: Vec<u8>,
     nonce: u64,
 }
 
@@ -113,6 +85,7 @@ struct KeyRegistration {
 /// persisted bytes in plaintext.
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 struct ApiKeyCreate {
+    genesis_hash: GenesisHash,
     account_id: u64,
     label: Option<String>,
     nonce: u64,
@@ -121,6 +94,7 @@ struct ApiKeyCreate {
 /// Canonical, stable byte layout of a read API-key revocation (SYB-60).
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 struct ApiKeyRevoke {
+    genesis_hash: GenesisHash,
     account_id: u64,
     api_key_id: u64,
     nonce: u64,
@@ -158,12 +132,28 @@ pub struct ResolutionAttestation {
     pub nonce: u64,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+struct ResolutionAttestationSigningRequest {
+    genesis_hash: GenesisHash,
+    attestation: ResolutionAttestation,
+}
+
+fn domain_separated_bytes<T: BorshSerialize>(domain: &[u8], value: &T) -> Vec<u8> {
+    let payload = borsh::to_vec(value).expect("canonical serialization should not fail");
+    let mut bytes = Vec::with_capacity(domain.len() + payload.len());
+    bytes.extend_from_slice(domain);
+    bytes.extend_from_slice(&payload);
+    bytes
+}
+
 pub fn canonical_order_bytes(order: &Order, genesis_hash: GenesisHash) -> Vec<u8> {
-    borsh::to_vec(&OrderRequest {
-        genesis_hash,
-        order: order.clone(),
-    })
-    .expect("canonical order serialization should not fail")
+    domain_separated_bytes(
+        ORDER_DOMAIN,
+        &OrderRequest {
+            genesis_hash,
+            order: order.clone(),
+        },
+    )
 }
 
 pub fn canonical_cancel_bytes(
@@ -172,28 +162,41 @@ pub fn canonical_cancel_bytes(
     nonce: u64,
     genesis_hash: GenesisHash,
 ) -> Vec<u8> {
-    borsh::to_vec(&CancelRequest {
-        genesis_hash,
-        account_id,
-        order_id,
-        nonce,
-    })
-    .expect("canonical cancel serialization should not fail")
+    domain_separated_bytes(
+        CANCEL_DOMAIN,
+        &CancelRequest {
+            genesis_hash,
+            account_id,
+            order_id,
+            nonce,
+        },
+    )
 }
 
-pub fn canonical_attestation_bytes(att: &ResolutionAttestation) -> Vec<u8> {
-    borsh::to_vec(att).expect("canonical attestation serialization should not fail")
+pub fn canonical_attestation_bytes(
+    att: &ResolutionAttestation,
+    genesis_hash: GenesisHash,
+) -> Vec<u8> {
+    domain_separated_bytes(
+        RESOLUTION_ATTESTATION_DOMAIN,
+        &ResolutionAttestationSigningRequest {
+            genesis_hash,
+            attestation: att.clone(),
+        },
+    )
 }
 
 pub fn canonical_bridge_withdrawal_bytes(
     request: &BridgeWithdrawalRequest,
     genesis_hash: GenesisHash,
 ) -> Vec<u8> {
-    borsh::to_vec(&BridgeWithdrawalSigningRequest {
-        genesis_hash,
-        request: request.clone(),
-    })
-    .expect("canonical bridge withdrawal serialization should not fail")
+    domain_separated_bytes(
+        BRIDGE_WITHDRAWAL_DOMAIN,
+        &BridgeWithdrawalSigningRequest {
+            genesis_hash,
+            request: request.clone(),
+        },
+    )
 }
 
 /// Canonical bytes for a signed account-profile update (SYB-60).
@@ -202,78 +205,54 @@ pub fn canonical_profile_update_bytes(
     display_name: Option<&str>,
     avatar_seed: Option<&str>,
     nonce: u64,
-) -> Vec<u8> {
-    borsh::to_vec(&ProfileUpdate {
-        account_id,
-        display_name: display_name.map(str::to_owned),
-        avatar_seed: avatar_seed.map(str::to_owned),
-        nonce,
-    })
-    .expect("canonical profile update serialization should not fail")
-}
-
-/// Canonical bytes for a signed signing-key revocation (SYB-60).
-///
-/// `target_pubkey` must be the 33-byte compressed SEC1 encoding of the key
-/// being revoked. Domain-separated by `genesis_hash` (SYB-231), mirroring
-/// orders/cancels (SYB-224) and key registrations (SYB-229).
-pub fn canonical_key_revocation_bytes(
     genesis_hash: GenesisHash,
-    account_id: u64,
-    target_pubkey: &[u8],
-    nonce: u64,
 ) -> Vec<u8> {
-    borsh::to_vec(&KeyRevocation {
-        genesis_hash,
-        account_id,
-        target_pubkey: target_pubkey.to_vec(),
-        nonce,
-    })
-    .expect("canonical key revocation serialization should not fail")
-}
-
-/// Canonical bytes for a signed signing-key registration (SYB-229).
-///
-/// `new_key_auth_scheme` is `0` for raw P256 and `1` for WebAuthn. Both
-/// `new_key_pubkey` and `signer_pubkey` must be the 33-byte compressed SEC1
-/// encodings of the respective keys.
-pub fn canonical_key_registration_bytes(
-    genesis_hash: GenesisHash,
-    account_id: u64,
-    new_key_auth_scheme: u8,
-    new_key_pubkey: &[u8],
-    signer_pubkey: &[u8],
-    nonce: u64,
-) -> Vec<u8> {
-    borsh::to_vec(&KeyRegistration {
-        genesis_hash,
-        account_id,
-        new_key_auth_scheme,
-        new_key_pubkey: new_key_pubkey.to_vec(),
-        signer_pubkey: signer_pubkey.to_vec(),
-        nonce,
-    })
-    .expect("canonical key registration serialization should not fail")
+    domain_separated_bytes(
+        PROFILE_UPDATE_DOMAIN,
+        &ProfileUpdate {
+            genesis_hash,
+            account_id,
+            display_name: display_name.map(str::to_owned),
+            avatar_seed: avatar_seed.map(str::to_owned),
+            nonce,
+        },
+    )
 }
 
 /// Canonical bytes for a signed read API-key creation (SYB-60).
-pub fn canonical_api_key_create_bytes(account_id: u64, label: Option<&str>, nonce: u64) -> Vec<u8> {
-    borsh::to_vec(&ApiKeyCreate {
-        account_id,
-        label: label.map(str::to_owned),
-        nonce,
-    })
-    .expect("canonical api key create serialization should not fail")
+pub fn canonical_api_key_create_bytes(
+    account_id: u64,
+    label: Option<&str>,
+    nonce: u64,
+    genesis_hash: GenesisHash,
+) -> Vec<u8> {
+    domain_separated_bytes(
+        API_KEY_CREATE_DOMAIN,
+        &ApiKeyCreate {
+            genesis_hash,
+            account_id,
+            label: label.map(str::to_owned),
+            nonce,
+        },
+    )
 }
 
 /// Canonical bytes for a signed read API-key revocation (SYB-60).
-pub fn canonical_api_key_revoke_bytes(account_id: u64, api_key_id: u64, nonce: u64) -> Vec<u8> {
-    borsh::to_vec(&ApiKeyRevoke {
-        account_id,
-        api_key_id,
-        nonce,
-    })
-    .expect("canonical api key revoke serialization should not fail")
+pub fn canonical_api_key_revoke_bytes(
+    account_id: u64,
+    api_key_id: u64,
+    nonce: u64,
+    genesis_hash: GenesisHash,
+) -> Vec<u8> {
+    domain_separated_bytes(
+        API_KEY_REVOKE_DOMAIN,
+        &ApiKeyRevoke {
+            genesis_hash,
+            account_id,
+            api_key_id,
+            nonce,
+        },
+    )
 }
 
 #[cfg(test)]
@@ -357,7 +336,7 @@ mod tests {
         };
         insta::assert_snapshot!(
             "attestation",
-            hex::encode(canonical_attestation_bytes(&att))
+            hex::encode(canonical_attestation_bytes(&att, GENESIS_HASH))
         );
     }
 
@@ -389,144 +368,92 @@ mod tests {
 
     #[test]
     fn profile_update_bytes_deterministic_and_field_covering() {
-        let a = canonical_profile_update_bytes(7, Some("alice"), Some("seed-1"), 11);
-        let b = canonical_profile_update_bytes(7, Some("alice"), Some("seed-1"), 11);
+        let a = canonical_profile_update_bytes(7, Some("alice"), Some("seed-1"), 11, GENESIS_HASH);
+        let b = canonical_profile_update_bytes(7, Some("alice"), Some("seed-1"), 11, GENESIS_HASH);
         assert_eq!(a, b, "encoding must be deterministic");
         // Clearing (None) differs from setting, and each field is covered.
-        assert_ne!(a, canonical_profile_update_bytes(7, None, None, 11));
         assert_ne!(
             a,
-            canonical_profile_update_bytes(7, Some("bob"), Some("seed-1"), 11)
-        );
-        assert_ne!(
-            a,
-            canonical_profile_update_bytes(7, Some("alice"), Some("seed-2"), 11)
+            canonical_profile_update_bytes(7, None, None, 11, GENESIS_HASH)
         );
         assert_ne!(
             a,
-            canonical_profile_update_bytes(7, Some("alice"), Some("seed-1"), 12)
+            canonical_profile_update_bytes(7, Some("bob"), Some("seed-1"), 11, GENESIS_HASH)
         );
         assert_ne!(
             a,
-            canonical_profile_update_bytes(8, Some("alice"), Some("seed-1"), 11)
+            canonical_profile_update_bytes(7, Some("alice"), Some("seed-2"), 11, GENESIS_HASH)
         );
-    }
-
-    #[test]
-    fn key_registration_snapshot() {
-        // Stable vector mirrored by the TS canonical encoder parity fixtures
-        // (frontend/web/src/lib/auth/__tests__/canonical-settings.test.ts).
-        let new_key = vec![0x02u8; 33];
-        let signer = vec![0x03u8; 33];
-        insta::assert_snapshot!(
-            "key_registration",
-            hex::encode(canonical_key_registration_bytes(
-                GENESIS_HASH,
-                7,
-                1,
-                &new_key,
-                &signer,
-                42
-            ))
-        );
-    }
-
-    #[test]
-    fn key_registration_bytes_cover_all_fields() {
-        let new_key = [0x02u8; 33];
-        let signer = [0x03u8; 33];
-        let a = canonical_key_registration_bytes(GENESIS_HASH, 7, 0, &new_key, &signer, 42);
-        assert_eq!(
-            a,
-            canonical_key_registration_bytes(GENESIS_HASH, 7, 0, &new_key, &signer, 42),
-            "encoding must be deterministic"
-        );
-        // Every field is signature-covered.
         assert_ne!(
             a,
-            canonical_key_registration_bytes([0xcd; 32], 7, 0, &new_key, &signer, 42),
+            canonical_profile_update_bytes(7, Some("alice"), Some("seed-1"), 12, GENESIS_HASH)
+        );
+        assert_ne!(
+            a,
+            canonical_profile_update_bytes(8, Some("alice"), Some("seed-1"), 11, GENESIS_HASH)
+        );
+        assert_ne!(
+            a,
+            canonical_profile_update_bytes(7, Some("alice"), Some("seed-1"), 11, [0xcd; 32]),
             "genesis_hash must be covered"
-        );
-        assert_ne!(
-            a,
-            canonical_key_registration_bytes(GENESIS_HASH, 8, 0, &new_key, &signer, 42)
-        );
-        assert_ne!(
-            a,
-            canonical_key_registration_bytes(GENESIS_HASH, 7, 1, &new_key, &signer, 42),
-            "new_key_auth_scheme must be covered"
-        );
-        assert_ne!(
-            a,
-            canonical_key_registration_bytes(GENESIS_HASH, 7, 0, &[0x04; 33], &signer, 42)
-        );
-        assert_ne!(
-            a,
-            canonical_key_registration_bytes(GENESIS_HASH, 7, 0, &new_key, &[0x05; 33], 42),
-            "signer_pubkey must be covered"
-        );
-        assert_ne!(
-            a,
-            canonical_key_registration_bytes(GENESIS_HASH, 7, 0, &new_key, &signer, 43)
-        );
-    }
-
-    #[test]
-    fn key_revocation_snapshot() {
-        // Stable vector mirrored by the TS canonical encoder parity fixtures
-        // (frontend/web/src/lib/auth/__tests__/canonical-settings.test.ts).
-        let target = vec![0x02u8; 33];
-        insta::assert_snapshot!(
-            "key_revocation",
-            hex::encode(canonical_key_revocation_bytes(GENESIS_HASH, 7, &target, 42))
-        );
-    }
-
-    #[test]
-    fn key_revocation_bytes_cover_genesis_target_and_nonce() {
-        let a = canonical_key_revocation_bytes(GENESIS_HASH, 3, &[0x02; 33], 5);
-        assert_eq!(
-            a,
-            canonical_key_revocation_bytes(GENESIS_HASH, 3, &[0x02; 33], 5)
-        );
-        // genesis_hash is signature-covered (SYB-231) so a captured revocation
-        // cannot replay against a fresh-genesis redeploy.
-        assert_ne!(
-            a,
-            canonical_key_revocation_bytes([0xcd; 32], 3, &[0x02; 33], 5),
-            "genesis_hash must be covered"
-        );
-        assert_ne!(
-            a,
-            canonical_key_revocation_bytes(GENESIS_HASH, 3, &[0x03; 33], 5)
-        );
-        assert_ne!(
-            a,
-            canonical_key_revocation_bytes(GENESIS_HASH, 3, &[0x02; 33], 6)
-        );
-        assert_ne!(
-            a,
-            canonical_key_revocation_bytes(GENESIS_HASH, 4, &[0x02; 33], 5)
         );
     }
 
     #[test]
     fn api_key_bytes_cover_all_fields() {
-        let create = canonical_api_key_create_bytes(9, Some("grafana"), 2);
+        let create = canonical_api_key_create_bytes(9, Some("grafana"), 2, GENESIS_HASH);
         assert_eq!(
             create,
-            canonical_api_key_create_bytes(9, Some("grafana"), 2)
+            canonical_api_key_create_bytes(9, Some("grafana"), 2, GENESIS_HASH)
         );
-        assert_ne!(create, canonical_api_key_create_bytes(9, None, 2));
         assert_ne!(
             create,
-            canonical_api_key_create_bytes(9, Some("grafana"), 3)
+            canonical_api_key_create_bytes(9, None, 2, GENESIS_HASH)
+        );
+        assert_ne!(
+            create,
+            canonical_api_key_create_bytes(9, Some("grafana"), 3, GENESIS_HASH)
+        );
+        assert_ne!(
+            create,
+            canonical_api_key_create_bytes(9, Some("grafana"), 2, [0xcd; 32])
         );
 
-        let revoke = canonical_api_key_revoke_bytes(9, 42, 2);
-        assert_eq!(revoke, canonical_api_key_revoke_bytes(9, 42, 2));
-        assert_ne!(revoke, canonical_api_key_revoke_bytes(9, 43, 2));
-        assert_ne!(revoke, canonical_api_key_revoke_bytes(9, 42, 3));
+        let revoke = canonical_api_key_revoke_bytes(9, 42, 2, GENESIS_HASH);
+        assert_eq!(
+            revoke,
+            canonical_api_key_revoke_bytes(9, 42, 2, GENESIS_HASH)
+        );
+        assert_ne!(
+            revoke,
+            canonical_api_key_revoke_bytes(9, 43, 2, GENESIS_HASH)
+        );
+        assert_ne!(
+            revoke,
+            canonical_api_key_revoke_bytes(9, 42, 3, GENESIS_HASH)
+        );
+        assert_ne!(revoke, canonical_api_key_revoke_bytes(9, 42, 2, [0xcd; 32]));
+    }
+
+    #[test]
+    fn action_domains_are_unique_and_explicit() {
+        let domains = [
+            ORDER_DOMAIN,
+            CANCEL_DOMAIN,
+            PROFILE_UPDATE_DOMAIN,
+            API_KEY_CREATE_DOMAIN,
+            API_KEY_REVOKE_DOMAIN,
+            BRIDGE_WITHDRAWAL_DOMAIN,
+            RESOLUTION_ATTESTATION_DOMAIN,
+        ];
+        for (index, domain) in domains.iter().enumerate() {
+            assert!(domain.ends_with(b"/v1"));
+            assert!(
+                domains[..index].iter().all(|other| other != domain),
+                "duplicate signed-action domain: {}",
+                String::from_utf8_lossy(domain)
+            );
+        }
     }
 
     #[test]

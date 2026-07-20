@@ -2,4 +2,4 @@
 source: crates/sybil-signing/src/lib.rs
 expression: "hex::encode(canonical_cancel_bytes(7, 42, 11, GENESIS_HASH))"
 ---
-abababababababababababababababababababababababababababababababab07000000000000002a000000000000000b00000000000000
+737962696c2f7369676e696e672f63616e63656c2f7631abababababababababababababababababababababababababababababababab07000000000000002a000000000000000b00000000000000

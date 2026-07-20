@@ -210,6 +210,7 @@ describe.skipIf(!RUN)("signed-flow smoke (live)", () => {
         BigInt(accountId),
         readKeyLabel,
         readKeyNonce,
+        genesisHash,
       );
       const readKeySignature = await signBytes(
         kp.privateKey,

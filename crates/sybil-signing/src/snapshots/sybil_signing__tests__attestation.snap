@@ -1,5 +1,5 @@
 ---
 source: crates/sybil-signing/src/lib.rs
-expression: "hex::encode(canonical_attestation_bytes(&att))"
+expression: "hex::encode(canonical_attestation_bytes(&att, GENESIS_HASH))"
 ---
-0700000000ca9a3b000000000068e5cf8b010000
+737962696c2f7369676e696e672f7265736f6c7574696f6e2d6174746573746174696f6e2f7631abababababababababababababababababababababababababababababababab0700000000ca9a3b000000000068e5cf8b010000

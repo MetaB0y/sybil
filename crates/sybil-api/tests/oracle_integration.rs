@@ -11,6 +11,18 @@ use sybil_oracle::ResolutionAttestation;
 
 use common::{get, post_json, test_app_with_bootstrap};
 
+async fn genesis_hash(handle: &matching_sequencer::SequencerHandle) -> [u8; 32] {
+    if let Some(hash) = handle.get_genesis_hash().await.unwrap() {
+        return hash;
+    }
+    handle.produce_block().await.unwrap();
+    handle
+        .get_genesis_hash()
+        .await
+        .unwrap()
+        .expect("genesis hash after first block")
+}
+
 #[tokio::test]
 async fn register_feed_happy_path() {
     let (app, _handle, _admin_key, _admin_id) = test_app_with_bootstrap(true).await;
@@ -45,6 +57,7 @@ async fn register_feed_happy_path() {
 #[tokio::test]
 async fn signed_resolve_via_polymarket_template_succeeds() {
     let (app, handle, _admin_key, _admin_id) = test_app_with_bootstrap(true).await;
+    let genesis_hash = genesis_hash(&handle).await;
 
     // Register polymarket_mirror feed + template.
     let key = <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(&mut UnwrapErr(
@@ -93,7 +106,7 @@ async fn signed_resolve_via_polymarket_template_succeeds() {
         payout_nanos: Nanos(NANOS_PER_DOLLAR),
         nonce: 1_700_000_000,
     };
-    let signed = sign_attestation(attestation, &key);
+    let signed = sign_attestation(attestation, genesis_hash, &key);
 
     let (status, body) = post_json(
         app.clone(),
@@ -172,7 +185,7 @@ async fn mis_signed_attestation_rejected() {
         payout_nanos: Nanos(0),
         nonce: 42,
     };
-    let signed = sign_attestation(attestation, &attacker_key);
+    let signed = sign_attestation(attestation, genesis_hash(&handle).await, &attacker_key);
 
     let (status, body) = post_json(
         app,

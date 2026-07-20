@@ -169,14 +169,14 @@ Canonical encoding is owned by `sybil-verifier`; signing bytes are owned by `syb
 
 | Pass | Re-derives/checks |
 |---|---|
-| Match | Fill/order existence, quantity/limits, uniform prices, groups, MM budgets, welfare |
+| Match | Fill/order existence, positive quantity/limits, uniform prices, binary complementarity, MM budgets, welfare; group-price distance is diagnostic |
 | Settlement | Integer balance/position/minting transition and event digests |
 | Block integrity | Roots, parent/height chain, counts, exact keyspace proofs |
 | Orders | Pre-state funding/positions, expiry, double-spend accumulation, rejection validity |
 | System/sidecar | Deposits, withdrawals, resolution, order book/reservations, market/bridge transition |
 | Keys/intent | Key universe/digests, register/revoke, uniqueness/last-key rules, RawP256/WebAuthn signatures |
 
-Key operations bind current `keys_digest` and `events_digest`. Ordinary signed orders/cancels use genesis-bound canonical bytes and a strictly increasing committed `last_trading_nonce`. Witness v11 carries both envelope classes in actor acknowledgement order, and shared native/guest verification checks scheme-matching active-key membership, exact RawP256/WebAuthn signatures, action/effect binding, and nonce replay. WebAuthn additionally pins RP/origin/challenge, rejects cross-origin assertions, and requires user presence/verification.
+Every canonical signed action starts with its own versioned domain and binds the chain `genesis_hash`, preventing both cross-action substitution and replay after a fresh-genesis deployment. Key operations additionally bind current `keys_digest` and `events_digest`. Signed orders/cancels use a strictly increasing committed `last_trading_nonce`. Witness v11 carries both key-operation and trading envelopes in actor acknowledgement order, and shared native/guest verification checks scheme-matching active-key membership, exact RawP256/WebAuthn signatures, action/effect binding, and nonce replay. WebAuthn additionally pins RP/origin/challenge, rejects cross-origin assertions, and requires user presence/verification.
 
 ## 8. ZK, DA, L1, and escape
 
