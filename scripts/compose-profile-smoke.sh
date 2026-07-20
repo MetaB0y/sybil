@@ -552,7 +552,7 @@ for expected in \
     'docker save "$ref" | ssh "$server" docker load' \
     'immutable remote tag $ref' \
     'deploy/releases/' \
-    'verify_running' \
+    'verify_containers' \
     'rollback reuses an already recorded host image set and never builds'; do
     grep -Fqi "$expected" scripts/deploy-release.sh \
         || fail "immutable release helper is missing: $expected"

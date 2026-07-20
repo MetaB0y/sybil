@@ -234,8 +234,8 @@ from pathlib import Path
 
 containers = {}
 for row in filter(None, container_rows.splitlines()):
-    service, image_id = row.split("=", 1)
-    containers[service] = image_id
+    service, image_id, state = row.split("\t", 2)
+    containers[service] = {"image_id": image_id, "state": state}
 
 payload = {
     "schema": "sybil.release.v1",
@@ -267,7 +267,7 @@ payload = {
             "source_revision": None,
         },
     },
-    "running_containers": containers,
+    "verified_containers": containers,
 }
 Path(path).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 PY
@@ -350,17 +350,29 @@ expected_id_for_service() {
     esac
 }
 
-verify_running() {
+verify_containers() {
     local server="$1" scope="$2" api_id="$3" arena_id="$4" web_id="$5" caddy_id="$6"
-    local service expected actual cid rows=""
+    local service expected actual cid observed_state verified_state rows=""
     while IFS= read -r service; do
         expected="$(expected_id_for_service "$service" "$api_id" "$arena_id" "$web_id" "$caddy_id")"
-        cid="$(ssh -n "$server" "docker ps --filter 'label=com.docker.compose.project=sybil' --filter 'label=com.docker.compose.service=$service' --format='{{.ID}}'")"
-        [[ -n "$cid" && "$cid" != *$'\n'* ]] || die "expected one running $service container"
+        cid="$(ssh -n "$server" "docker ps -a --filter 'label=com.docker.compose.project=sybil' --filter 'label=com.docker.compose.service=$service' --format='{{.ID}}'")"
+        [[ -n "$cid" && "$cid" != *$'\n'* ]] || die "expected one $service container"
         actual="$(ssh -n "$server" "docker inspect --format='{{.Image}}' '$cid'")"
         [[ "$actual" == "$expected" ]] \
             || die "$service runs $actual, expected immutable image $expected"
-        rows+="${service}=${actual}"$'\n'
+        observed_state="$(ssh -n "$server" "docker inspect --format='{{.State.Status}}:{{.State.ExitCode}}' '$cid'")"
+        case "$service:$observed_state" in
+            sybil-native-admin:exited:0)
+                verified_state="exited:0"
+                ;;
+            *:running:*)
+                verified_state="running"
+                ;;
+            *)
+                die "$service has unacceptable lifecycle state $observed_state"
+                ;;
+        esac
+        rows+="${service}"$'\t'"${actual}"$'\t'"${verified_state}"$'\n'
     done < <(services_for_scope "$scope")
     printf '%s' "$rows"
 }
@@ -455,7 +467,7 @@ promote() {
     scp "$env_path" "$pending_path" "$server:/opt/sybil/releases/$release_id/"
     activate_release "$server" "$release_id"
     compose_up "$server" "$scope" 0
-    containers="$(verify_running "$server" "$scope" "$api_id" "$arena_id" "$web_id" "$caddy_id")"
+    containers="$(verify_containers "$server" "$scope" "$api_id" "$arena_id" "$web_id" "$caddy_id")"
     verified="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     mkdir -p "$RECORD_DIR"
     write_manifest "$record_path" "$release_id" "$created" "$verified" "$scope" "$revision" \
@@ -500,7 +512,7 @@ rollback() {
     activate_release "$server" "$release_id"
     compose_up "$server" all 1
     local containers verified action_id action_path
-    containers="$(verify_running "$server" all "$api_id" "$arena_id" "$web_id" "$caddy_id")"
+    containers="$(verify_containers "$server" all "$api_id" "$arena_id" "$web_id" "$caddy_id")"
     verified="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     action_id="$(date -u +%Y%m%dT%H%M%SZ)-rollback-to-$release_id"
     action_path="$RECORD_DIR/$action_id.json"
@@ -510,7 +522,10 @@ import sys
 from pathlib import Path
 
 path, action_id, release_id, verified_at, rows = sys.argv[1:]
-containers = dict(row.split("=", 1) for row in rows.splitlines() if row)
+containers = {}
+for row in filter(None, rows.splitlines()):
+    service, image_id, state = row.split("\t", 2)
+    containers[service] = {"image_id": image_id, "state": state}
 Path(path).write_text(
     json.dumps(
         {
@@ -519,7 +534,7 @@ Path(path).write_text(
             "target_release_id": release_id,
             "verified_at": verified_at,
             "rebuilt_images": False,
-            "running_containers": containers,
+            "verified_containers": containers,
         },
         indent=2,
     )
@@ -547,8 +562,8 @@ verify_current() {
     arena_id="$(awk '$1 == "sybil-arena" { print $3 }' <<<"$rows")"
     web_id="$(awk '$1 == "sybil-web" { print $3 }' <<<"$rows")"
     caddy_id="$(awk '$1 == "caddy" { print $3 }' <<<"$rows")"
-    verify_running "$server" all "$api_id" "$arena_id" "$web_id" "$caddy_id" >/dev/null
-    info "running stack matches $release_id"
+    verify_containers "$server" all "$api_id" "$arena_id" "$web_id" "$caddy_id" >/dev/null
+    info "stack matches $release_id"
 }
 
 main() {

@@ -71,7 +71,7 @@ write_manifest "$work/manifest.json" test-release \
     "$api_ref" "$arena_ref" "$web_ref" \
     "$image_id" "$revision" "$image_id" "$revision" \
     "$image_id" "$revision" "$image_id" \
-    $'sybil-api=sha256:one\nsybil-history=sha256:one\n'
+    $'sybil-api\tsha256:one\trunning\nsybil-history\tsha256:one\trunning\n'
 
 python3 - "$work/manifest.json" "$revision" "$CADDY_REF" <<'PY'
 import json
@@ -84,7 +84,11 @@ assert record["status"] == "verified"
 assert record["promotion_source_revision"] == revision
 assert record["images"]["sybil-api"]["source_revision"] == revision
 assert record["images"]["caddy"]["ref"] == caddy_ref
-assert set(record["running_containers"]) == {"sybil-api", "sybil-history"}
+assert set(record["verified_containers"]) == {"sybil-api", "sybil-history"}
+assert record["verified_containers"]["sybil-api"] == {
+    "image_id": "sha256:one",
+    "state": "running",
+}
 PY
 
 api_services="$(services_for_scope api)"
@@ -105,15 +109,26 @@ verified_services="$(
         [[ "$server" == "test-host" ]]
         if [[ "$command" == docker\ ps* ]]; then
             sed -n "s/.*service=\\([^']*\\)'.*/cid-\\1/p" <<<"$command"
+        elif [[ "$command" == *".State.Status"* ]]; then
+            if [[ "$command" == *"cid-sybil-native-admin"* ]]; then
+                printf '%s\n' "exited:0"
+            else
+                printf '%s\n' "running:0"
+            fi
         else
             printf '%s\n' "$image_id"
         fi
     }
     export -f ssh
-    verify_running test-host api "$image_id" "$image_id" "$image_id" "$image_id"
+    verify_containers test-host api "$image_id" "$image_id" "$image_id" "$image_id"
 )"
 for service in sybil-api sybil-history sybil-native-admin sybil-native-mm sybil-polymarket; do
-    grep -qx "$service=$image_id" <<<"$verified_services"
+    if [[ "$service" == "sybil-native-admin" ]]; then
+        state="exited:0"
+    else
+        state="running"
+    fi
+    grep -qx "${service}"$'\t'"${image_id}"$'\t'"${state}" <<<"$verified_services"
 done
 [[ "$(wc -l <<<"$verified_services")" -eq 5 ]]
 
