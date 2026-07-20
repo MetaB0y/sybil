@@ -10,11 +10,12 @@
 //! The first 1000 units cross via minting. The remaining 1000-unit BuyNo pins
 //! the dual, so the exact YES/NO clearing vector is [0.50, 0.50].
 //!
-//! The v1 fixture is deliberately single-use per chain state, not idempotent:
-//! fixed signing keys may only belong to one account and fixed replay nonces
-//! may only be accepted once. Re-running against the same state fails closed;
-//! use a fresh throwaway state/volume. A future fixture change must use a new
-//! `FIXTURE_VERSION` and new keys/nonces rather than silently changing v1.
+//! The account allocations use stable provisioning keys, so an ambiguous
+//! creation response can be retried safely. The complete v1 fixture remains
+//! single-use per chain state because its funding calls and signed-order nonces
+//! are intentionally fixed. Re-run only against a fresh throwaway state/volume.
+//! A future fixture change must use a new `FIXTURE_VERSION` and new
+//! keys/nonces rather than silently changing v1.
 //!
 //! Safety: a positive dev/demo marker in `/v1/health` permits seeding. Current
 //! servers do not expose one, so callers must pass `--i-know-this-is-dev`.
@@ -301,6 +302,10 @@ fn order_nonce(run_id: u64, role_offset: u64) -> Result<u64, String> {
         .ok_or_else(|| "--run-id is too large for nonce derivation".to_string())
 }
 
+fn provisioning_key(run_id: u64, role: &str) -> String {
+    format!("seed-book/{FIXTURE_VERSION}/run-{run_id}/{role}")
+}
+
 fn public_key_hex(key: &SigningKey) -> String {
     hex::encode(key.verifying_key().to_sec1_point(true).as_bytes())
 }
@@ -450,6 +455,7 @@ async fn run(args: Args) -> Result<SeedSummary, String> {
             Method::POST,
             "/v1/accounts",
             Some(&json!({
+                "provisioning_key": provisioning_key(args.run_id, role),
                 "initial_balance_nanos": 0,
                 "initial_key": {"public_key_hex": public_key_hex}
             })),
@@ -621,6 +627,10 @@ mod tests {
         assert_eq!(key_seed(0, 2).unwrap()[24..], 2u64.to_be_bytes());
         assert_eq!(order_nonce(0, 1).unwrap(), 247_000_001);
         assert_eq!(order_nonce(0, 2).unwrap(), 247_000_002);
+        assert_eq!(
+            provisioning_key(0, "buy_yes"),
+            "seed-book/SYB-247-v1/run-0/buy_yes"
+        );
     }
 
     #[test]
@@ -652,7 +662,6 @@ mod tests {
             Some("network=mainnet".to_string())
         );
     }
-
     #[test]
     fn u64_field_accepts_json_and_wire_encoded_integers() {
         assert_eq!(u64_field(&json!({"value": 42}), "value"), Ok(42));

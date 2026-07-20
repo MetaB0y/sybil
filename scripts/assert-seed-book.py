@@ -15,6 +15,18 @@ def load(path: str) -> Any:
         return json.load(handle)
 
 
+def wire_int(value: Any) -> int:
+    """Decode an API wire integer without accepting floats or booleans."""
+    if isinstance(value, bool):
+        raise AssertionError(f"boolean is not an integer wire value: {value!r}")
+    if isinstance(value, int):
+        return value
+    assert isinstance(value, str) and value, f"invalid integer wire value: {value!r}"
+    digits = value[1:] if value.startswith("-") else value
+    assert digits.isdigit(), f"invalid integer wire value: {value!r}"
+    return int(value)
+
+
 def one_by(items: list[dict[str, Any]], field: str, value: Any) -> dict[str, Any]:
     matches = [item for item in items if item.get(field) == value]
     assert len(matches) == 1, f"expected one {field}={value!r}, got {matches!r}"
@@ -118,15 +130,15 @@ def assert_result(
     for fill, order in ((yes_fill, yes_order), (no_fill, no_order)):
         assert fill["order_id"] == order["order_id"]
         assert fill["fill_qty"] == order["expected_fill_quantity"]
-        assert fill["fill_price_nanos"] == order["expected_fill_price_nanos"]
+        assert wire_int(fill["fill_price_nanos"]) == order["expected_fill_price_nanos"]
     assert yes_fill["block_height"] == no_fill["block_height"] == block["height"]
 
     assert block["order_count"] == 2
     assert block["fill_count"] == expected["fill_count"]
     assert block["orders_filled"] == expected["fill_count"]
-    assert block["total_volume_nanos"] == expected["total_volume_nanos"]
-    assert block["total_welfare_nanos"] == expected["total_welfare_nanos"]
-    assert block["clearing_prices_nanos"][str(market_id)] == [
+    assert wire_int(block["total_volume_nanos"]) == expected["total_volume_nanos"]
+    assert wire_int(block["total_welfare_nanos"]) == expected["total_welfare_nanos"]
+    assert [wire_int(price) for price in block["clearing_prices_nanos"][str(market_id)]] == [
         expected["yes_price_nanos"],
         expected["no_price_nanos"],
     ]
@@ -138,14 +150,14 @@ def assert_result(
     assert yes_account_actual["account_id"] == yes_account["account_id"]
     assert no_account_actual["account_id"] == no_account["account_id"]
     assert (
-        yes_account_actual["balance_nanos"],
-        yes_account_actual["available_balance_nanos"],
-        yes_account_actual["reserved_balance_nanos"],
+        wire_int(yes_account_actual["balance_nanos"]),
+        wire_int(yes_account_actual["available_balance_nanos"]),
+        wire_int(yes_account_actual["reserved_balance_nanos"]),
     ) == (9_500_000_000, 9_500_000_000, 0)
     assert (
-        no_account_actual["balance_nanos"],
-        no_account_actual["available_balance_nanos"],
-        no_account_actual["reserved_balance_nanos"],
+        wire_int(no_account_actual["balance_nanos"]),
+        wire_int(no_account_actual["available_balance_nanos"]),
+        wire_int(no_account_actual["reserved_balance_nanos"]),
     ) == (9_500_000_000, 9_000_000_000, 500_000_000)
     assert yes_account_actual["positions"] == [
         {"market_id": market_id, "outcome": "YES", "quantity": 1_000}
@@ -156,11 +168,14 @@ def assert_result(
 
     for account in (yes_account_actual, no_account_actual):
         assert (
-            account["available_balance_nanos"] + account["reserved_balance_nanos"]
-            == account["balance_nanos"]
+            wire_int(account["available_balance_nanos"])
+            + wire_int(account["reserved_balance_nanos"])
+            == wire_int(account["balance_nanos"])
         )
 
-    cash_total = yes_account_actual["balance_nanos"] + no_account_actual["balance_nanos"]
+    cash_total = wire_int(yes_account_actual["balance_nanos"]) + wire_int(
+        no_account_actual["balance_nanos"]
+    )
     marked_positions = sum(
         position["quantity"] * expected["yes_price_nanos"] // 1_000
         for position in yes_account_actual["positions"]
@@ -252,9 +267,9 @@ def self_test() -> None:
         "order_count": 2,
         "fill_count": 2,
         "orders_filled": 2,
-        "total_volume_nanos": 1_000_000_000,
-        "total_welfare_nanos": 100_000_000,
-        "clearing_prices_nanos": {"7": [500_000_000, 500_000_000]},
+        "total_volume_nanos": "1000000000",
+        "total_welfare_nanos": "100000000",
+        "clearing_prices_nanos": {"7": ["500000000", "500000000"]},
         "fills": [
             {"order_id": 21, "account_id": 11, "fill_qty": 1_000, "fill_price_nanos": 500_000_000},
             {"order_id": 22, "account_id": 12, "fill_qty": 1_000, "fill_price_nanos": 500_000_000},
@@ -262,16 +277,16 @@ def self_test() -> None:
     }
     yes_account = {
         "account_id": 11,
-        "balance_nanos": 9_500_000_000,
-        "available_balance_nanos": 9_500_000_000,
-        "reserved_balance_nanos": 0,
+        "balance_nanos": "9500000000",
+        "available_balance_nanos": "9500000000",
+        "reserved_balance_nanos": "0",
         "positions": [{"market_id": 7, "outcome": "YES", "quantity": 1_000}],
     }
     no_account = {
         "account_id": 12,
-        "balance_nanos": 9_500_000_000,
-        "available_balance_nanos": 9_000_000_000,
-        "reserved_balance_nanos": 500_000_000,
+        "balance_nanos": "9500000000",
+        "available_balance_nanos": "9000000000",
+        "reserved_balance_nanos": "500000000",
         "positions": [{"market_id": 7, "outcome": "NO", "quantity": 1_000}],
     }
     def fill_page(order_id: int) -> dict[str, Any]:
@@ -280,7 +295,7 @@ def self_test() -> None:
                 {
                     "order_id": order_id,
                     "fill_qty": 1_000,
-                    "fill_price_nanos": 500_000_000,
+                    "fill_price_nanos": "500000000",
                     "block_height": 3,
                 }
             ],

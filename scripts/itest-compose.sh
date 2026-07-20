@@ -83,7 +83,16 @@ cleanup() {
     fi
     if [[ "$status" -ne 0 ]]; then
         compose logs --no-color >"$LOG_FILE" 2>&1 || true
+        artifact_dir="$LOG_DIR/$PROJECT-artifacts"
+        mkdir -p "$artifact_dir"
+        for artifact in summary block yes-account no-account yes-fills no-fills \
+            bridge-funded-account bridge-status bridge-debited-account \
+            bridge-withdrawals-queued bridge-withdrawals-final; do
+            [[ -f "$WORK/$artifact.json" ]] \
+                && cp "$WORK/$artifact.json" "$artifact_dir/" || true
+        done
         echo "compose integration failed; container logs: $LOG_FILE" >&2
+        echo "safe response artifacts: $artifact_dir" >&2
     fi
     compose down -v --remove-orphans >/dev/null 2>&1 || true
     rm -rf "$WORK"
@@ -324,6 +333,7 @@ BRIDGE_PUBLIC_KEY="$(jget "$WORK/bridge-key.json" public_key_hex)"
 BRIDGE_ACCOUNT_BODY="$(python3 - "$BRIDGE_PUBLIC_KEY" <<'PY'
 import json, sys
 print(json.dumps({
+    "provisioning_key": "itest-bridge/v1",
     "initial_balance_nanos": 0,
     "initial_key": {"public_key_hex": sys.argv[1], "auth_scheme": "raw_p256"},
 }))
@@ -379,7 +389,7 @@ python3 - "$WORK/bridge-funded-account.json" "$WORK/bridge-status.json" <<'PY'
 import json, sys
 account = json.load(open(sys.argv[1], encoding="utf-8"))
 status = json.load(open(sys.argv[2], encoding="utf-8"))
-assert account["balance_nanos"] == 5_000_000_000, account
+assert int(account["balance_nanos"]) == 5_000_000_000, account
 assert status["deposit_cursor"] == 1, status
 PY
 pass "real MockUSDC deposit -> confirmed indexer -> exact Sybil credit"
