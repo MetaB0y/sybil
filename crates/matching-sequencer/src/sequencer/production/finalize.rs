@@ -171,13 +171,10 @@ impl BlockSequencer {
         }
 
         let order_map: HashMap<u64, &Order> = problem.orders.iter().map(|o| (o.id, o)).collect();
-        // Touch midpoints from the resting single-market book for markets that
-        // did not cross this batch. Scoped so the immutable book borrow is
-        // released before the &mut self.analytics call below.
-        let midpoints = {
-            let resting: Vec<&Order> = self.order_book.resting_orders().map(|(o, _)| o).collect();
-            matching_engine::book_midprices(resting.iter().copied())
-        };
+        // Touch midpoints from every single-market order that participated in
+        // this batch. This includes one-shot MM quotes: they are executable
+        // liquidity for the current batch even though they never rest.
+        let midpoints = matching_engine::book_midprices(problem.orders.iter());
         let (volume_by_market, mark_prices) = self.analytics.record_finalized_block(
             fills,
             &order_map,

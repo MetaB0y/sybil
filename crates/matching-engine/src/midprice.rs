@@ -2,7 +2,7 @@
 //!
 //! When a batch matches volume, the uniform clearing price is the market's
 //! price. When nothing crosses, this module derives a touch midpoint from the
-//! resting *single-market* order book — the analogue of an order-book mid.
+//! participating *single-market* orders — the analogue of an order-book mid.
 //! Multi-market (bundle/spread) orders are excluded: their `limit_price` is a
 //! bundle total, not attributable to one market (same rule the liquidity
 //! tracker applies).
@@ -16,7 +16,7 @@ use crate::OrderDirection;
 use crate::order::derive_order_direction;
 use crate::types::{MarketId, NANOS_PER_DOLLAR, Nanos};
 
-/// Per-market YES touch midpoint over the resting single-market book.
+/// Per-market YES touch midpoint over the supplied single-market orders.
 ///
 /// Returns an entry only for markets with a two-sided, non-crossed book
 /// (`best_bid < best_ask`). One-sided, empty, or crossed books are omitted —

@@ -1275,6 +1275,46 @@ fn placed_order_stats_count_mm_batch_orders() {
 }
 
 #[test]
+fn flash_mm_quotes_set_no_fill_mark_and_liquidity() {
+    let (markets, m0) = setup();
+    let mut accounts = AccountStore::new();
+    let mm = accounts.create_account(1_000 * NANOS_PER_DOLLAR as i64);
+    let mut seq = BlockSequencer::with_default_solver(
+        accounts,
+        markets.clone(),
+        vec![],
+        SequencerConfig::default(),
+    );
+
+    // YES bid 20c + BuyNo 76c (a YES ask at 24c) establish a 22c touch
+    // without crossing. Both quotes are flash liquidity and never rest.
+    let mut constraint = MmConstraint::new(MmId::new(1), Nanos(100 * NANOS_PER_DOLLAR));
+    constraint.add_order(0, matching_engine::MmSide::BuyYes);
+    constraint.add_order(1, matching_engine::MmSide::BuyNo);
+    let sub = OrderSubmission {
+        account_id: mm,
+        orders: vec![
+            outcome_buy(&markets, 0, m0, 0, 200_000_000, q(10)),
+            outcome_buy(&markets, 1, m0, 1, 760_000_000, q(10)),
+        ],
+        mm_constraint: Some(constraint),
+    };
+
+    let production = seq.produce_block(vec![sub], 1_000);
+
+    assert_eq!(production.block.header.fill_count, 0);
+    assert_eq!(
+        seq.analytics().last_mark_prices().get(&m0),
+        Some(&vec![Nanos(220_000_000), Nanos(780_000_000)])
+    );
+    assert!(
+        seq.analytics().liquidity_avg10(m0) > 0,
+        "the current executable MM bundle must contribute visible liquidity"
+    );
+    assert_eq!(seq.order_book.len(), 0, "flash quotes must not rest");
+}
+
+#[test]
 fn derived_view_stream_rebuilds_order_stats_over_scenarios() {
     let scenarios = [
         ScenarioConfig::quick().with_seed(216),
