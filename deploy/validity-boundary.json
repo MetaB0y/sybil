@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fingerprint": "sha256:8c925e5191734ece7a0f524cb29100a84d3e88735342466b346905e24f8d64ab",
+  "fingerprint": "sha256:2d94779ef560e32084a1043b4939a69d242e5ac70f36f18f240e52405ed4891f",
   "inputs": {
     "commonware_packages": [
       {
@@ -74,31 +74,31 @@
     "guests": {
       "state_transition": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "d2500a7472870c57789176ade9fbe3a2950b1d550095fb7181d8cf6486459ec2",
-        "app_exe_commit": "0x0093f2791f6a17eb45d84a9b89b362c621a43a42b5c3c53518ed94112dd6ef8a",
+        "source_sha256": "9cc66fb050a831a1a338e45ab759eeec9b471e6b2827b25d26671bddf07c4b44",
+        "app_exe_commit": "0x00837ae158d26c9265be2096f50d2864efb51225c116ddcee794dc8294d45369",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       },
       "escape_claim": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "6829e35a791e4c68beb81922b56746137c0cb4c1a8a3757ea8070541ee749533",
-        "app_exe_commit": "0x008c8f972e57f4b15163aa7bb8d5ca89c5532212c091bb85c1c19a1428a53ffd",
+        "source_sha256": "c18ad39cc7a2a462256c632707c626c540fba402c6f5879aa75c07b0db946ce5",
+        "app_exe_commit": "0x00026aa313d5f7c0158118be7a9ed89883625bb6b9622f0976377c0ae9173351",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       }
     },
     "desired_validity_pins": {
       "state_transition": {
-        "app_exe_commit": "0x0093f2791f6a17eb45d84a9b89b362c621a43a42b5c3c53518ed94112dd6ef8a",
+        "app_exe_commit": "0x00837ae158d26c9265be2096f50d2864efb51225c116ddcee794dc8294d45369",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       },
       "escape_claim": {
-        "app_exe_commit": "0x008c8f972e57f4b15163aa7bb8d5ca89c5532212c091bb85c1c19a1428a53ffd",
+        "app_exe_commit": "0x00026aa313d5f7c0158118be7a9ed89883625bb6b9622f0976377c0ae9173351",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       }
     }
   },
   "decision": {
     "action": "fresh_genesis",
-    "reason": "Witness v12 adds canonical market-group creation identity and signed-action domains changed; prior witnesses and state roots are intentionally incompatible",
+    "reason": "Witness v12 canonical market-group identity; rebuilt main and escape guest commitments from the final source tree",
     "reference": "docs/runbooks/fresh-genesis-redeploy.md"
   }
 }
