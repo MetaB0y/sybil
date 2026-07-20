@@ -218,6 +218,20 @@ impl SybilClient {
         self.decode(resp).await
     }
 
+    pub async fn get_private_account_summary(
+        &self,
+        account_id: u64,
+    ) -> Result<PrivateAccountSummaryResponse, Error> {
+        let resp = self
+            .with_service_auth(
+                self.http
+                    .get(self.url(&format!("/v1/accounts/{account_id}/private-summary"))),
+            )
+            .send()
+            .await?;
+        self.decode(resp).await
+    }
+
     pub async fn fund_account(
         &self,
         account_id: u64,

@@ -6,7 +6,7 @@ use axum::http::StatusCode;
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::Serialize;
-use sybil_market_maker::{MmProgress, PriceSnapshot, PriceUpdateSource};
+use sybil_market_maker::{MmMode, MmProgress, PriceSnapshot, PriceUpdateSource};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
@@ -123,15 +123,25 @@ struct ReadinessResponse {
     status: &'static str,
     ready: bool,
     problems: Vec<&'static str>,
+    mm_mode: &'static str,
     tracked_tokens: usize,
     tracked_markets: usize,
     eligible_quote_markets: usize,
     quoted_markets: usize,
+    two_sided_quote_markets: usize,
     quote_orders: usize,
+    compaction_markets: usize,
+    compaction_quantity_units: u64,
+    missing_price_markets: usize,
+    stale_price_markets: usize,
+    out_of_band_markets: usize,
     quote_capacity_limited: bool,
     last_sync_success_timestamp_ms: u64,
     last_feed_update_timestamp_ms: u64,
     last_mm_progress_timestamp_ms: u64,
+    last_mm_submission_attempt_block: Option<u64>,
+    last_mm_successful_submission_block: Option<u64>,
+    mm_submission_lag_blocks: Option<u64>,
     last_resolution_success_timestamp_ms: Option<u64>,
     sync_age_ms: Option<u64>,
     feed_age_ms: Option<u64>,
@@ -182,6 +192,27 @@ impl MonitoringState {
             problems.push("mm_has_no_markets");
         } else if mm_age_ms.is_some_and(|value| value > self.windows.mm_ms) {
             problems.push("mm_stalled");
+        } else {
+            if mm.last_eligible_quote_markets == 0 {
+                problems.push("mm_has_no_eligible_markets");
+            } else if mm.last_quoted_markets == 0 {
+                problems.push("mm_has_no_quotes");
+            } else {
+                if mm.last_quoted_markets < mm.last_eligible_quote_markets {
+                    problems.push("mm_partial_coverage");
+                }
+                if mm.mode == MmMode::Normal
+                    && mm.last_two_sided_quote_markets < mm.last_eligible_quote_markets
+                {
+                    problems.push("mm_partial_two_sided_coverage");
+                }
+            }
+            if submission_is_stalled(&mm) {
+                problems.push("mm_submission_stalled");
+            }
+            if mm.mode == MmMode::ReduceOnly {
+                problems.push("mm_reduce_only");
+            }
         }
         if self.resolution_enabled
             && resolution_age_ms.is_some_and(|value| value > self.windows.resolution_ms)
@@ -204,15 +235,25 @@ impl MonitoringState {
             status,
             ready: status == "ok",
             problems,
+            mm_mode: mode_name(mm.mode),
             tracked_tokens: prices.midpoints.len(),
             tracked_markets: mm.tracked_markets,
             eligible_quote_markets: mm.last_eligible_quote_markets,
             quoted_markets: mm.last_quoted_markets,
+            two_sided_quote_markets: mm.last_two_sided_quote_markets,
             quote_orders: mm.last_quote_orders,
+            compaction_markets: mm.last_compaction_markets,
+            compaction_quantity_units: mm.last_compaction_quantity_units,
+            missing_price_markets: mm.last_missing_price_markets,
+            stale_price_markets: mm.last_stale_price_markets,
+            out_of_band_markets: mm.last_out_of_band_markets,
             quote_capacity_limited: mm.quote_capacity_limited,
             last_sync_success_timestamp_ms: integration.sync.last_success_timestamp_ms,
             last_feed_update_timestamp_ms: last_feed_update_ms,
             last_mm_progress_timestamp_ms: mm.last_progress_timestamp_ms,
+            last_mm_submission_attempt_block: mm.last_submission_attempt_block,
+            last_mm_successful_submission_block: mm.last_successful_submission_block,
+            mm_submission_lag_blocks: submission_lag_blocks(&mm),
             last_resolution_success_timestamp_ms: self
                 .resolution_enabled
                 .then_some(integration.resolution.last_success_timestamp_ms),
@@ -237,6 +278,7 @@ impl MonitoringState {
             "Whether required Polymarket actors have recent successful progress.",
             u64::from(ready),
         );
+        mode_metric(&mut out, "sybil_polymarket_mm_mode", mm.mode);
         actor_metrics(
             &mut out,
             "sync_cycles",
@@ -309,9 +351,36 @@ impl MonitoringState {
         );
         gauge(
             &mut out,
+            "sybil_polymarket_mm_two_sided_quote_markets",
+            "Markets with both cash-backed YES and NO quotes in the latest MM cycle.",
+            mm.last_two_sided_quote_markets
+                .try_into()
+                .unwrap_or(u64::MAX),
+        );
+        gauge(
+            &mut out,
             "sybil_polymarket_mm_quote_orders",
             "Orders included in the latest MM quote set.",
             mm.last_quote_orders.try_into().unwrap_or(u64::MAX),
+        );
+        gauge(
+            &mut out,
+            "sybil_polymarket_mm_compaction_markets",
+            "Markets with an atomic complete-set redemption pair in the latest MM bundle.",
+            mm.last_compaction_markets.try_into().unwrap_or(u64::MAX),
+        );
+        gauge(
+            &mut out,
+            "sybil_polymarket_mm_compaction_quantity_units",
+            "Complete-set share-units submitted for redemption in the latest MM bundle.",
+            mm.last_compaction_quantity_units,
+        );
+        reason_metrics(
+            &mut out,
+            "sybil_polymarket_mm_ineligible_markets",
+            mm.last_missing_price_markets,
+            mm.last_stale_price_markets,
+            mm.last_out_of_band_markets,
         );
         gauge(
             &mut out,
@@ -333,9 +402,21 @@ impl MonitoringState {
         );
         optional_gauge(
             &mut out,
+            "sybil_polymarket_mm_last_submission_attempt_block",
+            "Latest block on which the Polymarket MM attempted a non-empty IOC bundle.",
+            mm.last_submission_attempt_block,
+        );
+        optional_gauge(
+            &mut out,
             "sybil_polymarket_mm_last_completed_quote_block",
             "Latest live Sybil block whose MM quote cycle completed.",
             mm.last_completed_quote_block,
+        );
+        optional_gauge(
+            &mut out,
+            "sybil_polymarket_mm_submission_lag_blocks",
+            "Observed block height minus the latest successful Polymarket MM submission block.",
+            submission_lag_blocks(&mm),
         );
         optional_gauge(
             &mut out,
@@ -354,6 +435,60 @@ impl MonitoringState {
             "sybil_polymarket_mm_submissions_success_total",
             "Polymarket MM IOC bundles accepted by the API in this process.",
             mm.successful_submissions,
+        );
+        gauge(
+            &mut out,
+            "sybil_polymarket_mm_paired_position_units",
+            "Redeemable YES+NO complete-set inventory in protocol share-units.",
+            mm.paired_position_units,
+        );
+        gauge(
+            &mut out,
+            "sybil_polymarket_mm_directional_position_units",
+            "Absolute unpaired inventory across markets in protocol share-units.",
+            mm.directional_position_units,
+        );
+        gauge(
+            &mut out,
+            "sybil_polymarket_mm_directional_exposure_nanos",
+            "Reference-marked value of directional inventory in nanodollars.",
+            mm.directional_exposure_nanos,
+        );
+        signed_gauge(
+            &mut out,
+            "sybil_polymarket_mm_balance_nanos",
+            "Polymarket MM cash balance in nanodollars.",
+            mm.balance_nanos,
+        );
+        signed_gauge(
+            &mut out,
+            "sybil_polymarket_mm_total_deposited_nanos",
+            "Polymarket MM cumulative deposits in nanodollars.",
+            mm.total_deposited_nanos,
+        );
+        signed_gauge(
+            &mut out,
+            "sybil_polymarket_mm_portfolio_value_nanos",
+            "Polymarket MM marked portfolio value in nanodollars.",
+            mm.portfolio_value_nanos,
+        );
+        signed_gauge(
+            &mut out,
+            "sybil_polymarket_mm_pnl_nanos",
+            "Polymarket MM marked PnL in nanodollars.",
+            mm.pnl_nanos,
+        );
+        signed_gauge(
+            &mut out,
+            "sybil_polymarket_mm_conservative_floor_nanos",
+            "Polymarket MM cash plus redeemable binary complete sets in nanodollars.",
+            mm.conservative_floor_nanos,
+        );
+        signed_gauge(
+            &mut out,
+            "sybil_polymarket_mm_worst_case_drawdown_nanos",
+            "Deposits minus cash and redeemable binary complete sets, floored at zero.",
+            mm.worst_case_drawdown_nanos,
         );
         counter(
             &mut out,
@@ -487,6 +622,76 @@ fn optional_gauge(out: &mut String, name: &str, help: &str, value: Option<u64>) 
     }
 }
 
+fn signed_gauge(out: &mut String, name: &str, help: &str, value: i64) {
+    out.push_str("# HELP ");
+    out.push_str(name);
+    out.push(' ');
+    out.push_str(help);
+    out.push_str("\n# TYPE ");
+    out.push_str(name);
+    out.push_str(" gauge\n");
+    out.push_str(name);
+    out.push(' ');
+    out.push_str(&value.to_string());
+    out.push('\n');
+}
+
+fn mode_name(mode: MmMode) -> &'static str {
+    match mode {
+        MmMode::Normal => "normal",
+        MmMode::ReduceOnly => "reduce_only",
+    }
+}
+
+fn mode_metric(out: &mut String, name: &str, mode: MmMode) {
+    out.push_str("# HELP ");
+    out.push_str(name);
+    out.push_str(" Active market-maker risk mode.\n# TYPE ");
+    out.push_str(name);
+    out.push_str(" gauge\n");
+    out.push_str(name);
+    out.push_str("{mode=\"");
+    out.push_str(mode_name(mode));
+    out.push_str("\"} 1\n");
+}
+
+fn reason_metrics(out: &mut String, name: &str, missing: usize, stale: usize, out_of_band: usize) {
+    out.push_str("# HELP ");
+    out.push_str(name);
+    out.push_str(" Tracked markets excluded from quoting by reason.\n# TYPE ");
+    out.push_str(name);
+    out.push_str(" gauge\n");
+    for (reason, value) in [
+        ("missing_price", missing),
+        ("stale_price", stale),
+        ("out_of_band", out_of_band),
+    ] {
+        out.push_str(name);
+        out.push_str("{reason=\"");
+        out.push_str(reason);
+        out.push_str("\"} ");
+        out.push_str(&value.to_string());
+        out.push('\n');
+    }
+}
+
+fn submission_lag_blocks(progress: &MmProgress) -> Option<u64> {
+    progress
+        .last_observed_block
+        .zip(progress.last_successful_submission_block)
+        .map(|(observed, successful)| observed.saturating_sub(successful))
+}
+
+fn submission_is_stalled(progress: &MmProgress) -> bool {
+    if progress.last_quote_orders == 0 || progress.last_submission_attempt_block.is_none() {
+        return false;
+    }
+    match submission_lag_blocks(progress) {
+        Some(lag) => lag > 2,
+        None => true,
+    }
+}
+
 fn counter(out: &mut String, name: &str, help: &str, value: u64) {
     out.push_str("# HELP ");
     out.push_str(name);
@@ -535,9 +740,11 @@ mod tests {
             tracked_markets: 1,
             last_eligible_quote_markets: 1,
             last_quoted_markets: 1,
+            last_two_sided_quote_markets: 1,
             last_quote_orders: 2,
             last_observed_block: Some(10),
             last_completed_quote_block: Some(10),
+            last_submission_attempt_block: Some(10),
             last_successful_submission_block: Some(10),
             successful_submissions: 8,
             failed_submissions: 1,
@@ -597,10 +804,48 @@ mod tests {
         assert!(metrics.contains("sybil_polymarket_feed_tracked_tokens 1"));
         assert!(metrics.contains("sybil_polymarket_mm_eligible_quote_markets 1"));
         assert!(metrics.contains("sybil_polymarket_mm_quoted_markets 1"));
+        assert!(metrics.contains("sybil_polymarket_mm_two_sided_quote_markets 1"));
         assert!(metrics.contains("sybil_polymarket_mm_quote_orders 2"));
         assert!(metrics.contains("sybil_polymarket_mm_quote_capacity_limited 0"));
         assert!(metrics.contains("sybil_polymarket_mm_submissions_success_total 8"));
+        assert!(metrics.contains("sybil_polymarket_mm_mode{mode=\"normal\"} 1"));
+        assert!(metrics.contains("sybil_polymarket_mm_paired_position_units 0"));
         assert!(metrics.contains("sybil_polymarket_resolution_ticks_success_total 4"));
+    }
+
+    #[test]
+    fn readiness_names_quote_coverage_and_submission_failures() {
+        let now = 100_000;
+        let mut state = ready_state(now);
+        let mut progress = state.mm.borrow().clone();
+        progress.last_quoted_markets = 0;
+        progress.last_two_sided_quote_markets = 0;
+        progress.last_quote_orders = 0;
+        state.mm = watch::channel(progress).1;
+        assert!(
+            state
+                .readiness_at(now)
+                .problems
+                .contains(&"mm_has_no_quotes")
+        );
+
+        let mut state = ready_state(now);
+        let mut progress = state.mm.borrow().clone();
+        progress.last_observed_block = Some(14);
+        state.mm = watch::channel(progress).1;
+        assert!(
+            state
+                .readiness_at(now)
+                .problems
+                .contains(&"mm_submission_stalled")
+        );
+
+        let mut state = ready_state(now);
+        let mut progress = state.mm.borrow().clone();
+        progress.mode = MmMode::ReduceOnly;
+        progress.last_two_sided_quote_markets = 0;
+        state.mm = watch::channel(progress).1;
+        assert!(state.readiness_at(now).problems.contains(&"mm_reduce_only"));
     }
 
     #[test]

@@ -51,6 +51,17 @@ struct MarketQuotes {
     compaction: Option<[OrderSpec; 2]>,
 }
 
+/// Operational facts about the bounded order set selected for one block.
+#[derive(Debug)]
+pub struct QuoteSelection {
+    pub orders: Vec<OrderSpec>,
+    pub next_index: usize,
+    pub quoted_markets: usize,
+    pub two_sided_markets: usize,
+    pub compaction_markets: usize,
+    pub compaction_quantity_units: u64,
+}
+
 fn generate_market_quotes(input: &QuoteInput, config: &QuoteConfig) -> MarketQuotes {
     let mut baseline = Vec::new();
     let mut inventory = Vec::new();
@@ -204,14 +215,25 @@ pub fn select_rotating_quotes(
     quote_config: &QuoteConfig,
     start_index: usize,
     max_orders: usize,
-) -> (Vec<OrderSpec>, usize) {
+) -> QuoteSelection {
     if quote_inputs.is_empty() || max_orders == 0 {
-        return (Vec::new(), start_index);
+        return QuoteSelection {
+            orders: Vec::new(),
+            next_index: start_index,
+            quoted_markets: 0,
+            two_sided_markets: 0,
+            compaction_markets: 0,
+            compaction_quantity_units: 0,
+        };
     }
 
     let start = start_index % quote_inputs.len();
     let mut orders = Vec::new();
     let mut group_quotes = HashMap::<String, GroupQuoteState>::new();
+    let mut baseline_sides = HashMap::<u32, (bool, bool)>::new();
+    let mut quoted_markets = std::collections::HashSet::new();
+    let mut compaction_markets = 0usize;
+    let mut compaction_quantity_units = 0u64;
     let generated: Vec<_> = quote_inputs
         .iter()
         .map(|input| generate_market_quotes(input, quote_config))
@@ -233,12 +255,21 @@ pub fn select_rotating_quotes(
 
         for order in market_orders {
             if orders.len() >= max_orders {
-                return (orders, idx);
+                return selection(
+                    orders,
+                    idx,
+                    quoted_markets,
+                    baseline_sides,
+                    compaction_markets,
+                    compaction_quantity_units,
+                );
             }
             if would_self_cross_group(input, &order, &group_quotes) {
                 continue;
             }
             record_group_quote(input, &order, &mut group_quotes);
+            record_baseline_side(&order, &mut baseline_sides);
+            quoted_markets.insert(input.market_id);
             orders.push(order);
         }
     }
@@ -250,9 +281,19 @@ pub fn select_rotating_quotes(
             continue;
         };
         if orders.len().saturating_add(compaction.len()) > max_orders {
-            return (orders, idx);
+            return selection(
+                orders,
+                idx,
+                quoted_markets,
+                baseline_sides,
+                compaction_markets,
+                compaction_quantity_units,
+            );
         }
+        let quantity = order_quantity(&compaction[0]);
         orders.extend(compaction);
+        compaction_markets = compaction_markets.saturating_add(1);
+        compaction_quantity_units = compaction_quantity_units.saturating_add(quantity);
     }
 
     // Inventory pass: residual sells add depth only after every baseline quote
@@ -262,14 +303,67 @@ pub fn select_rotating_quotes(
         let input = &quote_inputs[idx];
         for order in generated[idx].inventory.iter().cloned() {
             if orders.len() >= max_orders {
-                return (orders, idx);
+                return selection(
+                    orders,
+                    idx,
+                    quoted_markets,
+                    baseline_sides,
+                    compaction_markets,
+                    compaction_quantity_units,
+                );
             }
             record_group_quote(input, &order, &mut group_quotes);
+            quoted_markets.insert(input.market_id);
             orders.push(order);
         }
     }
 
-    (orders, start)
+    selection(
+        orders,
+        start,
+        quoted_markets,
+        baseline_sides,
+        compaction_markets,
+        compaction_quantity_units,
+    )
+}
+
+fn selection(
+    orders: Vec<OrderSpec>,
+    next_index: usize,
+    quoted_markets: std::collections::HashSet<u32>,
+    baseline_sides: HashMap<u32, (bool, bool)>,
+    compaction_markets: usize,
+    compaction_quantity_units: u64,
+) -> QuoteSelection {
+    QuoteSelection {
+        orders,
+        next_index,
+        quoted_markets: quoted_markets.len(),
+        two_sided_markets: baseline_sides
+            .values()
+            .filter(|(yes, no)| *yes && *no)
+            .count(),
+        compaction_markets,
+        compaction_quantity_units,
+    }
+}
+
+fn record_baseline_side(order: &OrderSpec, sides: &mut HashMap<u32, (bool, bool)>) {
+    match order {
+        OrderSpec::BuyYes { market_id, .. } => sides.entry(*market_id).or_default().0 = true,
+        OrderSpec::BuyNo { market_id, .. } => sides.entry(*market_id).or_default().1 = true,
+        OrderSpec::SellYes { .. } | OrderSpec::SellNo { .. } => {}
+    }
+}
+
+fn order_quantity(order: &OrderSpec) -> u64 {
+    match order {
+        OrderSpec::BuyYes { quantity, .. }
+        | OrderSpec::BuyNo { quantity, .. }
+        | OrderSpec::SellYes { quantity, .. }
+        | OrderSpec::SellNo { quantity, .. } => *quantity,
+    }
 }
 
 #[derive(Clone, Default)]
