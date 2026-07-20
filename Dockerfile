@@ -41,6 +41,12 @@ RUN --mount=type=cache,id=sybil-cargo-registry,target=/usr/local/cargo/registry,
 # Copy the real workspace only after dependencies have been cooked.
 COPY . .
 
+# The shared BuildKit target cache can contain cargo-chef's newer dummy source
+# fingerprints from an earlier build. Make the just-copied workspace sources
+# unambiguously newer so Cargo never links a current crate against a stale
+# workspace artifact; third-party dependencies remain cached.
+RUN find crates tools -type f -exec touch {} + && touch Cargo.toml Cargo.lock
+
 # /app/target is a cache mount and is not part of the image filesystem, so copy
 # the completed executables to a normal directory before the mount is detached.
 RUN --mount=type=cache,id=sybil-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \

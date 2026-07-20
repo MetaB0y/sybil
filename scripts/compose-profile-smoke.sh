@@ -242,6 +242,8 @@ for expected in \
 done
 grep -Fq '/app/bin/sybil-l1-indexer' Dockerfile \
     || fail "server image does not package sybil-l1-indexer"
+grep -Fq 'find crates tools -type f -exec touch {} +' Dockerfile \
+    || fail "server image does not fence shared cargo-chef caches from stale workspace artifacts"
 for optional_job in sybil-prover sybil-l1-indexer; do
     grep -Fq "job_name: $optional_job" deploy/prometheus.yml \
         || fail "VictoriaMetrics is missing optional $optional_job job"
