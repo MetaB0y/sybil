@@ -1565,7 +1565,7 @@ mod tests {
         ));
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn scheduled_ticks_do_not_stack_while_actor_is_busy() {
         let config = SequencerConfig {
             block_interval: Duration::from_millis(20),
@@ -1584,6 +1584,9 @@ mod tests {
             .unwrap();
 
         started_rx.await.unwrap();
+        // Virtual time advances exactly five block periods. Host contention
+        // cannot stretch this wait past the independent 750ms indicative
+        // scheduler and add an unrelated message to the shared depth gauge.
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(
             handle.inner.mailbox_monitor.depth(),

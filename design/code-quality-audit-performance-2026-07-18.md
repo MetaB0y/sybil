@@ -3,7 +3,7 @@ tags: [audit, code-quality, performance, history, observability]
 layer: cross-cutting
 status: current
 date: 2026-07-18
-last_verified: 2026-07-18
+last_verified: 2026-07-20
 ---
 
 # Performance and algorithmic-complexity audit — 2026-07-18
@@ -91,8 +91,16 @@ Severity: low. Disposition: fixed.
 The history-outbox test manually requested its blocks but configured a
 60-second scheduler. Under a contended full suite, the scheduler could inject
 an unrelated extra block and make an exact-height assertion flaky. The test now
-uses a one-hour interval and documents that block production is manual. The
-formerly flaky test passes independently.
+uses a one-hour interval and documents that block production is manual.
+
+Post-rebase validation exposed the same flaw class in the scheduled-tick
+coalescing test. It waited 100 milliseconds of wall time and asserted total
+mailbox depth even though an independent 750-millisecond indicative scheduler
+shares that mailbox. Host contention could stretch the wait far enough for the
+unrelated message to arrive. The test now uses Tokio's paused clock, so it
+advances exactly five block intervals without advancing the indicative
+scheduler. Both formerly flaky tests pass independently and in the full
+sequencer suite.
 
 ### PERF-4 — Reviewed storage loops are bounded or index-aligned
 
@@ -128,7 +136,9 @@ Passed:
 
 - history and history-types package tests;
 - cursor/default/rejected-offset API integration coverage;
-- the formerly flaky sequencer outbox regression;
+- both formerly flaky scheduler regressions and all 364 sequencer library
+  tests;
+- matching-sequencer all-target/all-feature Clippy;
 - Arena fill-reconciliation tests and Ruff;
 - regenerated Python and TypeScript clients;
 - frontend TypeScript and all 384 passing Vitest tests (one skipped);
@@ -144,4 +154,3 @@ benchmark regression thresholds can be set. Indexing account fills by market
 and changing equity retention are workload/product decisions. The outbox bound
 is owned by #90. Those are the remaining performance leads; none is an
 unambiguous simplification without additional evidence.
-

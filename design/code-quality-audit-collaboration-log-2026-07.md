@@ -630,3 +630,7 @@ that needed a single classification owner.
   and the explicit `fresh_genesis` boundary. Deployment remains
   `pending_redeploy`; no setup, key generation, proof, transaction, reset, or
   deployment occurred.
+- The full sequencer suite then exposed a second wall-clock contention flaw in
+  a scheduler-coalescing test: its shared mailbox depth could include an
+  unrelated indicative tick. Converted that test to paused Tokio time so it
+  advances exactly the intended block periods.

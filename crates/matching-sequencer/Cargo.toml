@@ -42,6 +42,7 @@ proptest = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
 matching-scenarios = { path = "../matching-scenarios" }
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true
