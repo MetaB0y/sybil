@@ -214,6 +214,22 @@ groups:
           summary: "Native MM two-sided coverage is below 95%"
           description: "The native MM is in normal mode, but fewer than 95% of eligible markets have both YES and NO cash-backed quotes. Check per-market position caps and generated order capacity."
 
+      - alert: NativeMarketMakerProductLiquidityLow
+        expr: |
+          last_over_time(sybil_synthetic_mm_eligible_markets{catalog="native"}[15m]) > 0
+          and
+          (
+            last_over_time(sybil_synthetic_mm_liquid_markets{catalog="native"}[15m])
+            / clamp_min(last_over_time(sybil_synthetic_mm_eligible_markets{catalog="native"}[15m]), 1)
+          ) < 0.95
+        for: 10m
+        labels:
+          severity: warning
+          component: native-mm
+        annotations:
+          summary: "Native MM product liquidity is below 95%"
+          description: "The external probe sees nonzero rolling liquidity on fewer than 95% of active native markets. Actor-local quote counters may be green; compare product marks, NO-side price normalization, and the current batch quote bundle."
+
       - alert: NativeMarketMakerSubmissionStalled
         expr: |
           sybil_native_mm_submission_lag_blocks > 2
@@ -330,6 +346,22 @@ groups:
         annotations:
           summary: "Polymarket MM two-sided coverage is below 95%"
           description: "The mirror MM is in normal mode, but fewer than 95% of eligible markets have both YES and NO cash-backed quotes. Check position caps and order capacity."
+
+      - alert: PolymarketMarketMakerProductLiquidityLow
+        expr: |
+          last_over_time(sybil_synthetic_mm_eligible_markets{catalog="polymarket"}[15m]) > 0
+          and
+          (
+            last_over_time(sybil_synthetic_mm_liquid_markets{catalog="polymarket"}[15m])
+            / clamp_min(last_over_time(sybil_synthetic_mm_eligible_markets{catalog="polymarket"}[15m]), 1)
+          ) < 0.95
+        for: 10m
+        labels:
+          severity: warning
+          component: polymarket
+        annotations:
+          summary: "Polymarket MM product liquidity is below 95%"
+          description: "The external probe sees nonzero rolling liquidity on fewer than 95% of fresh, in-band mirrored markets. Compare the provider reference, product mark, and actor-local quote coverage."
 
       - alert: PolymarketMarketMakerSubmissionStalled
         expr: |

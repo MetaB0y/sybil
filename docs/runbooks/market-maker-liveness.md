@@ -14,6 +14,7 @@ last_verified: 2026-07-20
 **Alerts:** `NativeMarketMakerNotReady`,
 `NativeMarketMakerNoQuotes`, `NativeMarketMakerCoverageLow`,
 `NativeMarketMakerTwoSidedCoverageLow`,
+`NativeMarketMakerProductLiquidityLow`,
 `NativeMarketMakerSubmissionStalled`, `NativeMarketMakerReduceOnly`,
 `NativeMarketMakerPairedInventoryStuck`, and their Polymarket equivalents.
 
@@ -24,6 +25,7 @@ last_verified: 2026-07-20
 | `*_ready` | `1` | The owner process has passed all quote-loop checks. |
 | quoted / eligible | at least 95%; normally 100% | Optional inventory work must not displace baseline market coverage. |
 | two-sided / eligible | at least 95% in normal mode | Markets have both cash-backed YES and NO quotes. |
+| synthetic liquid / eligible | at least 95%; normally 100% | The public market view has nonzero rolling liquidity, closing the gap between generated quotes and product behavior. |
 | `*_submission_lag_blocks` | at most 2 | The API is accepting current IOC bundles. |
 | `*_mode{mode="normal"}` | `1` | Directional exposure is below the configured cap. |
 | `*_paired_position_units` | drains when elevated | YES+NO complete sets are automatically sold together and converted back to cash. |
@@ -39,7 +41,9 @@ Grafana. Negative PnL alone is not an incident in prelaunch.
 
 1. Open the Native MM or Polymarket MM rows in the Sybil Grafana dashboard.
    Confirm whether the failure is eligibility, coverage, submission, risk, or
-   redemption rather than relying on the aggregate liquidity display.
+   redemption. Compare actor-local quote coverage with the external
+   `product liquid` series; a gap means accepted quotes are not reaching the
+   displayed price/liquidity projection.
 2. Read the owner readiness payload and recent logs:
 
    ```bash
@@ -56,6 +60,10 @@ Grafana. Negative PnL alone is not an incident in prelaunch.
    - **No or partial coverage:** compare eligible, quoted, two-sided, quote
      order count, position inventory, and the capacity-limited gauge. A larger
      catalog needs at least two baseline order slots per eligible market.
+   - **Product liquidity low:** inspect markets where
+     `liquidity_avg10_nanos` is zero. Compare their public YES mark with the
+     MM bid/ask center. Check that NO limits are mapped to the complementary
+     YES price and that no-fill marks include the current flash bundle.
    - **Submission stalled:** inspect the structured API rejection and the
      submission-failure counter. Confirm the MM account still exists and the
      service token authorizes account reads and order submission.
@@ -77,6 +85,7 @@ Keep the incident open until all of these hold continuously for 10 minutes:
 
 - readiness is `1`;
 - quoted and two-sided coverage are each at least 95%;
+- external nonzero-liquidity coverage is at least 95%;
 - accepted-submission lag is at most two blocks and successes keep increasing;
 - risk mode is normal;
 - paired inventory is below 1,000 shares or is visibly decreasing; and

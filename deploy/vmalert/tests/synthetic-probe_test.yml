@@ -81,6 +81,45 @@ tests:
               summary: "Proof pipeline is lagging the chain head"
               description: "The synthetic probe measured /proofs/latest beyond its configured lag limit for https://172-104-31-54.nip.io (current lag: 110 blocks). The prover or mock-prover pipeline is likely wedged; see the proof-lag section of the synthetic-monitoring runbook."
 
+  - name: native product liquidity gap persists
+    interval: 1m
+    input_series:
+      - series: 'sybil_synthetic_mm_eligible_markets{job="sybil-synthetic",instance="https://172-104-31-54.nip.io",catalog="native"}'
+        values: "134+0x20"
+      - series: 'sybil_synthetic_mm_liquid_markets{job="sybil-synthetic",instance="https://172-104-31-54.nip.io",catalog="native"}'
+        values: "97+0x20"
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: NativeMarketMakerProductLiquidityLow
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: NativeMarketMakerProductLiquidityLow
+        exp_alerts:
+          - exp_labels:
+              job: "sybil-synthetic"
+              instance: "https://172-104-31-54.nip.io"
+              catalog: native
+              severity: warning
+              component: native-mm
+            exp_annotations:
+              summary: "Native MM product liquidity is below 95%"
+              description: "The external probe sees nonzero rolling liquidity on fewer than 95% of active native markets. Actor-local quote counters may be green; compare product marks, NO-side price normalization, and the current batch quote bundle."
+
+  - name: polymarket product liquidity gap recovers
+    interval: 1m
+    input_series:
+      - series: 'sybil_synthetic_mm_eligible_markets{job="sybil-synthetic",instance="https://172-104-31-54.nip.io",catalog="polymarket"}'
+        values: "60+0x20"
+      - series: 'sybil_synthetic_mm_liquid_markets{job="sybil-synthetic",instance="https://172-104-31-54.nip.io",catalog="polymarket"}'
+        values: "40+0x5 60+0x15"
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: PolymarketMarketMakerProductLiquidityLow
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: PolymarketMarketMakerProductLiquidityLow
+        exp_alerts: []
+
   # Healthy devnet: the mock prover trails by at most a block or two.
   - interval: 1m
     input_series:

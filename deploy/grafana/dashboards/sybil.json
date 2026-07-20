@@ -910,7 +910,8 @@
         { "expr": "sybil_native_mm_tracked_markets", "legendFormat": "tracked", "refId": "A" },
         { "expr": "sybil_native_mm_eligible_quote_markets", "legendFormat": "eligible", "refId": "B" },
         { "expr": "sybil_native_mm_quoted_markets", "legendFormat": "quoted", "refId": "C" },
-        { "expr": "sybil_native_mm_two_sided_quote_markets", "legendFormat": "two-sided", "refId": "D" }
+        { "expr": "sybil_native_mm_two_sided_quote_markets", "legendFormat": "two-sided", "refId": "D" },
+        { "expr": "sybil_synthetic_mm_liquid_markets{catalog=\"native\"}", "legendFormat": "product liquid", "refId": "E" }
       ],
       "fieldConfig": {
         "defaults": { "unit": "none", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 12 } },
@@ -1064,7 +1065,8 @@
         { "expr": "sybil_polymarket_mm_tracked_markets", "legendFormat": "tracked", "refId": "A" },
         { "expr": "sybil_polymarket_mm_eligible_quote_markets", "legendFormat": "eligible", "refId": "B" },
         { "expr": "sybil_polymarket_mm_quoted_markets", "legendFormat": "quoted", "refId": "C" },
-        { "expr": "sybil_polymarket_mm_two_sided_quote_markets", "legendFormat": "two-sided", "refId": "D" }
+        { "expr": "sybil_polymarket_mm_two_sided_quote_markets", "legendFormat": "two-sided", "refId": "D" },
+        { "expr": "sybil_synthetic_mm_liquid_markets{catalog=\"polymarket\"}", "legendFormat": "product liquid", "refId": "E" }
       ],
       "fieldConfig": {
         "defaults": { "unit": "none", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 12 } },

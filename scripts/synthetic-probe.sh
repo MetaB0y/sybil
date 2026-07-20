@@ -71,10 +71,11 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
 dry-run: GET $BASE/v1/health and require status=ok plus a positive height and 64-hex genesis_hash
 dry-run: GET $BASE/v1/blocks/latest twice, ${INTERVAL}s block interval aware, and require height advancement
 dry-run: GET $BASE/v1/markets and require a nonempty JSON array
+dry-run: measure nonzero product liquidity for active native and eligible Polymarket markets
 dry-run: OPTIONS $BASE/v1/onboarding/accounts from Origin: $APP_ORIGIN and require POST CORS permission
 dry-run: require /proofs/latest height within $PROOF_LAG_MAX blocks of /v1/blocks/latest (mode: $PROOF_LAG_MODE; source: ${PROVER_BASE:-docker exec into compose service sybil-prover})
 dry-run: inspect compose project '$COMPOSE_PROJECT' containers ($([[ -n "$DOCKER_SSH" ]] && echo "ssh $DOCKER_SSH" || echo local-docker)) when Docker is available
-dry-run: write sybil_synthetic_probe_failure=0 or 1 plus sybil_synthetic_proof_lag_blocks and sybil_synthetic_proof_lag_limit_blocks to ${VM_URL:-compose victoriametrics service}
+dry-run: write probe, proof-lag, and MM product-liquidity metrics to ${VM_URL:-compose victoriametrics service}
 EOF
     exit 0
 fi
@@ -128,6 +129,12 @@ push_proof_lag_limit_metric() {
     push_metric_line "sybil_synthetic_proof_lag_limit_blocks{job=\"sybil-synthetic\",instance=\"$instance\"} $limit"
 }
 
+push_mm_liquidity_metric() {
+    local metric=$1 catalog=$2 value=$3 instance
+    instance="$(prom_label_escape "$BASE")"
+    push_metric_line "$metric{job=\"sybil-synthetic\",instance=\"$instance\",catalog=\"$catalog\"} $value"
+}
+
 die() {
     local reason=$1
     push_result_metric 1 || true
@@ -170,6 +177,51 @@ get_json /v1/markets
 printf '%s' "$HTTP_BODY" | python3 -c \
     'import json,sys; v=json.load(sys.stdin); raise SystemExit(0 if isinstance(v,list) and len(v)>0 else 1)' \
     2>/dev/null || die "/v1/markets was empty or not a JSON array"
+
+NOW_MS="$(date +%s)000"
+LIQUIDITY_SUMMARY=""
+for catalog in native polymarket; do
+    get_json "/v1/markets/search?tags=$catalog&status=active&limit=200"
+    [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]] \
+        || die "/v1/markets/search for $catalog returned HTTP $HTTP_CODE"
+    COUNTS="$(printf '%s' "$HTTP_BODY" | python3 -c '
+import json, sys
+
+catalog = sys.argv[1]
+now_ms = int(sys.argv[2])
+markets = json.load(sys.stdin)
+if not isinstance(markets, list):
+    raise SystemExit(1)
+
+def integer(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+eligible = []
+for market in markets:
+    if catalog == "native":
+        eligible.append(market)
+        continue
+    reference = integer(market.get("reference_price_nanos"))
+    expires = integer(market.get("reference_price_expires_at_ms"))
+    if reference is not None and 10_000_000 < reference < 990_000_000 and expires is not None and expires > now_ms:
+        eligible.append(market)
+
+liquid = sum(1 for market in eligible if (integer(market.get("liquidity_avg10_nanos")) or 0) > 0)
+print(len(eligible), liquid)
+' "$catalog" "$NOW_MS" 2>/dev/null)" \
+        || die "/v1/markets/search for $catalog was not valid market JSON"
+    read -r ELIGIBLE LIQUID <<<"$COUNTS"
+    [[ "$ELIGIBLE" =~ ^[1-9][0-9]*$ && "$LIQUID" =~ ^[0-9]+$ && "$LIQUID" -le "$ELIGIBLE" ]] \
+        || die "$catalog liquidity coverage counts were invalid ($COUNTS)"
+    push_mm_liquidity_metric sybil_synthetic_mm_eligible_markets "$catalog" "$ELIGIBLE" \
+        || die "failed to publish $catalog MM eligible-market metric"
+    push_mm_liquidity_metric sybil_synthetic_mm_liquid_markets "$catalog" "$LIQUID" \
+        || die "failed to publish $catalog MM liquid-market metric"
+    LIQUIDITY_SUMMARY="${LIQUIDITY_SUMMARY}${LIQUIDITY_SUMMARY:+, }$catalog liquidity $LIQUID/$ELIGIBLE"
+done
 
 curl -sS --max-time 20 -D "$TMP/cors-headers" -o /dev/null -X OPTIONS \
     "$BASE/v1/onboarding/accounts" \
@@ -287,4 +339,4 @@ if ! push_result_metric 0; then
     exit 1
 fi
 
-echo "OK: health, advancing blocks ($HEIGHT_1 -> $HEIGHT_2), markets, CORS, $PROOF_LAG_SUMMARY, and available container checks passed"
+echo "OK: health, advancing blocks ($HEIGHT_1 -> $HEIGHT_2), markets, $LIQUIDITY_SUMMARY, CORS, $PROOF_LAG_SUMMARY, and available container checks passed"
