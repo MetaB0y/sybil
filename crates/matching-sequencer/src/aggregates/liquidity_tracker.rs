@@ -15,7 +15,10 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use matching_engine::{MarketId, Nanos, Order, notional_nanos};
+use matching_engine::{
+    MarketId, NANOS_PER_DOLLAR, Nanos, Order, OrderDirection, derive_order_direction,
+    notional_nanos,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::order_book::OrderBook;
@@ -87,7 +90,8 @@ impl LiquidityTracker {
             }
             let band_lo = mid.saturating_sub(Nanos(band_nanos));
             let band_hi = mid.saturating_add(Nanos(band_nanos));
-            if order.limit_price >= band_lo && order.limit_price <= band_hi {
+            let yes_axis_price = yes_axis_price(order, market);
+            if yes_axis_price >= band_lo && yes_axis_price <= band_hi {
                 let value = notional_nanos(order.limit_price, order.max_fill);
                 let entry = depth_by_market.entry(market).or_insert(0);
                 *entry = entry.saturating_add(value.0);
@@ -111,7 +115,8 @@ impl LiquidityTracker {
             }
             let band_lo = mid.saturating_sub(Nanos(band_nanos));
             let band_hi = mid.saturating_add(Nanos(band_nanos));
-            if order.limit_price >= band_lo && order.limit_price <= band_hi {
+            let yes_axis_price = yes_axis_price(order, market);
+            if yes_axis_price >= band_lo && yes_axis_price <= band_hi {
                 let value = notional_nanos(order.limit_price, order.max_fill);
                 let entry = depth_by_market.entry(market).or_insert(0);
                 *entry = entry.saturating_add(value.0);
@@ -192,6 +197,15 @@ impl LiquidityTracker {
             .keys()
             .map(|&m| (m, self.sum_last_n(m, n)))
             .collect()
+    }
+}
+
+fn yes_axis_price(order: &Order, market: MarketId) -> Nanos {
+    match derive_order_direction(order, market) {
+        OrderDirection::BuyYes | OrderDirection::SellYes => order.limit_price,
+        OrderDirection::BuyNo | OrderDirection::SellNo => {
+            Nanos(NANOS_PER_DOLLAR.saturating_sub(order.limit_price.0))
+        }
     }
 }
 
@@ -383,6 +397,30 @@ mod tests {
         tracker.record_block(&book, &mm_slice, &midprices, 50_000_000);
 
         assert_eq!(tracker.current(m0), 0);
+    }
+
+    /// NO limits live on the complementary outcome axis. A BuyNo at 30c is
+    /// a YES ask at 70c and must be scored against a 70c YES midpoint.
+    #[test]
+    fn record_block_maps_no_quotes_onto_yes_price_axis() {
+        let (markets, _accounts, _trader, m0, _m1) = two_market_setup();
+        let book = OrderBook::new(1_000);
+        let mid_yes = 700_000_000;
+        let buy_no = outcome_buy(&markets, 99, m0, 1, 300_000_000, q(6));
+        let mm_slice: Vec<&matching_engine::Order> = vec![&buy_no];
+
+        let mut tracker = LiquidityTracker::new();
+        let mut midprices = HashMap::new();
+        midprices.insert(
+            m0,
+            vec![
+                Nanos(mid_yes),
+                Nanos(NANOS_PER_DOLLAR.saturating_sub(mid_yes)),
+            ],
+        );
+        tracker.record_block(&book, &mm_slice, &midprices, 50_000_000);
+
+        assert_eq!(tracker.current(m0), 300_000_000 * 6);
     }
 
     /// `sum_last_n` totals the ring instead of averaging it.
