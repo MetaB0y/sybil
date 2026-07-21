@@ -73,6 +73,23 @@ Wallets, names, pseudonyms, biographies, and profile images are never written.
 Resting-side trade records remain anonymous and are not classified as market
 makers.
 
+Analyze a run artifact, optionally joining the complete historical tape, into
+strictly paired long-form and summary tables:
+
+```sh
+uv run scripts/benchmarks/analyze_market_structure.py \
+  --protocol benchmarks/market-structure/protocol-development.json \
+  --runs /tmp/sybil-market-structure-development.jsonl \
+  --historical /tmp/polymarket-spikes.jsonl.gz \
+  --historical-manifest /tmp/polymarket-spikes.manifest.json \
+  --output-dir /tmp/sybil-market-structure-analysis
+```
+
+The analyzer refuses missing engine rows, mismatched tape or protocol hashes,
+duplicate rows, inconsistent seed sets, and historical identity fields. It
+leaves conditional metrics undefined when either paired engine has no defined
+value and reports zero-fill episodes through their unconditional metrics.
+
 ## Publication boundary
 
 A result may support a founder-facing statement only when:
