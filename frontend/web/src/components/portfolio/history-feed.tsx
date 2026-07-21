@@ -12,6 +12,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { MarketThumb } from "@/components/market-thumb";
 import {
   Pager,
   usePaged,
@@ -30,6 +31,23 @@ import { FilterDropdown } from "./filter-dropdown";
 import { PortfolioToolbar } from "./portfolio-toolbar";
 import { SearchField } from "./search-field";
 import { SidePill, valueChipStyle } from "./side-pill";
+import {
+  ActionCell,
+  bodyRowGrid,
+  cmpNullableBig,
+  Empty,
+  headerRowGrid,
+  MarketLabel,
+  Muted,
+  nextSort,
+  PagerFooter,
+  RightCell,
+  SortHeader,
+  TableCard,
+  TimeCell,
+  type Column,
+  type Sort,
+} from "./table";
 
 type Market = components["schemas"]["MarketResponse"];
 
@@ -63,49 +81,44 @@ const TYPE_OPTIONS: { value: HistoryEventType | "all"; label: string }[] = [
 ];
 
 type SortKey =
-  | "time"
-  | "type"
   | "market"
+  | "type"
   | "action"
   | "side"
   | "qty"
   | "price"
   | "amount"
-  | "block";
-type SortDir = "asc" | "desc";
-type Sort = { key: SortKey; dir: SortDir };
+  | "block"
+  | "time";
 
-const COLUMNS: { key: SortKey; label: string; align: "left" | "right" }[] = [
-  { key: "time", label: "Time", align: "left" },
-  { key: "type", label: "Type", align: "left" },
+/* Same shape as the other three tabs: thumbnail and market lead, the timestamp
+   closes the row. Qty / price / time widths are the Trades tab's, so the two
+   fill-bearing tables line up column for column. */
+const GRID =
+  "28px minmax(0, 1.3fr) 84px 56px 48px 62px 74px 92px 76px 96px";
+
+const COLUMNS: Column<SortKey>[] = [
   { key: "market", label: "Market", align: "left" },
+  { key: "type", label: "Type", align: "left" },
   { key: "action", label: "Action", align: "left" },
   { key: "side", label: "Side", align: "left" },
   { key: "qty", label: "Qty", align: "right" },
   { key: "price", label: "Price", align: "right" },
   { key: "amount", label: "Amount", align: "right" },
   { key: "block", label: "Block", align: "right" },
+  { key: "time", label: "Time", align: "right" },
 ];
 
-function nextSort(prev: Sort | null, key: SortKey): Sort {
-  if (prev && prev.key === key) {
-    return { key, dir: prev.dir === "asc" ? "desc" : "asc" };
-  }
-  const numeric =
-    key === "qty" ||
-    key === "price" ||
-    key === "amount" ||
-    key === "block" ||
-    key === "time";
-  return { key, dir: numeric ? "desc" : "asc" };
-}
-
-function cmpBig(a: bigint, b: bigint): number {
-  return a > b ? 1 : a < b ? -1 : 0;
+/** Every column but the four text ones sorts high→low on first click. */
+function isNumericColumn(key: SortKey): boolean {
+  return (
+    key !== "market" && key !== "type" && key !== "action" && key !== "side"
+  );
 }
 
 interface HistoryRow {
   event: HistoryEvent;
+  market: Market | undefined;
   marketName: string;
 }
 
@@ -127,15 +140,9 @@ function compareBy(a: HistoryRow, b: HistoryRow, key: SortKey): number {
     case "qty":
       return (ea.qty ?? -1) - (eb.qty ?? -1);
     case "price":
-      if (ea.priceNanos == null && eb.priceNanos == null) return 0;
-      if (ea.priceNanos == null) return -1;
-      if (eb.priceNanos == null) return 1;
-      return cmpBig(ea.priceNanos, eb.priceNanos);
+      return cmpNullableBig(ea.priceNanos, eb.priceNanos);
     case "amount":
-      if (ea.amountNanos == null && eb.amountNanos == null) return 0;
-      if (ea.amountNanos == null) return -1;
-      if (eb.amountNanos == null) return 1;
-      return cmpBig(ea.amountNanos, eb.amountNanos);
+      return cmpNullableBig(ea.amountNanos, eb.amountNanos);
     case "block":
       return ea.blockHeight - eb.blockHeight;
   }
@@ -152,7 +159,7 @@ export function HistoryFeed({
   const [marketId, setMarketId] = useState<number | "all">("all");
   const [side, setSide] = useState<"BUY" | "SELL" | "all">("all");
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<Sort | null>(null);
+  const [sort, setSort] = useState<Sort<SortKey> | null>(null);
 
   // Markets present in the feed, for the market dropdown.
   const marketOptions = useMemo(() => {
@@ -183,6 +190,7 @@ export function HistoryFeed({
     });
     let decorated = filtered.map((e) => ({
       event: e,
+      market: e.marketId != null ? marketsById.get(e.marketId) : undefined,
       marketName:
         e.marketId != null
           ? (titleByMarket.get(e.marketId) ??
@@ -217,7 +225,7 @@ export function HistoryFeed({
   const paged = usePaged(rows, PORTFOLIO_PAGE_SIZE);
 
   const onSort = (key: SortKey) => {
-    setSort((s) => nextSort(s, key));
+    setSort((s) => nextSort(s, key, isNumericColumn(key)));
     paged.setPage(0);
   };
 
@@ -312,16 +320,9 @@ export function HistoryFeed({
           {noData ? "No history yet." : "No events match these filters."}
         </Empty>
       ) : (
-        <div
-          className="portfolio-grid-table"
-          style={{
-            background: "var(--surface-1)",
-            border: "1px solid var(--border-1)",
-            borderRadius: 6,
-            overflowY: "hidden",
-          }}
-        >
-          <div style={rowGrid("var(--fg-4)")}>
+        <TableCard>
+          <div style={headerRowGrid(GRID)}>
+            <span />
             {COLUMNS.map((col) => (
               <SortHeader key={col.key} col={col} sort={sort} onSort={onSort} />
             ))}
@@ -329,34 +330,41 @@ export function HistoryFeed({
           {paged.visible.map((r) => (
             <EventRow key={r.event.id} row={r} />
           ))}
-          <div style={{ padding: "0 14px" }}>
+          <PagerFooter>
             <Pager paged={paged} />
-          </div>
-        </div>
+          </PagerFooter>
+        </TableCard>
       )}
     </div>
   );
 }
 
 function EventRow({ row }: { row: HistoryRow }) {
-  const { event, marketName } = row;
+  const { event, market, marketName } = row;
   const body = (
     <>
-      <TimeCell ms={event.timestampMs} />
+      {/* Funding and account events have no market: the thumbnail slot stays
+          empty and the label reads "—", so the grid still lines up. */}
+      {event.marketId != null ? (
+        <MarketThumb
+          marketId={event.marketId}
+          name={marketName}
+          imageUrl={market?.market_image_url ?? market?.event_image_url ?? null}
+          fallbackIconUrl={
+            market?.market_icon_url ?? market?.event_icon_url ?? null
+          }
+          size={28}
+        />
+      ) : (
+        <span />
+      )}
+      {marketName ? (
+        <MarketLabel>{marketName}</MarketLabel>
+      ) : (
+        <Muted>—</Muted>
+      )}
       <span>
         <TypeBadge type={event.type} side={event.side} />
-      </span>
-      <span
-        style={{
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          color: marketName ? "var(--fg-1)" : "var(--fg-4)",
-          fontFamily: "var(--font-sans)",
-          fontSize: 13,
-        }}
-      >
-        {marketName || "—"}
       </span>
       <ActionCell side={event.side} />
       {event.outcome ? <SidePill outcome={event.outcome} /> : <Muted>—</Muted>}
@@ -372,44 +380,29 @@ function EventRow({ row }: { row: HistoryRow }) {
           #{event.blockHeight.toLocaleString()}
         </span>
       </RightCell>
+      <RightCell>
+        <TimeCell ms={event.timestampMs} />
+      </RightCell>
     </>
   );
-
-  const style: React.CSSProperties = {
-    ...rowGrid("var(--fg-2)"),
-    borderTop: "1px solid var(--border-1)",
-  };
 
   if (event.marketId != null) {
     return (
       <Link
+        className="portfolio-row"
         href={`/m/${event.marketId}`}
-        style={{ ...style, textDecoration: "none", color: "inherit" }}
+        style={{
+          ...bodyRowGrid(GRID),
+          textDecoration: "none",
+          color: "inherit",
+        }}
       >
         {body}
       </Link>
     );
   }
-  return <div style={style}>{body}</div>;
-}
-
-/** Buy/sell action — accent for BUY, red for SELL, "—" for non-order events. */
-function ActionCell({ side }: { side?: "BUY" | "SELL" | undefined }) {
-  const isBuy = side === "BUY";
-  const isSell = side === "SELL";
-  return (
-    <span
-      style={{
-        fontFamily: "var(--font-mono)",
-        fontSize: 11,
-        fontWeight: 600,
-        letterSpacing: "var(--track-wide)",
-        color: isBuy ? "var(--accent)" : isSell ? "var(--no)" : "var(--fg-4)",
-      }}
-    >
-      {isBuy ? "BUY" : isSell ? "SELL" : "—"}
-    </span>
-  );
+  // No market to open, so no hover affordance — this row goes nowhere.
+  return <div style={bodyRowGrid(GRID)}>{body}</div>;
 }
 
 function priceLabel(event: HistoryEvent): React.ReactNode {
@@ -457,35 +450,6 @@ function AmountCell({ event }: { event: HistoryEvent }) {
     <RightCell mono>
       <span style={{ color: "var(--fg-4)" }}>—</span>
     </RightCell>
-  );
-}
-
-/** Wall-clock time then a faded short date, on one line — the same stamp the
- *  market-detail closed-orders list uses. Full timestamp on hover. */
-function TimeCell({ ms }: { ms: number }) {
-  const d = new Date(ms);
-  const date = d.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
-  const time = d.toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-  return (
-    <span
-      title={d.toLocaleString()}
-      style={{
-        fontFamily: "var(--font-mono)",
-        fontSize: 11,
-        color: "var(--fg-2)",
-        whiteSpace: "nowrap",
-      }}
-    >
-      {time}
-      <span style={{ color: "var(--fg-4)" }}>{` ${date}`}</span>
-    </span>
   );
 }
 
@@ -554,52 +518,6 @@ function badgeMeta(
   }
 }
 
-function SortHeader({
-  col,
-  sort,
-  onSort,
-}: {
-  col: (typeof COLUMNS)[number];
-  sort: Sort | null;
-  onSort: (key: SortKey) => void;
-}) {
-  const active = sort?.key === col.key;
-  return (
-    <button
-      type="button"
-      onClick={() => onSort(col.key)}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 3,
-        width: "100%",
-        justifyContent: col.align === "right" ? "flex-end" : "flex-start",
-        padding: 0,
-        border: 0,
-        background: "transparent",
-        cursor: "pointer",
-        font: "inherit",
-        letterSpacing: "var(--track-wide)",
-        color: active ? "var(--fg-2)" : "var(--fg-4)",
-      }}
-    >
-      <span style={{ whiteSpace: "nowrap" }}>{col.label}</span>
-      <span style={{ fontSize: 8, lineHeight: 1, opacity: active ? 1 : 0.3 }}>
-        {active ? (sort!.dir === "asc" ? "▲" : "▼") : "↕"}
-      </span>
-    </button>
-  );
-}
-
-/**
- * Themed filter dropdown — a pill trigger + an anchored popover menu, replacing
- * the native `<select>` (whose option list is unstyled OS chrome that clashes
- * with the dark theme). Closes on outside-click / Escape; the trigger border
- * goes accent when a non-default value is active so set filters read at a
- * glance. The menu right-aligns to the trigger since the filter bar sits at the
- * right edge.
- */
-
 function Chip({
   label,
   active,
@@ -629,65 +547,5 @@ function Chip({
     >
       {label}
     </button>
-  );
-}
-
-function rowGrid(color: string): React.CSSProperties {
-  return {
-    display: "grid",
-    // Time is 96px: it holds "14:42 Jul 10" on one line rather than stacked.
-    gridTemplateColumns:
-      "96px 84px minmax(0, 1fr) 52px 44px 56px 56px 92px 84px",
-    gap: 10,
-    alignItems: "center",
-    padding: "9px 14px",
-    color,
-    fontFamily: "var(--font-mono)",
-    fontSize: 11,
-    letterSpacing: "var(--track-wide)",
-  };
-}
-
-function RightCell({
-  children,
-  mono,
-}: {
-  children: React.ReactNode;
-  mono?: boolean;
-}) {
-  return (
-    <span
-      style={{
-        textAlign: "right",
-        fontFamily: mono ? "var(--font-mono)" : "inherit",
-        fontSize: mono ? 12 : undefined,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {children}
-    </span>
-  );
-}
-
-function Muted({ children }: { children: React.ReactNode }) {
-  return <span style={{ color: "var(--fg-4)" }}>{children}</span>;
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        padding: "32px 16px",
-        background: "var(--surface-1)",
-        border: "1px dashed var(--border-1)",
-        borderRadius: 6,
-        color: "var(--fg-4)",
-        fontFamily: "var(--font-mono)",
-        fontSize: 12,
-        textAlign: "center",
-      }}
-    >
-      {children}
-    </div>
   );
 }

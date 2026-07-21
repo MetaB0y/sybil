@@ -698,6 +698,44 @@ textarea {
 .portfolio-grid-table > * {
   min-width: 860px;
 }
+
+/* Portfolio table rows (Positions / Orders / Trades / History). Every row is a
+   route into its market, so hovering tints the whole row on --surface-2 — the
+   same feedback the dev, arena and activity tables give — and the market label
+   goes accent to name where the tap actually lands. In Orders only the market
+   cell is the link, so the accent label is what carries the affordance there;
+   the row tint just follows the cursor. */
+.portfolio-row {
+  transition: background var(--dur-fast) var(--ease-standard);
+}
+
+.portfolio-row-market {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-1);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  transition: color var(--dur-fast) var(--ease-standard);
+}
+
+@media (hover: hover) {
+  .portfolio-row:hover {
+    background: var(--surface-2);
+  }
+
+  .portfolio-row:hover .portfolio-row-market {
+    color: var(--accent);
+  }
+}
+
+.portfolio-row:focus-visible {
+  position: relative;
+  z-index: 2;
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
 /* Dev-zone sub-nav tabs — same hover / active feedback as the global route
    tabs, kept compact for the dev toolbar's density. */
 .dev-sub-nav-tab {
