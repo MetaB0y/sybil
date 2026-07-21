@@ -6,6 +6,19 @@ started with the `deploy-*` recipes in the `justfile`. Application releases use
 full source-revision tags; production Compose reads one recorded image set from
 `/opt/sybil/releases/current.env`.
 
+## Host Access and Safety Boundary
+
+The current prelaunch target is the configured SSH alias `patty`
+(`friend@62.171.170.238`). The former `172.104.31.54` Linode is a historical
+rollback environment, not the live target for deploys, monitoring, or repairs.
+
+This host is shared with founder-owned services and data outside Sybil. In
+particular, do not alter `unbiased.service`, `perestroika-api.service`, their
+files, the host PostgreSQL installation/databases, or unrelated nginx sites.
+Do not reboot the host or apply host/kernel upgrades without explicit owner
+approval. Sybil operations belong under `/opt/sybil`; keep its web ingress
+behind the existing nginx and loopback-bound Caddy topology described below.
+
 ## Public Surface
 
 Only Caddy publishes host ports in the locked remote Compose stack. On the
