@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use sybil_api_types::{CreateMarketRequest, SetMarketMetadataRequest};
+use sybil_api_types::{CreateMarketRequest, SetMarketMetadataRequest, UpdateMarketContentRequest};
 use url::Url;
 
 use crate::error::Error;
@@ -45,8 +45,17 @@ pub struct NativeMarketTemplate {
     pub units: String,
     /// RFC-3339 UTC display end time.
     pub end_time: String,
-    /// Frontend-displayable resolution criteria text.
+    /// The market's rules, as shown to traders. This becomes the created
+    /// market's `description` — mirrored markets have no separate criteria
+    /// field, so a native market that filled both rendered a second block no
+    /// mirrored market has.
     pub resolution_criteria: String,
+    /// How the operator actually takes the reading: API keys, client-side
+    /// rendering quirks, CSV column names. Deliberately never published —
+    /// nothing here belongs in a trader-facing description, and keeping it in
+    /// the catalog stops it from decaying into tribal knowledge.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub operator_notes: String,
     /// Primary source URL used in `external_url`.
     pub source_url: String,
     /// Single display category for native markets.
@@ -157,7 +166,6 @@ pub struct NativeMarketSpec {
     pub end_time_ms: u64,
     description: Option<String>,
     category: String,
-    resolution_criteria: String,
     source_url: String,
     event_title: String,
     /// Event/group image, copied from the parent template (shared by siblings).
@@ -457,9 +465,8 @@ impl NativeMarketTemplate {
                     group_key: None,
                     group_size: 0,
                     end_time_ms,
-                    description: Some(format!("Native market. Units: {}.", self.units)),
+                    description: Some(self.resolution_criteria.clone()),
                     category: self.category.clone(),
-                    resolution_criteria: self.resolution_criteria.clone(),
                     source_url: self.source_url.clone(),
                     event_title: self.title.clone(),
                     event_image_url: self.event_image_url.clone(),
@@ -482,12 +489,8 @@ impl NativeMarketTemplate {
                         group_key: group_key.clone(),
                         group_size,
                         end_time_ms,
-                        description: Some(format!(
-                            "Native categorical market. Units: {}.",
-                            self.units
-                        )),
+                        description: Some(self.resolution_criteria.clone()),
                         category: self.category.clone(),
-                        resolution_criteria: self.resolution_criteria.clone(),
                         source_url: self.source_url.clone(),
                         event_title: self.title.clone(),
                         event_image_url: self.event_image_url.clone(),
@@ -509,12 +512,8 @@ impl NativeMarketTemplate {
                         group_key: None,
                         group_size: 0,
                         end_time_ms,
-                        description: Some(format!(
-                            "Native threshold market. Units: {}.",
-                            self.units
-                        )),
+                        description: Some(self.resolution_criteria.clone()),
                         category: self.category.clone(),
-                        resolution_criteria: self.resolution_criteria.clone(),
                         source_url: self.source_url.clone(),
                         event_title: self.title.clone(),
                         event_image_url: self.event_image_url.clone(),
@@ -559,11 +558,29 @@ impl NativeMarketSpec {
             creation_key: Some(native_market_creation_key(&self.market_key)),
             description: self.description.clone(),
             category: Some(self.category.clone()),
-            tags: Some(vec!["native".to_string(), self.category.clone()]),
-            resolution_criteria: Some(self.resolution_criteria.clone()),
+            tags: Some(self.tags()),
+            resolution_criteria: None,
             expiry_timestamp_ms: Some(self.end_time_ms),
             resolution_template: None,
         }
+    }
+
+    /// The same content as `create_request`, addressed to a market that already
+    /// exists. Every field here must match its `create_request` counterpart, or
+    /// applying a catalog twice would flip the market between two texts.
+    pub fn update_request(&self) -> UpdateMarketContentRequest {
+        UpdateMarketContentRequest {
+            name: self.name.clone(),
+            description: self.description.clone(),
+            category: Some(self.category.clone()),
+            tags: Some(self.tags()),
+            resolution_criteria: None,
+            expiry_timestamp_ms: Some(self.end_time_ms),
+        }
+    }
+
+    fn tags(&self) -> Vec<String> {
+        vec!["native".to_string(), self.category.clone()]
     }
 
     pub fn metadata_request(&self) -> SetMarketMetadataRequest {
@@ -692,6 +709,81 @@ fn validate_child_market_title(
 mod tests {
     use super::*;
 
+    /// A native market must read like a mirrored one: rules in `description`,
+    /// no second "resolution" block, no operator mechanics in either.
+    #[test]
+    fn published_content_is_rules_only_and_matches_between_create_and_update() {
+        let catalog =
+            NativeMarketCatalog::parse_json(include_str!("../native_markets.json")).unwrap();
+        let by_template: std::collections::HashMap<&str, &NativeMarketTemplate> = catalog
+            .markets
+            .iter()
+            .map(|template| (template.id.as_str(), template))
+            .collect();
+
+        for spec in catalog.enabled_market_specs() {
+            let template = by_template[spec.template_id.as_str()];
+            let create = spec.create_request();
+            assert_eq!(
+                create.description.as_deref(),
+                Some(template.resolution_criteria.as_str()),
+                "{} should publish its rules as the description",
+                spec.market_key
+            );
+            assert_eq!(
+                create.resolution_criteria, None,
+                "{} would render a second rules block no mirrored market has",
+                spec.market_key
+            );
+            assert!(
+                !template.operator_notes.is_empty(),
+                "{} lost its operator notes",
+                template.id
+            );
+            assert!(
+                !create
+                    .description
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains(&template.operator_notes),
+                "{} leaked operator mechanics into the description",
+                spec.market_key
+            );
+
+            // Applying the same catalog twice must not flip a market between
+            // two texts, so the edit path has to agree with the create path.
+            let update = spec.update_request();
+            assert_eq!(update.name, create.name);
+            assert_eq!(update.description, create.description);
+            assert_eq!(update.category, create.category);
+            assert_eq!(update.tags, create.tags);
+            assert_eq!(update.resolution_criteria, create.resolution_criteria);
+            assert_eq!(update.expiry_timestamp_ms, create.expiry_timestamp_ms);
+        }
+    }
+
+    /// Sybil settles every market YES or NO — `resolve_market` takes a payout
+    /// and has no void branch — so a rule that ends in "the market voids" is an
+    /// instruction the operator cannot carry out.
+    #[test]
+    fn checked_in_rules_never_promise_a_void() {
+        let catalog =
+            NativeMarketCatalog::parse_json(include_str!("../native_markets.json")).unwrap();
+        for template in &catalog.markets {
+            let rules = template.resolution_criteria.to_ascii_lowercase();
+            assert!(
+                !rules.contains("void"),
+                "{} promises a void, which cannot be settled",
+                template.id
+            );
+            assert!(
+                rules.contains("resolves no"),
+                "{} needs a definite outcome for the case where no source can be read",
+                template.id
+            );
+        }
+    }
+
     #[test]
     fn checked_in_catalog_is_research_backed() {
         let data = include_str!("../native_markets.json");
@@ -771,15 +863,11 @@ mod tests {
         );
         assert_eq!(
             title_for("anthropic_flagship_input_price_below_eoy2026:anthropic_input_le_5"),
-            Some(
-                "Will Anthropic's flagship Opus base input API price be at or below $5/MTok at end of 2026?"
-            )
+            Some("Will Anthropic flagship model input API price be ≤$5/MTok at end of 2026?")
         );
         assert_eq!(
             title_for("openai_flagship_input_price_below_eoy2026:openai_input_le_5"),
-            Some(
-                "Will OpenAI's flagship model standard input API price be at or below $5/MTok at end of 2026?"
-            )
+            Some("Will OpenAI flagship model input API price be ≤$5/MTok at end of 2026?")
         );
         assert!(
             specs.iter().all(|spec| spec.market_key

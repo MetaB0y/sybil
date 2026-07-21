@@ -5,7 +5,10 @@ use serde::{Deserialize, Serialize};
 use sybil_api_types::{CreateMarketGroupRequest, ExtendMarketGroupRequest};
 use sybil_client::SybilClient;
 
-use crate::{Error, NativeMarketCatalog, NativeMarketSpec, NativeQuoteRange, native_group_key};
+use crate::{
+    Error, NativeMarketCatalog, NativeMarketSpec, NativeQuoteRange, native_group_key,
+    native_market_creation_key,
+};
 
 pub const NATIVE_DEPLOYMENT_SCHEMA_VERSION: u32 = 1;
 
@@ -83,11 +86,41 @@ pub async fn apply_catalog(
     let specs = catalog.enabled_market_specs();
     let mut deployed = Vec::with_capacity(specs.len());
 
+    // Live creation keys, read from the chain rather than the local manifest:
+    // the manifest lives on a container volume that can be lost while chain
+    // state survives, and a missing manifest must not look like an empty
+    // deployment. Markets absent here are created; markets present here are
+    // reconciled, because `create_market` rejects a key whose creation fields
+    // drifted (`MarketCreationKeyConflict`) instead of quietly updating.
+    let live = client.list_markets().await?;
+    let live_by_creation_key: BTreeMap<&str, &sybil_api_types::MarketResponse> = live
+        .iter()
+        .filter_map(|market| Some((market.creation_key.as_deref()?, market)))
+        .collect();
+
     for spec in &specs {
-        let market_id = client
-            .create_market(&spec.create_request())
-            .await?
-            .market_id;
+        let creation_key = native_market_creation_key(&spec.market_key);
+        let market_id = match live_by_creation_key.get(creation_key.as_str()) {
+            Some(existing) => {
+                let response = client
+                    .update_market_content(existing.market_id, &spec.update_request())
+                    .await?;
+                if response.updated {
+                    tracing::info!(
+                        market_id = existing.market_id,
+                        native_market_key = %spec.market_key,
+                        "rewrote native market content from catalog"
+                    );
+                }
+                existing.market_id
+            }
+            None => {
+                client
+                    .create_market(&spec.create_request())
+                    .await?
+                    .market_id
+            }
+        };
         client
             .set_market_metadata(market_id, &spec.metadata_request())
             .await?;
