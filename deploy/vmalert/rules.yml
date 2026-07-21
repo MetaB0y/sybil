@@ -730,6 +730,7 @@ groups:
         labels:
           severity: warning
           component: sequencer
+          rule_revision: "2"
         annotations:
           summary: "sybil-api RSS is growing persistently"
           description: "After the recent-block cache finished warming, RSS grew faster than 32 MiB/hour for 30m. Correlate the archive, outbox, actor queue, and workload panels before a high absolute-memory alert fires."
