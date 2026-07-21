@@ -813,6 +813,58 @@ groups:
           summary: "The kernel killed a process for out-of-memory"
           description: "node_vmstat_oom_kill increased. Inspect the kernel journal and the Grafana resource panels immediately; container health can remain stale after a global OOM kill."
 
+      - alert: ContainerRestartObserved
+        # Docker's current running/healthy state hides an automatic process
+        # replacement. Alert only on an observed increase; a deliberate
+        # container recreation resets the gauge to zero and does not fire.
+        expr: |
+          max_over_time(sybil_synthetic_container_restart_count[10m])
+            > min_over_time(sybil_synthetic_container_restart_count[10m])
+          and sybil_synthetic_container_restart_count > 0
+        for: 0m
+        labels:
+          severity: warning
+          component: lifecycle
+        annotations:
+          summary: "A Sybil container restarted"
+          description: "Compose service {{ $labels.service }} has automatically restarted (current count: {{ $value }}). Inspect Docker events, container logs, and the host OOM counter before treating current health as recovery."
+
+      - alert: ContainerOomKilled
+        expr: sybil_synthetic_container_oom_killed > 0
+        for: 0m
+        labels:
+          severity: critical
+          component: lifecycle
+        annotations:
+          summary: "A Sybil container was OOM-killed"
+          description: "Compose service {{ $labels.service }} currently reports OOMKilled. Preserve kernel/container diagnostics and correlate node_vmstat_oom_kill before restarting or raising its limit."
+
+      - alert: ContainerMemoryHigh
+        expr: |
+          sybil_synthetic_container_memory_usage_bytes
+            / sybil_synthetic_container_memory_limit_bytes > 0.85
+          and sybil_synthetic_container_memory_limit_bytes > 0
+        for: 10m
+        labels:
+          severity: warning
+          component: resources
+        annotations:
+          summary: "A Sybil container is nearing its memory limit"
+          description: "Compose service {{ $labels.service }} has used more than 85% of its memory limit for 10m (current ratio: {{ $value | humanizePercentage }}). Inspect its current/peak memory curve and restart/OOM history before changing the limit."
+
+      - alert: ContainerMemoryCritical
+        expr: |
+          sybil_synthetic_container_memory_usage_bytes
+            / sybil_synthetic_container_memory_limit_bytes > 0.95
+          and sybil_synthetic_container_memory_limit_bytes > 0
+        for: 2m
+        labels:
+          severity: critical
+          component: resources
+        annotations:
+          summary: "A Sybil container is at its memory limit"
+          description: "Compose service {{ $labels.service }} is above 95% of its memory limit (current ratio: {{ $value | humanizePercentage }}). Preserve diagnostics and shed discretionary load before the cgroup OOM killer acts."
+
       - alert: HostCpuHigh
         expr: 1 - avg by (instance, job) (rate(node_cpu_seconds_total{mode="idle"}[5m])) > 0.85
         for: 10m

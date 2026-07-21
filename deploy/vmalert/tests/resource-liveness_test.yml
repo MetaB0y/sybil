@@ -74,6 +74,94 @@ tests:
 
   - interval: 1m
     input_series:
+      - series: 'sybil_synthetic_container_restart_count{job="sybil-synthetic",instance="https://devnet.example",service="sybil-web"}'
+        values: "0+0x4 1+0x10"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ContainerRestartObserved
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: ContainerRestartObserved
+        exp_alerts:
+          - exp_labels:
+              job: "sybil-synthetic"
+              instance: "https://devnet.example"
+              service: "sybil-web"
+              severity: warning
+              component: lifecycle
+            exp_annotations:
+              summary: "A Sybil container restarted"
+              description: "Compose service sybil-web has automatically restarted (current count: 1). Inspect Docker events, container logs, and the host OOM counter before treating current health as recovery."
+
+  - interval: 1m
+    input_series:
+      - series: 'sybil_synthetic_container_oom_killed{job="sybil-synthetic",instance="https://devnet.example",service="sybil-web"}'
+        values: "0 1+0x3"
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: ContainerOomKilled
+        exp_alerts: []
+      - eval_time: 1m
+        alertname: ContainerOomKilled
+        exp_alerts:
+          - exp_labels:
+              job: "sybil-synthetic"
+              instance: "https://devnet.example"
+              service: "sybil-web"
+              severity: critical
+              component: lifecycle
+            exp_annotations:
+              summary: "A Sybil container was OOM-killed"
+              description: "Compose service sybil-web currently reports OOMKilled. Preserve kernel/container diagnostics and correlate node_vmstat_oom_kill before restarting or raising its limit."
+
+  - interval: 1m
+    input_series:
+      - series: 'sybil_synthetic_container_memory_usage_bytes{job="sybil-synthetic",instance="https://devnet.example",service="sybil-web"}'
+        values: "90+0x15"
+      - series: 'sybil_synthetic_container_memory_limit_bytes{job="sybil-synthetic",instance="https://devnet.example",service="sybil-web"}'
+        values: "100+0x15"
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: ContainerMemoryHigh
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: ContainerMemoryHigh
+        exp_alerts:
+          - exp_labels:
+              job: "sybil-synthetic"
+              instance: "https://devnet.example"
+              service: "sybil-web"
+              severity: warning
+              component: resources
+            exp_annotations:
+              summary: "A Sybil container is nearing its memory limit"
+              description: "Compose service sybil-web has used more than 85% of its memory limit for 10m (current ratio: 90%). Inspect its current/peak memory curve and restart/OOM history before changing the limit."
+
+  - interval: 1m
+    input_series:
+      - series: 'sybil_synthetic_container_memory_usage_bytes{job="sybil-synthetic",instance="https://devnet.example",service="sybil-web"}'
+        values: "96+0x5"
+      - series: 'sybil_synthetic_container_memory_limit_bytes{job="sybil-synthetic",instance="https://devnet.example",service="sybil-web"}'
+        values: "100+0x5"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: ContainerMemoryCritical
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: ContainerMemoryCritical
+        exp_alerts:
+          - exp_labels:
+              job: "sybil-synthetic"
+              instance: "https://devnet.example"
+              service: "sybil-web"
+              severity: critical
+              component: resources
+            exp_annotations:
+              summary: "A Sybil container is at its memory limit"
+              description: "Compose service sybil-web is above 95% of its memory limit (current ratio: 96%). Preserve diagnostics and shed discretionary load before the cgroup OOM killer acts."
+
+  - interval: 1m
+    input_series:
       - series: 'node_filesystem_avail_bytes{job="node",instance="node-exporter:9100",mountpoint="/",fstype="ext4"}'
         values: "14000000000+0x12"
       - series: 'node_filesystem_size_bytes{job="node",instance="node-exporter:9100",mountpoint="/",fstype="ext4"}'

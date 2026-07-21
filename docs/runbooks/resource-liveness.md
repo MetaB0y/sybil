@@ -1,7 +1,7 @@
 ---
 tags: [runbook, observability, resources, data-availability]
 status: current
-last_verified: 2026-07-16
+last_verified: 2026-07-21
 ---
 
 # Resource and DA liveness alerts
@@ -14,7 +14,9 @@ last_verified: 2026-07-16
 > process/host exhaustion from validity failures.
 
 **Alerts:** `SybilApiMemoryGrowingFast`, `HostMemoryPressureStalled`,
-`HostOomKill`, `HostDiskSpaceLow`, `HostDiskSpaceCritical`,
+`HostOomKill`, `ContainerRestartObserved`, `ContainerOomKilled`,
+`ContainerMemoryHigh`, `ContainerMemoryCritical`,
+`HostDiskSpaceLow`, `HostDiskSpaceCritical`,
 `SequencerAccountStockGrowingFast`,
 `PublicAccountCapacityLow`, `PublicAccountCapacityExhausted`,
 `ProductHistoryOutboxStale`, `ProductHistoryOutboxLarge`,
@@ -27,6 +29,10 @@ last_verified: 2026-07-16
 | `SybilApiMemoryGrowingFast` | After the recent-block cache has been size-stable for 5 minutes, RSS slope above 32 MiB/hour for 30 minutes | Catches sustained post-warm-up retention well before the 650/800 MiB absolute alerts. The absolute alerts remain active during startup. |
 | `HostMemoryPressureStalled` | Full Linux PSI memory stalls above 5% for 5 minutes | By this point scrapes, DNS, and actor scheduling can already lag, so later queue values may be consequences rather than causes. |
 | `HostOomKill` | Any kernel OOM kill in 10 minutes | Container state can remain stale when the host OOM killer terminates the payload process directly. |
+| `ContainerRestartObserved` | A Compose service's Docker restart count increases within 10 minutes | A replacement process can be healthy while the release has already failed its uninterrupted soak; the five-minute synthetic probe preserves the increase in VictoriaMetrics. |
+| `ContainerOomKilled` | Docker currently reports `OOMKilled` for a Compose service | Adds service attribution when Docker retains it; the host OOM counter remains the durable fallback after an automatic restart clears the current flag. |
+| `ContainerMemoryHigh` | Current cgroup usage above 85% of its configured limit for 10 minutes | Gives a bounded service time to plateau or shed load before an OOM; current, creation-lifetime peak, and limit are retained as five-minute series. |
+| `ContainerMemoryCritical` | Current cgroup usage above 95% of its configured limit for 2 minutes | This is the final actionable margin before a cgroup OOM kill and is deliberately independent of point-in-time health. |
 | `HostDiskSpaceLow` | Root filesystem below 15% available for 10 minutes | Both named sequencer/history Docker volumes currently allocate from this filesystem, so the warning precedes correlated redb failures. |
 | `HostDiskSpaceCritical` | Root filesystem below 5% available for 2 minutes | This is an incident threshold, not permission to delete an unacknowledged source row or canonical artifact. |
 | `SequencerAccountStockGrowingFast` | More than 100 committed accounts added in 15 minutes, sustained for 5 minutes | Accounts are permanent today and each account recurs in every later full-state witness. This is a traffic-anomaly warning, not a hard capacity limit. |
@@ -74,6 +80,9 @@ failure and inspect logs before restarting.
    container logs.
    For an OOM alert, use `journalctl -k` to distinguish a global host OOM from
    a cgroup kill; record the killed process's anonymous/file RSS and cgroup.
+   `just status` reports each service's current restart count and OOM flag;
+   query `sybil_synthetic_container_restart_count` over the incident window
+   before a deliberate recreation resets the Docker counter.
 2. For disk pressure or history backlog, compare outbox rows, payload bytes,
    oldest age/height, newest height, and `sybil_block_height`. Check
    `sybil-history` health/logs, the dedicated token, network, history-volume

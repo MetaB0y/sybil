@@ -75,7 +75,7 @@ dry-run: measure nonzero product liquidity for active native and eligible Polyma
 dry-run: OPTIONS $BASE/v1/onboarding/accounts from Origin: $APP_ORIGIN and require POST CORS permission
 dry-run: require /proofs/latest height within $PROOF_LAG_MAX blocks of /v1/blocks/latest (mode: $PROOF_LAG_MODE; source: ${PROVER_BASE:-docker exec into compose service sybil-prover})
 dry-run: inspect compose project '$COMPOSE_PROJECT' containers ($([[ -n "$DOCKER_SSH" ]] && echo "ssh $DOCKER_SSH" || echo local-docker)) when Docker is available
-dry-run: write probe, proof-lag, and MM product-liquidity metrics to ${VM_URL:-compose victoriametrics service}
+dry-run: write probe, proof-lag, MM product-liquidity, and per-service lifecycle/memory metrics to ${VM_URL:-compose victoriametrics service}
 EOF
     exit 0
 fi
@@ -133,6 +133,36 @@ push_mm_liquidity_metric() {
     local metric=$1 catalog=$2 value=$3 instance
     instance="$(prom_label_escape "$BASE")"
     push_metric_line "$metric{job=\"sybil-synthetic\",instance=\"$instance\",catalog=\"$catalog\"} $value"
+}
+
+push_container_resource_metrics() {
+    local instance rows batch="" service restart_count oom_killed memory_limit memory_current memory_peak service_label oom_value
+    instance="$(prom_label_escape "$BASE")"
+    rows="$(smoke_compose_resource_rows "$DOCKER_SSH" "$COMPOSE_PROJECT")" \
+        || return 1
+    [[ -n "$rows" ]] || return 1
+
+    while read -r service restart_count oom_killed memory_limit memory_current memory_peak; do
+        [[ -n "$service" && "$restart_count" =~ ^[0-9]+$ ]] || return 1
+        [[ "$memory_limit" =~ ^[0-9]+$ && "$memory_current" =~ ^[0-9]+$ && "$memory_peak" =~ ^[0-9]+$ ]] \
+            || return 1
+        case "$oom_killed" in
+            true) oom_value=1 ;;
+            false) oom_value=0 ;;
+            *) return 1 ;;
+        esac
+        service_label="$(prom_label_escape "$service")"
+        batch+="${batch:+$'\n'}sybil_synthetic_container_restart_count{job=\"sybil-synthetic\",instance=\"$instance\",service=\"$service_label\"} $restart_count"
+        batch+=$'\n'
+        batch+="sybil_synthetic_container_oom_killed{job=\"sybil-synthetic\",instance=\"$instance\",service=\"$service_label\"} $oom_value"
+        batch+=$'\n'
+        batch+="sybil_synthetic_container_memory_usage_bytes{job=\"sybil-synthetic\",instance=\"$instance\",service=\"$service_label\"} $memory_current"
+        batch+=$'\n'
+        batch+="sybil_synthetic_container_memory_peak_bytes{job=\"sybil-synthetic\",instance=\"$instance\",service=\"$service_label\"} $memory_peak"
+        batch+=$'\n'
+        batch+="sybil_synthetic_container_memory_limit_bytes{job=\"sybil-synthetic\",instance=\"$instance\",service=\"$service_label\"} $memory_limit"
+    done <<< "$rows"
+    push_metric_line "$batch"
 }
 
 die() {
@@ -331,6 +361,10 @@ service_unavailable() { :; }
 smoke_check_compose_services "$DOCKER_SSH" "$COMPOSE_PROJECT" \
     service_ok service_fail service_unavailable
 [[ -z "$SERVICE_FAILURE" ]] || die "$SERVICE_FAILURE"
+if smoke_docker_available "$DOCKER_SSH"; then
+    push_container_resource_metrics \
+        || die "failed to publish compose container lifecycle/memory metrics"
+fi
 
 if ! push_result_metric 0; then
     # The API probe succeeded. Metric-delivery failure is itself actionable and

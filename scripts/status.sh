@@ -10,7 +10,21 @@ remote_api_get() {
 }
 
 echo "=== Containers ==="
-ssh "$S" 'docker ps --format "table {{.Names}}\t{{.Status}}"'
+ssh "$S" 'docker ps -aq --filter label=com.docker.compose.project=sybil | while read -r container; do row=$(docker inspect --format "{{index .Config.Labels \"com.docker.compose.service\"}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}|{{.RestartCount}}|{{.State.OOMKilled}}|{{.HostConfig.Memory}}|{{.State.StartedAt}}" "$container") || exit; if [ "$(docker inspect --format "{{.State.Running}}" "$container")" = true ]; then current=$(docker exec "$container" cat /sys/fs/cgroup/memory.current) || exit; peak=$(docker exec "$container" sh -c "cat /sys/fs/cgroup/memory.peak 2>/dev/null || cat /sys/fs/cgroup/memory.current") || exit; else current=-; peak=-; fi; printf "%s|%s|%s\n" "$row" "$current" "$peak"; done' \
+    | sort \
+    | awk -F'|' '
+        function human(n, value, unit) {
+            if (n == "-" || n == 0) return n
+            value = n
+            unit = "B"
+            if (value >= 1073741824) { value /= 1073741824; unit = "GiB" }
+            else if (value >= 1048576) { value /= 1048576; unit = "MiB" }
+            else if (value >= 1024) { value /= 1024; unit = "KiB" }
+            return sprintf("%.1f%s", value, unit)
+        }
+        BEGIN { printf "%-24s %-10s %-10s %-8s %-5s %-10s %-10s %-10s %s\n", "SERVICE", "STATUS", "HEALTH", "RESTARTS", "OOM", "MEMORY", "PEAK", "LIMIT", "STARTED_UTC" }
+        { printf "%-24s %-10s %-10s %-8s %-5s %-10s %-10s %-10s %s\n", $1, $2, $3, $4, $5, human($8), human($9), human($6), $7 }
+    '
 echo ""
 
 echo "=== Recent Blocks ==="
