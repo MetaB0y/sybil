@@ -7,15 +7,17 @@ last_verified: 2026-07-21
 # Resource and DA liveness alerts
 
 > **Executive summary:** these warnings catch persistent API-memory growth,
-> host pressure/OOM kills, root-filesystem exhaustion, unusually fast
-> permanent-state growth, a stale/large product-history source backlog, large
-> full-state witnesses, and a post-commit DA writer that is falling behind.
+> measured web/history memory-envelope breaches, host pressure/OOM kills,
+> root-filesystem exhaustion, unusually fast permanent-state growth, a
+> stale/large product-history source backlog, large full-state witnesses, and
+> a post-commit DA writer that is falling behind.
 > Block commit remains authoritative, so preserve the store while separating
 > process/host exhaustion from validity failures.
 
 **Alerts:** `SybilApiMemoryGrowingFast`, `HostMemoryPressureStalled`,
 `HostOomKill`, `ContainerRestartObserved`, `ContainerOomKilled`,
-`ContainerMemoryHigh`, `ContainerMemoryCritical`,
+`MeasuredMemoryEnvelopeExceeded`, `ContainerMemoryHigh`,
+`ContainerMemoryCritical`,
 `HostDiskSpaceLow`, `HostDiskSpaceCritical`,
 `SequencerAccountStockGrowingFast`,
 `PublicAccountCapacityLow`, `PublicAccountCapacityExhausted`,
@@ -31,6 +33,7 @@ last_verified: 2026-07-21
 | `HostOomKill` | Any kernel OOM kill in 10 minutes | Container state can remain stale when the host OOM killer terminates the payload process directly. |
 | `ContainerRestartObserved` | A Compose service's Docker restart count increases within 10 minutes | A replacement process can be healthy while the release has already failed its uninterrupted soak; the five-minute synthetic probe preserves the increase in VictoriaMetrics. |
 | `ContainerOomKilled` | Docker currently reports `OOMKilled` for a Compose service | Adds service attribution when Docker retains it; the host OOM counter remains the durable fallback after an automatic restart clears the current flag. |
+| `MeasuredMemoryEnvelopeExceeded` | `sybil-history` or `sybil-web` current cgroup usage above 160 MiB for 15 minutes | Both thresholds come from measured post-warm-up behavior and catch the observed allocator/cache and V8 failure modes before the much larger generic cgroup percentage is actionable. Sparse probe samples remain continuous through a ten-minute lookback. |
 | `ContainerMemoryHigh` | Current cgroup usage above 85% of its configured limit for 10 minutes | Gives a bounded service time to plateau or shed load before an OOM; current, creation-lifetime peak, and limit are retained as five-minute series. |
 | `ContainerMemoryCritical` | Current cgroup usage above 95% of its configured limit for 2 minutes | This is the final actionable margin before a cgroup OOM kill and is deliberately independent of point-in-time health. |
 | `HostDiskSpaceLow` | Root filesystem below 15% available for 10 minutes | Both named sequencer/history Docker volumes currently allocate from this filesystem, so the warning precedes correlated redb failures. |

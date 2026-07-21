@@ -166,6 +166,54 @@ tests:
 
   - interval: 1m
     input_series:
+      - series: 'sybil_synthetic_container_memory_usage_bytes{job="sybil-synthetic",instance="https://devnet.example",service="sybil-history"}'
+        values: "168820736+0x20"
+      - series: 'sybil_synthetic_container_memory_usage_bytes{job="sybil-synthetic",instance="https://devnet.example",service="sybil-web"}'
+        values: "167772160+0x20"
+      - series: 'sybil_synthetic_container_memory_usage_bytes{job="sybil-synthetic",instance="https://devnet.example",service="sybil-arena"}'
+        values: "419430400+0x20"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: MeasuredMemoryEnvelopeExceeded
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: MeasuredMemoryEnvelopeExceeded
+        exp_alerts:
+          - exp_labels:
+              job: "sybil-synthetic"
+              instance: "https://devnet.example"
+              service: "sybil-history"
+              severity: warning
+              component: resources
+            exp_annotations:
+              summary: "A Sybil service exceeded its measured memory envelope"
+              description: "Compose service sybil-history has remained above the measured 160 MiB post-warm-up envelope for 15m (current: 161MiB). For sybil-history, split allocator RSS from file cache; for sybil-web, correlate routes with V8 fatal/restart signals before changing limits."
+
+  # Preserve the measured web envelope timer across the real probe's sparse
+  # five-minute-plus-jitter samples, just like the generic cgroup warning.
+  - interval: 15s
+    input_series:
+      - series: 'sybil_synthetic_container_memory_usage_bytes{job="sybil-synthetic",instance="https://devnet.example",service="sybil-web"}'
+        values: "168820736 _x24 168820736 _x24 168820736 _x24 168820736"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: MeasuredMemoryEnvelopeExceeded
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: MeasuredMemoryEnvelopeExceeded
+        exp_alerts:
+          - exp_labels:
+              job: "sybil-synthetic"
+              instance: "https://devnet.example"
+              service: "sybil-web"
+              severity: warning
+              component: resources
+            exp_annotations:
+              summary: "A Sybil service exceeded its measured memory envelope"
+              description: "Compose service sybil-web has remained above the measured 160 MiB post-warm-up envelope for 15m (current: 161MiB). For sybil-history, split allocator RSS from file cache; for sybil-web, correlate routes with V8 fatal/restart signals before changing limits."
+
+  - interval: 1m
+    input_series:
       - series: 'sybil_synthetic_container_memory_usage_bytes{job="sybil-synthetic",instance="https://devnet.example",service="sybil-web"}'
         values: "90+0x15"
       - series: 'sybil_synthetic_container_memory_limit_bytes{job="sybil-synthetic",instance="https://devnet.example",service="sybil-web"}'

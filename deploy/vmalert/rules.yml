@@ -872,6 +872,21 @@ groups:
           summary: "A Sybil container was OOM-killed"
           description: "Compose service {{ $labels.service }} currently reports OOMKilled. Preserve kernel/container diagnostics and correlate node_vmstat_oom_kill before restarting or raising its limit."
 
+      - alert: MeasuredMemoryEnvelopeExceeded
+        expr: |
+          last_over_time(
+            sybil_synthetic_container_memory_usage_bytes{
+              service=~"sybil-history|sybil-web"
+            }[10m]
+          ) > 160 * 1024 * 1024
+        for: 15m
+        labels:
+          severity: warning
+          component: resources
+        annotations:
+          summary: "A Sybil service exceeded its measured memory envelope"
+          description: "Compose service {{ $labels.service }} has remained above the measured 160 MiB post-warm-up envelope for 15m (current: {{ $value | humanize1024 }}B). For sybil-history, split allocator RSS from file cache; for sybil-web, correlate routes with V8 fatal/restart signals before changing limits."
+
       - alert: ContainerMemoryHigh
         expr: |
           last_over_time(sybil_synthetic_container_memory_usage_bytes[10m])
