@@ -14,6 +14,8 @@ export SYBIL_WEBAUTHN_ORIGIN="${SYBIL_WEBAUTHN_ORIGIN:-https://app.example.test}
 export GF_SECURITY_ADMIN_PASSWORD="${GF_SECURITY_ADMIN_PASSWORD:-compose-smoke-grafana-password}"
 export CADDY_OPS_AUTH_USER="${CADDY_OPS_AUTH_USER:-ops}"
 export CADDY_OPS_AUTH_HASH="${CADDY_OPS_AUTH_HASH:-compose-smoke-caddy-hash}"
+export TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-compose-smoke-telegram-token}"
+export TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:-compose-smoke-telegram-chat}"
 export SYBIL_L1_RPC_URLS="${SYBIL_L1_RPC_URLS:-http://rpc-a.example.test,http://rpc-b.example.test}"
 export SYBIL_L1_RPC_IDS="${SYBIL_L1_RPC_IDS:-compose-smoke-a,compose-smoke-b}"
 
@@ -58,6 +60,11 @@ compose_validity() {
 compose_l1() {
     # shellcheck disable=SC2086
     $COMPOSE_CMD "${COMPOSE_FILES[@]}" -f docker-compose.l1.yml "$@"
+}
+
+compose_telegram() {
+    # shellcheck disable=SC2086
+    $COMPOSE_CMD "${COMPOSE_FILES[@]}" -f docker-compose.telegram.yml "$@"
 }
 
 contains_service() {
@@ -174,6 +181,20 @@ pass "L1 indexer is explicit opt-in deployment state"
 
 compose config --quiet
 pass "compose config parses"
+
+telegram_log_contract=$(
+    compose_telegram config | python3 -c '
+import sys
+import yaml
+
+logging = yaml.safe_load(sys.stdin)["services"]["telegram-alerts"]["logging"]
+options = logging["options"]
+print("|".join((logging["driver"], options["max-size"], options["max-file"])))
+'
+)
+[[ "$telegram_log_contract" == "json-file|50m|5" ]] \
+    || fail "Telegram alert-forwarder logs are not size/count bounded"
+pass "Telegram alert-forwarder logs are bounded on the shared host"
 
 prover_service_block=$(
     awk '
