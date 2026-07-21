@@ -61,9 +61,20 @@ export function AccountsView() {
     null,
   );
 
-  const accounts = useDevAccounts().data ?? [];
-  const pendingOrders = useDevPendingOrders().data ?? [];
+  const accountsQuery = useDevAccounts();
+  const pendingQuery = useDevPendingOrders();
+  const accounts = accountsQuery.data ?? [];
+  const pendingOrders = pendingQuery.data ?? [];
   const markets = useDevMarkets().data ?? [];
+
+  // Both sources are unreachable against a production deployment, and an
+  // indefinite "Loading…" reads as a hung page rather than a closed door.
+  const accountsEmptyMsg = accountsQuery.isError
+    ? "Account portfolios unreadable: /v1/accounts/{id}/portfolio is bearer-gated and the dev zone holds no token. Expected when SYBIL_DEV_MODE=false."
+    : "Loading account portfolios…";
+  const pendingEmptyMsg = pendingQuery.isError
+    ? "Resting orders unreadable: /v1/orders/pending is a dev-only route and is not mounted on this deployment."
+    : "No markets have resting orders.";
 
   const mIdx = marketIndex(markets);
   const pendIdx = pendingIndex(pendingOrders);
@@ -295,7 +306,7 @@ export function AccountsView() {
                 {accounts.length === 0 ? (
                   <tr>
                     <td colSpan={7} style={emptyMsg}>
-                      Loading account portfolios...
+                      {accountsEmptyMsg}
                     </td>
                   </tr>
                 ) : null}
@@ -362,7 +373,7 @@ export function AccountsView() {
               {topPendingMarkets(pendIdx).length === 0 ? (
                 <tr>
                   <td colSpan={8} style={emptyMsg}>
-                    No pending orders are visible from /v1/orders/pending.
+                    {pendingEmptyMsg}
                   </td>
                 </tr>
               ) : null}

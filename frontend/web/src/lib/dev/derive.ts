@@ -455,13 +455,25 @@ export interface QuickAnswerContext {
   accounts: DevAccountPortfolio[];
   marketIndex: Map<number, DevMarket>;
   aggregates: AccountAggregates;
+  /** False when `/v1/orders/pending` could not be read (dev-only route). */
+  pendingAvailable?: boolean;
+  /** False when the per-account portfolio reads were rejected (bearer-gated). */
+  accountsAvailable?: boolean;
 }
 
 export function buildQuickAnswer(
   kind: "prices" | "chain" | "liquidity" | "mm",
   ctx: QuickAnswerContext,
 ): string {
-  const { markets, blocks, pendingOrders, marketIndex: mIdx, aggregates } = ctx;
+  const {
+    markets,
+    blocks,
+    pendingOrders,
+    marketIndex: mIdx,
+    aggregates,
+    pendingAvailable = true,
+    accountsAvailable = true,
+  } = ctx;
 
   if (kind === "prices") {
     const priced = markets.filter((m) => present(m.yes_price_nanos));
@@ -510,38 +522,75 @@ export function buildQuickAnswer(
   }
 
   if (kind === "liquidity") {
-    const idx = pendingIndex(pendingOrders);
-    const marketsWithPending = new Set(pendingOrders.map((o) => o.market_id))
-      .size;
-    const rows = topPendingMarkets(idx)
+    // Resting depth comes from /v1/orders/pending, which lives in the dev-only
+    // route table and 404s against a deployment running SYBIL_DEV_MODE=false.
+    // Answer from the public market summary instead of reporting a zero that
+    // only means "never received".
+    const quoted = markets.filter((m) => present(m.liquidity_avg10_nanos));
+    const byDepth = [...quoted].sort(
+      (a, b) => n(b.liquidity_avg10_nanos) - n(a.liquidity_avg10_nanos),
+    );
+    const totalDepth = quoted.reduce(
+      (sum, m) => sum + n(m.liquidity_avg10_nanos),
+      0,
+    );
+    const unmatched = markets.reduce(
+      (sum, m) => sum + (m.orders_unmatched_total || 0),
+      0,
+    );
+    const top = byDepth
       .slice(0, 8)
       .map(
-        (r) =>
+        (m) =>
           "#" +
-          r.market_id +
+          m.market_id +
           " " +
-          marketName(mIdx, r.market_id) +
-          ": " +
-          r.count +
-          " pending",
+          marketName(mIdx, m.market_id) +
+          ": $" +
+          dollars(n(m.liquidity_avg10_nanos)) +
+          " avg depth",
       )
       .join("\n");
+
+    const restingLine = pendingAvailable
+      ? pendingOrders.length +
+        " resting orders across " +
+        new Set(pendingOrders.map((o) => o.market_id)).size +
+        " markets."
+      : "Resting-order detail unavailable: /v1/orders/pending is a dev-only " +
+        "route and is not mounted on this deployment.";
+
     return (
-      pendingOrders.length +
-      " pending orders across " +
-      marketsWithPending +
-      " markets.\n" +
-      (rows || "No pending orders are visible from /v1/orders/pending.")
+      quoted.length +
+      " / " +
+      markets.length +
+      " markets carry quoted depth, $" +
+      dollars(totalDepth) +
+      " total (10-block average).\n" +
+      fmtInt(unmatched) +
+      " orders placed all-time went unmatched.\n" +
+      restingLine +
+      (top ? "\n" + top : "")
     );
   }
 
   // kind === "mm"
+  if (!accountsAvailable) {
+    return (
+      "Account figures unavailable.\n" +
+      "/v1/accounts/{id}/portfolio is bearer-gated and the dev zone holds no " +
+      "token, so MM cash, positions and PnL cannot be read here.\n" +
+      "This is expected against a deployment running SYBIL_DEV_MODE=false; " +
+      "it is not a sign that the market maker is flat."
+    );
+  }
   return (
     "Active trading accounts: " +
-    aggregates.activeTradingAccounts.map((a) => "#" + a.account_id).join(", ") +
+    (aggregates.activeTradingAccounts.map((a) => "#" + a.account_id).join(", ") ||
+      "none") +
     "\n" +
     "Pending orders: " +
-    aggregates.mmPendingOrders +
+    (pendingAvailable ? aggregates.mmPendingOrders : "unavailable") +
     "\n" +
     "Canonical portfolio: $" +
     dollars(aggregates.mmPortfolioValueNanos) +

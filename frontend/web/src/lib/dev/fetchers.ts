@@ -27,6 +27,21 @@ async function rawGet<T>(path: string): Promise<T | null> {
   }
 }
 
+/**
+ * Same, but surfaces the failure instead of swallowing it.
+ *
+ * Several dev endpoints are unreachable against a production deployment —
+ * `/v1/orders/pending` is registered in the dev-only route table (404 when
+ * `SYBIL_DEV_MODE` is false) and the per-account reads are bearer-gated (401).
+ * Collapsing those into an empty array made the views report a confident zero
+ * for data they had simply never received.
+ */
+async function rawGetOrThrow<T>(path: string): Promise<T> {
+  const r = await fetch(API_BASE + path);
+  if (!r.ok) throw new Error(`${path} → HTTP ${r.status}`);
+  return (await r.json()) as T;
+}
+
 /** /v1/markets/summary — markets with volume/liquidity/24h fields. */
 export function useDevMarkets() {
   return useQuery({
@@ -79,8 +94,8 @@ export function useDevGroups() {
 export function useDevPendingOrders() {
   return useQuery({
     queryKey: ["dev", "pending-orders"],
-    queryFn: async () =>
-      (await rawGet<DevPendingOrder[]>("/v1/orders/pending")) ?? [],
+    queryFn: () => rawGetOrThrow<DevPendingOrder[]>("/v1/orders/pending"),
+    retry: false,
     refetchInterval: 10_000,
   });
 }
@@ -120,10 +135,18 @@ export function useDevAccounts(extraIds: number[] = []) {
           rawGet<DevAccountPortfolio>(`/v1/accounts/${id}/portfolio`),
         ),
       );
-      return rows
-        .filter((r): r is DevAccountPortfolio => r != null)
-        .sort((a, b) => a.account_id - b.account_id);
+      const found = rows.filter((r): r is DevAccountPortfolio => r != null);
+      // Asking for accounts and receiving none back is a read failure, not an
+      // empty system: `/v1/accounts/{id}/portfolio` is bearer-gated and answers
+      // 401 to the dev zone, which holds no token.
+      if (ids.length > 0 && found.length === 0) {
+        throw new Error(
+          "No account portfolio was readable — /v1/accounts/{id}/portfolio requires a bearer token",
+        );
+      }
+      return found.sort((a, b) => a.account_id - b.account_id);
     },
+    retry: false,
     refetchInterval: 60_000,
   });
 }
