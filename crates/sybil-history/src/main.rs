@@ -2,7 +2,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use clap::Parser;
-use sybil_history::{HistoryHandle, HistoryHttpConfig, HistoryStore, router};
+use sybil_history::{
+    DEFAULT_REDB_CACHE_BYTES, HistoryHandle, HistoryHttpConfig, HistoryStore, router,
+};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 use tracing_subscriber::EnvFilter;
@@ -31,6 +33,12 @@ struct Config {
         default_value_t = 16
     )]
     max_query_concurrency: usize,
+    #[arg(
+        long,
+        env = "SYBIL_HISTORY_REDB_CACHE_BYTES",
+        default_value_t = DEFAULT_REDB_CACHE_BYTES
+    )]
+    redb_cache_bytes: usize,
 }
 
 #[tokio::main]
@@ -45,10 +53,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("SYBIL_HISTORY_TOKEN is required outside dev mode".into());
     }
     std::fs::create_dir_all(&config.data_dir)?;
-    let store = HistoryStore::open(
+    let store = HistoryStore::open_with_cache(
         config.data_dir.join("history.redb"),
         config.candle_resolutions_secs,
+        config.redb_cache_bytes,
     )?;
+    tracing::info!(
+        redb_cache_bytes = config.redb_cache_bytes,
+        "Configured bounded history redb cache"
+    );
     let handle = HistoryHandle::spawn(store.clone());
     let app = router(
         handle.clone(),

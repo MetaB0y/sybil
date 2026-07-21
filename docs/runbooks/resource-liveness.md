@@ -66,6 +66,15 @@ root-filesystem ratio is the final capacity signal because redb pages,
 fragmentation, canonical qMDB/redb, the history projection, Docker logs, and
 other services share the host.
 
+`sybil-history` runs with a 64 MiB redb page-cache ceiling
+(`SYBIL_HISTORY_REDB_CACHE_BYTES=67108864`) inside its 256 MiB cgroup. Redb's
+upstream 1 GiB default is intentionally not used: it can look like a gradual
+history-process leak as indexed pages warm and would exceed the container
+budget before reaching its own bound. Treat sustained history memory above
+roughly 160 MiB after cache warm-up as unexpected; separate anonymous RSS from
+reclaimable file cache, confirm the configured cache value in startup logs,
+and inspect query concurrency before raising either limit.
+
 The in-flight gauge increments before each DA task is spawned and decrements
 after its write result is recorded. A task panic deliberately leaves the gauge
 high for that process lifetime, making the lost writer visible; restarting the

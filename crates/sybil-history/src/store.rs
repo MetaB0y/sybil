@@ -3,7 +3,7 @@ use std::ops::Bound::{Excluded, Included};
 use std::path::Path;
 use std::sync::Arc;
 
-use redb::{Database, ReadTransaction, ReadableDatabase, ReadableTable, TableDefinition};
+use redb::{Builder, Database, ReadTransaction, ReadableDatabase, ReadableTable, TableDefinition};
 use sybil_history_types::{
     AccountEquityFact, AccountEventFact, AccountEventQuery, AccountFillFact, ApplyBatchOutcome,
     ApplyBatchResponse, CommittedHistoryBatchV1, EquityBaselines, EquityBaselinesQuery,
@@ -32,6 +32,8 @@ const META_CANDLE_RESOLUTIONS: &str = "candle_resolutions_secs_v1";
 const MAX_QUERY_POINTS: usize = 5_000;
 const MAX_PAGE_SIZE: usize = 1_000;
 const MAX_BASELINE_ACCOUNTS: usize = 100_000;
+/// Default page-cache ceiling for a projector deployed in the 256 MiB cgroup.
+pub const DEFAULT_REDB_CACHE_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum HistoryError {
@@ -82,13 +84,23 @@ impl HistoryStore {
         path: impl AsRef<Path>,
         candle_resolutions_secs: Vec<u32>,
     ) -> Result<Self, HistoryError> {
+        Self::open_with_cache(path, candle_resolutions_secs, DEFAULT_REDB_CACHE_BYTES)
+    }
+
+    pub fn open_with_cache(
+        path: impl AsRef<Path>,
+        candle_resolutions_secs: Vec<u32>,
+        redb_cache_bytes: usize,
+    ) -> Result<Self, HistoryError> {
         let mut resolutions: Vec<u32> = candle_resolutions_secs
             .into_iter()
             .filter(|resolution| *resolution > 0)
             .collect();
         resolutions.sort_unstable();
         resolutions.dedup();
-        let db = Database::create(path)?;
+        let mut builder = Builder::new();
+        builder.set_cache_size(redb_cache_bytes);
+        let db = builder.create(path)?;
         let txn = db.begin_write()?;
         txn.open_table(RAW_BATCHES)?;
         txn.open_table(FILLS)?;
@@ -760,6 +772,25 @@ mod tests {
         let store = HistoryStore::open(dir.path().join("history.redb"), vec![60])
             .expect("open history store");
         (dir, store)
+    }
+
+    #[test]
+    fn explicit_small_redb_cache_preserves_projection() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store =
+            HistoryStore::open_with_cache(dir.path().join("history.redb"), vec![60], 1024 * 1024)
+                .expect("open history store with explicit cache");
+
+        store
+            .apply_batch(batch(1, [0; 32], [1; 32], 1_000))
+            .expect("apply batch");
+        assert_eq!(
+            store
+                .status()
+                .expect("projection status")
+                .indexed_through_height,
+            Some(1)
+        );
     }
 
     fn batch(

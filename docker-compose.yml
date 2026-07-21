@@ -82,6 +82,8 @@ services:
       SYBIL_HISTORY_TOKEN: "${SYBIL_HISTORY_TOKEN:-sybil-history-dev-only}"
       SYBIL_HISTORY_CANDLE_RESOLUTIONS_SECS: "60,300,3600"
       SYBIL_HISTORY_MAX_QUERY_CONCURRENCY: "16"
+      # redb defaults to a 1 GiB cache, which is incompatible with this 256 MiB cgroup.
+      SYBIL_HISTORY_REDB_CACHE_BYTES: "67108864"
       RUST_LOG: "warn,sybil_history=info"
     volumes:
       - history-data:/history-data
