@@ -40,6 +40,31 @@ tests:
         alertname: SybilApiMemoryGrowingFast
         exp_alerts: []
 
+  # A cache that only recently stopped changing must not let the 30-minute RSS
+  # derivative include its intentional warm-up. The alert timer starts only
+  # after the complete derivative window is cache-stable.
+  - interval: 1m
+    input_series:
+      - series: 'sybil_process_resident_memory_bytes{job="sybil-api",instance="sybil-api:3000"}'
+        values: "419430400+2097152x75"
+      - series: 'sybil_recent_block_cache_len{job="sybil-api",instance="sybil-api:3000"}'
+        values: "1+2x10 21+0x65"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: SybilApiMemoryGrowingFast
+        exp_alerts: []
+      - eval_time: 72m
+        alertname: SybilApiMemoryGrowingFast
+        exp_alerts:
+          - exp_labels:
+              job: "sybil-api"
+              instance: "sybil-api:3000"
+              severity: warning
+              component: sequencer
+            exp_annotations:
+              summary: "sybil-api RSS is growing persistently"
+              description: "After the recent-block cache finished warming, RSS grew faster than 32 MiB/hour for 30m. Correlate the archive, outbox, actor queue, and workload panels before a high absolute-memory alert fires."
+
   - interval: 1m
     input_series:
       - series: 'node_vmstat_oom_kill{job="node",instance="node-exporter:9100"}'

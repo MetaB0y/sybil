@@ -26,7 +26,7 @@ last_verified: 2026-07-21
 
 | Alert | Threshold | Why it is conservative |
 | --- | --- | --- |
-| `SybilApiMemoryGrowingFast` | After the recent-block cache has been size-stable for 5 minutes, RSS slope above 32 MiB/hour for 30 minutes | Catches sustained post-warm-up retention well before the 650/800 MiB absolute alerts. The absolute alerts remain active during startup. |
+| `SybilApiMemoryGrowingFast` | After the recent-block cache has been size-stable across the complete 30-minute slope window, RSS slope above 32 MiB/hour for 30 minutes | Catches sustained post-warm-up retention well before the 650/800 MiB absolute alerts. The absolute alerts remain active during startup. |
 | `HostMemoryPressureStalled` | Full Linux PSI memory stalls above 5% for 5 minutes | By this point scrapes, DNS, and actor scheduling can already lag, so later queue values may be consequences rather than causes. |
 | `HostOomKill` | Any kernel OOM kill in 10 minutes | Container state can remain stale when the host OOM killer terminates the payload process directly. |
 | `ContainerRestartObserved` | A Compose service's Docker restart count increases within 10 minutes | A replacement process can be healthy while the release has already failed its uninterrupted soak; the five-minute synthetic probe preserves the increase in VictoriaMetrics. |
@@ -111,10 +111,11 @@ failure and inspect logs before restarting.
    queue with growing durable state or outbox stock suggests retained data; a
    growing queue with flat state suggests backpressure. Once PSI is high, treat
    queue growth as possibly downstream of host starvation.
-   The derivative alert waits until the recent-block cache length has been
-   stable for five minutes, so its 30-minute persistence window measures
-   post-warm-up growth rather than intentional cache population. Absolute RSS
-   alerts remain active throughout startup.
+   The derivative alert requires the recent-block cache length to be stable
+   across its complete 30-minute slope window, then requires that slope to
+   persist for 30 minutes. Startup/cache growth therefore cannot enter a
+   purported post-warm-up measurement. Absolute RSS alerts remain active
+   throughout startup.
 4. For account growth, compare `sybil_state_accounts_total` with
    `sybil_public_account_stock`, `sybil_public_account_remaining`, and
    `sybil_public_account_creation_total{result=...}`. Anonymous creation uses

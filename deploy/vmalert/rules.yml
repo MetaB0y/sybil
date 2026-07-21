@@ -725,7 +725,7 @@ groups:
         expr: |
           deriv(sybil_process_resident_memory_bytes[30m]) * 3600 > 32 * 1024 * 1024
           and on(job, instance)
-          changes(sybil_recent_block_cache_len[5m]) == 0
+          changes(sybil_recent_block_cache_len[30m]) == 0
         for: 30m
         labels:
           severity: warning
