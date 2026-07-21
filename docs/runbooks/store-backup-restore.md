@@ -1,7 +1,7 @@
 ---
 tags: [runbook, persistence, recovery]
 status: current
-last_verified: 2026-07-15
+last_verified: 2026-07-21
 ---
 
 # Sequencer store backup and restore
@@ -95,6 +95,10 @@ The output directory is `sybil-store-<UTC>-<pid>/` and contains:
 The script fails and removes an incomplete output if the source cannot be
 unpaused, the files are absent, the copied store cannot boot, or an account
 sample cannot be read. The last stdout line is the completed backup path.
+The destination root, timestamped artifact, and copied contents are normalized
+to owner-only access (`0700` directories and no group/other file access). This
+protects canonical state on a shared host; off-host copies must retain an
+equivalent encrypted-at-rest boundary.
 
 Do not use `docker cp` manually against a live, unpaused container. Do not copy
 only `sybil.redb`; the fenced qMDB slots are required for recovery.

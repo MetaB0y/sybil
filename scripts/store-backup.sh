@@ -76,6 +76,7 @@ dry-run: verify $DATA_DIR/sybil.redb and $DATA_DIR/sybil.qmdb exist in the sourc
 dry-run: docker pause <source>; docker cp <source>:$DATA_DIR/. <timestamped-backup>/store/; docker unpause <source>
 dry-run: hash every copied file and boot the source image with its exact validity-retention mode against a throwaway second copy
 dry-run: record exact restored height, committed/replayed state roots, and account ${ACCOUNT_ID:-auto (leaderboard, then account 0)} in <timestamped-backup>/manifest.json
+dry-run: lock the destination root and completed backup to owner-only access
 dry-run: destination root $DEST; the production sybil-data volume is never mounted or modified
 EOF
     exit 0
@@ -161,7 +162,11 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-mkdir -p "$OUT/store"
+# Canonical state and manifests are confidential on a shared host. Do not
+# inherit a permissive login umask or destination mode, and normalize copied
+# source entries before declaring the artifact complete.
+umask 077
+install -d -m 0700 "$DEST" "$OUT/store"
 echo "Freezing $CONTAINER for a crash-consistent copy..."
 docker pause "$CONTAINER" >/dev/null
 SOURCE_PAUSED=1
@@ -248,6 +253,7 @@ python3 "$SCRIPT_DIR/store-manifest.py" build \
 
 docker rm -f "$INSPECT_CONTAINER" >/dev/null
 rm -rf "$INSPECT_ROOT"
+chmod -R u=rwX,go= "$OUT"
 COMPLETE=1
 echo "OK: backup restored in isolation at height=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["expected"]["height"])' "$OUT/manifest.json")"
 echo "$OUT"

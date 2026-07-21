@@ -41,5 +41,14 @@ require(
     '--retain-validity-artifacts "$SOURCE_RETAIN_VALIDITY_ARTIFACTS"',
     "manifest lost the source chain validity-retention mode",
 )
+require("umask 077", "backup artifacts can inherit a permissive caller umask")
+require(
+    'install -d -m 0700 "$DEST" "$OUT/store"',
+    "backup destination and artifact root are not owner-only",
+)
+require(
+    'chmod -R u=rwX,go= "$OUT"',
+    "copied store entries are not normalized to owner-only access",
+)
 
 print("store backup immutable-image contract: ok")
