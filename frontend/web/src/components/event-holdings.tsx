@@ -271,6 +271,17 @@ export function EventHoldings({ marketId }: { marketId: number }) {
   }, [historyData, labelByMarket]);
   const hasClosed = closedOrdersByMarket.size > 0;
 
+  // Which outcomes the filter should mark as "you have something here" — a
+  // position, a resting order, or a closed order. Without it every outcome in a
+  // 12-way event looks equally worth opening, and most lead to an empty table.
+  const activeMarkets = useMemo(() => {
+    const ids = new Set<number>();
+    for (const h of holdings) ids.add(h.position.market_id);
+    for (const o of eventOrders) ids.add(o.market_id);
+    for (const id of closedOrdersByMarket.keys()) ids.add(id);
+    return ids;
+  }, [holdings, eventOrders, closedOrdersByMarket]);
+
   // Apply the outcome filter for display. The render gate below still considers
   // the *full* event, so picking an outcome with no rows narrows the table
   // rather than hiding the whole section. A scoped label map both relabels and
@@ -408,6 +419,7 @@ export function EventHoldings({ marketId }: { marketId: number }) {
           {outcomes.length > 1 && (
             <OutcomeFilter
               outcomes={outcomes}
+              activeMarkets={activeMarkets}
               selected={selectedMarket}
               onChange={(id) => {
                 setSelectedMarket(id);
@@ -597,13 +609,20 @@ function ViewSwitcher({
  * multi-outcome events; a single binary market has nothing to filter. Colored
  * dots match the chart legend (`colorForOutcome`). Mirrors the rail picker's
  * click-outside + Escape close.
+ *
+ * Outcomes you actually hold or have traded read at full strength; the rest are
+ * dimmed, so a 12-way event's menu shows at a glance which two are worth
+ * opening. Empty outcomes stay selectable — the table just says it's empty.
  */
 function OutcomeFilter({
   outcomes,
+  activeMarkets,
   selected,
   onChange,
 }: {
   outcomes: EventOutcome[];
+  /** market_ids with a position, resting order, or closed order. */
+  activeMarkets: Set<number>;
   selected: number | null;
   onChange: (id: number | null) => void;
 }) {
@@ -720,6 +739,7 @@ function OutcomeFilter({
         >
           <OutcomeOption
             label="All outcomes"
+            active
             selected={selected == null}
             onClick={() => pick(null)}
           />
@@ -728,6 +748,7 @@ function OutcomeFilter({
               key={o.marketId}
               label={o.shortLabel}
               color={colorForOutcome(o, i)}
+              active={activeMarkets.has(o.marketId)}
               selected={selected === o.marketId}
               onClick={() => pick(o.marketId)}
             />
@@ -741,11 +762,14 @@ function OutcomeFilter({
 function OutcomeOption({
   label,
   color,
+  active,
   selected,
   onClick,
 }: {
   label: string;
   color?: string;
+  /** You have a position or an order here — render it at full strength. */
+  active: boolean;
   selected: boolean;
   onClick: () => void;
 }) {
@@ -781,6 +805,7 @@ function OutcomeOption({
           height: 8,
           borderRadius: "50%",
           background: color ?? "var(--fg-4)",
+          opacity: active ? 1 : 0.4,
           flexShrink: 0,
         }}
       />
@@ -793,7 +818,8 @@ function OutcomeOption({
           whiteSpace: "nowrap",
           fontFamily: "var(--font-sans)",
           fontSize: 13,
-          color: "var(--fg-1)",
+          fontWeight: active ? 500 : 400,
+          color: active ? "var(--fg-1)" : "var(--fg-4)",
         }}
       >
         {label}
