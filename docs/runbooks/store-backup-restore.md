@@ -8,9 +8,9 @@ last_verified: 2026-07-21
 
 > **Executive summary:** a valid backup contains the entire data directory and
 > is not trusted until an isolated restore reproduces the recorded height,
-> committed and replayed state roots, and sample account. The script briefly
-> freezes the whole API container so redb and both qMDB slots are copied as one
-> crash-consistent unit.
+> committed and replayed state roots, and sample account, then continues the
+> chain from that exact state. The script briefly freezes the whole API
+> container so redb and both qMDB slots are copied as one crash-consistent unit.
 
 **Scripts:** `scripts/store-backup.sh`, `scripts/store-restore-drill.sh`
 
@@ -140,7 +140,13 @@ standalone itest service definition without merging the base file, populates
 only that project's fresh `itest-data` volume, builds/boots `sybil-api`, and
 tears the project down with `down -v` on every exit or shell hangup.
 `--no-build` reuses an existing `sybil-api:itest` image; `--port` and
-`--timeout` tune local execution.
+`--timeout` tune local execution. Exact comparisons run first with a 24-hour
+block interval. The drill then replaces only its isolated API against the same
+throwaway volume with a one-second interval, requires the head to advance, and
+re-reads the recorded base block to prove its height and committed root remain
+in the continued chain. The old disposable container is removed explicitly
+before restart so the drill also works with legacy Docker Compose v1; the
+project's named data volume remains attached to the replacement.
 
 The helper refuses to run on a Docker daemon with a live API mounted to
 `sybil-data`. Use a separate machine for production-sized drills. The
@@ -157,7 +163,11 @@ does not weaken storage isolation.
   `committed_state_root`;
 - `/v1/state-root` exactly equals the manifest `replayed_state_root`;
 - `GET /v1/accounts/<sample>` is structurally equal to the complete account
-  object recorded in the manifest.
+  object recorded in the manifest;
+- after those exact comparisons, the same isolated volume produces a later
+  committed height; and
+- the continued chain still serves the manifest height with the recorded
+  `committed_state_root`.
 
 The drill also accepts legacy `sybil.store-backup.v1` and
 `sybil.store-backup.v2` manifests. Version 1 recorded only `state_root`, so its
@@ -169,7 +179,8 @@ mode. Unknown schemas or malformed/missing roots fail before the restore
 container is started.
 
 Any difference exits nonzero. A 24-hour drill block interval prevents the
-restored node from advancing before those exact comparisons.
+restored node from advancing before the exact comparisons; only the subsequent
+isolated continuation phase uses the short interval.
 
 ## Acknowledged-write restore failure
 

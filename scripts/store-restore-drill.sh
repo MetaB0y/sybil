@@ -65,6 +65,7 @@ dry-run: populate only that project's fresh itest-data volume from $BACKUP_DIR/s
 dry-run: read the chain's validity-artifact retention mode from the manifest (legacy manifests require an explicit override)
 dry-run: $BUILD_DESCRIPTION sybil-api with that exact chain mode and a 24h block interval on 127.0.0.1:$PORT
 dry-run: require health and exact manifest matches for latest height, committed/replayed state roots, and sampled account
+dry-run: replace only that isolated API against the same throwaway volume with a 1s block interval and require the head to advance while preserving the recorded base block
 dry-run: docker compose down -v --remove-orphans (production sybil-data is never referenced)
 EOF
     exit 0
@@ -189,4 +190,53 @@ python3 "$SCRIPT_DIR/store-manifest.py" compare \
     --state-root "$WORK/state-root.json" \
     --account "$WORK/account.json"
 
-echo "RESULT: restored OK — exact manifest state served from an isolated fresh volume"
+EXPECTED_HEIGHT="$(
+    python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["expected"]["height"])' \
+        "$BACKUP_DIR/manifest.json"
+)"
+
+# Exact comparisons must happen before block production resumes. Then replace
+# only this unique project's API against the same throwaway volume and require
+# a later committed head. Removing the disposable service container before
+# starting it again also avoids the legacy Compose v1 ContainerConfig recreate
+# failure while retaining the project's named data volume. This proves that
+# recovery did not merely open and serve a frozen snapshot: the restored
+# sequencer can continue from it.
+export SYBIL_ITEST_BLOCK_INTERVAL_MS=1000
+compose rm -s -f sybil-api
+compose up -d --no-deps --no-build sybil-api
+CONTINUED_HEIGHT=""
+for _ in $(seq 1 "$TIMEOUT"); do
+    if curl -fsS --max-time 3 "$BASE/v1/health" > "$WORK/continued-health.json" 2>/dev/null \
+        && curl -fsS --max-time 3 "$BASE/v1/blocks/latest" > "$WORK/continued-latest.json" 2>/dev/null; then
+        CONTINUED_HEIGHT="$(
+            python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("height", ""))' \
+                "$WORK/continued-latest.json" 2>/dev/null || true
+        )"
+        if [[ "$CONTINUED_HEIGHT" =~ ^[0-9]+$ && "$CONTINUED_HEIGHT" -gt "$EXPECTED_HEIGHT" ]]; then
+            break
+        fi
+    fi
+    sleep 1
+done
+[[ "$CONTINUED_HEIGHT" =~ ^[0-9]+$ && "$CONTINUED_HEIGHT" -gt "$EXPECTED_HEIGHT" ]] \
+    || { echo "FAIL: restored node did not advance beyond height $EXPECTED_HEIGHT" >&2; exit 4; }
+
+curl -fsS --max-time 10 "$BASE/v1/blocks/$EXPECTED_HEIGHT" > "$WORK/continued-base.json"
+python3 - "$BACKUP_DIR/manifest.json" "$WORK/continued-base.json" <<'PY'
+import json
+import sys
+
+manifest_path, block_path = sys.argv[1:]
+with open(manifest_path, encoding="utf-8") as handle:
+    expected = json.load(handle)["expected"]
+with open(block_path, encoding="utf-8") as handle:
+    block = json.load(handle)
+if block.get("height") != expected["height"]:
+    raise SystemExit("continued chain did not retain the recorded base height")
+committed_state_root = expected.get("committed_state_root", expected.get("state_root"))
+if block.get("state_root") != committed_state_root:
+    raise SystemExit("continued chain changed the recorded base state root")
+PY
+
+echo "RESULT: restored OK — exact manifest state served and continued from height $EXPECTED_HEIGHT to $CONTINUED_HEIGHT in an isolated fresh volume"
