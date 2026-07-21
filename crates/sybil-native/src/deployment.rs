@@ -134,6 +134,7 @@ pub async fn apply_catalog(
         });
     }
 
+    close_retired(client, catalog, &live).await?;
     ensure_groups(client, &specs, &deployed).await?;
     deployed.sort_by(|left, right| left.market_key.cmp(&right.market_key));
     Ok(NativeDeployment {
@@ -141,6 +142,47 @@ pub async fn apply_catalog(
         genesis_hash,
         markets: deployed,
     })
+}
+
+/// Take every market of a retired template off the board.
+///
+/// `closed` is display state, so this withdraws the event without deciding it:
+/// the markets page drops closed cards, and an operator can still settle them
+/// on their merits. Deleting is not on the table — a market is committed state
+/// that positions, fills and DA witnesses reference by id. A retired template
+/// also removed from `markets` is simply never created again from genesis,
+/// which is the only way one truly disappears.
+async fn close_retired(
+    client: &SybilClient,
+    catalog: &NativeMarketCatalog,
+    live: &[sybil_api_types::MarketResponse],
+) -> Result<(), Error> {
+    if catalog.retired.is_empty() {
+        return Ok(());
+    }
+    for market in live {
+        let Some(creation_key) = market.creation_key.as_deref() else {
+            continue;
+        };
+        if !catalog.is_retired_creation_key(creation_key) || market.closed == Some(true) {
+            continue;
+        }
+        client
+            .set_market_metadata(
+                market.market_id,
+                &sybil_api_types::SetMarketMetadataRequest {
+                    closed: Some(true),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        tracing::info!(
+            market_id = market.market_id,
+            creation_key,
+            "closed retired native market"
+        );
+    }
+    Ok(())
 }
 
 async fn ensure_groups(

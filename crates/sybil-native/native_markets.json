@@ -1317,61 +1317,6 @@
       "operator_notes": "The chart renders client-side; wait for it to populate before reading. Select the 80% time-horizon view, take the maximum point estimate across all plotted models, convert to hours, and mark each rung YES whose threshold is at or below that value."
     },
     {
-      "id": "context_window_max_advertised_eoy2026",
-      "enabled": true,
-      "title": "How large will the biggest public-API model context window be at end of 2026?",
-      "outcome_set": {
-        "type": "threshold",
-        "direction": "above",
-        "unit": "tokens",
-        "outcomes": [
-          {
-            "id": "context_window_above_2m_eoy2026",
-            "title": "≥2M tokens",
-            "market_title": "Will the largest advertised public-API context window be ≥2M tokens at end of 2026?",
-            "enabled": true,
-            "threshold": 2000000,
-            "quote_range": {
-              "min": 0.3,
-              "max": 0.7,
-              "initial": 0.5
-            }
-          },
-          {
-            "id": "context_window_above_3m_eoy2026",
-            "title": "≥3M tokens",
-            "market_title": "Will the largest advertised public-API context window be ≥3M tokens at end of 2026?",
-            "enabled": true,
-            "threshold": 3000000,
-            "quote_range": {
-              "min": 0.14,
-              "max": 0.48,
-              "initial": 0.28
-            }
-          },
-          {
-            "id": "context_window_above_5m_eoy2026",
-            "title": "≥5M tokens",
-            "market_title": "Will the largest advertised public-API context window be ≥5M tokens at end of 2026?",
-            "enabled": true,
-            "threshold": 5000000,
-            "quote_range": {
-              "min": 0.06,
-              "max": 0.3,
-              "initial": 0.15
-            }
-          }
-        ]
-      },
-      "units": "probability",
-      "end_time": "2027-01-01T00:00:00Z",
-      "resolution_criteria": "Each outcome resolves YES if, at 2026-12-31 23:59 UTC, the largest maximum context window advertised for a generally-available model on a standard public API is at least its token threshold. 'Generally available on a standard public API' excludes downloadable open-weights and self-hosted-only models, research previews, waitlist or private-beta access, and enterprise-gated tiers that are not on the standard API. 'Advertised' means the officially listed maximum input context length, counting the headline figure even where effective usable context is lower. A value exactly equal to a threshold meets it. The binding source is the provider's own official API documentation, checked across Anthropic, OpenAI, Google, xAI, DeepSeek and any newer frontier entrant. If a provider's own documentation cannot be read at that time, use the WhatLLM largest-context tracker (https://whatllm.org/largest-context-window-llm), which scopes to public-API frontier models. If that is also unavailable, use the most recent Internet Archive (web.archive.org) capture of https://whatllm.org/largest-context-window-llm taken on or before the read time. If none of those yields a reading, every outcome resolves NO.",
-      "source_url": "https://whatllm.org/largest-context-window-llm",
-      "category": "AI",
-      "event_image_url": "https://www.google.com/s2/favicons?domain=whatllm.org&sz=128",
-      "operator_notes": "Check the official API docs for each listed provider, exclude ineligible model classes, then cross-check the largest figure against the WhatLLM tracker."
-    },
-    {
       "id": "anthropic_flagship_input_price_below_eoy2026",
       "enabled": true,
       "title": "Input API price for Anthropic flagship model at end of 2026?",
@@ -2025,5 +1970,8 @@
       "event_image_url": "https://www.google.com/s2/favicons?domain=snorkel.ai&sz=128",
       "operator_notes": "Read the binary-completion column at the 500-step budget and take the maximum across all rows."
     }
+  ],
+  "retired": [
+    "context_window_max_advertised_eoy2026"
   ]
 }
