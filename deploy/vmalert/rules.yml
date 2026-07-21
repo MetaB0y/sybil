@@ -797,7 +797,10 @@ groups:
           description: "Full memory-pressure stalls consumed more than 5% of wall time for 5m. Scrapes and actor queues may become misleading after this point; shed load or add memory."
 
       - alert: HostOomKill
-        expr: increase(node_vmstat_oom_kill[10m]) > 0
+        # `increase()` treats the first scrape on a long-running host as a
+        # rise from zero. Alert only after observing an actual counter change;
+        # requiring a positive current value also ignores reboot resets.
+        expr: changes(node_vmstat_oom_kill[10m]) > 0 and node_vmstat_oom_kill > 0
         for: 0m
         labels:
           severity: critical

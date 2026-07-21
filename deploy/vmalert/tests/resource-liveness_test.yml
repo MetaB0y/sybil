@@ -62,6 +62,18 @@ tests:
 
   - interval: 1m
     input_series:
+      - series: 'node_vmstat_oom_kill{job="node",instance="node-exporter:9100"}'
+        values: "9+0x10"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: HostOomKill
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: HostOomKill
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
       - series: 'node_filesystem_avail_bytes{job="node",instance="node-exporter:9100",mountpoint="/",fstype="ext4"}'
         values: "14000000000+0x12"
       - series: 'node_filesystem_size_bytes{job="node",instance="node-exporter:9100",mountpoint="/",fstype="ext4"}'
