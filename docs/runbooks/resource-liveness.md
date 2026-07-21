@@ -101,9 +101,10 @@ former server-rendered index fetched a roughly 564 KiB catalog for every
 request and serialized it into an approximately 280 KiB RSC response, retaining
 memory until V8 exited 139 near its heap ceiling; Docker reported
 `OOMKilled=false`. Compare lightweight routes, `/`, and `/m/[id]`, then inspect
-both the Next/V8 fatal log and the retained synthetic restart/OOM/current/peak
-series. A healthy container after an automatic replacement does not prove a
-plateau, and a V8 heap abort is not necessarily a memcg OOM.
+both the Next/V8 fatal log and the retained synthetic
+restart/start-time/OOM/current/peak series. A healthy container after an
+automatic replacement does not prove a plateau, and a V8 heap abort is not
+necessarily a memcg OOM.
 
 The in-flight gauge increments before each DA task is spawned and decrements
 after its write result is recorded. A task panic deliberately leaves the gauge
@@ -121,8 +122,10 @@ failure and inspect logs before restarting.
    a cgroup kill; record the killed process's anonymous/file RSS and cgroup.
    `just status` reports pending/firing alerts plus each service's current
    restart count and OOM flag; query
-   `sybil_synthetic_container_restart_count` over the incident window before a
-   deliberate recreation resets the Docker counter.
+   `sybil_synthetic_container_restart_count` and
+   `sybil_synthetic_container_started_at_seconds` over the incident window;
+   the latter remains discontinuous when a deliberate recreation resets the
+   Docker counter.
 2. For disk pressure or history backlog, compare outbox rows, payload bytes,
    oldest age/height, newest height, and `sybil_block_height`. Check
    `sybil-history` health/logs, the dedicated token, network, history-volume

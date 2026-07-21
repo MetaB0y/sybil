@@ -17,7 +17,7 @@ trap cleanup EXIT
 # Hide Docker deliberately. The scheduled probe treats Docker as an optional
 # on-box extension, while this fixture isolates its public HTTP contract.
 mkdir -p "$tmpdir/bin"
-for command in bash cat curl date dirname grep head mktemp python3 rm sed sleep awk; do
+for command in bash cat curl date dirname grep head mktemp python3 rm sed sleep awk xargs; do
     ln -s "$(command -v "$command")" "$tmpdir/bin/$command"
 done
 
@@ -27,9 +27,11 @@ fail() {
 }
 
 start_fixture() {
-    local mode=$1 port_file="$tmpdir/port"
+    local mode=$1 port_file="$tmpdir/port" metrics_file="$tmpdir/metrics"
     rm -f "$port_file"
-    python3 scripts/_synthetic_probe_fixture.py --mode "$mode" --port-file "$port_file" &
+    : > "$metrics_file"
+    python3 scripts/_synthetic_probe_fixture.py \
+        --mode "$mode" --port-file "$port_file" --metrics-file "$metrics_file" &
     fixture_pid=$!
     for _ in $(seq 1 100); do
         [[ -s "$port_file" ]] && break
@@ -85,6 +87,50 @@ status=$?
 set -e
 [[ "$status" -ne 0 && "$output" == *"Next.js asset returned 503"* ]] \
     || fail "broken public Next.js asset did not fail closed: $output"
+stop_fixture
+
+cat > "$tmpdir/bin/docker" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+case "$1" in
+    ps)
+        echo fixture-container
+        ;;
+    inspect)
+        case "$*" in
+            *'.State.ExitCode'*)
+                echo 'sybil-api /fixture-sybil-api-1 running healthy 0'
+                ;;
+            *'.State.StartedAt'*)
+                echo 'sybil-api 0 false 134217728 2026-07-21T18:03:14.921882519Z'
+                ;;
+            *)
+                exit 2
+                ;;
+        esac
+        ;;
+    exec)
+        if [[ "${3:-}" == cat && "${4:-}" == /sys/fs/cgroup/memory.current ]]; then
+            echo 1048576
+        elif [[ "${3:-}" == sh ]]; then
+            echo 2097152
+        else
+            exit 2
+        fi
+        ;;
+    *)
+        exit 2
+        ;;
+esac
+EOF
+chmod +x "$tmpdir/bin/docker"
+
+start_fixture ok
+output="$(run_probe)" || fail "healthy Docker resource path failed: $output"
+grep -Fq 'sybil_synthetic_container_started_at_seconds{' "$tmpdir/metrics" \
+    || fail "container start-time metric was not pushed"
+grep -Fq 'service="sybil-api"} 1784656994' "$tmpdir/metrics" \
+    || fail "container start time was not converted to epoch seconds"
 stop_fixture
 
 echo "synthetic probe tests: ok"

@@ -117,8 +117,31 @@ tests:
               severity: warning
               component: lifecycle
             exp_annotations:
-              summary: "A Sybil container restarted"
-              description: "Compose service sybil-web has automatically restarted (current count: 1). Inspect Docker events, container logs, and the host OOM counter before treating current health as recovery."
+              summary: "A Sybil container process started again"
+              description: "Compose service sybil-web restarted or was replaced. Inspect its retained start-time/restart series, Docker events, container logs, and the host OOM counter before treating current health as recovery."
+
+  - interval: 1m
+    input_series:
+      - series: 'sybil_synthetic_container_restart_count{job="sybil-synthetic",instance="https://devnet.example",service="sybil-history"}'
+        values: "0+0x10"
+      - series: 'sybil_synthetic_container_started_at_seconds{job="sybil-synthetic",instance="https://devnet.example",service="sybil-history"}'
+        values: "100+0x4 200+0x10"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ContainerRestartObserved
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: ContainerRestartObserved
+        exp_alerts:
+          - exp_labels:
+              job: "sybil-synthetic"
+              instance: "https://devnet.example"
+              service: "sybil-history"
+              severity: warning
+              component: lifecycle
+            exp_annotations:
+              summary: "A Sybil container process started again"
+              description: "Compose service sybil-history restarted or was replaced. Inspect its retained start-time/restart series, Docker events, container logs, and the host OOM counter before treating current health as recovery."
 
   - interval: 1m
     input_series:

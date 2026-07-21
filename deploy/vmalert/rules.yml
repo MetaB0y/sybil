@@ -838,20 +838,29 @@ groups:
           description: "node_vmstat_oom_kill increased. Inspect the kernel journal and the Grafana resource panels immediately; container health can remain stale after a global OOM kill."
 
       - alert: ContainerRestartObserved
-        # Docker's current running/healthy state hides an automatic process
-        # replacement. Alert only on an observed increase; a deliberate
-        # container recreation resets the gauge to zero and does not fire.
+        # Docker's current running/healthy state hides both an automatic
+        # restart and a Compose replacement. RestartCount catches the former;
+        # StartedAt catches either and remains useful when a new container's
+        # restart counter resets to zero. The OR keeps one alert identity when
+        # both branches observe the same automatic restart.
         expr: |
-          max_over_time(sybil_synthetic_container_restart_count[10m])
-            > min_over_time(sybil_synthetic_container_restart_count[10m])
-          and sybil_synthetic_container_restart_count > 0
+          (
+            max_over_time(sybil_synthetic_container_restart_count[10m])
+              > min_over_time(sybil_synthetic_container_restart_count[10m])
+            and last_over_time(sybil_synthetic_container_restart_count[10m]) > 0
+          )
+          or
+          (
+            max_over_time(sybil_synthetic_container_started_at_seconds[10m])
+              > min_over_time(sybil_synthetic_container_started_at_seconds[10m])
+          )
         for: 0m
         labels:
           severity: warning
           component: lifecycle
         annotations:
-          summary: "A Sybil container restarted"
-          description: "Compose service {{ $labels.service }} has automatically restarted (current count: {{ $value }}). Inspect Docker events, container logs, and the host OOM counter before treating current health as recovery."
+          summary: "A Sybil container process started again"
+          description: "Compose service {{ $labels.service }} restarted or was replaced. Inspect its retained start-time/restart series, Docker events, container logs, and the host OOM counter before treating current health as recovery."
 
       - alert: ContainerOomKilled
         expr: sybil_synthetic_container_oom_killed > 0

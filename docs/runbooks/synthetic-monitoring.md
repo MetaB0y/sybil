@@ -38,9 +38,10 @@ without creating accounts, orders, or any other application state.
 - every discovered Compose container is running and is either healthy or has
   no healthcheck, using the exact shared helper also used by
   `post-deploy-smoke.sh`; and
-- Docker restart counts, current OOM-killed flags, and cgroup-v2 current/peak/
-  limit memory for each running Compose service are published alongside the
-  result, so a recovered process cannot hide its lifecycle or memory curve.
+- Docker restart counts, process start timestamps, current OOM-killed flags,
+  and cgroup-v2 current/peak/limit memory for each running Compose service are
+  published alongside the result, so a recovered or Compose-replaced process
+  cannot hide its lifecycle or memory curve.
 
 Set `SYBIL_SMOKE_DOCKER_SSH=root@host` to perform the same optional container
 check over SSH. If Docker is unavailable the HTTP checks still run; on the
@@ -67,6 +68,7 @@ sybil_synthetic_proof_lag_blocks{job="sybil-synthetic",instance="<base-url>"} <b
 sybil_synthetic_proof_lag_limit_blocks{job="sybil-synthetic",instance="<base-url>"} <blocks>
 sybil_synthetic_container_restart_count{job="sybil-synthetic",instance="<base-url>",service="<compose-service>"} <count>
 sybil_synthetic_container_oom_killed{job="sybil-synthetic",instance="<base-url>",service="<compose-service>"} 0|1
+sybil_synthetic_container_started_at_seconds{job="sybil-synthetic",instance="<base-url>",service="<compose-service>"} <unix-seconds>
 sybil_synthetic_container_memory_usage_bytes{job="sybil-synthetic",instance="<base-url>",service="<compose-service>"} <bytes>
 sybil_synthetic_container_memory_peak_bytes{job="sybil-synthetic",instance="<base-url>",service="<compose-service>"} <bytes>
 sybil_synthetic_container_memory_limit_bytes{job="sybil-synthetic",instance="<base-url>",service="<compose-service>"} <bytes>
@@ -90,9 +92,11 @@ port. `SYBIL_SYNTHETIC_VM_URL` can instead name a directly reachable VM URL.
   gives a graded lag series either way. The alert and probe therefore keep the
   same ceiling when operators tune it for real-prover cadence.
 - `ContainerRestartObserved` fires when a service's Docker restart count
-  increases after observation began. `ContainerOomKilled` adds exact service
-  attribution while Docker's current flag remains set; `HostOomKill` remains
-  the durable host-level fallback after an automatic restart clears it.
+  increases or its process start timestamp changes after observation began.
+  The latter also catches a Compose replacement whose new container resets the
+  restart counter to zero. `ContainerOomKilled` adds exact service attribution
+  while Docker's current flag remains set; `HostOomKill` remains the durable
+  host-level fallback after an automatic restart clears it.
 - `ContainerMemoryHigh` warns after ten minutes above 85% of a configured
   cgroup limit; `ContainerMemoryCritical` fires after two minutes above 95%.
   Both compare the latest sample in ten minutes so timer jitter beyond the

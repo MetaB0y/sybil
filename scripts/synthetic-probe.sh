@@ -138,15 +138,16 @@ push_mm_liquidity_metric() {
 }
 
 push_container_resource_metrics() {
-    local instance rows batch="" service restart_count oom_killed memory_limit memory_current memory_peak service_label oom_value
+    local instance rows batch="" service restart_count oom_killed memory_limit started_at_seconds memory_current memory_peak service_label oom_value
     instance="$(prom_label_escape "$BASE")"
     rows="$(smoke_compose_resource_rows "$DOCKER_SSH" "$COMPOSE_PROJECT")" \
         || return 1
     [[ -n "$rows" ]] || return 1
 
-    while read -r service restart_count oom_killed memory_limit memory_current memory_peak; do
+    while read -r service restart_count oom_killed memory_limit started_at_seconds memory_current memory_peak; do
         [[ -n "$service" && "$restart_count" =~ ^[0-9]+$ ]] || return 1
-        [[ "$memory_limit" =~ ^[0-9]+$ && "$memory_current" =~ ^[0-9]+$ && "$memory_peak" =~ ^[0-9]+$ ]] \
+        [[ "$memory_limit" =~ ^[0-9]+$ && "$started_at_seconds" =~ ^[1-9][0-9]*$ \
+            && "$memory_current" =~ ^[0-9]+$ && "$memory_peak" =~ ^[0-9]+$ ]] \
             || return 1
         case "$oom_killed" in
             true) oom_value=1 ;;
@@ -157,6 +158,8 @@ push_container_resource_metrics() {
         batch+="${batch:+$'\n'}sybil_synthetic_container_restart_count{job=\"sybil-synthetic\",instance=\"$instance\",service=\"$service_label\"} $restart_count"
         batch+=$'\n'
         batch+="sybil_synthetic_container_oom_killed{job=\"sybil-synthetic\",instance=\"$instance\",service=\"$service_label\"} $oom_value"
+        batch+=$'\n'
+        batch+="sybil_synthetic_container_started_at_seconds{job=\"sybil-synthetic\",instance=\"$instance\",service=\"$service_label\"} $started_at_seconds"
         batch+=$'\n'
         batch+="sybil_synthetic_container_memory_usage_bytes{job=\"sybil-synthetic\",instance=\"$instance\",service=\"$service_label\"} $memory_current"
         batch+=$'\n'

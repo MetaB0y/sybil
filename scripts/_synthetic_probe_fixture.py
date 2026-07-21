@@ -18,6 +18,7 @@ def main() -> None:
         required=True,
     )
     parser.add_argument("--port-file", type=Path, required=True)
+    parser.add_argument("--metrics-file", type=Path, required=True)
     args = parser.parse_args()
 
     class Handler(BaseHTTPRequestHandler):
@@ -113,7 +114,9 @@ def main() -> None:
         def do_POST(self) -> None:  # noqa: N802 - stdlib handler contract
             if urlsplit(self.path).path == "/vm/api/v1/import/prometheus":
                 length = int(self.headers.get("Content-Length", "0"))
-                self.rfile.read(length)
+                body = self.rfile.read(length)
+                with args.metrics_file.open("ab") as metrics:
+                    metrics.write(body + b"\n")
                 self.send_body(204, b"", "text/plain")
             else:
                 self.send_json({"error": "not found"}, 404)

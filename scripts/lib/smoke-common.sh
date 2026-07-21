@@ -256,15 +256,16 @@ smoke_compose_service_rows() {
 }
 
 # Print one row per running compose container:
-#   "<service> <restart-count> <oom-killed> <limit> <current> <peak>".
+#   "<service> <restart-count> <oom-killed> <limit> <started-at-seconds> <current> <peak>".
 # RestartCount survives an automatic restart of the same container, which is
-# the lifecycle history hidden by a point-in-time running/healthy check. The
-# cgroup-v2 counters preserve the process's memory curve without exposing the
-# Docker socket to the monitoring containers.
+# the lifecycle history hidden by a point-in-time running/healthy check.
+# StartedAt also changes when Compose replaces the entire container and its
+# restart counter resets. The cgroup-v2 counters preserve the process's memory
+# curve without exposing the Docker socket to the monitoring containers.
 smoke_compose_resource_rows() {
     local docker_ssh=$1 compose_project=$2
     smoke_docker_run "$docker_ssh" \
-        "docker ps -q --filter label=com.docker.compose.project=$compose_project | while read -r container; do state=\$(docker inspect --format '{{index .Config.Labels \"com.docker.compose.service\"}} {{.RestartCount}} {{.State.OOMKilled}} {{.HostConfig.Memory}}' \"\$container\") || exit; current=\$(docker exec \"\$container\" cat /sys/fs/cgroup/memory.current) || exit; peak=\$(docker exec \"\$container\" sh -c 'cat /sys/fs/cgroup/memory.peak 2>/dev/null || cat /sys/fs/cgroup/memory.current') || exit; printf '%s %s %s\\n' \"\$state\" \"\$current\" \"\$peak\"; done"
+        "docker ps -q --filter label=com.docker.compose.project=$compose_project | while read -r container; do state=\$(docker inspect --format '{{index .Config.Labels \"com.docker.compose.service\"}} {{.RestartCount}} {{.State.OOMKilled}} {{.HostConfig.Memory}} {{.State.StartedAt}}' \"\$container\") || exit; started_at=\${state##* }; started_at_seconds=\$(date -u -d \"\$started_at\" +%s) || exit; state=\${state% *}; current=\$(docker exec \"\$container\" cat /sys/fs/cgroup/memory.current) || exit; peak=\$(docker exec \"\$container\" sh -c 'cat /sys/fs/cgroup/memory.peak 2>/dev/null || cat /sys/fs/cgroup/memory.current') || exit; printf '%s %s %s %s\\n' \"\$state\" \"\$started_at_seconds\" \"\$current\" \"\$peak\"; done"
 }
 
 # Native catalog installation is an explicit one-shot deployment service. No
