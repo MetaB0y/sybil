@@ -164,7 +164,7 @@ export function GlobalNav() {
         <button
           ref={menuButtonRef}
           type="button"
-          className="global-nav-menu-button"
+          className="global-nav-menu-button hit-target"
           aria-label={
             menuOpen ? "Close navigation menu" : "Open navigation menu"
           }

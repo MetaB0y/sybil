@@ -463,6 +463,7 @@ export function BuyBox({
 
   return (
     <div
+      data-testid="buy-box"
       style={{
         background: "var(--surface-1)",
         border: "1px solid var(--border-1)",

@@ -13,6 +13,8 @@ export function RangeTabs({
 }) {
   return (
     <div
+      /* Four 11px labels in one track — see `.hit-target-group`. */
+      className="hit-target-group"
       style={{
         display: "inline-flex",
         background: "var(--bg-2)",

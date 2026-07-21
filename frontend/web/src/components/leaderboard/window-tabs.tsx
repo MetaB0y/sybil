@@ -13,6 +13,9 @@ export function WindowTabs({
 }) {
   return (
     <div
+      /* Three 11px labels in one track — the coarse-pointer floor made it a
+         44px slab under the page title. See `.hit-target-group`. */
+      className="hit-target-group"
       style={{
         display: "inline-flex",
         background: "var(--bg-2)",
@@ -37,7 +40,7 @@ export function WindowTabs({
             }}
             style={{
               padding: "4px 12px",
-              minHeight: 40,
+              minHeight: 28,
               border: 0,
               borderRadius: 3,
               background: active ? "var(--surface-2)" : "transparent",

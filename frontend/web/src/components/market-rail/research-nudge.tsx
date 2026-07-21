@@ -31,6 +31,10 @@ export function ResearchNudge() {
   const [outgoing, setOutgoing] = useState<number | null>(null);
   const [paused, setPaused] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
+  // The rotation is only tappable because a mouse can hover it still. A phone
+  // has no hover, so every 2.6s the link you were reaching for slid away and
+  // another took its place — visible for a moment, impossible to hit.
+  const [noHover, setNoHover] = useState(false);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -41,9 +45,25 @@ export function ResearchNudge() {
   }, []);
 
   useEffect(() => {
+    const media = window.matchMedia("(hover: none)");
+    const sync = () => setNoHover(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
+
+  // Frozen, not fixed: the rotation exists so no one service owns the slot, so
+  // a touch device draws its one service at random instead of always the first.
+  // Only read on the no-hover path, which never runs during hydration (the
+  // media query resolves in an effect), so the server's markup still matches.
+  const [frozenIndex] = useState(() =>
+    Math.floor(Math.random() * PLATFORMS.length),
+  );
+
+  useEffect(() => {
     // Reduced-motion means no autonomous content replacement, not merely a
     // hard cut without the slide animation.
-    if (paused || reducedMotion) return;
+    if (paused || reducedMotion || noHover) return;
     const interval = window.setInterval(() => {
       setIndex((current) => {
         if (!reducedMotion) setOutgoing(current);
@@ -51,7 +71,7 @@ export function ResearchNudge() {
       });
     }, ROTATE_MS);
     return () => window.clearInterval(interval);
-  }, [paused, reducedMotion]);
+  }, [paused, reducedMotion, noHover]);
 
   useEffect(() => {
     if (outgoing == null) return;
@@ -59,8 +79,10 @@ export function ResearchNudge() {
     return () => window.clearTimeout(timeout);
   }, [outgoing]);
 
-  const platform = PLATFORMS[index]!;
-  const outgoingPlatform = outgoing == null ? null : PLATFORMS[outgoing];
+  const shownIndex = noHover ? frozenIndex : index;
+  const platform = PLATFORMS[shownIndex]!;
+  const outgoingPlatform =
+    outgoing == null || noHover ? null : PLATFORMS[outgoing];
 
   return (
     <div
@@ -111,7 +133,7 @@ export function ResearchNudge() {
           </span>
         )}
         <a
-          key={index}
+          key={shownIndex}
           className="mobile-action-link"
           href={platform.url}
           target="_blank"

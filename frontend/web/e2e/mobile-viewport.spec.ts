@@ -55,26 +55,15 @@ test.describe("mobile viewport smoke", () => {
     await expect(page.getByTestId("price-chart-tooltip")).toBeVisible();
     await expect(chart).toHaveCSS("touch-action", "pan-y");
 
-    const placeOrder = page.getByRole("button", { name: "Place order" });
-    await expect(placeOrder).toBeVisible();
-    await placeOrder.click();
-
-    const dialog = page.getByRole("dialog", { name: "Place order" });
-    await expect(dialog).toBeVisible();
-    const closeOrder = dialog.getByRole("button", { name: "Close" });
-    await expect(closeOrder).toBeFocused();
-    const sheet = dialog.locator(".place-order-sheet");
-    await expect(sheet).toBeVisible();
-    const bottomGap = await sheet.evaluate(
-      (node) => window.innerHeight - node.getBoundingClientRect().bottom,
-    );
-    expect(Math.abs(bottomGap)).toBeLessThanOrEqual(1);
+    // Trading leads the page at phone width: the rail sits above the chart, so
+    // the bet controls must be on screen without a scroll or a sheet.
+    const rail = page.locator(".market-rail-responsive");
+    await expect(rail).toBeVisible();
+    const railTop = (await rail.boundingBox())!.y;
+    const chartTop = (await page.locator(".market-detail-chart-head").first().boundingBox())!.y;
+    expect(railTop).toBeLessThan(chartTop);
     await expectNoDocumentOverflow(page, href!);
-    await expectTouchTargets(page, `${href!} order sheet`);
-
-    await closeOrder.click();
-    await expect(dialog).toBeHidden();
-    await expect(placeOrder).toBeFocused();
+    await expectTouchTargets(page, href!);
 
     for (const path of ["/portfolio", "/activity", "/arena"]) {
       await page.goto(path);
@@ -356,10 +345,11 @@ async function expectTouchTargets(page: Page, path: string) {
           return [];
         }
         // Controls that are drawn small on purpose (the glossary "?", the
-        // market sort chips) carry their 44px as a pseudo-element hit area —
-        // real for a finger, invisible to getBoundingClientRect. See
-        // `.hit-target` in globals.css.
+        // market sort chips, the segments of a range bar) carry their 44px as a
+        // pseudo-element hit area — real for a finger, invisible to
+        // getBoundingClientRect. See `.hit-target` in globals.css.
         if (target.dataset.hitArea === "expanded") return [];
+        if (target.closest(".hit-target, .hit-target-group")) return [];
         if (
           target instanceof HTMLAnchorElement &&
           getComputedStyle(target).display === "inline"

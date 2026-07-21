@@ -51,6 +51,12 @@ export function Glossary({
   // in render is disallowed). `null` = closed; a rect = open + anchored.
   const [rect, setRect] = useState<DOMRect | null>(null);
   const ref = useRef<HTMLSpanElement>(null);
+  // A tap fires the compatibility mouse events before `click`: the badge
+  // "hovers" open, then the click toggle immediately closed it again, so on a
+  // phone the definition flashed for a frame and could not be read. This
+  // records that the tooltip was opened by that hover, and the click then
+  // leaves it alone. Tapping elsewhere fires mouseleave and closes it.
+  const openedByHover = useRef(false);
   const content = GLOSSARY[term] ?? "";
   const openAt = (el: HTMLElement | null) =>
     setRect(el ? el.getBoundingClientRect() : null);
@@ -64,8 +70,14 @@ export function Glossary({
         alignItems: "center",
         gap: 4,
       }}
-      onMouseEnter={(e) => openAt(e.currentTarget)}
-      onMouseLeave={() => setRect(null)}
+      onMouseEnter={(e) => {
+        openedByHover.current = true;
+        openAt(e.currentTarget);
+      }}
+      onMouseLeave={() => {
+        openedByHover.current = false;
+        setRect(null);
+      }}
       onFocus={(e) => openAt(e.currentTarget)}
       onBlur={() => setRect(null)}
     >
@@ -76,7 +88,14 @@ export function Glossary({
         aria-label={`What is ${term}?`}
         onClick={(e) => {
           e.preventDefault();
-          setRect((r) => (r ? null : ref.current?.getBoundingClientRect() ?? null));
+          if (openedByHover.current) {
+            // This click is the tail of the gesture that just opened it.
+            openedByHover.current = false;
+            return;
+          }
+          setRect((r) =>
+            r ? null : (ref.current?.getBoundingClientRect() ?? null),
+          );
         }}
         // A 13px dot beside an 11px label. On a touch device the blanket 44px
         // control sizing turned it into a circle three times the height of the

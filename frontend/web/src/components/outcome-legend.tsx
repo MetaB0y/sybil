@@ -145,6 +145,13 @@ export function OutcomeLegend({
           <span
             key={o.marketId}
             ref={i === 0 ? firstChipRef : null}
+            /* A chip is a 22px pill labelling one line on the chart. Inflated
+               to the coarse-pointer 44px the legend became a wall of boxes
+               taller than the chart's own header, so the chip keeps its drawn
+               size and its two buttons take the touch target as hit area. The
+               marker sits on the chip, not the legend, because the "+N more"
+               popover below holds real full-size list options. */
+            className="hit-target-group"
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -252,7 +259,7 @@ export function OutcomeLegend({
           <button
             type="button"
             onClick={() => setOpen((o) => !o)}
-            className="text-mono"
+            className="text-mono hit-target"
             style={{
               flexShrink: 0,
               padding: "4px 8px",

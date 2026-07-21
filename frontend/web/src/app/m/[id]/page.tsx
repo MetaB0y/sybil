@@ -11,7 +11,6 @@ import {
 import { EventActivity } from "@/components/event-activity";
 import { EventHoldings } from "@/components/event-holdings";
 import { MarketRail } from "@/components/market-rail";
-import { PlaceOrderModal } from "@/components/market-rail/place-order-modal";
 import { MarketThumb } from "@/components/market-thumb";
 import { OutcomeLegend } from "@/components/outcome-legend";
 import { PriceChart, PriceHistoryNotice } from "@/components/price-chart";
@@ -30,6 +29,7 @@ import { useMarketStats } from "@/lib/market-detail/use-market-stats";
 import { useEventPriceHistory } from "@/lib/markets/use-event-price-history";
 import { useEventRaw } from "@/lib/markets/use-event-raw";
 import { useEventTraders } from "@/lib/markets/use-event-traders";
+import { useCompactLayout } from "@/lib/responsive/use-compact";
 import { selectLatestBlock, useStore } from "@/lib/store";
 
 type RouteParams = { id: string };
@@ -98,9 +98,6 @@ export default function MarketDetailPage({
 
   const marketQ = useMarket(marketId);
   const market = marketQ.data;
-  const [orderOpen, setOrderOpen] = useState(false);
-  const openOrder = useCallback(() => setOrderOpen(true), []);
-  const closeOrder = useCallback(() => setOrderOpen(false), []);
 
   return (
     <SelectOutcomeProvider value={selectOutcome}>
@@ -116,11 +113,7 @@ export default function MarketDetailPage({
                 state shows in the status pill + the rail's read-only notice, not
                 a separate banner row (which shifted the page). */}
             <div className="market-detail-header-pad">
-              <Header
-                marketId={marketId}
-                market={market}
-                {...(market.closed === true ? {} : { onPlaceOrder: openOrder })}
-              />
+              <Header marketId={marketId} market={market} />
             </div>
 
             <div
@@ -140,12 +133,6 @@ export default function MarketDetailPage({
 
               <MarketRail marketId={marketId} />
             </div>
-
-            <PlaceOrderModal
-              marketId={marketId}
-              open={orderOpen}
-              onClose={closeOrder}
-            />
           </>
         )}
       </main>
@@ -162,7 +149,6 @@ export default function MarketDetailPage({
 function Header({
   marketId,
   market,
-  onPlaceOrder,
 }: {
   marketId: number;
   market: {
@@ -182,9 +168,8 @@ function Header({
     event_id?: string | null;
     polymarket_condition_id?: string | null;
   };
-  /** Mobile shortcut; desktop ordering stays in the visually vetted rail. */
-  onPlaceOrder?: () => void;
 }) {
+  const compact = useCompactLayout();
   const { stats } = useMarketStats(marketId);
   const { primary } = pickDisplayCategory(market.categories, market.category);
   const resolvesMs =
@@ -224,7 +209,9 @@ function Header({
           fallbackIconUrl={
             market.market_icon_url ?? market.event_icon_url ?? null
           }
-          size={56}
+          /* Beside a 40px title the 56px tile reads as a logo; beside the
+             phone's 20px one it out-weighed the question it belongs to. */
+          size={compact ? 34 : 56}
         />
       </span>
       {/* Breadcrumb: Markets / ● Category / resolves <date> · status */}
@@ -293,15 +280,6 @@ function Header({
           </h1>
           {market.closed === true && (
             <StatusPill status={market.status} closed />
-          )}
-          {onPlaceOrder && (
-            <button
-              type="button"
-              className="market-detail-place-order"
-              onClick={onPlaceOrder}
-            >
-              Place order
-            </button>
           )}
         </div>
 

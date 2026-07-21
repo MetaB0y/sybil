@@ -159,6 +159,22 @@ async function pickMarkets(
   };
 }
 
+/**
+ * Switch the market rail to Pro and return its signed limit ticket.
+ *
+ * The ticket used to be reachable only through a phone-width "Place order"
+ * sheet; that button is gone now that the rail leads the page on a phone, so
+ * the journey drives the same BuyBox where it actually lives.
+ */
+async function openProTicket(page: Page) {
+  const pro = page.getByRole("tab", { name: "Pro" });
+  await expect(pro).toBeVisible({ timeout: 20_000 });
+  await pro.click();
+  const ticket = page.getByTestId("buy-box");
+  await expect(ticket).toBeVisible({ timeout: 20_000 });
+  return ticket;
+}
+
 test("passkey account create + signed order (live rp_id/origin validation)", async ({
   page,
   request,
@@ -500,17 +516,12 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   const { priced } = await pickMarkets(request);
   expect(priced, "need an active market with a price").toBeTruthy();
   const market = priced!;
-  // The compact layout opens the reviewed order sheet; desktop Lite exposes
-  // direct bet controls instead of a separate "Place order" button.
+  // The rail leads the page at phone width, so the signed limit ticket is
+  // reachable inline — there is no longer a "Place order" sheet to open.
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/m/${market.market_id}`);
 
-  const placeOrder = page.getByRole("button", { name: "Place order" });
-  await expect(placeOrder.first()).toBeVisible({ timeout: 20_000 });
-  await placeOrder.first().click();
-
-  const orderDialog = page.getByRole("dialog", { name: "Place order" });
-  await expect(orderDialog).toBeVisible();
+  const orderDialog = await openProTicket(page);
 
   // A priced market must present its real indicative anchor (not the
   // null-price seed-the-book copy) — sanity that we picked a live market.
@@ -601,13 +612,7 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   //     id without assuming a busy deployment still has a never-traded market.
   const cancelMarket = market;
   await page.goto(`/m/${cancelMarket.market_id}`);
-  const cancelMarketPlaceOrder = page
-    .getByRole("button", { name: "Place order" })
-    .first();
-  await expect(cancelMarketPlaceOrder).toBeVisible({ timeout: 20_000 });
-  await cancelMarketPlaceOrder.click();
-
-  const cancelOrderDialog = page.getByRole("dialog", { name: "Place order" });
+  const cancelOrderDialog = await openProTicket(page);
   const limitSlider = cancelOrderDialog.getByRole("slider");
   await limitSlider.focus();
   await limitSlider.press("Home");

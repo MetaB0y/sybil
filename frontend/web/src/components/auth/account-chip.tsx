@@ -43,7 +43,7 @@ export function AccountChip() {
   if (!session) {
     return (
       <button
-        className="account-chip nav-chip"
+        className="account-chip nav-chip hit-target"
         type="button"
         onClick={() => setOpen(true)}
       >
@@ -124,7 +124,7 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
   return (
     <div ref={rootRef} style={{ position: "relative" }}>
       <button
-        className="account-chip nav-chip"
+        className="account-chip nav-chip hit-target"
         type="button"
         data-connected="true"
         onClick={() => setOpen((o) => !o)}
@@ -157,8 +157,14 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
           style={{
             position: "absolute",
             top: "calc(100% + 6px)",
-            left: 0,
+            // Anchored to the chip's right edge with a floor of its own, not
+            // stretched to the chip's width: on a phone the chip is ~110px, and
+            // at that width every row broke over two lines ("In orders" under
+            // its own label, "Copy private key (backup)" over three). Capped so
+            // it can never reach past the left edge of a small screen.
             right: 0,
+            minWidth: 236,
+            maxWidth: "calc(100vw - var(--space-6))",
             background: "var(--surface-1)",
             border: "1px solid var(--border-1)",
             borderRadius: 8,
@@ -258,6 +264,7 @@ function InfoRow({
           letterSpacing: "var(--track-wide)",
           textTransform: "uppercase",
           color: "var(--fg-4)",
+          whiteSpace: "nowrap",
         }}
       >
         {label}
@@ -391,7 +398,7 @@ function ChipShell({ label, disabled }: { label: string; disabled?: boolean }) {
     <button
       type="button"
       disabled={disabled}
-      className="nav-chip"
+      className="nav-chip hit-target"
       aria-hidden={disabled}
     >
       {label}

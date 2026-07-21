@@ -52,6 +52,10 @@ export function FilterDropdown({
         aria-expanded={open}
         aria-label={ariaLabel}
         onClick={() => setOpen((o) => !o)}
+        /* An 11px mono chip. Three of them side by side on a phone, each blown
+           up to the coarse-pointer 44px, made a band of boxes taller than the
+           tab strip above them. See `.hit-target`. */
+        className="hit-target"
         style={{
           display: "inline-flex",
           alignItems: "center",

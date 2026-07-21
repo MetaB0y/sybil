@@ -145,11 +145,15 @@ textarea {
  * chunky boxes.
  *
  * `.hit-target` keeps the element's drawn size and grows only the *hit* area,
- * via a centred pseudo-element that takes no layout space. Anything using it
- * carries `data-hit-area="expanded"` so the e2e touch-target sweep — which can
- * only measure bounding boxes — knows the 44px is there.
+ * via a centred pseudo-element that takes no layout space. `.hit-target-group`
+ * says the same thing about every button inside a segmented control (a range
+ * bar, a tab pair) — there the pseudo-element grows only downwards and upwards,
+ * because neighbouring segments touch and a wider hit area would steal taps
+ * from the segment next door. The e2e touch-target sweep — which can only
+ * measure bounding boxes — skips anything under either marker.
  */
-.hit-target {
+.hit-target,
+.hit-target-group button {
   position: relative;
 }
 
@@ -162,6 +166,16 @@ textarea {
     width: max(100%, 44px);
     height: max(100%, 44px);
     transform: translate(-50%, -50%);
+  }
+
+  .hit-target-group button::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: max(100%, 44px);
+    transform: translateY(-50%);
   }
 }
 
@@ -631,26 +645,6 @@ textarea {
   gap: var(--space-3);
 }
 
-/* Desktop ordering stays in the reviewed rail. Compact layouts get the modal
-   shortcut so order entry remains reachable before the rail reflows below the
-   long market content. */
-.market-detail-place-order {
-  display: none;
-  margin-left: auto;
-  flex-shrink: 0;
-  min-height: 40px;
-  padding: 8px 16px;
-  border: 0;
-  border-radius: var(--radius-md);
-  background: var(--accent);
-  color: var(--fg-on-accent);
-  font-family: var(--font-sans);
-  font-size: var(--fs-13);
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  cursor: pointer;
-}
-
 .market-detail-title {
   font-family: var(--font-display);
   font-weight: 600;
@@ -669,12 +663,33 @@ textarea {
   flex-wrap: nowrap;
 }
 
-.place-order-close {
-  width: 40px;
-  height: 40px;
-  display: inline-flex;
+/* Expanded batch panel. The left indent lines it up under the row's expand
+   caret; small screens override it (there is no caret column there). */
+.activity-batch-detail {
+  padding: 18px 24px 24px 70px;
+}
+
+/* Activity / Comments, the outcome filter, then the range track. The filter
+   follows the switch it belongs to; the range track takes the right edge on a
+   desktop and its own line on a phone. */
+.event-activity-head {
+  display: flex;
   align-items: center;
-  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  min-width: 0;
+}
+
+.event-activity-head > :last-child {
+  margin-left: auto;
+}
+
+@media (max-width: 640px) {
+  /* No right edge to hold on a phone — the track keeps its own width and wraps
+     to the next line when the switch and the filter have taken the first. */
+  .event-activity-head > :last-child {
+    margin-left: 0;
+  }
 }
 
 .markets-filter-bar,
@@ -768,6 +783,9 @@ textarea {
 .data-card {
   display: flex;
   flex-direction: column;
+  /* A card's min-content is its widest pair row; without this it can push its
+     way out of any flex or grid parent that sizes to content. */
+  min-width: 0;
   gap: 9px;
   padding: 12px 14px;
   background: var(--surface-1);
@@ -821,16 +839,20 @@ textarea {
    label and its value at opposite ends of a lot of empty space. */
 .data-card-pairs {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 7px var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 10px var(--space-4);
   max-width: 680px;
 }
 
+/* Label above value, both flush left. Side by side with the label pushed to one
+   edge and the value to the other, two pairs on a line read as four columns
+   with every value sitting closer to the *next* pair's label than its own —
+   "PNL   +$33.18   ROI   +3.3%". Stacked, each pair is unmistakably one thing.
+   The tabular figures still line up, because the columns are equal width. */
 .data-card-pair {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
 }
 
@@ -850,9 +872,8 @@ textarea {
 .data-card-value {
   min-width: 0;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--fg-1);
-  text-align: right;
   overflow-wrap: anywhere;
 }
 
@@ -873,15 +894,26 @@ textarea {
    template is inline on the header element, hence the !important. */
 .table-sort-strip {
   display: flex !important;
-  flex-wrap: wrap;
+  /* One scrolling line, not a wrapped block. Wrapped over two lines the strip
+     read as the broken header of a table that isn't there any more; kept on one
+     line it reads as what it is — a row of controls. */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
   align-items: center;
   gap: 4px var(--space-3) !important;
   min-width: 0 !important;
   padding: 0 2px var(--space-2) !important;
 }
 
+.table-sort-strip::-webkit-scrollbar {
+  display: none;
+}
+
 .table-sort-strip::before {
   content: "sort";
+  flex: 0 0 auto;
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: var(--track-wide);
@@ -911,6 +943,7 @@ textarea {
   justify-content: flex-start !important;
   min-height: 0 !important;
   padding: 2px 0 !important;
+  white-space: nowrap;
 }
 
 /* Portfolio table rows (Positions / Orders / Trades / History). Every row is a
@@ -1282,12 +1315,6 @@ textarea {
 /* Market-detail page reflow keeps its own 1100px breakpoint, independent of the
    nav collapse above. */
 @media (max-width: 1100px) {
-  .market-detail-place-order {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-
   .market-detail-main {
     height: auto;
     min-height: calc(100dvh - var(--nav-height));
@@ -1317,8 +1344,17 @@ textarea {
     padding-bottom: var(--space-6);
   }
 
+  /* minmax(0, …), not 1fr: a grid item's automatic minimum is its content, and
+     a stack of cards min-contents at five 110px pair columns — 614px inside a
+     358px column, which is how the market rows ended up off the screen. */
   .activity-batch-detail-grid {
-    grid-template-columns: 1fr !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  /* The desktop indent aligns the panel under the row's expand caret; there is
+     no caret column left to align to once the rows are cards. */
+  .activity-batch-detail {
+    padding: var(--space-3) var(--space-3) var(--space-4) !important;
   }
 
   /* Dev Zone's two-column views pin their right column at 360px, which is wider
@@ -1411,9 +1447,14 @@ textarea {
     color: var(--fg-2);
   }
 
-  /* One bordered control in the bar, and it is the one that does something. */
+  /* One bordered control in the bar, and it is the one that does something.
+     All three controls now stand 32px — the wordmark's own height — instead of
+     the 44px the coarse-pointer floor gave them; the touch target moved into
+     `.hit-target`'s pseudo-element. */
   .global-nav .nav-chip {
-    height: 36px;
+    height: 32px;
+    padding: 0 var(--space-2);
+    font-size: 11px;
   }
 
   /* A 40px display title plus a range bar does not fit on one phone line, and
@@ -1511,7 +1552,7 @@ textarea {
      crumb the full width and drop the thumb down next to the title, which is
      what it actually labels. */
   .market-detail-header {
-    grid-template-columns: 44px minmax(0, 1fr);
+    grid-template-columns: 34px minmax(0, 1fr);
     grid-template-areas:
       "crumb crumb"
       "thumb headline";
@@ -1522,16 +1563,20 @@ textarea {
     padding-right: var(--space-4);
   }
 
+  /* A 24px question ran to four lines beside the thumbnail, which left a 56px
+     tile pinned to a column of text three times its height — the mismatch that
+     made the icon look misplaced. At 20px next to a 34px tile the two read as
+     one unit, the same pairing the market cards use. */
   .market-detail-title {
-    font-size: var(--fs-24);
-    line-height: var(--lh-24);
+    font-size: var(--fs-20);
+    line-height: var(--lh-20);
     letter-spacing: 0;
   }
 
-  .market-detail-title-row > button {
-    width: 100%;
-    margin-left: 0 !important;
-    min-height: 44px;
+  /* Beside a wrapped title the tile belongs at the first line, not the middle
+     of the block. */
+  .market-detail-thumb {
+    align-self: start;
   }
 
   .portfolio-hero-grid {
@@ -1568,9 +1613,24 @@ textarea {
     grid-template-columns: 1fr 1fr;
   }
 
-  .activity-hero-stats {
+  /* Half these labels wrap to two lines at this width ("trader orders filled")
+     and half don't, which left every other figure sitting a line lower than the
+     one beside it. Reserving the second line puts all four on two shared
+     baselines. */
+  .activity-pulse-cell > .eyebrow {
+    min-height: 2.4em;
+  }
+
+  /* One rhythm for all six figures. Stacked into a single column the two hero
+     numbers kept a 44px display size while the four below them stayed at 30px,
+     with a caption hanging off the left cell of every other row — six stats
+     that never lined up with each other. Same size, same gaps, same column
+     edges: the whole block reads as one grid. */
+  .activity-hero-stats,
+  .activity-hero-numbers {
     column-gap: var(--space-4);
-    row-gap: var(--space-4);
+    row-gap: var(--space-5);
+    align-items: start;
   }
 
   .activity-hero-section,
@@ -1580,14 +1640,9 @@ textarea {
     padding-right: var(--space-4) !important;
   }
 
-  /* Same two-up treatment for the pair of headline $ figures. `clamp()`'s 48px
-     floor is what forced them apart, so the floor comes down here too. */
-  .activity-hero-numbers {
-    column-gap: var(--space-4);
-  }
-
+  /* Matches the 30px of the four stats below it (`BigKv`). */
   .activity-hero-value {
-    font-size: clamp(30px, 9vw, 44px) !important;
+    font-size: 30px !important;
   }
 
   .activity-table-head {
@@ -1631,37 +1686,6 @@ textarea {
     max-width: 100% !important;
   }
 
-  .place-order-overlay {
-    align-items: flex-end !important;
-    padding: 0 !important;
-  }
-
-  .place-order-sheet {
-    width: 100% !important;
-    max-width: none !important;
-    max-height: calc(100dvh - var(--space-4)) !important;
-    border-radius: 16px 16px 0 0 !important;
-    border-bottom: 0 !important;
-  }
-
-  .place-order-sheet::before {
-    content: "";
-    display: block;
-    width: 40px;
-    height: 4px;
-    margin: 8px auto 0;
-    border-radius: var(--radius-pill);
-    background: var(--border-3);
-  }
-
-  .place-order-sheet-header {
-    padding-top: 8px !important;
-  }
-
-  .place-order-sheet-body {
-    padding-bottom: calc(18px + env(safe-area-inset-bottom)) !important;
-  }
-
   .settings-profile-grid,
   .settings-inline-form,
   .settings-row {
@@ -1689,7 +1713,8 @@ textarea {
 
   /* Opted out of the blanket sizing — these carry their 44px as hit area
      instead, so they stay the size they were drawn. See `.hit-target`. */
-  .hit-target {
+  .hit-target,
+  .hit-target-group button {
     min-width: 0 !important;
     min-height: 0 !important;
   }
@@ -1701,7 +1726,6 @@ textarea {
   }
 
   .global-nav-menu-button,
-  .place-order-close,
   .theme-toggle {
     min-width: 44px;
   }
