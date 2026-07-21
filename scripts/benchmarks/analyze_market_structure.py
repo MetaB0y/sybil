@@ -108,7 +108,9 @@ def jsonl_rows(path: Path) -> Iterator[dict[str, Any]]:
             try:
                 row = json.loads(line)
             except json.JSONDecodeError as error:
-                raise ValueError(f"{path}:{line_number}: invalid JSON: {error}") from error
+                raise ValueError(
+                    f"{path}:{line_number}: invalid JSON: {error}"
+                ) from error
             if not isinstance(row, dict):
                 raise ValueError(f"{path}:{line_number}: row is not an object")
             yield row
@@ -145,7 +147,9 @@ def validate_runs(
         if metric_keys != set(METRICS):
             missing = sorted(set(METRICS) - metric_keys)
             extra = sorted(metric_keys - set(METRICS))
-            raise ValueError(f"run metric schema mismatch; missing={missing}, extra={extra}")
+            raise ValueError(
+                f"run metric schema mismatch; missing={missing}, extra={extra}"
+            )
 
     grouped: dict[tuple[str, str, int], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -156,7 +160,8 @@ def validate_runs(
         expected = expected_engines(group[0])
         if engines != expected:
             raise ValueError(
-                f"incomplete engine group {key}: expected {sorted(expected)}, got {sorted(engines)}"
+                f"incomplete engine group {key}: expected {sorted(expected)}, "
+                f"got {sorted(engines)}"
             )
         tape_hashes = {row["tape_blake3"] for row in group}
         if len(tape_hashes) != 1:
@@ -367,7 +372,15 @@ def summarize_pairs(
 
 def flatten_engine_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     output = []
-    for row in sorted(rows, key=lambda row: (row["suite"], row["case_id"], row["seed"], row["engine"])):
+    for row in sorted(
+        rows,
+        key=lambda row: (
+            row["suite"],
+            row["case_id"],
+            row["seed"],
+            row["engine"],
+        ),
+    ):
         flattened = {
             "suite": row["suite"],
             "regime": row["regime"],
@@ -391,7 +404,9 @@ def recursively_reject_identity_keys(value: Any) -> None:
     if isinstance(value, dict):
         found = PROHIBITED_IDENTITY_KEYS.intersection(value)
         if found:
-            raise ValueError(f"historical artifact retained identity keys: {sorted(found)}")
+            raise ValueError(
+                f"historical artifact retained identity keys: {sorted(found)}"
+            )
         for child in value.values():
             recursively_reject_identity_keys(child)
     elif isinstance(value, list):
@@ -550,7 +565,9 @@ def write_bytes(path: Path, content: bytes) -> None:
 
 
 def summary_markdown(
-    protocol: dict[str, Any], validation: dict[str, Any], historical: dict[str, Any] | None
+    protocol: dict[str, Any],
+    validation: dict[str, Any],
+    historical: dict[str, Any] | None,
 ) -> str:
     evidence_label = (
         "publishable held-out evidence"
@@ -596,7 +613,9 @@ def build(args: argparse.Namespace) -> None:
     if args.output_dir.exists():
         raise FileExistsError(f"output directory already exists: {args.output_dir}")
     if (args.historical is None) != (args.historical_manifest is None):
-        raise ValueError("--historical and --historical-manifest must be supplied together")
+        raise ValueError(
+            "--historical and --historical-manifest must be supplied together"
+        )
     protocol_bytes = args.protocol.read_bytes()
     protocol = json.loads(protocol_bytes)
     protocol_hash = blake3.blake3(protocol_bytes).hexdigest()
@@ -618,7 +637,10 @@ def build(args: argparse.Namespace) -> None:
     temporary = args.output_dir.with_name(f".{args.output_dir.name}.tmp-{os.getpid()}")
     temporary.mkdir(parents=True)
     try:
-        write_bytes(temporary / "engine-metrics.csv", csv_bytes(flatten_engine_rows(rows)))
+        write_bytes(
+            temporary / "engine-metrics.csv",
+            csv_bytes(flatten_engine_rows(rows)),
+        )
         write_bytes(temporary / "paired-differences.csv", csv_bytes(pairs))
         write_bytes(temporary / "paired-summary.csv", csv_bytes(summaries))
         if historical_rows is not None and historical_summary is not None:
@@ -627,7 +649,9 @@ def build(args: argparse.Namespace) -> None:
             )
             write_bytes(
                 temporary / "historical-summary.json",
-                (json.dumps(historical_summary, indent=2, sort_keys=True) + "\n").encode(),
+                (
+                    json.dumps(historical_summary, indent=2, sort_keys=True) + "\n"
+                ).encode(),
             )
         analysis_manifest = {
             "schema_version": SCRIPT_SCHEMA_VERSION,
@@ -651,8 +675,14 @@ def build(args: argparse.Namespace) -> None:
             "bootstrap": {
                 "resamples": protocol["uncertainty"]["bootstrap_resamples"],
                 "cluster": "independent paired episode seed within configuration",
-                "rng": "numpy PCG64 seeded by BLAKE3(protocol, comparison, case, metric)",
-                "interval": "2.5th and 97.5th linear-interpolated percentiles of paired means",
+                "rng": (
+                    "numpy PCG64 seeded by "
+                    "BLAKE3(protocol, comparison, case, metric)"
+                ),
+                "interval": (
+                    "2.5th and 97.5th linear-interpolated percentiles "
+                    "of paired means"
+                ),
             },
         }
         write_bytes(

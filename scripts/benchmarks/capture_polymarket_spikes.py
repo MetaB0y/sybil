@@ -129,7 +129,9 @@ def quantity_microshares(value: Any) -> int:
     scaled = Decimal(str(value)) * MICROSHARES_PER_SHARE
     landed = int(scaled.to_integral_value(rounding=ROUND_HALF_EVEN))
     if Decimal(landed) != scaled or landed <= 0:
-        raise ValueError(f"quantity is not a positive integer microshare amount: {value}")
+        raise ValueError(
+            f"quantity is not a positive integer microshare amount: {value}"
+        )
     return landed
 
 
@@ -185,7 +187,8 @@ def public_row_key(row: dict[str, Any]) -> tuple[str, ...]:
 def parse_markets(event: dict[str, Any], expected_slug: str) -> list[Market]:
     if str(event.get("slug", "")) != expected_slug:
         raise ValueError(
-            f"Gamma event slug changed: expected {expected_slug}, got {event.get('slug')}"
+            f"Gamma event slug changed: expected {expected_slug}, "
+            f"got {event.get('slug')}"
         )
     parsed: list[Market] = []
     for raw in event.get("markets", []):
@@ -357,7 +360,9 @@ def reconstruct_market(
         str(row.get("transactionHash", "")).lower() for row in taker_rows
     ]
     if len(transaction_hashes) != len(set(transaction_hashes)):
-        raise ValueError(f"{market.condition_id} has multiple taker summaries per transaction")
+        raise ValueError(
+            f"{market.condition_id} has multiple taker summaries per transaction"
+        )
     all_by_transaction: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in all_rows:
         all_by_transaction[str(row.get("transactionHash", "")).lower()].append(row)
@@ -483,7 +488,9 @@ def capture(args: argparse.Namespace) -> None:
     }
     if found_known != known_hashes:
         missing = sorted(known_hashes - found_known)
-        raise ValueError(f"known transaction hashes absent from complete capture: {missing}")
+        raise ValueError(
+            f"known transaction hashes absent from complete capture: {missing}"
+        )
 
     payload_content = b"".join(
         canonical_json(record).encode() + b"\n" for record in records
