@@ -9,6 +9,7 @@ import {
 } from "react";
 import { BlockBarChart } from "@/components/dev/block-bar-chart";
 import { PageHeader } from "@/components/page-header";
+import { Pager, usePaged } from "@/components/event-list-pager";
 import {
   articleLabel,
   articleList,
@@ -66,6 +67,10 @@ const EMPTY_DECISIONS: ArenaDecision[] = [];
 const EMPTY_TOKEN_USAGE: ArenaTokenUsage[] = [];
 
 type Tone = "yes" | "no" | "warn" | "accent" | "dim";
+
+/** Recent Decisions page size — one screen of cards on a phone, ~3 rows on a
+ *  desktop grid. */
+const DECISIONS_PAGE_SIZE = 12;
 
 export type ArenaFeedUiState = {
   kind: "loading" | "transport_error" | "server_error" | "ready";
@@ -1778,6 +1783,10 @@ function DecisionsPanel({
   onSelectTrader: (trader: string) => void;
   isLoading: boolean;
 }) {
+  // The feed is unbounded — every decision the Arena has ever logged. Rendered
+  // in full it ran to ~76,000px on a phone (one column) and grows with every
+  // bot run, so it pages like the portfolio and market-detail lists do.
+  const paged = usePaged(decisions, DECISIONS_PAGE_SIZE);
   return (
     <Panel style={{ marginTop: 12 }}>
       <PanelHead
@@ -1800,10 +1809,11 @@ function DecisionsPanel({
       />
       <PanelBody>
         <div className="arena-decision-grid" style={{}}>
-          {decisions.map((decision) => (
+          {paged.visible.map((decision) => (
             <DecisionCard key={decision.id} decision={decision} />
           ))}
         </div>
+        <Pager paged={paged} />
         {decisions.length === 0 ? (
           <div style={emptyMsg}>
             {isLoading ? "Loading decisions..." : "No matching bot decisions."}
@@ -1932,16 +1942,28 @@ function DecisionCard({ decision }: { decision: ArenaDecision }) {
                 padding: "2px 6px",
                 borderRadius: 999,
                 fontSize: 10,
-                whiteSpace: "nowrap",
                 overflow: "hidden",
-                textOverflow: "ellipsis",
-                maxWidth: 320,
+                maxWidth: "100%",
                 border: "1px solid var(--border-2)",
                 color: "var(--accent)",
                 textDecoration: "none",
               }}
             >
-              {articleLabel(article)}
+              {/* The truncation lives on this span, not the anchor: the anchor
+                  is a flex box (inline-flex here, and `a.mobile-action-link`
+                  makes it one on touch too), and `text-overflow` does nothing
+                  on a flex container — the headline was hard-clipped mid-word
+                  at the card's edge with no ellipsis. */}
+              <span
+                style={{
+                  minWidth: 0,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {articleLabel(article)}
+              </span>
             </a>
           ))}
         </div>

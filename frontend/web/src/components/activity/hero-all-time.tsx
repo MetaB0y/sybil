@@ -158,6 +158,7 @@ function HeroNumber({
         <span className="eyebrow">{label}</span>
       )}
       <span
+        className="activity-hero-value"
         style={{
           fontFamily: "var(--font-sans)",
           fontWeight: 600,
