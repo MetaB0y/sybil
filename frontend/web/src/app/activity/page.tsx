@@ -42,7 +42,10 @@ export default function ActivityPage() {
           paddingBottom: "var(--space-6)",
         }}
       >
-        <PageHeader title="Activity" />
+        <PageHeader
+          title="Activity"
+          meta="every committed batch · volume, welfare, trader and bot activity"
+        />
       </div>
 
       <ActivityOverviewReadNotice
