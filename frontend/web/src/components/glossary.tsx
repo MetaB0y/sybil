@@ -78,6 +78,13 @@ export function Glossary({
           e.preventDefault();
           setRect((r) => (r ? null : ref.current?.getBoundingClientRect() ?? null));
         }}
+        // A 13px dot beside an 11px label. On a touch device the blanket 44px
+        // control sizing turned it into a circle three times the height of the
+        // word it annotates, and pushed the value below it out of line with its
+        // neighbours. `.hit-target` keeps the dot 13px and puts the 44px into a
+        // pseudo-element that takes no layout space.
+        className="hit-target"
+        data-hit-area="expanded"
         style={{
           width: 13,
           height: 13,

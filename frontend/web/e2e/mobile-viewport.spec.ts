@@ -344,9 +344,22 @@ async function expectTouchTargets(page: Page, path: string) {
     .locator("button:visible, a[href]:visible")
     .evaluateAll((targets) =>
       targets.flatMap((target) => {
-        if (target.getAttribute("aria-label") === "Open Next.js Dev Tools") {
+        // Next's dev-tools overlay lives in a shadow root that Playwright's
+        // locators pierce. None of it exists in a production build, and its
+        // buttons (the toolbar, the issues badge and its collapse control) are
+        // not ours to size — skip the whole portal rather than naming each one.
+        const root = target.getRootNode();
+        if (
+          root instanceof ShadowRoot &&
+          root.host.tagName.toLowerCase() === "nextjs-portal"
+        ) {
           return [];
         }
+        // Controls that are drawn small on purpose (the glossary "?", the
+        // market sort chips) carry their 44px as a pseudo-element hit area —
+        // real for a finger, invisible to getBoundingClientRect. See
+        // `.hit-target` in globals.css.
+        if (target.dataset.hitArea === "expanded") return [];
         if (
           target instanceof HTMLAnchorElement &&
           getComputedStyle(target).display === "inline"

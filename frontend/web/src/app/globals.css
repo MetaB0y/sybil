@@ -134,6 +134,37 @@ textarea {
   min-height: 40px;
 }
 
+/*
+ * Touch target without the bulk.
+ *
+ * Below, every control on a coarse pointer is forced to 44x44 so it can be
+ * tapped. For most controls that is exactly right, but a few are *meant* to be
+ * small: the glossary "?" is a 13px dot beside a label, and the market sort
+ * chips are 26px pills. Blowing those up to 44px made the "?" a circle three
+ * times the height of the word next to it, and turned the filter row into three
+ * chunky boxes.
+ *
+ * `.hit-target` keeps the element's drawn size and grows only the *hit* area,
+ * via a centred pseudo-element that takes no layout space. Anything using it
+ * carries `data-hit-area="expanded"` so the e2e touch-target sweep — which can
+ * only measure bounding boxes — knows the 44px is there.
+ */
+.hit-target {
+  position: relative;
+}
+
+@media (pointer: coarse) {
+  .hit-target::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
+}
+
 .responsive-scroll {
   width: 100%;
   max-width: 100%;
@@ -976,9 +1007,10 @@ textarea {
   background: var(--bg-1);
   color: var(--fg-1);
   font-family: var(--font-sans);
-  /* +36px = markets ClearingTicker height. Every other page header offsets by
-     it so titles land on one baseline; without it "Bot Arena" sat 36px high. */
-  padding: calc(var(--space-6) + 36px) var(--space-5) var(--space-9);
+  /* Every page header offsets by the markets ticker's height so titles land on
+     one baseline; without it "Bot Arena" sat 36px high. */
+  padding: calc(var(--space-6) + var(--ticker-offset)) var(--space-5)
+    var(--space-9);
 }
 
 .arena-panel-grid {
@@ -1482,9 +1514,10 @@ textarea {
   }
 
   .arena-main {
-    /* Sibling pages keep the full offset at every width, so match them here
+    /* Sibling pages keep the same offset at every width, so match them here
        rather than reintroducing the misalignment on small screens. */
-    padding: calc(var(--space-6) + 36px) var(--space-4) var(--space-8);
+    padding: calc(var(--space-6) + var(--ticker-offset)) var(--space-4)
+      var(--space-8);
   }
 
   .arena-panel-grid,
@@ -1565,6 +1598,13 @@ textarea {
   [role="menuitem"],
   summary {
     min-height: 44px !important;
+  }
+
+  /* Opted out of the blanket sizing — these carry their 44px as hit area
+     instead, so they stay the size they were drawn. See `.hit-target`. */
+  .hit-target {
+    min-width: 0 !important;
+    min-height: 0 !important;
   }
 
   button,
