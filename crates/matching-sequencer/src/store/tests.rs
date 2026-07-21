@@ -34,6 +34,17 @@ fn validity_artifact_retention_is_bound_before_genesis() {
     reopened.bind_validity_artifact_retention(false).unwrap();
 }
 
+#[test]
+fn explicit_small_redb_cache_preserves_store_across_reopen() {
+    let path = temp_db_path("store-explicit-redb-cache");
+    let store = Store::open_with_cache(&path, 1024 * 1024).unwrap();
+    store.bind_validity_artifact_retention(false).unwrap();
+    drop(store);
+
+    let reopened = Store::open_with_cache(&path, 1024 * 1024).unwrap();
+    reopened.bind_validity_artifact_retention(false).unwrap();
+}
+
 #[tokio::test]
 async fn legacy_nonempty_store_cannot_acquire_validity_mode_retroactively() {
     let path = temp_db_path("store-unbound-validity-artifact-mode");

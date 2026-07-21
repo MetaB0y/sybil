@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
+use matching_sequencer::store::DEFAULT_REDB_CACHE_BYTES;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BridgeDomain {
@@ -398,6 +399,14 @@ pub struct ApiConfig {
     #[arg(long, default_value = "", env = "SYBIL_DATA_DIR")]
     pub data_dir: String,
 
+    /// In-memory redb page-cache ceiling for the canonical sequencer store.
+    #[arg(
+        long,
+        default_value_t = DEFAULT_REDB_CACHE_BYTES,
+        env = "SYBIL_SEQUENCER_REDB_CACHE_BYTES"
+    )]
+    pub sequencer_redb_cache_bytes: usize,
+
     /// Import a canonical block witness payload into an empty persistent store,
     /// then exit. The imported store continues the witness chain instance; use
     /// `--genesis-hash` when the payload cannot derive the height-1 header.
@@ -512,6 +521,7 @@ impl Default for ApiConfig {
             actor_queue_error_depth: 5_000,
             liquidity_band_nanos: 50_000_000,
             data_dir: String::new(),
+            sequencer_redb_cache_bytes: DEFAULT_REDB_CACHE_BYTES,
             import_witness: false,
             payload: None,
             expect_state_root: None,
@@ -558,6 +568,18 @@ impl ApiConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sequencer_redb_cache_default_and_cli_override_are_exact() {
+        assert_eq!(
+            ApiConfig::default().sequencer_redb_cache_bytes,
+            DEFAULT_REDB_CACHE_BYTES
+        );
+        let parsed =
+            ApiConfig::try_parse_from(["sybil-api", "--sequencer-redb-cache-bytes", "1048576"])
+                .unwrap();
+        assert_eq!(parsed.sequencer_redb_cache_bytes, 1024 * 1024);
+    }
 
     #[test]
     fn bridge_domain_is_all_or_none_and_strictly_typed() {

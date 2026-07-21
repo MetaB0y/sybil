@@ -66,14 +66,19 @@ root-filesystem ratio is the final capacity signal because redb pages,
 fragmentation, canonical qMDB/redb, the history projection, Docker logs, and
 other services share the host.
 
-`sybil-history` runs with a 64 MiB redb page-cache ceiling
+The API's canonical sequencer store runs with a 128 MiB redb page-cache ceiling
+(`SYBIL_SEQUENCER_REDB_CACHE_BYTES=134217728`) inside its 1.25 GiB cgroup.
+`sybil-history` independently uses a 64 MiB ceiling
 (`SYBIL_HISTORY_REDB_CACHE_BYTES=67108864`) inside its 256 MiB cgroup. Redb's
-upstream 1 GiB default is intentionally not used: it can look like a gradual
-history-process leak as indexed pages warm and would exceed the container
-budget before reaching its own bound. Treat sustained history memory above
-roughly 160 MiB after cache warm-up as unexpected; separate anonymous RSS from
-reclaimable file cache, confirm the configured cache value in startup logs,
-and inspect query concurrency before raising either limit.
+upstream 1 GiB default is intentionally not used for either store: page-cache
+warm-up otherwise looks like a gradual process leak and can consume the whole
+history budget or leave the API without recovery headroom. Confirm both values
+in startup logs before attributing a slope to application state. Treat
+sustained history memory above roughly 160 MiB after cache warm-up as
+unexpected; separate anonymous RSS from reclaimable file cache and inspect
+query concurrency before raising either limit. The API cache ceiling is not a
+total-RSS ceiling: correlate it with qMDB/account state, recent blocks, queues,
+and the existing absolute and slope alerts.
 
 The in-flight gauge increments before each DA task is spawned and decrements
 after its write result is recorded. A task panic deliberately leaves the gauge

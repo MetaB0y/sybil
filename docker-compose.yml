@@ -27,6 +27,9 @@ services:
       SYBIL_HISTORY_URL: "http://sybil-history:3003"
       SYBIL_HISTORY_TOKEN: "${SYBIL_HISTORY_TOKEN:-sybil-history-dev-only}"
       SYBIL_DATA_DIR: "/data"
+      # redb defaults to a 1 GiB cache, leaving no safe restore/runtime margin
+      # inside this service's 1.25 GiB cgroup.
+      SYBIL_SEQUENCER_REDB_CACHE_BYTES: "134217728"
       # All three are optional as a group. When absent, monetary bridge routes
       # fail closed while trading and bridge status remain available.
       SYBIL_BRIDGE_CHAIN_ID: "${SYBIL_BRIDGE_CHAIN_ID:-}"

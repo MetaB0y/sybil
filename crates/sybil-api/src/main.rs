@@ -211,8 +211,15 @@ async fn run_witness_import(config: &ApiConfig) -> Result<(), Box<dyn std::error
         )
     })?;
     let db_path = data_dir.join("sybil.redb");
-    let store = matching_sequencer::store::Store::open(&db_path)
-        .map_err(|e| Error::other(format!("open persistent store {}: {e}", db_path.display())))?;
+    let store = matching_sequencer::store::Store::open_with_cache(
+        &db_path,
+        config.sequencer_redb_cache_bytes,
+    )
+    .map_err(|e| Error::other(format!("open persistent store {}: {e}", db_path.display())))?;
+    tracing::info!(
+        redb_cache_bytes = config.sequencer_redb_cache_bytes,
+        "Configured bounded canonical sequencer redb cache"
+    );
     store
         .bind_validity_artifact_retention(config.retain_validity_artifacts)
         .map_err(|e| Error::other(format!("bind validity artifact retention: {e}")))?;
@@ -323,9 +330,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ))
         })?;
         let db_path = data_dir.join("sybil.redb");
-        match matching_sequencer::store::Store::open(&db_path) {
+        match matching_sequencer::store::Store::open_with_cache(
+            &db_path,
+            config.sequencer_redb_cache_bytes,
+        ) {
             Ok(s) => match s.bind_validity_artifact_retention(config.retain_validity_artifacts) {
-                Ok(()) => Some(Arc::new(s)),
+                Ok(()) => {
+                    tracing::info!(
+                        redb_cache_bytes = config.sequencer_redb_cache_bytes,
+                        "Configured bounded canonical sequencer redb cache"
+                    );
+                    Some(Arc::new(s))
+                }
                 Err(e) => {
                     tracing::error!(error = %e, "persistent store validity mode mismatch");
                     return Err(std::io::Error::other(format!(

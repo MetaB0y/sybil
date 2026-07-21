@@ -55,7 +55,9 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use matching_engine::{Market, MarketGroup, MarketId, MarketSet, Nanos};
-use redb::{Database, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition};
+use redb::{
+    Builder, Database, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition,
+};
 use sybil_oracle::{
     DataFeed, FeedId, FeedPubkey, MarketStatus, OracleSource, ResolutionRecord, ResolutionTemplate,
     SignedAttestation,
@@ -125,7 +127,9 @@ use self::restore::{
 use self::retention::prune_historical_block_rows;
 use self::tables::*;
 
-pub use self::commit::{AnalyticsSnapshot, SequencerSnapshot, Store, StoreError};
+pub use self::commit::{
+    AnalyticsSnapshot, DEFAULT_REDB_CACHE_BYTES, SequencerSnapshot, Store, StoreError,
+};
 pub use self::da::{
     DA_FILE_PROVIDER_REF_ENCODING, DA_FILE_PROVIDER_REF_KIND, DA_PAYLOAD_ENCODING, DA_PAYLOAD_KIND,
     DA_PROVIDER_REFS_ENCODING_BYTES, DaArtifact, DaArtifactIntegrityError, DaArtifactLookup,

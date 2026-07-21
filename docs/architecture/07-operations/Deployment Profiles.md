@@ -98,6 +98,8 @@ uses that same overlay with the two explicit funding overrides above.
 
 | Knob | default | devnet | prelaunch / prod | Dev-only in locked profiles? |
 | --- | --- | --- | --- | --- |
+| `SYBIL_SEQUENCER_REDB_CACHE_BYTES` | `134217728` (128 MiB) | same | same | no |
+| `SYBIL_HISTORY_REDB_CACHE_BYTES` | `67108864` (64 MiB) | same | same | no |
 | `SYBIL_RECENT_BLOCK_CACHE_CAPACITY` | `100` | `100` | `100` | no |
 | `SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS` | `0` (no prune) | `0` | `60480` (7 days at 10s/block) | no |
 | `SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS` | `8640` in Compose; `0` for direct runs | `8640` (1 day at 10s/block) | `60480` (7 days at 10s/block) | no |

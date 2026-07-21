@@ -12,6 +12,9 @@ pub struct Store {
     pub(crate) fault_injection: Arc<Mutex<StoreFaultInjection>>,
 }
 
+/// Default page-cache ceiling for the canonical store used by `sybil-api`.
+pub const DEFAULT_REDB_CACHE_BYTES: usize = 128 * 1024 * 1024;
+
 /// Borrowed analytics view needed to persist one block.
 pub struct AnalyticsSnapshot<'a> {
     pub last_clearing_prices: &'a HashMap<MarketId, Vec<Nanos>>,
@@ -723,7 +726,14 @@ impl Store {
 
     /// Open (or create) a store at the given path.
     pub fn open(path: &Path) -> Result<Self, StoreError> {
-        let mut db = Database::create(path)?;
+        Self::open_with_cache(path, DEFAULT_REDB_CACHE_BYTES)
+    }
+
+    /// Open (or create) a store with an explicit redb page-cache ceiling.
+    pub fn open_with_cache(path: &Path, redb_cache_bytes: usize) -> Result<Self, StoreError> {
+        let mut builder = Builder::new();
+        builder.set_cache_size(redb_cache_bytes);
+        let mut db = builder.create(path)?;
         let qmdb_path = path.with_extension("qmdb");
         std::fs::create_dir_all(&qmdb_path)?;
         let account_state_store =
