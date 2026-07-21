@@ -9,6 +9,10 @@ remote_api_get() {
     ssh "$S" "cd /opt/sybil && $COMPOSE exec -T sybil-api curl -fsS --max-time 15 'http://127.0.0.1:3000${path}'"
 }
 
+remote_alerts_get() {
+    ssh "$S" "cd /opt/sybil && $COMPOSE exec -T victoriametrics wget -qO- 'http://127.0.0.1:8428/api/v1/query?query=ALERTS'"
+}
+
 echo "=== Containers ==="
 ssh "$S" 'docker ps -aq --filter label=com.docker.compose.project=sybil | while read -r container; do row=$(docker inspect --format "{{index .Config.Labels \"com.docker.compose.service\"}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}|{{.RestartCount}}|{{.State.OOMKilled}}|{{.HostConfig.Memory}}|{{.State.StartedAt}}" "$container") || exit; if [ "$(docker inspect --format "{{.State.Running}}" "$container")" = true ]; then current=$(docker exec "$container" cat /sys/fs/cgroup/memory.current) || exit; peak=$(docker exec "$container" sh -c "cat /sys/fs/cgroup/memory.peak 2>/dev/null || cat /sys/fs/cgroup/memory.current") || exit; else current=-; peak=-; fi; printf "%s|%s|%s\n" "$row" "$current" "$peak"; done' \
     | sort \
@@ -25,6 +29,33 @@ ssh "$S" 'docker ps -aq --filter label=com.docker.compose.project=sybil | while 
         BEGIN { printf "%-24s %-10s %-10s %-8s %-5s %-10s %-10s %-10s %s\n", "SERVICE", "STATUS", "HEALTH", "RESTARTS", "OOM", "MEMORY", "PEAK", "LIMIT", "STARTED_UTC" }
         { printf "%-24s %-10s %-10s %-8s %-5s %-10s %-10s %-10s %s\n", $1, $2, $3, $4, $5, human($8), human($9), human($6), $7 }
     '
+echo ""
+
+echo "=== Alerts ==="
+if alerts=$(remote_alerts_get); then
+    python3 -c '
+import json
+import sys
+
+payload = json.load(sys.stdin)
+results = payload.get("data", {}).get("result", [])
+active = sorted(
+    (
+        sample.get("metric", {}).get("alertstate", "unknown"),
+        sample.get("metric", {}).get("severity", "unknown"),
+        sample.get("metric", {}).get("alertname", "unnamed"),
+        sample.get("metric", {}).get("component", "unknown"),
+    )
+    for sample in results
+)
+if not active:
+    print("  none firing or pending")
+for state, severity, name, component in active:
+    print(f"  {state.upper():7} {severity:<8} {name} ({component})")
+' <<<"$alerts"
+else
+    echo "  unavailable"
+fi
 echo ""
 
 echo "=== Recent Blocks ==="

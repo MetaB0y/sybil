@@ -80,9 +80,10 @@ failure and inspect logs before restarting.
    container logs.
    For an OOM alert, use `journalctl -k` to distinguish a global host OOM from
    a cgroup kill; record the killed process's anonymous/file RSS and cgroup.
-   `just status` reports each service's current restart count and OOM flag;
-   query `sybil_synthetic_container_restart_count` over the incident window
-   before a deliberate recreation resets the Docker counter.
+   `just status` reports pending/firing alerts plus each service's current
+   restart count and OOM flag; query
+   `sybil_synthetic_container_restart_count` over the incident window before a
+   deliberate recreation resets the Docker counter.
 2. For disk pressure or history backlog, compare outbox rows, payload bytes,
    oldest age/height, newest height, and `sybil_block_height`. Check
    `sybil-history` health/logs, the dedicated token, network, history-volume
