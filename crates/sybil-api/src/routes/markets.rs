@@ -18,6 +18,7 @@ use crate::types::error::AppError;
 use crate::types::request::{
     CreateMarketGroupRequest, CreateMarketRequest, ExtendMarketGroupRequest, MarketSearchParams,
     ResolveMarketRequest, SetMarketMetadataRequest, SetReferencePricesRequest,
+    UpdateMarketContentRequest,
 };
 use crate::types::response::*;
 use crate::util::now_ms;
@@ -133,6 +134,7 @@ fn build_market_response(args: BuildMarketResponseArgs<'_>) -> MarketResponse {
             .map(|m| m.expiry_timestamp_ms)
             .filter(|&v| v != 0),
         created_at_ms: args.metadata.map(|m| m.created_at_ms).filter(|&v| v != 0),
+        creation_key: args.metadata.and_then(|m| m.creation_key.clone()),
         volume_nanos: args.volume_nanos,
         reference_price_nanos: args.reference_price_nanos,
         reference_price_expires_at_ms: args.reference_price_expires_at_ms,
@@ -502,6 +504,58 @@ pub async fn create_market(
     Ok(Json(CreateMarketResponse {
         market_id: market_id.0,
         name: req.name,
+    }))
+}
+
+/// PUT /v1/markets/{id}/content — replace a live market's committed prose.
+///
+/// The edit path for text a creation key already owns. `POST /v1/markets`
+/// stays strict: repeating a key with different creation fields is a 409, so
+/// a typo can never silently re-point a key at a different market. This route
+/// is where an operator says "yes, same market, new wording".
+///
+/// Both the name and the metadata digest ride `MarketSnapshot` into the state
+/// root, so a successful edit moves the root at the block it lands in.
+#[utoipa::path(
+    tag = "routesmarkets",
+    put,
+    path = "/v1/markets/{id}/content",
+    params(("id" = u32, Path, description = "Market ID")),
+    request_body = UpdateMarketContentRequest,
+    responses(
+        (status = 200, description = "Market content replaced", body = UpdateMarketContentResponse),
+        (status = 400, description = "Blank market name", body = ApiErrorResponse),
+        (status = 404, description = "Market not found", body = ApiErrorResponse),
+        (status = 409, description = "Market is resolved or otherwise not tradeable", body = ApiErrorResponse)
+    )
+)]
+pub async fn update_market_content(
+    State(state): State<AppState>,
+    Path(id): Path<u32>,
+    Json(req): Json<UpdateMarketContentRequest>,
+) -> Result<Json<UpdateMarketContentResponse>, AppError> {
+    // `created_at_ms`, `creation_key`, and `resolution_config` are re-derived
+    // from live state by the sequencer, which is why they are absent from the
+    // request and zeroed here rather than guessed.
+    let metadata = MarketMetadata {
+        description: req.description.unwrap_or_default(),
+        category: req.category.unwrap_or_default(),
+        tags: req.tags.unwrap_or_default(),
+        resolution_criteria: req.resolution_criteria.unwrap_or_default(),
+        expiry_timestamp_ms: req.expiry_timestamp_ms.unwrap_or(0),
+        created_at_ms: 0,
+        resolution_config: None,
+        creation_key: None,
+        committed_metadata_digest: None,
+    };
+    let updated = state
+        .sequencer
+        .update_market_content(MarketId::new(id), req.name.clone(), metadata)
+        .await?;
+    Ok(Json(UpdateMarketContentResponse {
+        market_id: id,
+        name: req.name,
+        updated,
     }))
 }
 

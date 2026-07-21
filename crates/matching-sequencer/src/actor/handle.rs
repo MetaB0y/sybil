@@ -831,6 +831,20 @@ impl SequencerHandle {
             .await?
     }
 
+    /// Rewrite a live market's committed name and metadata. `false` means the
+    /// market already carried this content and nothing was written.
+    pub async fn update_market_content(
+        &self,
+        market_id: MarketId,
+        name: String,
+        metadata: MarketMetadata,
+    ) -> Result<bool, SequencerError> {
+        self.control_rpc(|reply| {
+            SequencerMsg::UpdateMarketContent(market_id, name, metadata, reply)
+        })
+        .await?
+    }
+
     pub async fn get_market_metadata(
         &self,
         market_id: MarketId,
@@ -2051,6 +2065,43 @@ mod tests {
             metadata_market,
             "an exact keyed retry should not allocate a second market"
         );
+        // The catalog applier's edit path. It sends replacement content only —
+        // identity and resolution wiring are re-derived from live state, which
+        // is what `edited_metadata` below asserts.
+        let replacement = MarketMetadata {
+            description: "rewritten by the catalog".to_string(),
+            category: "regression".to_string(),
+            tags: vec!["wal".to_string()],
+            ..MarketMetadata::default()
+        };
+        assert!(
+            handle
+                .update_market_content(
+                    metadata_market,
+                    "renamed wal market".to_string(),
+                    replacement.clone(),
+                )
+                .await
+                .unwrap(),
+            "the first edit should report a change"
+        );
+        assert!(
+            !handle
+                .update_market_content(
+                    metadata_market,
+                    "renamed wal market".to_string(),
+                    replacement.clone(),
+                )
+                .await
+                .unwrap(),
+            "re-applying identical content should not append a control-plane write"
+        );
+        let edited_metadata = MarketMetadata {
+            created_at_ms: metadata.created_at_ms,
+            resolution_config: metadata.resolution_config.clone(),
+            creation_key: metadata.creation_key.clone(),
+            ..replacement
+        };
         let group_market = handle
             .create_market("group wal market".to_string())
             .await
@@ -2149,8 +2200,13 @@ mod tests {
             );
             assert_eq!(
                 restored_seq.market_metadata(metadata_market),
-                Some(&metadata),
-                "market metadata was acknowledged but not replayed after restore"
+                Some(&edited_metadata),
+                "the market content edit was acknowledged but not replayed after restore"
+            );
+            assert_eq!(
+                restored_seq.markets().get(metadata_market).unwrap().name,
+                "renamed wal market",
+                "the market rename was acknowledged but not replayed after restore"
             );
             assert!(
                 restored_seq
@@ -2185,7 +2241,7 @@ mod tests {
             );
         };
 
-        const EXPECTED_CONTROL_PLANE_COMMANDS: usize = 11;
+        const EXPECTED_CONTROL_PLANE_COMMANDS: usize = 12;
         for restart_round in 0..3 {
             let restored = store.load_state().await.unwrap().unwrap();
             assert_eq!(
@@ -2251,15 +2307,29 @@ mod tests {
             );
 
             let mut probe = restored_seq.clone();
+            // Re-creating with the *edited* text is the idempotent retry after
+            // an edit; the pre-edit text is now a genuine conflict, which is
+            // what stops a stale catalog from silently reverting a market.
+            let mut edited_retry = edited_metadata.clone();
+            edited_retry.created_at_ms += 1;
             assert_eq!(
                 probe
-                    .create_market_with_metadata(
-                        "metadata wal market".to_string(),
-                        retry_metadata.clone(),
-                    )
+                    .create_market_with_metadata("renamed wal market".to_string(), edited_retry,)
                     .unwrap(),
                 metadata_market,
                 "restart round {restart_round} should retain keyed creation identity"
+            );
+            assert!(
+                matches!(
+                    probe
+                        .create_market_with_metadata(
+                            "metadata wal market".to_string(),
+                            retry_metadata.clone(),
+                        )
+                        .unwrap_err(),
+                    SequencerError::MarketCreationKeyConflict { .. }
+                ),
+                "restart round {restart_round} should reject the pre-edit text under the same key"
             );
             let probe_block = probe
                 .produce_block(Vec::new(), 10_000 + restart_round)

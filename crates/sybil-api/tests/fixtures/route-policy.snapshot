@@ -67,6 +67,7 @@ SERVICE POST /v1/bridge/withdrawals/signed
 SERVICE POST /v1/bridge/withdrawals/l1-events
 SERVICE POST /v1/bridge/l1-height
 SERVICE POST /v1/markets
+SERVICE PUT /v1/markets/{id}/content
 SERVICE POST /v1/markets/groups
 SERVICE POST /v1/markets/groups/{group_id}/members
 SERVICE POST /v1/markets/{id}/resolve

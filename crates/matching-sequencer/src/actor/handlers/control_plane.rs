@@ -250,6 +250,31 @@ impl SequencerActorState {
         self.sequencer.create_market_with_metadata(name, metadata)
     }
 
+    /// Validate first, then persist, then apply — a rejected edit must not
+    /// leave a command in the WAL that replay would fail on.
+    pub(super) async fn handle_update_market_content(
+        &mut self,
+        market_id: MarketId,
+        name: String,
+        metadata: MarketMetadata,
+    ) -> Result<bool, SequencerError> {
+        if self
+            .sequencer
+            .market_content_matches(market_id, &name, &metadata)?
+        {
+            return Ok(false);
+        }
+        self.persist_control_plane(&ControlPlaneCommand::UpdateMarketContent {
+            market_id,
+            name: name.clone(),
+            metadata: metadata.clone(),
+        })
+        .await?;
+        self.sequencer
+            .update_market_content(market_id, name, metadata)?;
+        Ok(true)
+    }
+
     pub(super) async fn handle_create_market_group(
         &mut self,
         name: String,

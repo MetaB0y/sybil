@@ -239,6 +239,12 @@ pub struct MarketResponse {
     pub expiry_timestamp_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at_ms: Option<u64>,
+    /// Operator idempotency key this market was created under, if any. Lets a
+    /// catalog applier map its checked-in specs onto live market ids from
+    /// server state alone, instead of trusting a local manifest that a wiped
+    /// volume could have lost while chain state survived.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creation_key: Option<String>,
     /// All-time traded notional. Integer nanodollars; 1_000_000_000 = $1.
     #[serde(default, with = "crate::wire_integer")]
     #[cfg_attr(feature = "openapi", schema(value_type = String, pattern = r"^[0-9]+$"))]
@@ -1229,6 +1235,18 @@ pub struct RegisteredFeedResponse {
 pub struct CreateMarketResponse {
     pub market_id: u32,
     pub name: String,
+}
+
+/// Outcome of a market content edit. `updated: false` means the market already
+/// carried exactly this content and no block-visible write was made, so the
+/// catalog applier can re-run against an unchanged deployment without churning
+/// the state root.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct UpdateMarketContentResponse {
+    pub market_id: u32,
+    pub name: String,
+    pub updated: bool,
 }
 
 // --- Portfolio ---

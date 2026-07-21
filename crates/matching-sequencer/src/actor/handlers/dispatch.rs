@@ -502,6 +502,13 @@ impl Actor for SequencerActor {
                         .await,
                 );
             }
+            SequencerMsg::UpdateMarketContent(market_id, name, metadata, reply) => {
+                let _ = reply.send(
+                    state
+                        .handle_update_market_content(market_id, name, metadata)
+                        .await,
+                );
+            }
             SequencerMsg::PauseBlockProduction(reply) => {
                 state.pause_count = state.pause_count.saturating_add(1);
                 let _ = reply.send(Ok(()));

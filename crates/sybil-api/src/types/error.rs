@@ -337,6 +337,9 @@ impl From<matching_sequencer::SequencerError> for AppError {
             matching_sequencer::SequencerError::MarketNotFound { market_id } => {
                 AppError::market_not_found(market_id.0)
             }
+            matching_sequencer::SequencerError::InvalidMarketName => {
+                AppError::bad_request("Market name must not be empty")
+            }
             matching_sequencer::SequencerError::InvalidMarketCreationKey(message) => {
                 AppError::bad_request(format!("Invalid market creation key: {message}"))
             }

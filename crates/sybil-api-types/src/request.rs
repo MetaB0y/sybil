@@ -423,6 +423,40 @@ pub struct CreateMarketRequest {
     pub resolution_template: Option<String>,
 }
 
+/// Full replacement of a live market's committed prose.
+///
+/// This is the edit path for text a creation key already owns — the catalog
+/// applier reaches for it when a checked-in spec drifted from the deployed
+/// market, where `POST /v1/markets` would return `MarketCreationKeyConflict`.
+/// Replacement, not patch: every field is authoritative, and an omitted
+/// optional clears the stored value.
+///
+/// Identity is not editable here. `creation_key`, `created_at_ms`, and the
+/// resolution template stay as created whatever this body says — the point of
+/// the op is to fix wording, not to re-key a market or re-wire how it settles.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct UpdateMarketContentRequest {
+    /// Replacement market name. Must not be blank.
+    #[cfg_attr(feature = "openapi", schema(example = "Will it rain tomorrow?"))]
+    pub name: String,
+    /// Replacement description.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Replacement category.
+    #[serde(default)]
+    pub category: Option<String>,
+    /// Replacement discovery tags.
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+    /// Replacement resolution criteria.
+    #[serde(default)]
+    pub resolution_criteria: Option<String>,
+    /// Replacement expiry timestamp in ms (0 = no expiry).
+    #[serde(default)]
+    pub expiry_timestamp_ms: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateMarketGroupRequest {

@@ -3295,6 +3295,109 @@ fn market_creation_key_is_idempotent_and_conflict_safe() {
     assert_eq!(seq.markets().len(), 1);
 }
 
+/// The catalog applier's edit path: a market whose checked-in text drifted is
+/// rewritten in place, keeping its id, creation key, and creation timestamp.
+#[test]
+fn market_content_update_rewrites_text_and_preserves_identity() {
+    let mut seq = BlockSequencer::with_default_solver(
+        AccountStore::new(),
+        MarketSet::new(),
+        vec![],
+        SequencerConfig::default(),
+    );
+    let metadata = MarketMetadata {
+        description: "Native threshold market. Units: probability.".to_string(),
+        category: "AI".to_string(),
+        tags: vec!["native".to_string(), "AI".to_string()],
+        resolution_criteria: "Resolves from the leaderboard.".to_string(),
+        creation_key: Some("native:catalog:outcome".to_string()),
+        created_at_ms: 10,
+        ..MarketMetadata::default()
+    };
+    let market_id = seq
+        .create_market_with_metadata("Will a company other than X win?".to_string(), metadata)
+        .unwrap();
+
+    // The applier sends full replacement content and knows nothing about
+    // identity fields, so it leaves them unset.
+    let replacement = MarketMetadata {
+        description: "Resolves from the leaderboard.".to_string(),
+        category: "AI".to_string(),
+        tags: vec!["native".to_string(), "AI".to_string()],
+        ..MarketMetadata::default()
+    };
+    assert!(
+        !seq.market_content_matches(market_id, "Will other company win?", &replacement)
+            .unwrap()
+    );
+    seq.update_market_content(
+        market_id,
+        "Will other company win?".to_string(),
+        replacement.clone(),
+    )
+    .unwrap();
+
+    assert_eq!(seq.markets().len(), 1, "an edit must not create a market");
+    assert_eq!(
+        seq.markets().get(market_id).unwrap().name,
+        "Will other company win?"
+    );
+    let stored = seq.market_metadata(market_id).unwrap();
+    assert_eq!(stored.description, "Resolves from the leaderboard.");
+    assert_eq!(stored.resolution_criteria, "");
+    assert_eq!(
+        stored.creation_key.as_deref(),
+        Some("native:catalog:outcome"),
+        "an edit must not re-key the market"
+    );
+    assert_eq!(stored.created_at_ms, 10, "creation time is not editable");
+
+    // Re-applying an unchanged catalog must not write anything, or every
+    // deploy would move the state root for nothing.
+    assert!(
+        seq.market_content_matches(market_id, "Will other company win?", &replacement)
+            .unwrap()
+    );
+}
+
+#[test]
+fn market_content_update_rejects_unknown_blank_and_settled_markets() {
+    let mut seq = BlockSequencer::with_default_solver(
+        AccountStore::new(),
+        MarketSet::new(),
+        vec![],
+        SequencerConfig::default(),
+    );
+    let content = MarketMetadata {
+        description: "Rules".to_string(),
+        ..MarketMetadata::default()
+    };
+
+    let missing = seq
+        .update_market_content(MarketId::new(7), "Renamed".to_string(), content.clone())
+        .unwrap_err();
+    assert!(matches!(
+        missing,
+        SequencerError::MarketNotFound { market_id } if market_id == MarketId::new(7)
+    ));
+
+    let market_id = seq.create_market("Will it happen?".to_string());
+    let blank = seq
+        .update_market_content(market_id, "   ".to_string(), content.clone())
+        .unwrap_err();
+    assert!(matches!(blank, SequencerError::InvalidMarketName));
+
+    seq.resolve_market(market_id, Nanos(NANOS_PER_DOLLAR), 1)
+        .unwrap();
+    let settled = seq
+        .update_market_content(market_id, "Renamed".to_string(), content)
+        .unwrap_err();
+    assert!(
+        matches!(settled, SequencerError::MarketNotTradeable { .. }),
+        "rewriting the rules of a settled market must be refused, got {settled:?}"
+    );
+}
+
 #[test]
 fn market_group_creation_key_is_canonical_idempotent_and_conflict_safe() {
     let mut markets = MarketSet::new();

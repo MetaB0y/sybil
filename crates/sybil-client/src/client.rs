@@ -361,6 +361,24 @@ impl SybilClient {
         self.decode(resp).await
     }
 
+    /// Replace a live market's committed name and prose. Full replacement:
+    /// an omitted optional clears the stored value.
+    pub async fn update_market_content(
+        &self,
+        market_id: u32,
+        req: &UpdateMarketContentRequest,
+    ) -> Result<UpdateMarketContentResponse, Error> {
+        let resp = self
+            .with_service_auth(
+                self.http
+                    .put(self.url(&format!("/v1/markets/{market_id}/content"))),
+            )
+            .json(req)
+            .send()
+            .await?;
+        self.decode(resp).await
+    }
+
     pub async fn list_markets(&self) -> Result<Vec<MarketResponse>, Error> {
         let resp = self
             .with_service_auth(self.http.get(self.url("/v1/markets")))

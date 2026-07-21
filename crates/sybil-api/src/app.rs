@@ -44,6 +44,7 @@ use crate::util::now_ms;
         CreateApiKeyResponse,
         PrivateAccountSummaryResponse,
         CreateMarketRequest,
+        UpdateMarketContentRequest,
         CreateMarketGroupRequest,
         ExtendMarketGroupRequest,
         ResolveMarketRequest,
@@ -85,6 +86,7 @@ use crate::util::now_ms;
         MarketPricesResponse,
         MarketPriceResponse,
         CreateMarketResponse,
+        UpdateMarketContentResponse,
         OrderAcceptedResponse,
         CancelOrderResponse,
         FillResponse,
@@ -1002,6 +1004,7 @@ declare_route_registry! {
         "POST" "/v1/bridge/withdrawals/l1-events" => routes::bridge::submit_l1_withdrawal_event;
         "POST" "/v1/bridge/l1-height" => routes::bridge::observe_l1_height;
         "POST" "/v1/markets" => routes::markets::create_market;
+        "PUT" "/v1/markets/{id}/content" => routes::markets::update_market_content;
         "POST" "/v1/markets/groups" => routes::markets::create_market_group;
         "POST" "/v1/markets/groups/{group_id}/members" => routes::markets::extend_market_group;
         "POST" "/v1/markets/{id}/resolve" => routes::markets::resolve_market;

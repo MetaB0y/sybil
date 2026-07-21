@@ -161,6 +161,17 @@ pub enum ControlPlaneCommand {
         timestamp_ms: u64,
         initial_key: Option<InitialAccountKeyCommand>,
     },
+    /// Rewrite a live market's committed name and metadata — the catalog
+    /// applier's edit path for text that drifted from the checked-in spec.
+    /// Carries the resolved metadata, not a patch, so replay reproduces the
+    /// same state root without re-reading the request that produced it. Kept
+    /// at the enum tail so legacy MessagePack variant indexes stay
+    /// replay-compatible.
+    UpdateMarketContent {
+        market_id: MarketId,
+        name: String,
+        metadata: MarketMetadata,
+    },
 }
 
 impl Store {
