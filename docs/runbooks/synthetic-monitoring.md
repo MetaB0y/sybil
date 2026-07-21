@@ -7,9 +7,10 @@ last_verified: 2026-07-21
 # Synthetic monitoring and alert delivery
 
 > **Executive summary:** every five minutes, a read-only probe checks the public
-> API, block advancement, markets, browser CORS, proof lag, and container
-> health. It writes results to VictoriaMetrics; vmalert—not the probe—owns
-> paging and missing-probe detection.
+> web shell plus one emitted JavaScript asset, API, block advancement, markets,
+> browser CORS, proof lag, and container health. It writes results to
+> VictoriaMetrics; vmalert—not the probe—owns paging and missing-probe
+> detection.
 
 **Components:** VictoriaMetrics, vmalert, optional Telegram delivery ·
 **Script:** `scripts/synthetic-probe.sh`
@@ -21,6 +22,9 @@ without creating accounts, orders, or any other application state.
 
 `synthetic-probe.sh` fails fast with one `FAIL: ...` line unless:
 
+- `GET` of the public app origin is 2xx and contains the Sybil shell, and one
+  emitted `/_next/static/*.js` asset is a nonempty JavaScript response; this
+  covers the public nginx/Caddy path that a container-local healthcheck cannot;
 - `GET /v1/health` is 2xx, reports `status=ok`, and exposes a positive
   committed height plus a lowercase 64-hex genesis hash;
 - `/v1/blocks/latest` advances between samples separated by 1.5 configured

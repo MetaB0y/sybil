@@ -71,6 +71,8 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
 dry-run: GET $BASE/v1/health and require status=ok plus a positive height and 64-hex genesis_hash
 dry-run: GET $BASE/v1/blocks/latest twice, ${INTERVAL}s block interval aware, and require height advancement
 dry-run: GET $BASE/v1/markets and require a nonempty JSON array
+dry-run: GET $APP_ORIGIN/ and require the Sybil app shell
+dry-run: GET one emitted Next.js JavaScript asset and require a nonempty JavaScript response
 dry-run: measure nonzero product liquidity for active native and eligible Polymarket markets
 dry-run: OPTIONS $BASE/v1/onboarding/accounts from Origin: $APP_ORIGIN and require POST CORS permission
 dry-run: require /proofs/latest height within $PROOF_LAG_MAX blocks of /v1/blocks/latest (mode: $PROOF_LAG_MODE; source: ${PROVER_BASE:-docker exec into compose service sybil-prover})
@@ -207,6 +209,50 @@ get_json /v1/markets
 printf '%s' "$HTTP_BODY" | python3 -c \
     'import json,sys; v=json.load(sys.stdin); raise SystemExit(0 if isinstance(v,list) and len(v)>0 else 1)' \
     2>/dev/null || die "/v1/markets was empty or not a JSON array"
+
+# A healthy local Next process does not prove that the public nginx -> Caddy
+# route or the emitted static-asset path works. Exercise both read-only paths
+# from the same public origin a browser uses. This also supplies a small,
+# regular normal-traffic sample for the frontend memory/lifecycle envelope.
+if ! APP_CODE="$(curl -sS -L --max-time 20 -o "$TMP/app.html" -w '%{http_code}' \
+    "$APP_ORIGIN/" 2>/dev/null)"; then
+    die "GET $APP_ORIGIN/ failed"
+fi
+[[ "$APP_CODE" =~ ^2[0-9][0-9]$ ]] || die "GET $APP_ORIGIN/ returned HTTP $APP_CODE"
+grep -Fq '<title>Sybil</title>' "$TMP/app.html" \
+    || die "GET $APP_ORIGIN/ did not return the Sybil app shell"
+
+APP_ASSET_URL="$(python3 - "$APP_ORIGIN" "$TMP/app.html" <<'PY'
+import html
+import re
+import sys
+from pathlib import Path
+from urllib.parse import urljoin
+
+origin, path = sys.argv[1:]
+document = Path(path).read_text(encoding="utf-8", errors="replace")
+asset = next(
+    (
+        html.unescape(value)
+        for value in re.findall(r'(?:src|href)="([^"]+)"', document)
+        if "/_next/static/" in value and ".js" in value
+    ),
+    "",
+)
+if asset:
+    print(urljoin(f"{origin}/", asset))
+PY
+)"
+[[ -n "$APP_ASSET_URL" ]] || die "Sybil app shell exposed no Next.js JavaScript asset"
+if ! APP_ASSET_META="$(curl -sS -L --max-time 20 -o /dev/null \
+    -w '%{http_code}|%{content_type}|%{size_download}' "$APP_ASSET_URL" 2>/dev/null)"; then
+    die "GET $APP_ASSET_URL failed"
+fi
+IFS='|' read -r APP_ASSET_CODE APP_ASSET_TYPE APP_ASSET_SIZE <<<"$APP_ASSET_META"
+[[ "$APP_ASSET_CODE" =~ ^2[0-9][0-9]$ \
+    && "$APP_ASSET_TYPE" == *javascript* \
+    && "$APP_ASSET_SIZE" =~ ^[1-9][0-9]*$ ]] \
+    || die "Next.js asset returned ${APP_ASSET_CODE:-unknown}/${APP_ASSET_TYPE:-unknown}/${APP_ASSET_SIZE:-0}B"
 
 NOW_MS="$(date +%s)000"
 LIQUIDITY_SUMMARY=""
@@ -373,4 +419,4 @@ if ! push_result_metric 0; then
     exit 1
 fi
 
-echo "OK: health, advancing blocks ($HEIGHT_1 -> $HEIGHT_2), markets, $LIQUIDITY_SUMMARY, CORS, $PROOF_LAG_SUMMARY, and available container checks passed"
+echo "OK: public web app, health, advancing blocks ($HEIGHT_1 -> $HEIGHT_2), markets, $LIQUIDITY_SUMMARY, CORS, $PROOF_LAG_SUMMARY, and available container checks passed"
