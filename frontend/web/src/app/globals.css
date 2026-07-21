@@ -730,6 +730,19 @@ textarea {
   }
 }
 
+/* Market-detail lists (Holdings / Open orders / Closed orders under the chart).
+   These rows navigate nowhere — the tint is purely a reading aid across ten
+   columns — so there's no accent label the way portfolio rows have. */
+.event-row {
+  transition: background var(--dur-fast) var(--ease-standard);
+}
+
+@media (hover: hover) {
+  .event-row:hover {
+    background: var(--surface-2);
+  }
+}
+
 .portfolio-row:focus-visible {
   position: relative;
   z-index: 2;

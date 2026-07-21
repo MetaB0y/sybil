@@ -51,6 +51,19 @@ import { EventClosedOrders } from "@/components/event-closed-orders";
 import { EventOpenOrders } from "@/components/event-open-orders";
 import { Pager, usePaged } from "@/components/event-list-pager";
 import { SidePill } from "@/components/portfolio/side-pill";
+import {
+  cmpBig,
+  cmpNullableBig,
+  Empty,
+  EventRow,
+  EventTable,
+  HeaderCell,
+  nextSort,
+  OutcomeLabel,
+  Right,
+  type Column,
+  type Sort,
+} from "@/components/event-table";
 
 /** Which sub-view the "your holdings" section is showing. */
 type View = "holdings" | "open" | "closed";
@@ -116,25 +129,23 @@ type Holding = {
 };
 
 type SortKey = "outcome" | "side" | "shares" | "price" | "value" | "pnl";
-type SortDir = "asc" | "desc";
-type Sort = { key: SortKey; dir: SortDir };
 
-const COLUMNS: { key: SortKey; label: string; align: "left" | "right" }[] = [
+/* Outcome / Side / Qty / Price / Value / P&L, laid out on the same slots the
+   closed-orders list uses so the two tables line up where they overlap. */
+const GRID = "minmax(0, 1fr) 48px 62px 104px 78px 70px";
+
+const COLUMNS: Column<SortKey>[] = [
   { key: "outcome", label: "Outcome", align: "left" },
   { key: "side", label: "Side", align: "left" },
-  { key: "shares", label: "Shares", align: "right" },
+  { key: "shares", label: "Qty", align: "right" },
   { key: "price", label: "Price", align: "right" },
   { key: "value", label: "Value", align: "right" },
   { key: "pnl", label: "P&L", align: "right" },
 ];
 
-/** Text columns sort A→Z first; numeric columns sort high→low first. */
-function nextSort(prev: Sort | null, key: SortKey): Sort {
-  if (prev && prev.key === key) {
-    return { key, dir: prev.dir === "asc" ? "desc" : "asc" };
-  }
-  const numeric = key !== "outcome" && key !== "side";
-  return { key, dir: numeric ? "desc" : "asc" };
+/** Every column but the two text ones sorts high→low on first click. */
+function isNumericColumn(key: SortKey): boolean {
+  return key !== "outcome" && key !== "side";
 }
 
 /** −1 / 0 / 1 ascending comparison for a key; nulls (PnL) sort lowest. */
@@ -151,15 +162,8 @@ function compareBy(a: Holding, b: Holding, key: SortKey): number {
     case "value":
       return cmpBig(a.valueNanos, b.valueNanos);
     case "pnl":
-      if (a.pnlNanos == null && b.pnlNanos == null) return 0;
-      if (a.pnlNanos == null) return -1;
-      if (b.pnlNanos == null) return 1;
-      return cmpBig(a.pnlNanos, b.pnlNanos);
+      return cmpNullableBig(a.pnlNanos, b.pnlNanos);
   }
-}
-
-function cmpBig(a: bigint, b: bigint): number {
-  return a > b ? 1 : a < b ? -1 : 0;
 }
 
 export function EventHoldings({ marketId }: { marketId: number }) {
@@ -175,7 +179,7 @@ export function EventHoldings({ marketId }: { marketId: number }) {
   const ordersData = orders.data;
   const historyData = history.events;
 
-  const [sort, setSort] = useState<Sort | null>(null);
+  const [sort, setSort] = useState<Sort<SortKey> | null>(null);
   const [view, setView] = useState<View>("holdings");
   // Outcome filter (null = all outcomes). Scopes every view to one market.
   const [selectedMarket, setSelectedMarket] = useState<number | null>(null);
@@ -248,19 +252,24 @@ export function EventHoldings({ marketId }: { marketId: number }) {
       .sort((a, b) => (b.created_at_ms ?? 0) - (a.created_at_ms ?? 0));
   }, [ordersData, labelByMarket]);
 
-  // Does this event have any terminally-closed order in the history feed? Cheap
-  // existence scan so the section can render the Closed view; the full per-order
-  // reconstruction lives in EventClosedOrders.
-  const hasClosed = useMemo(() => {
+  // Distinct terminally-closed orders per market in this event. Cheap scan over
+  // the history feed — enough to decide whether the Closed view has anything and
+  // which outcomes to mark in the filter; the full per-order reconstruction
+  // lives in EventClosedOrders.
+  const closedOrdersByMarket = useMemo(() => {
     const eventMarketIds = new Set(labelByMarket.keys());
-    return historyData.some(
-      (e) =>
-        e.orderId != null &&
-        e.marketId != null &&
-        eventMarketIds.has(e.marketId) &&
-        CLOSED_TYPES.has(e.type),
-    );
+    const byMarket = new Map<number, Set<number>>();
+    for (const e of historyData) {
+      if (e.orderId == null || e.marketId == null) continue;
+      if (!eventMarketIds.has(e.marketId)) continue;
+      if (!CLOSED_TYPES.has(e.type)) continue;
+      const seen = byMarket.get(e.marketId) ?? new Set<number>();
+      seen.add(e.orderId);
+      byMarket.set(e.marketId, seen);
+    }
+    return byMarket;
   }, [historyData, labelByMarket]);
+  const hasClosed = closedOrdersByMarket.size > 0;
 
   // Apply the outcome filter for display. The render gate below still considers
   // the *full* event, so picking an outcome with no rows narrows the table
@@ -418,20 +427,22 @@ export function EventHoldings({ marketId }: { marketId: number }) {
               : "No holdings in this outcome."}
           </Empty>
         ) : (
-          <div>
-            <Row header>
+          <EventTable>
+            <EventRow columns={GRID} header>
               {COLUMNS.map((col) => (
                 <HeaderCell
                   key={col.key}
                   col={col}
                   sort={sort}
                   onSort={() => {
-                    setSort((s) => nextSort(s, col.key));
+                    setSort((s) =>
+                      nextSort(s, col.key, isNumericColumn(col.key)),
+                    );
                     holdingsPage.setPage(0);
                   }}
                 />
               ))}
-            </Row>
+            </EventRow>
             {holdingsPage.visible.map((h) => (
               <HoldingRow
                 key={`${h.position.market_id}:${h.outcome}`}
@@ -439,7 +450,7 @@ export function EventHoldings({ marketId }: { marketId: number }) {
               />
             ))}
             <Pager paged={holdingsPage} />
-          </div>
+          </EventTable>
         )
       ) : view === "open" ? (
         <EventOpenOrders
@@ -791,78 +802,12 @@ function OutcomeOption({
   );
 }
 
-function Empty({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        padding: "24px 0",
-        color: "var(--fg-4)",
-        fontFamily: "var(--font-mono)",
-        fontSize: 12,
-        letterSpacing: "var(--track-wide)",
-        textAlign: "center",
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function HeaderCell({
-  col,
-  sort,
-  onSort,
-}: {
-  col: (typeof COLUMNS)[number];
-  sort: Sort | null;
-  onSort: () => void;
-}) {
-  const active = sort?.key === col.key;
-  return (
-    <button
-      type="button"
-      onClick={onSort}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 4,
-        width: "100%",
-        justifyContent: col.align === "right" ? "flex-end" : "flex-start",
-        padding: 0,
-        border: 0,
-        background: "transparent",
-        cursor: "pointer",
-        font: "inherit",
-        textTransform: "uppercase",
-        letterSpacing: "var(--track-wide)",
-        color: active ? "var(--fg-2)" : "var(--fg-4)",
-      }}
-    >
-      <span>{col.label}</span>
-      <span style={{ fontSize: 8, lineHeight: 1, opacity: active ? 1 : 0.3 }}>
-        {active ? (sort!.dir === "asc" ? "▲" : "▼") : "↕"}
-      </span>
-    </button>
-  );
-}
-
 function HoldingRow({ holding }: { holding: Holding }) {
   const { label, quantity, outcome, avgNanos, markNanos, valueNanos, pnlNanos } =
     holding;
   return (
-    <Row>
-      <span
-        style={{
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          color: "var(--fg-1)",
-          fontFamily: "var(--font-sans)",
-          fontSize: 13,
-        }}
-      >
-        {label}
-      </span>
+    <EventRow columns={GRID}>
+      <OutcomeLabel>{label}</OutcomeLabel>
       <SidePill outcome={outcome} />
       <Right mono>{formatShareUnits(quantity, 1)}</Right>
       <Right mono>
@@ -897,56 +842,6 @@ function HoldingRow({ holding }: { holding: Holding }) {
             : formatDollarsRounded(pnlNanos, { decimals: 1, sign: true })}
         </span>
       </Right>
-    </Row>
-  );
-}
-
-function Row({
-  children,
-  header,
-}: {
-  children: React.ReactNode;
-  header?: boolean;
-}) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr) 52px 60px 104px 78px 80px",
-        gap: 10,
-        alignItems: "center",
-        padding: "9px 0",
-        borderTop: header ? undefined : "1px solid var(--border-1)",
-        fontFamily: "var(--font-mono)",
-        fontSize: header ? 10 : 11,
-        letterSpacing: "var(--track-wide)",
-        textTransform: header ? "uppercase" : undefined,
-        color: header ? "var(--fg-4)" : "var(--fg-2)",
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function Right({
-  children,
-  mono,
-}: {
-  children: React.ReactNode;
-  mono?: boolean;
-}) {
-  return (
-    <span
-      style={{
-        textAlign: "right",
-        whiteSpace: "nowrap",
-        fontFamily: mono ? "var(--font-mono)" : "inherit",
-        fontSize: mono ? 12 : undefined,
-        color: mono ? "var(--fg-1)" : undefined,
-      }}
-    >
-      {children}
-    </span>
+    </EventRow>
   );
 }

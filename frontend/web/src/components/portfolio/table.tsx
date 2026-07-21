@@ -18,6 +18,19 @@
 
 import type { CSSProperties, ReactNode } from "react";
 
+import type { Column, Sort } from "@/lib/table/sort";
+
+// Re-exported so the portfolio tabs keep importing their whole table toolkit
+// from one module; the implementations are shared with the market-detail lists.
+export {
+  cmpBig,
+  cmpNullableBig,
+  nextSort,
+  type Column,
+  type Sort,
+  type SortDir,
+} from "@/lib/table/sort";
+
 /** Vertical rhythm shared by every portfolio table row, header included. */
 export const ROW_PADDING = "10px 14px";
 /** Column gutter shared by every portfolio table row. */
@@ -183,55 +196,6 @@ export function Empty({ children }: { children: ReactNode }) {
       {children}
     </div>
   );
-}
-
-export type SortDir = "asc" | "desc";
-export interface Sort<K extends string> {
-  key: K;
-  dir: SortDir;
-}
-
-export interface Column<K extends string> {
-  key: K;
-  label: string;
-  align: "left" | "right";
-  /** Glossary term to hang a `?` badge off, if the column needs explaining. */
-  info?: string;
-}
-
-/**
- * Next sort state for a header click: re-clicking a column flips direction,
- * otherwise text columns open A→Z and numeric columns open high→low.
- */
-export function nextSort<K extends string>(
-  prev: Sort<K> | null,
-  key: K,
-  numeric: boolean,
-): Sort<K> {
-  if (prev && prev.key === key) {
-    return { key, dir: prev.dir === "asc" ? "desc" : "asc" };
-  }
-  return { key, dir: numeric ? "desc" : "asc" };
-}
-
-/** Ascending bigint comparison, for the `compareBy` in each tab. */
-export function cmpBig(a: bigint, b: bigint): number {
-  return a > b ? 1 : a < b ? -1 : 0;
-}
-
-/**
- * Ascending comparison of two nullable bigints, nulls lowest. Every tab has a
- * handful of columns that are unknown for some rows (no fill price yet, no
- * realized PnL on a buy) and each had hand-rolled the same four guards.
- */
-export function cmpNullableBig(
-  a: bigint | null | undefined,
-  b: bigint | null | undefined,
-): number {
-  if (a == null && b == null) return 0;
-  if (a == null) return -1;
-  if (b == null) return 1;
-  return cmpBig(a, b);
 }
 
 /** Click-to-sort column header with the active-direction caret. */
