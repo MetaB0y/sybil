@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
+import { useState } from "react";
 
 import { DataTable, Td, Th } from "@/components/dev/primitives/data-table";
 import { Panel, PanelBody, PanelHead } from "@/components/dev/primitives/panel";
@@ -19,6 +19,7 @@ import {
   useDevPendingOrders,
 } from "@/lib/dev/fetchers";
 import { dollars, fmtPct, fmtPrice, pctWidth } from "@/lib/dev/format";
+import { fullWidthControl } from "@/components/dev/primitives/control";
 
 const STATE_OPTIONS: ReadonlyArray<readonly [string, string]> = [
   ["all", "All states"],
@@ -28,16 +29,6 @@ const STATE_OPTIONS: ReadonlyArray<readonly [string, string]> = [
   ["pending", "Has pending"],
   ["mismatch", "Large ref mismatch"],
 ];
-
-const controlStyle: CSSProperties = {
-  width: "100%",
-  border: "1px solid var(--border-2)",
-  background: "var(--surface-1)",
-  color: "var(--fg-1)",
-  borderRadius: 6,
-  padding: "7px 9px",
-  fontFamily: "inherit",
-};
 
 export function MarketsView() {
   const [marketSearch, setMarketSearch] = useState<string>("");
@@ -80,12 +71,12 @@ export function MarketsView() {
             value={marketSearch}
             onChange={(e) => setMarketSearch(e.target.value)}
             placeholder="Search markets, IDs, names"
-            style={controlStyle}
+            style={fullWidthControl}
           />
           <select
             value={selectedGroup}
             onChange={(e) => setSelectedGroup(e.target.value)}
-            style={controlStyle}
+            style={fullWidthControl}
           >
             <option value="">All groups</option>
             {groups.map((g) => (
@@ -97,7 +88,7 @@ export function MarketsView() {
           <select
             value={marketStateFilter}
             onChange={(e) => setMarketStateFilter(e.target.value)}
-            style={controlStyle}
+            style={fullWidthControl}
           >
             {STATE_OPTIONS.map(([value, label]) => (
               <option key={value} value={value}>

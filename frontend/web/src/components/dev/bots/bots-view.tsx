@@ -22,17 +22,7 @@ import {
   moneySigned,
   shortTime,
 } from "@/lib/dev/format";
-
-const controlStyle: CSSProperties = {
-  border: "1px solid var(--border-2)",
-  background: "var(--surface-1)",
-  color: "var(--fg-1)",
-  borderRadius: 6,
-  padding: "7px 9px",
-  fontFamily: "inherit",
-  fontSize: 12,
-  width: "100%",
-};
+import { fullWidthControl } from "@/components/dev/primitives/control";
 
 const truncCell: CSSProperties = {
   padding: "7px 9px",
@@ -166,7 +156,7 @@ export function BotsView() {
               <select
                 value={botFilter}
                 onChange={(e) => setBotFilter(e.target.value)}
-                style={controlStyle}
+                style={fullWidthControl}
               >
                 <option value="">All bots</option>
                 {botTraderNames.map((name) => (
