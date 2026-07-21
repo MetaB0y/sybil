@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "protocol_id": "sybil-market-structure-development",
+  "protocol_id": "sybil-market-structure-development-v2",
   "status": "development-only-not-evidence",
   "issue": "https://github.com/MetaB0y/sybil/issues/198",
   "objective": "Discover when Sybil's FBA materially improves maker, trader, and shared-budget outcomes relative to fair CLOB baselines, and when it does not.",
@@ -45,25 +45,51 @@
       "purpose": "Measure stale-quote loss, spread capture, trader execution, price discovery, and delay in quiet and jump windows.",
       "regimes": ["quiet", "jump"],
       "development_axes": {
-        "batch_interval_ms": [500, 1000, 5000, 10000],
-        "quote_half_spread_nanos": [10000000, 20000000, 50000000, 100000000],
-        "maker_reaction_ms": [25, 100, 500, 2000],
-        "taker_reaction_ms": [25, 100, 500],
+        "batch_interval_ms": [500, 1000, 10000],
+        "quote_half_spread_nanos": [10000000, 50000000, 100000000],
+        "maker_reaction_ms": [25, 500, 2000],
+        "taker_reaction_ms": [25, 500],
         "fba_bundle_cancel_policy": ["current-noncancellable", "counterfactual-cancellable"],
-        "informed_trader_count": [1, 2, 4, 8],
-        "jump_nanos": [100000000, 300000000, 600000000]
+        "informed_trader_count": [1, 2, 8],
+        "jump_nanos": [100000000, 600000000]
       }
     },
     {
       "id": "shared-budget-portfolio",
       "purpose": "Measure firm quoted coverage, executable coverage, fill allocation, budget use, and trader welfare across many markets.",
       "development_axes": {
-        "market_count": [8, 32, 72],
+        "market_count": [8, 72],
         "budget_fraction_ppm": [100000, 250000, 500000],
         "flow_concentration": ["uniform", "head-heavy", "held-out-shuffled"]
       }
     }
   ],
+  "development_axis_selection": {
+    "date": "2026-07-21",
+    "inputs": [
+      "The full v1 microstructure matrix on development seed 0 (2,320 configurations; 6,944 retained engine rows).",
+      "The full v1 portfolio matrix on development seeds 0 through 31 (27 configurations; 2,592 retained engine rows)."
+    ],
+    "rule": "Remove interpolating levels only after preserving boundary conditions and qualitatively distinct mechanics. No held-out seed was executed or inspected.",
+    "retained_boundaries": [
+      "500 ms current binary cadence, 1 s intermediate cadence, and 10 s current Compose cadence",
+      "1 cent, 5 cent, and 10 cent quote half-spreads",
+      "maker reaction tied with, faster than, and slower than taker reaction",
+      "one, two, and several same-batch informed traders",
+      "10 cent and 60 cent jumps",
+      "8-market and 72-market portfolios at 10%, 25%, and 50% budget",
+      "uniform, head-heavy, and independently shuffled flow"
+    ],
+    "removed_interpolating_levels": [
+      "5 s cadence",
+      "2 cent half-spread",
+      "100 ms maker reaction",
+      "100 ms taker reaction",
+      "30 cent jump",
+      "four informed traders (two exhaust the 10-share maker quote and eight retains the high-demand boundary)",
+      "32-market portfolio"
+    ]
+  },
   "development_seeds": {
     "range_inclusive": [0, 31],
     "allowed_uses": ["debugging", "strategy sanity checks", "axis reduction", "runtime sizing"]

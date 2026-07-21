@@ -177,6 +177,44 @@ The publishable run must include:
 - every zero-fill and solver-failure row; and
 - paired uncertainty intervals over held-out seeds.
 
+### Development axis reduction on 2026-07-21
+
+Axis reduction used only the declared development range: the full v1
+microstructure surface on seed 0 (2,320 configurations and 6,944 engine rows)
+and all 32 development seeds for the full v1 portfolio surface (27
+configurations and 2,592 engine rows). The raw deterministic runner artifacts
+had SHA-256 hashes
+`9950b241f2c0ec9661e3047c69680f8eee76e106cba3fd8a867e3739899c6629`
+and
+`e86e68a6ad17fd7964481a287deadab3ce0f2f96abe62ecfec8552e3fba39c46`,
+respectively. These were diagnostics, not evidence; the v1 protocol remains in
+repository history for regeneration.
+
+The v2 development matrix removes only levels that interpolated between
+retained boundaries. It keeps the 500 ms, 1 s, and 10 s cadences; 1 cent, 5
+cent, and 10 cent half-spreads; maker/taker timing ties and both orderings; one,
+two, and several informed traders; small and large jumps; the smallest and
+largest catalog; all three budget fractions; and all three flow shapes.
+
+The diagnostics rejected a simple presumption that current FBA uniform pricing
+automatically protects a stale live bundle. On seed 0, current FBA had lower
+stale loss than the firm CLOB in only 88 of 2,304 jump configurations and
+higher stale loss in 792; ties mostly reflected zero fills. This single-seed
+count is a design diagnostic, not an estimate. The full portfolio development
+run also showed why both CLOB capital policies must remain: FBA had a material
+fill-rate advantage over shared-risk CLOB only in the nine 10%-budget cells,
+while displayed and individually executable catalog coverage were tied in all
+27 cells. FBA price error and delay were materially worse in all 27 shared-risk
+comparisons. The held-out range remained unexecuted while making these choices.
+
+The reduced v2 superset then completed all 32 development seeds in 270.7
+seconds: 43,776 engine rows, no verifier-invalid attempt, and SHA-256
+`153ab0fc493f19abd17e00982b4ac8f4ad06982e57c467c5b0daf36b30d29ebd`.
+It included both four and eight informed traders. Four was removed from the
+candidate frozen matrix because two 5-share traders already exhaust the
+10-share maker quote, while eight retains the higher-demand and lower-fill-rate
+boundary. No result from the held-out seed range informed that reduction.
+
 ## Stop conditions
 
 Implementation may improve clearly mechanical research support, capture
