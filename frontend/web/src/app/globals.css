@@ -594,7 +594,10 @@ textarea {
 .market-detail-header {
   display: grid;
   grid-template-columns: 56px minmax(0, 1fr);
-  gap: var(--space-4);
+  grid-template-areas:
+    "thumb crumb"
+    "thumb headline";
+  gap: var(--space-2) var(--space-4);
   align-items: start;
   margin-left: calc(-1 * var(--space-5));
   margin-right: calc(-1 * var(--space-5));
@@ -602,6 +605,23 @@ textarea {
   padding-right: var(--space-5);
   padding-bottom: var(--space-5);
   border-bottom: 1px solid var(--border-1);
+}
+
+.market-detail-thumb {
+  grid-area: thumb;
+  display: inline-flex;
+}
+
+.market-detail-crumb {
+  grid-area: crumb;
+}
+
+.market-detail-headline {
+  grid-area: headline;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
 .market-detail-title-row {
@@ -1281,15 +1301,20 @@ textarea {
     overflow: visible;
   }
 
-  .market-detail-content {
+  /* Trading first. Stacked in source order the buy box landed below the chart,
+     the holdings, the description and the activity feed — about 2,400px down,
+     so the one thing you came to the page to do was the last thing on it. The
+     rail leads and the reading material follows. */
+  .market-rail-responsive {
     order: 1;
-    overflow: visible;
+    overflow: visible !important;
+    padding-bottom: 0 !important;
   }
 
-  .market-rail-responsive {
+  .market-detail-content {
     order: 2;
-    overflow: visible !important;
-    padding-bottom: var(--space-6) !important;
+    overflow: visible;
+    padding-bottom: var(--space-6);
   }
 
   .activity-batch-detail-grid {
@@ -1480,8 +1505,16 @@ textarea {
     gap: var(--space-4);
   }
 
+  /* The breadcrumb wraps to two lines at this width, and with the thumb pinned
+     beside it the icon sat against the crumb with the title starting below and
+     to the right of it — reading as if it belonged to the breadcrumb. Give the
+     crumb the full width and drop the thumb down next to the title, which is
+     what it actually labels. */
   .market-detail-header {
     grid-template-columns: 44px minmax(0, 1fr);
+    grid-template-areas:
+      "crumb crumb"
+      "thumb headline";
     gap: var(--space-3);
     margin-left: calc(-1 * var(--space-4));
     margin-right: calc(-1 * var(--space-4));

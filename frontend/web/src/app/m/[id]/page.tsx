@@ -210,76 +210,76 @@ function Header({
         } as React.CSSProperties
       }
     >
-      <MarketThumb
-        key={marketId}
-        marketId={market.market_id}
-        name={market.name}
-        imageUrl={market.market_image_url ?? market.event_image_url ?? null}
-        fallbackIconUrl={
-          market.market_icon_url ?? market.event_icon_url ?? null
-        }
-        size={56}
-      />
+      {/* Three grid areas — thumb / crumb / headline. On a desktop the thumb
+          spans both rows down the left. On a phone the breadcrumb takes the
+          full width above and the thumb drops down beside the title, because
+          the breadcrumb wraps to two lines there and left the icon stranded
+          against it with the title starting below. */}
+      <span className="market-detail-thumb">
+        <MarketThumb
+          key={marketId}
+          marketId={market.market_id}
+          name={market.name}
+          imageUrl={market.market_image_url ?? market.event_image_url ?? null}
+          fallbackIconUrl={
+            market.market_icon_url ?? market.event_icon_url ?? null
+          }
+          size={56}
+        />
+      </span>
+      {/* Breadcrumb: Markets / ● Category / resolves <date> · status */}
       <div
+        key={marketId}
+        className="text-mono market-detail-crumb"
         style={{
           display: "flex",
-          flexDirection: "column",
+          alignItems: "center",
+          flexWrap: "wrap",
           gap: "var(--space-2)",
-          minWidth: 0,
+          fontSize: "10px",
+          letterSpacing: "var(--track-wide)",
+          textTransform: "uppercase",
+          color: "var(--fg-3)",
         }}
       >
-        {/* Breadcrumb: Markets / ● Category / resolves <date> · status */}
-        <div
-          key={marketId}
-          className="text-mono"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            flexWrap: "wrap",
-            gap: "var(--space-2)",
-            fontSize: "10px",
-            letterSpacing: "var(--track-wide)",
-            textTransform: "uppercase",
-            color: "var(--fg-3)",
-          }}
+        <Link
+          className="mobile-action-link"
+          href="/"
+          style={{ color: "var(--fg-4)", textDecoration: "none" }}
         >
-          <Link
-            className="mobile-action-link"
-            href="/"
-            style={{ color: "var(--fg-4)", textDecoration: "none" }}
+          markets
+        </Link>
+        <span style={{ color: "var(--fg-4)" }}>/</span>
+        {primary ? (
+          <span
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
           >
-            markets
-          </Link>
-          <span style={{ color: "var(--fg-4)" }}>/</span>
-          {primary ? (
             <span
-              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-            >
-              <span
-                aria-hidden
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: "50%",
-                  background: getCategoryColor(primary),
-                  display: "inline-block",
-                }}
-              />
-              {primary}
-            </span>
-          ) : (
-            <span style={{ color: "var(--fg-4)" }}>uncategorized</span>
-          )}
-          {resolvesMs != null && (
-            <>
-              <span style={{ color: "var(--fg-4)" }}>/</span>
-              <span>resolves {formatDate(resolvesMs)}</span>
-            </>
-          )}
-          <span style={{ color: "var(--fg-4)" }}>/</span>
-          <span>{origin}</span>
-        </div>
+              aria-hidden
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: "50%",
+                background: getCategoryColor(primary),
+                display: "inline-block",
+              }}
+            />
+            {primary}
+          </span>
+        ) : (
+          <span style={{ color: "var(--fg-4)" }}>uncategorized</span>
+        )}
+        {resolvesMs != null && (
+          <>
+            <span style={{ color: "var(--fg-4)" }}>/</span>
+            <span>resolves {formatDate(resolvesMs)}</span>
+          </>
+        )}
+        <span style={{ color: "var(--fg-4)" }}>/</span>
+        <span>{origin}</span>
+      </div>
 
+      <div className="market-detail-headline">
         {/* Ordering lives in the rail; active markets need no redundant badge. */}
         <div className="market-detail-title-row">
           <h1
