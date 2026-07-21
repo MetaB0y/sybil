@@ -321,6 +321,12 @@ grep -Fq 'targets: ["sybil-arena:9101"]' deploy/prometheus.yml \
     || fail "VictoriaMetrics does not scrape the arena metrics exporter"
 pass "Arena owns its authenticated read boundary, storage, and scraped metrics"
 
+for status_source in scripts/status.sh justfile; do
+    grep -Fq 'ARENA_METRICS_URL=http://sybil-arena:9101/metrics' "$status_source" \
+        || fail "$status_source does not show the live Arena provider-health state"
+done
+pass "operator status reads live Arena provider health"
+
 prod_arena_service_block=$(
     awk '
         /^  sybil-arena:/ { in_service = 1; next }

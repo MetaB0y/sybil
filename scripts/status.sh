@@ -107,4 +107,4 @@ fi
 echo ""
 
 echo "=== Arena ==="
-ssh "$S" "cd /opt/sybil && $COMPOSE exec -T sybil-arena-dashboard .venv/bin/python -m live.status --hours 24"
+ssh "$S" "cd /opt/sybil && $COMPOSE exec -T -e ARENA_METRICS_URL=http://sybil-arena:9101/metrics sybil-arena-dashboard .venv/bin/python -m live.status --hours 24"

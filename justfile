@@ -832,7 +832,7 @@ deploy-shell:
 
 # Arena bot status — text dashboard (readable by CLI / LLM)
 arena-status hours="24":
-    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_REMOTE}} exec -T sybil-arena-dashboard uv run --no-sync python -m live.status --hours {{hours}}'
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_REMOTE}} exec -T -e ARENA_METRICS_URL=http://sybil-arena:9101/metrics sybil-arena-dashboard uv run --no-sync python -m live.status --hours {{hours}}'
 
 # Preview resolved-market labels that would be added to the live decisions DB.
 arena-outcomes-dry-run:
