@@ -195,6 +195,19 @@ print(history["environment"].get("MALLOC_ARENA_MAX", ""))
     || fail "sybil-history does not bound glibc allocator arenas inside its tight cgroup"
 pass "history allocator arenas are bounded independently of blocking-worker churn"
 
+api_allocator_arenas=$(
+    compose config | python3 -c '
+import sys
+import yaml
+
+api = yaml.safe_load(sys.stdin)["services"]["sybil-api"]
+print(api["environment"].get("MALLOC_ARENA_MAX", ""))
+'
+)
+[[ "$api_allocator_arenas" == "2" ]] \
+    || fail "sybil-api does not bound glibc allocator arenas for large public responses"
+pass "API allocator arenas are bounded across Tokio response workers"
+
 telegram_log_contract=$(
     compose_telegram config | python3 -c '
 import sys

@@ -76,11 +76,15 @@ The API's canonical sequencer store runs with a 128 MiB redb page-cache ceiling
 upstream 1 GiB default is intentionally not used for either store: page-cache
 warm-up otherwise looks like a gradual process leak and can consume the whole
 history budget or leave the API without recovery headroom. Compose also sets
-`MALLOC_ARENA_MAX=2` for `sybil-history`: blocking-query workers can otherwise
-leave many glibc arenas resident after the worker threads exit, allowing
-anonymous RSS to grow independently of the redb cache ceiling. Confirm both
-cache values and the allocator bound in the resolved Compose configuration
-before attributing a slope to application state. Treat sustained history
+`MALLOC_ARENA_MAX=2` for both services. Blocking history workers can otherwise
+leave arenas resident after the worker threads exit; the API can similarly
+retain another tens-of-MiB arena when a large public response lands on a new
+Tokio worker. In an isolated restored-store check, twelve 13 MiB block-page
+responses plateaued by the third request at roughly 192 MiB with the deployed
+converter and 177 MiB with the direct public converter. Without the bound,
+resident memory instead rose in worker-sized steps. Confirm both cache values
+and both allocator bounds in the resolved Compose configuration before
+attributing a slope to application state. Treat sustained history
 memory above roughly 160 MiB after cache warm-up as unexpected; separate
 anonymous RSS from reclaimable file cache, compare live thread count with the
 anonymous arena mappings in `/proc/1/smaps`, and inspect query concurrency

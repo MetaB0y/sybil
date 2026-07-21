@@ -380,46 +380,20 @@ fn removed_order_exit_reason(reason: matching_sequencer::RemovedOrderExitReason)
     }
 }
 
-/// Convert a sealed block to the authenticated service response. This contains
-/// account-attributed data and must not be called from public routes.
-pub fn block_to_response(block: &SealedBlock) -> BlockResponse {
-    let fills = block
-        .canonical
-        .fills
-        .iter()
-        .map(|f| FillResponse {
-            order_id: f.order_id,
-            fill_qty: f.fill_qty.0,
-            fill_price_nanos: f.fill_price.0,
-            account_id: f.account_id,
-        })
-        .collect();
-
-    let clearing_prices_nanos: HashMap<String, Vec<u64>> = block
+fn clearing_prices_to_response(block: &SealedBlock) -> HashMap<String, Vec<u64>> {
+    block
         .canonical
         .clearing_prices
         .iter()
         .map(|(mid, prices)| (mid.0.to_string(), prices.iter().map(|n| n.0).collect()))
-        .collect();
+        .collect()
+}
 
-    let rejections = block
-        .canonical
-        .rejections
-        .iter()
-        .map(rejection_to_response)
-        .collect();
-    let system_events = block
-        .canonical
-        .system_events
-        .iter()
-        .map(system_event_to_response)
-        .collect();
-
+fn block_market_stats_to_response(block: &SealedBlock) -> HashMap<String, BlockMarketStats> {
     // Union the keys from placers_by_market, volume_by_market, and
-    // orders_by_market — any of the three can be empty on its own (a
-    // block with carried fills but no fresh admits has zero placers but
-    // non-zero volume; a block whose only book activity is expiries has
-    // matched/unmatched but no fresh admits).
+    // orders_by_market. Any source may be empty on its own: carried fills have
+    // volume without fresh placers, while expiry-only activity has order exits
+    // without new admissions.
     let mut by_market: HashMap<String, BlockMarketStats> = HashMap::new();
     for (mid, count) in &block.analytics.placers_by_market {
         by_market.entry(mid.0.to_string()).or_default().placers = *count;
@@ -439,6 +413,40 @@ pub fn block_to_response(block: &SealedBlock) -> BlockResponse {
             .or_default()
             .welfare_nanos = *welfare;
     }
+    by_market
+}
+
+/// Convert a sealed block to the authenticated service response. This contains
+/// account-attributed data and must not be called from public routes.
+pub fn block_to_response(block: &SealedBlock) -> BlockResponse {
+    let fills = block
+        .canonical
+        .fills
+        .iter()
+        .map(|f| FillResponse {
+            order_id: f.order_id,
+            fill_qty: f.fill_qty.0,
+            fill_price_nanos: f.fill_price.0,
+            account_id: f.account_id,
+        })
+        .collect();
+
+    let clearing_prices_nanos = clearing_prices_to_response(block);
+
+    let rejections = block
+        .canonical
+        .rejections
+        .iter()
+        .map(rejection_to_response)
+        .collect();
+    let system_events = block
+        .canonical
+        .system_events
+        .iter()
+        .map(system_event_to_response)
+        .collect();
+
+    let by_market = block_market_stats_to_response(block);
 
     BlockResponse {
         height: block.canonical.header.height,
@@ -466,7 +474,6 @@ pub fn block_to_response(block: &SealedBlock) -> BlockResponse {
 /// type makes it impossible for a public handler to accidentally serialize
 /// account-attributed canonical rows.
 pub fn public_block_to_response(block: &SealedBlock) -> PublicBlockResponse {
-    let full = block_to_response(block);
     let resolved_market_ids = block
         .canonical
         .system_events
@@ -478,25 +485,25 @@ pub fn public_block_to_response(block: &SealedBlock) -> PublicBlockResponse {
         .collect();
 
     PublicBlockResponse {
-        height: full.height,
-        parent_hash: full.parent_hash,
-        state_root: full.state_root,
-        events_root: full.events_root,
-        order_count: full.order_count,
-        fill_count: full.fill_count,
-        rejection_count: full.rejections.len() as u32,
-        timestamp_ms: full.timestamp_ms,
-        clearing_prices_nanos: full.clearing_prices_nanos,
+        height: block.canonical.header.height,
+        parent_hash: hex::encode(block.canonical.header.parent_hash),
+        state_root: hex::encode(block.canonical.header.state_root),
+        events_root: hex::encode(block.canonical.header.events_root),
+        order_count: block.canonical.header.order_count,
+        fill_count: block.canonical.header.fill_count,
+        rejection_count: block.canonical.rejections.len() as u32,
+        timestamp_ms: block.canonical.header.timestamp_ms,
+        clearing_prices_nanos: clearing_prices_to_response(block),
         bridge: PublicBridgeBlockResponse {
-            deposit_count: full.bridge.deposit_count,
-            deposit_root_hex: full.bridge.deposit_root_hex,
+            deposit_count: block.canonical.bridge.deposit_count,
+            deposit_root_hex: hex::encode(block.canonical.bridge.deposit_root),
         },
         resolved_market_ids,
-        total_welfare_nanos: full.total_welfare_nanos,
-        total_volume_nanos: full.total_volume_nanos,
-        orders_filled: full.orders_filled,
-        unique_placers: full.unique_placers,
-        by_market: full.by_market,
+        total_welfare_nanos: block.analytics.total_welfare,
+        total_volume_nanos: block.analytics.total_volume,
+        orders_filled: block.analytics.orders_filled,
+        unique_placers: block.analytics.unique_placers,
+        by_market: block_market_stats_to_response(block),
     }
 }
 

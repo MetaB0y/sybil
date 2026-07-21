@@ -30,6 +30,10 @@ services:
       # redb defaults to a 1 GiB cache, leaving no safe restore/runtime margin
       # inside this service's 1.25 GiB cgroup.
       SYBIL_SEQUENCER_REDB_CACHE_BYTES: "134217728"
+      # Large public block pages are serialized on Tokio worker threads. Bound
+      # glibc arenas so identical requests reuse a small allocator stock rather
+      # than retaining another tens-of-MiB arena on each worker.
+      MALLOC_ARENA_MAX: "2"
       # All three are optional as a group. When absent, monetary bridge routes
       # fail closed while trading and bridge status remain available.
       SYBIL_BRIDGE_CHAIN_ID: "${SYBIL_BRIDGE_CHAIN_ID:-}"
