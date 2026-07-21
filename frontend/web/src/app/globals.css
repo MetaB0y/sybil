@@ -190,9 +190,92 @@ textarea {
   min-width: max-content;
 }
 
-.global-nav {
+/*
+ * Devnet notice — a standing strip above the nav on a public devnet.
+ *
+ * It is fixed like the nav, so the space it takes has to be reserved by hand:
+ * `--devnet-offset` is its height, `--chrome-height` is everything fixed at the
+ * top of the page, and anything that positions itself "below the chrome" uses
+ * the latter. Dismissing sets `data-devnet="dismissed"` on <html>, which zeroes
+ * the offset and hides the strip in one move — see `devnet-notice.tsx`.
+ */
+:root {
+  --devnet-offset: 34px;
+  --chrome-height: calc(var(--nav-height) + var(--devnet-offset));
+}
+
+:root[data-devnet="dismissed"] {
+  --devnet-offset: 0px;
+}
+
+.devnet-notice {
   position: fixed;
   top: 0;
+  left: 0;
+  right: 0;
+  z-index: 51;
+  height: var(--devnet-offset);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-4);
+  background: var(--warn-soft);
+  border-bottom: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+  color: var(--fg-1);
+}
+
+:root[data-devnet="dismissed"] .devnet-notice {
+  display: none;
+}
+
+.devnet-notice-text {
+  margin: 0;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.35;
+  letter-spacing: var(--track-wide);
+  text-align: center;
+  /* Two lines at phone width; past that it is one. Clipped rather than allowed
+     to grow, because the strip's height is what the page reserved for it. */
+  overflow: hidden;
+}
+
+.devnet-notice-text strong {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.devnet-notice-short {
+  display: none;
+}
+
+.devnet-notice-close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-3);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .devnet-notice-close:hover {
+    color: var(--fg-1);
+    background: color-mix(in srgb, var(--warn) 18%, transparent);
+  }
+}
+
+.global-nav {
+  position: fixed;
+  top: var(--devnet-offset);
   left: 0;
   right: 0;
   height: var(--nav-height);
@@ -449,21 +532,21 @@ textarea {
 
 .global-nav-sheet-backdrop {
   position: fixed;
-  inset: var(--nav-height) 0 0;
+  inset: var(--chrome-height) 0 0;
   z-index: 49;
   background: var(--overlay);
 }
 
 .global-nav-sheet {
   position: fixed;
-  top: var(--nav-height);
+  top: var(--chrome-height);
   left: 0;
   right: 0;
   z-index: 51;
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  max-height: calc(100dvh - var(--nav-height));
+  max-height: calc(100dvh - var(--chrome-height));
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: var(--space-4) var(--space-5) var(--space-5);
@@ -574,7 +657,7 @@ textarea {
 
 .market-detail-main {
   width: 100%;
-  height: calc(100dvh - var(--nav-height));
+  height: calc(100dvh - var(--chrome-height));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1266,7 +1349,7 @@ textarea {
 @media (max-width: 1100px) {
   .market-detail-main {
     height: auto;
-    min-height: calc(100dvh - var(--nav-height));
+    min-height: calc(100dvh - var(--chrome-height));
     overflow: visible;
   }
 
@@ -1368,9 +1451,19 @@ textarea {
     /* The bar holds a wordmark and three 28px controls, all centred — the 64px
        it took when those controls were 44px boxes was mostly air. */
     --nav-height: 52px;
+    /* The notice runs to two lines of its short wording at this width. */
+    --devnet-offset: 44px;
     /* The ticker is hidden at this width (below), so pages must not reserve
        space for it or every title would sit 36px low. */
     --ticker-offset: 0px;
+  }
+
+  .devnet-notice-long {
+    display: none;
+  }
+
+  .devnet-notice-short {
+    display: inline;
   }
 
   /* RECENT TRADES is a marquee of clipped mid-sentence text that ate 44px of a

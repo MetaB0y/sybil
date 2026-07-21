@@ -146,7 +146,7 @@ export function ClearingTicker({ marketsById }: Props) {
       aria-busy={displayed.length === 0 && recentHistory === "loading"}
       style={{
         position: "sticky",
-        top: "var(--nav-height)",
+        top: "var(--chrome-height)",
         zIndex: 40,
         display: "flex",
         alignItems: "stretch",
