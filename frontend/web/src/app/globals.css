@@ -1276,14 +1276,41 @@ textarea {
     grid-template-columns: repeat(2, 1fr);
   }
 
+  /* Below 900px the legend and the range bar stop sharing a line. Left as one
+     row, `flex: 1` squeezed the legend into a ~150px column and the outcome
+     chips stacked one per row beside (and, once the chips hit their min width,
+     underneath) the range selector. Each gets its own full-width row instead,
+     range bar first so it stays reachable no matter how tall the chip list is. */
   .market-detail-chart-head {
     flex-wrap: wrap;
+  }
+
+  .market-detail-chart-legend,
+  .market-detail-chart-range {
+    flex: 1 0 100%;
+    min-width: 0;
+  }
+
+  .market-detail-chart-range {
+    order: -1;
   }
 }
 
 @media (max-width: 640px) {
   :root {
     --nav-height: 56px;
+  }
+
+  /* A 40px display title plus a range bar does not fit on one phone line, and
+     an unwrapped row pushed /leaderboard 34px past the viewport at every phone
+     width. Let the action drop to its own full-width line instead. */
+  .page-header-title-row {
+    flex-wrap: wrap;
+  }
+
+  .page-header-action {
+    margin-left: 0 !important;
+    width: 100%;
   }
 
   .sybil-page-pad {

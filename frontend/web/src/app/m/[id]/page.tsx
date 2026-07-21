@@ -561,6 +561,7 @@ function ChartSection({
       <div className="market-detail-chart-head" style={{}}>
         {outcomes.length > 0 ? (
           <div
+            className="market-detail-chart-legend"
             style={{
               flex: 1,
               minWidth: 0,
@@ -587,9 +588,11 @@ function ChartSection({
             />
           </div>
         ) : (
-          <div className="eyebrow">yes probability</div>
+          <div className="eyebrow market-detail-chart-legend">
+            yes probability
+          </div>
         )}
-        <div style={{ flexShrink: 0 }}>
+        <div className="market-detail-chart-range" style={{ flexShrink: 0 }}>
           <ChartRangeBar value={range} onChange={setRange} />
         </div>
       </div>
