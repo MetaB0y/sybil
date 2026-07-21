@@ -120,7 +120,11 @@ export function GlobalNav() {
         href="/"
         style={{
           display: "inline-flex",
-          alignItems: "baseline",
+          // Centred, not baseline-aligned: the coarse-pointer floor makes this
+          // link 44px tall, and on a baseline the wordmark sat at the top of
+          // that box — 12px above the middle of the bar its neighbours centre
+          // on.
+          alignItems: "center",
           flexShrink: 0,
           textDecoration: "none",
           color: "var(--fg-1)",

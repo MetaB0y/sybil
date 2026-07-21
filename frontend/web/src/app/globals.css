@@ -706,6 +706,11 @@ textarea {
   scrollbar-width: none;
 }
 
+/* Tabs never squeeze: a narrowed "Open orders" is what wrapped it in two. */
+.portfolio-tabs > * {
+  flex-shrink: 0;
+}
+
 .portfolio-tabs::-webkit-scrollbar {
   display: none;
 }
@@ -889,62 +894,6 @@ textarea {
   color: var(--fg-3);
 }
 
-/* The header row keeps its sort buttons in card mode — losing the ability to
-   sort on a phone would be a worse trade than the strip is ugly. The grid
-   template is inline on the header element, hence the !important. */
-.table-sort-strip {
-  display: flex !important;
-  /* One scrolling line, not a wrapped block. Wrapped over two lines the strip
-     read as the broken header of a table that isn't there any more; kept on one
-     line it reads as what it is — a row of controls. */
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  overscroll-behavior-inline: contain;
-  scrollbar-width: none;
-  align-items: center;
-  gap: 4px var(--space-3) !important;
-  min-width: 0 !important;
-  padding: 0 2px var(--space-2) !important;
-}
-
-.table-sort-strip::-webkit-scrollbar {
-  display: none;
-}
-
-.table-sort-strip::before {
-  content: "sort";
-  flex: 0 0 auto;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: var(--track-wide);
-  text-transform: uppercase;
-  color: var(--fg-4);
-}
-
-/* Cells with no sort button — thumbnail spacers, the non-sortable sparkline
-   column, trailing action slots — have nothing to say in the strip. Empty
-   spacers go by `:empty`; a cell with static text opts out by class. */
-.table-sort-strip > :empty,
-.table-sort-strip > .sort-strip-omit {
-  display: none;
-}
-
-/* Header cells stretch to fill their column on desktop — the buttons and the
-   wrappers some columns put around them both carry `width: 100%`. Left as-is
-   each one claims a full strip line and the sort controls stack vertically. */
-.table-sort-strip > *,
-.table-sort-strip button {
-  width: auto !important;
-  min-width: 0 !important;
-  flex: 0 0 auto;
-}
-
-.table-sort-strip button {
-  justify-content: flex-start !important;
-  min-height: 0 !important;
-  padding: 2px 0 !important;
-  white-space: nowrap;
-}
 
 /* Portfolio table rows (Positions / Orders / Trades / History). Every row is a
    route into its market, so hovering tints the whole row on --surface-2 — the
@@ -1416,10 +1365,9 @@ textarea {
 
 @media (max-width: 640px) {
   :root {
-    /* Roomier than the desktop bar, because on a touch device it holds three
-       44px controls: at 56px they filled the bar edge to edge and read as a
-       row of boxes with a wordmark squeezed in beside them. */
-    --nav-height: 64px;
+    /* The bar holds a wordmark and three 28px controls, all centred — the 64px
+       it took when those controls were 44px boxes was mostly air. */
+    --nav-height: 52px;
     /* The ticker is hidden at this width (below), so pages must not reserve
        space for it or every title would sit 36px low. */
     --ticker-offset: 0px;
@@ -1437,7 +1385,7 @@ textarea {
      buttons puts the emphasis back where it belongs — the buttons keep their
      44px targets, they just stop being drawn as buttons. */
   .global-nav-wordmark {
-    font-size: var(--fs-22, 22px);
+    font-size: var(--fs-20);
   }
 
   .global-nav .nav-icon-btn,
@@ -1448,13 +1396,19 @@ textarea {
   }
 
   /* One bordered control in the bar, and it is the one that does something.
-     All three controls now stand 32px — the wordmark's own height — instead of
-     the 44px the coarse-pointer floor gave them; the touch target moved into
+     All three stand 28px — the wordmark's own height — instead of the 44px the
+     coarse-pointer floor gave them; the touch target moved into
      `.hit-target`'s pseudo-element. */
   .global-nav .nav-chip {
-    height: 32px;
+    height: 28px;
     padding: 0 var(--space-2);
     font-size: 11px;
+  }
+
+  .global-nav .nav-icon-btn,
+  .global-nav-menu-button {
+    height: 28px;
+    width: 28px;
   }
 
   /* A 40px display title plus a range bar does not fit on one phone line, and

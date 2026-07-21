@@ -98,14 +98,11 @@ export function EventRow({
   children: ReactNode;
 }) {
   const compact = useCompactLayout();
-  const className = header
-    ? compact
-      ? "table-sort-strip"
-      : undefined
-    : "event-row";
+  // The header names columns the card rows below don't have.
+  if (header && compact) return null;
   return (
     <div
-      {...(className ? { className } : {})}
+      {...(header ? {} : { className: "event-row" })}
       style={eventRowGrid(columns, header)}
     >
       {children}

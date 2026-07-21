@@ -93,9 +93,9 @@ export function TableCard({ children }: { children: ReactNode }) {
 }
 
 /**
- * The header row. On a phone the column grid collapses to a wrapped strip of
- * sort buttons (`.table-sort-strip`) — the cards below carry their own labels,
- * but sorting has nowhere else to live.
+ * The header row — desktop only. Every card below labels its own values, so on
+ * a phone the header had nothing left to name: it read as the leftover header
+ * of a table that isn't there.
  */
 export function TableHead({
   columns,
@@ -105,14 +105,8 @@ export function TableHead({
   children: ReactNode;
 }) {
   const compact = useCompactLayout();
-  return (
-    <div
-      {...(compact ? { className: "table-sort-strip" } : {})}
-      style={headerRowGrid(columns)}
-    >
-      {children}
-    </div>
-  );
+  if (compact) return null;
+  return <div style={headerRowGrid(columns)}>{children}</div>;
 }
 
 /** Footer well holding a tab's `<Pager>`, padded identically across tabs. */

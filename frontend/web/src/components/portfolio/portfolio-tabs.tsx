@@ -60,6 +60,9 @@ export function PortfolioTabs({
               display: "inline-flex",
               alignItems: "center",
               gap: 6,
+              // "Open orders" broke over two lines on a phone and made the
+              // whole strip twice as tall. The strip scrolls sideways instead.
+              whiteSpace: "nowrap",
             }}
           >
             <span>{t.label}</span>

@@ -233,16 +233,17 @@ function Header({
   onSort: (key: SortKey) => void;
 }) {
   const compact = useCompactLayout();
+  // Card rows carry their own labels; the column header has nothing to name.
+  if (compact) return null;
   return (
     <div
-      {...(compact ? { className: "table-sort-strip" } : {})}
       style={{
         display: "grid",
         gridTemplateColumns: GRID,
         gap: GRID_GAP,
         alignItems: "center",
         padding: "0 22px",
-        height: compact ? undefined : 36,
+        height: 36,
         fontFamily: "var(--font-mono)",
         fontSize: 10,
         textTransform: "uppercase",
@@ -250,7 +251,7 @@ function Header({
         color: "var(--fg-3)",
         borderLeft: ROW_BORDER_LEFT,
         background: "var(--bg-1)",
-        position: compact ? undefined : "sticky",
+        position: "sticky",
         top: 0,
         zIndex: 1,
       }}

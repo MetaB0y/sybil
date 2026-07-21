@@ -220,12 +220,7 @@ export function PositionsList({
             <span />
             {COLUMNS.map((col) =>
               "spark" in col ? (
-                // Nothing to sort by, so it drops out of the phone sort strip.
-                <span
-                  key={col.spark}
-                  className="sort-strip-omit"
-                  style={{ textAlign: "center" }}
-                >
+                <span key={col.spark} style={{ textAlign: "center" }}>
                   {col.spark}
                 </span>
               ) : (
