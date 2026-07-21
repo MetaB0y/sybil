@@ -39,9 +39,15 @@ LLM calls or divergent news inputs.
 LLM cost and failure are contained at the analyst boundary. Each analyst has a persistent spend
 pause threshold; reaching it blocks the next call without affecting other personas. Because cost
 is known only after a completed call, actual spend may exceed the threshold by that final call.
+Analysts request at most 512 completion tokens with optional reasoning disabled, own a 90-second
+end-to-end deadline outside the SDK transport timeout, and reject any response whose reported
+completion count or returned text exceeds the local contract. Rejected completed calls still retain
+their provider-reported cost before the evidence batch is retried; raw over-limit text is never
+logged or published. These application-owned bounds remain authoritative when an upstream model or
+provider ignores a requested generation limit.
 Parse fallbacks are counted. Provider capability is tracked independently from
 that local experiment budget: relevance-gate and analyst calls classify
-authentication, credit, rate-limit, timeout, upstream, and other failures;
+authentication, credit, rate-limit, timeout, upstream, contract, and other failures;
 publish degraded/last-success/backoff metrics; and use bounded backoff for
 401/402/429. Failed analyst calls retain their evidence batch for retry and
 still consume the normal call cadence, so a transient failure cannot become a

@@ -16,8 +16,13 @@ ProviderFailureKind = Literal[
     "rate_limit",
     "timeout",
     "upstream",
+    "contract",
     "other",
 ]
+
+
+class ProviderContractError(ValueError):
+    """The provider returned a response outside the requested safety contract."""
 
 
 def classify_provider_error(error: Exception) -> ProviderFailureKind:
@@ -39,6 +44,8 @@ def classify_provider_error(error: Exception) -> ProviderFailureKind:
         return "timeout"
     if isinstance(status_code, int) and status_code >= 500:
         return "upstream"
+    if isinstance(error, ProviderContractError):
+        return "contract"
     return "other"
 
 

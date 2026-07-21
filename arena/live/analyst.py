@@ -14,6 +14,7 @@ sizing arms have different portfolios but must share one fair value).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -30,7 +31,7 @@ from .costs import cost_of_call
 from .fair_value_bus import FairValueBus, FairValueUpdate
 from .news_feed import LiveArticle, NewsFeed, NewsSubscription, PairedNewsBatchView
 from .pricing import market_price
-from .provider_health import ProviderCircuit
+from .provider_health import ProviderCircuit, ProviderContractError
 from .strategy import RESOLVED_HIGH, RESOLVED_LOW
 
 if TYPE_CHECKING:
@@ -47,8 +48,9 @@ DEFAULT_COUNTERCASE = "No countercase supplied; treat this estimate cautiously."
 DEFAULT_RESTATE = ""
 DEDUP_SIMILARITY_THRESHOLD = 0.82
 LLM_TEMPERATURE = 0.3
-LLM_MAX_TOKENS = 2048
-LLM_REASONING_MAX_TOKENS = 1024
+LLM_MAX_TOKENS = 512
+LLM_CALL_DEADLINE_SECONDS = 90.0
+LLM_MAX_RESPONSE_CHARS = 8_192
 
 
 def llm_generation_parameters() -> dict:
@@ -56,7 +58,9 @@ def llm_generation_parameters() -> dict:
     return {
         "temperature": LLM_TEMPERATURE,
         "max_tokens": LLM_MAX_TOKENS,
-        "reasoning": {"max_tokens": LLM_REASONING_MAX_TOKENS},
+        "reasoning": {"effort": "none"},
+        "call_deadline_seconds": LLM_CALL_DEADLINE_SECONDS,
+        "max_response_chars": LLM_MAX_RESPONSE_CHARS,
     }
 
 
@@ -433,19 +437,38 @@ class PersonaAnalyst:
     async def _call_llm(self, prompt: str) -> tuple[str, float]:
         llm = self._get_llm_client()
         t0 = time.monotonic()
-        resp = await llm.chat.completions.create(
-            model=self.model_name,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=LLM_TEMPERATURE,
-            max_tokens=LLM_MAX_TOKENS,
-            # SYB-64: ``usage.include`` makes OpenRouter return the actual billed
-            # USD cost in ``resp.usage.cost`` (0% error vs. billing). We fall
-            # back to a price table only when the field is absent.
-            extra_body={
-                "reasoning": {"max_tokens": LLM_REASONING_MAX_TOKENS},
-                "usage": {"include": True},
-            },
-        )
+        try:
+            # The SDK timeout is a per-I/O transport bound. A provider can keep
+            # that connection active while generating for far longer, so own a
+            # separate end-to-end wall clock around the complete request.
+            resp = await asyncio.wait_for(
+                llm.chat.completions.create(
+                    model=self.model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=LLM_TEMPERATURE,
+                    max_tokens=LLM_MAX_TOKENS,
+                    # This forecast contract needs a short structured answer,
+                    # not optional hidden reasoning. Disabling it also avoids
+                    # providers treating max_tokens as final-answer-only.
+                    extra_body={
+                        "reasoning": {"effort": "none"},
+                        "usage": {"include": True},
+                    },
+                ),
+                timeout=LLM_CALL_DEADLINE_SECONDS,
+            )
+        except TimeoutError as exc:
+            # Discard the connection pool after cancellation rather than
+            # trusting a provider connection that exceeded its hard deadline.
+            if self._llm_client is llm:
+                self._llm_client = None
+            try:
+                await llm.close()
+            except Exception:
+                log.warning("[%s] failed to close timed-out LLM client", self.name, exc_info=True)
+            raise TimeoutError(
+                f"provider call exceeded {LLM_CALL_DEADLINE_SECONDS:.0f}s hard deadline"
+            ) from exc
         text = resp.choices[0].message.content or ""
         duration = time.monotonic() - t0
         if resp.usage:
@@ -485,6 +508,17 @@ class PersonaAnalyst:
                     usd_cost,
                     cost_source,
                 )
+            if completion_tokens > LLM_MAX_TOKENS:
+                raise ProviderContractError(
+                    "provider reported "
+                    f"{completion_tokens} completion tokens after a "
+                    f"{LLM_MAX_TOKENS}-token request"
+                )
+        if len(text) > LLM_MAX_RESPONSE_CHARS:
+            raise ProviderContractError(
+                f"provider returned {len(text)} response characters; "
+                f"limit is {LLM_MAX_RESPONSE_CHARS}"
+            )
         return text, duration
 
     # -- Prompt building --

@@ -1,7 +1,11 @@
 """LLM provider classification, backoff, and observability tests."""
 
 from live.metrics import ArenaMetrics
-from live.provider_health import ProviderCircuit, classify_provider_error
+from live.provider_health import (
+    ProviderCircuit,
+    ProviderContractError,
+    classify_provider_error,
+)
 
 
 class ProviderError(Exception):
@@ -20,6 +24,7 @@ def test_provider_errors_are_classified_by_operational_action():
     assert classify_provider_error(ProviderError(429)) == "rate_limit"
     assert classify_provider_error(ProviderError(503)) == "upstream"
     assert classify_provider_error(TimeoutError()) == "timeout"
+    assert classify_provider_error(ProviderContractError("too large")) == "contract"
     assert classify_provider_error(ValueError()) == "other"
 
 

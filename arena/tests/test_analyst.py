@@ -8,19 +8,28 @@ Covers:
 - The sizer running LLM-free.
 """
 
+import asyncio
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from live.analyst import (
     DEFAULT_COUNTERCASE,
     DEFAULT_PARSE_CONFIDENCE,
     DEFAULT_RESTATE,
+    LLM_CALL_DEADLINE_SECONDS,
+    LLM_MAX_RESPONSE_CHARS,
+    LLM_MAX_TOKENS,
     PersonaAnalyst,
     cluster_near_duplicate_articles,
+    llm_generation_parameters,
 )
 from live.fair_value_bus import FairValueBus, FairValueUpdate, analysis_batch_id
 from live.metrics import ArenaMetrics
 from live.news_feed import LiveArticle, NewsFeed
+from live.provider_health import ProviderContractError
 from live.trader import LiveLlmTrader
 from sybil_client.types import Block
 
@@ -109,6 +118,113 @@ def _make_sizer(bus, name, market_ids=(7,)):
     sizer.balance_history = [500.0]
     sizer._observed_first_block = True
     return sizer
+
+
+def _llm_response(
+    content: str,
+    *,
+    prompt_tokens: int = 100,
+    completion_tokens: int = 100,
+    cost: float = 0.001,
+):
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+        usage=SimpleNamespace(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost=cost,
+        ),
+    )
+
+
+async def test_call_llm_disables_reasoning_and_enforces_generation_bound():
+    analyst = _make_analyst(FairValueBus(), [7])
+    create = AsyncMock(return_value=_llm_response("FAIR_VALUE: 0.60"))
+    analyst._llm_client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
+        close=AsyncMock(),
+    )
+
+    text, _duration = await analyst._call_llm("prompt")
+
+    assert text == "FAIR_VALUE: 0.60"
+    assert create.await_args.kwargs["max_tokens"] == LLM_MAX_TOKENS
+    assert create.await_args.kwargs["extra_body"] == {
+        "reasoning": {"effort": "none"},
+        "usage": {"include": True},
+    }
+    assert llm_generation_parameters() == {
+        "temperature": 0.3,
+        "max_tokens": LLM_MAX_TOKENS,
+        "reasoning": {"effort": "none"},
+        "call_deadline_seconds": LLM_CALL_DEADLINE_SECONDS,
+        "max_response_chars": LLM_MAX_RESPONSE_CHARS,
+    }
+
+
+async def test_call_llm_owns_hard_wall_clock(monkeypatch):
+    analyst = _make_analyst(FairValueBus(), [7])
+
+    async def never_returns(**_kwargs):
+        await asyncio.Event().wait()
+
+    close = AsyncMock()
+    analyst._llm_client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=never_returns)),
+        close=close,
+    )
+    monkeypatch.setattr("live.analyst.LLM_CALL_DEADLINE_SECONDS", 0.01)
+
+    with pytest.raises(TimeoutError, match="hard deadline"):
+        await analyst._call_llm("prompt")
+
+    close.assert_awaited_once()
+    assert analyst._llm_client is None
+
+
+async def test_call_llm_rejects_provider_token_overrun_after_accounting():
+    analyst = _make_analyst(FairValueBus(), [7])
+    analyst.db = MagicMock()
+    analyst.llm_budget_usd = 5.0
+    analyst._llm_client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(
+                create=AsyncMock(
+                    return_value=_llm_response(
+                        "FAIR_VALUE: 0.60",
+                        completion_tokens=LLM_MAX_TOKENS + 1,
+                    )
+                )
+            )
+        ),
+        close=AsyncMock(),
+    )
+
+    with pytest.raises(ProviderContractError, match="completion tokens"):
+        await analyst._call_llm("prompt")
+
+    assert analyst.llm_spent_usd == pytest.approx(0.001)
+    analyst.db.log_token_usage.assert_called_once()
+
+
+async def test_call_llm_rejects_unbounded_response_without_logging_it():
+    analyst = _make_analyst(FairValueBus(), [7])
+    analyst._llm_client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(
+                create=AsyncMock(
+                    return_value=_llm_response(
+                        "x" * (LLM_MAX_RESPONSE_CHARS + 1),
+                        completion_tokens=LLM_MAX_TOKENS,
+                    )
+                )
+            )
+        ),
+        close=AsyncMock(),
+    )
+
+    with pytest.raises(ProviderContractError, match="response characters"):
+        await analyst._call_llm("prompt")
 
 
 # -- Fair-value parsing (moved from the trader) --------------------------- #
@@ -344,6 +460,49 @@ async def test_transient_provider_failure_obeys_normal_call_interval():
 
     assert analyst._call_llm.await_count == 1
     assert list(analyst.news_sub._pending[7]) == [article]
+
+
+async def test_provider_contract_failure_is_visible_and_retries_evidence():
+    market = MagicMock()
+    market.id = 7
+    market.name = "Market 7"
+    market.description = ""
+    market.resolution_criteria = ""
+    market.reference_price_nanos = None
+    metrics = ArenaMetrics()
+    feed = NewsFeed([market], api_key=None)
+    analyst = PersonaAnalyst(
+        client=MagicMock(),
+        news_feed=feed,
+        bus=FairValueBus("test"),
+        api_key="test",
+        persona="Test",
+        persona_key="test",
+        market_ids=[7],
+        markets_info={7: market},
+        min_llm_interval_s=1_000,
+        name="Test (Analyst)",
+        metrics=metrics,
+    )
+    analyst._observed_first_block = True
+    article = _article()
+    async with feed._lock:
+        analyst.news_sub._deliver(7, article)
+    block = _block()
+    block.clearing_prices[7] = (550_000_000, 450_000_000)
+    analyst._call_llm = AsyncMock(side_effect=ProviderContractError("too many tokens"))
+
+    await analyst.on_block(block)
+
+    assert list(analyst.news_sub._pending[7]) == [article]
+    assert metrics.registry.get_sample_value(
+        "sybil_arena_llm_provider_failures_total",
+        {"component": "Test (Analyst)", "kind": "contract"},
+    ) == 1
+    assert metrics.registry.get_sample_value(
+        "sybil_arena_llm_provider_degraded",
+        {"component": "Test (Analyst)"},
+    ) == 1
 
 
 # -- Cost delta: one analyst call serves BOTH sizing arms (2N -> N) ------- #
