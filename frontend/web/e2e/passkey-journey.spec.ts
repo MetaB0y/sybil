@@ -21,10 +21,10 @@ import {
  * `/v1/orders/signed`. If the server's rp_id/origin are misconfigured, the
  * order is rejected and this test fails loudly with the exact server error.
  *
- * Run:  E2E_BASE_URL=https://app.62-171-170-238.nip.io pnpm e2e
+ * Run:  E2E_BASE_URL=https://app.sybil.exchange pnpm e2e
  */
 
-const APP_BASE = process.env.E2E_BASE_URL ?? "https://app.62-171-170-238.nip.io";
+const APP_BASE = process.env.E2E_BASE_URL ?? "https://app.sybil.exchange";
 const API_BASE = process.env.E2E_API_BASE ?? deriveApiBase(APP_BASE);
 // Chromium's opt-in host-resolver rules do not apply to Playwright's
 // APIRequestContext. Local pinned-RP runs can therefore keep browser traffic on

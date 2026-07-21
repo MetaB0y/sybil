@@ -26,8 +26,8 @@
 
 set -uo pipefail
 
-BASE="${SYBIL_SMOKE_BASE:-https://62-171-170-238.nip.io}"
-APP_ORIGIN="${SYBIL_SMOKE_APP_ORIGIN:-https://app.62-171-170-238.nip.io}"
+BASE="${SYBIL_SMOKE_BASE:-https://api.sybil.exchange}"
+APP_ORIGIN="${SYBIL_SMOKE_APP_ORIGIN:-https://app.sybil.exchange}"
 INTERVAL="${SYBIL_SMOKE_INTERVAL:-10}"
 DOCKER_SSH="${SYBIL_SMOKE_DOCKER_SSH:-}"
 COMPOSE_PROJECT="${SYBIL_COMPOSE_PROJECT:-sybil}"

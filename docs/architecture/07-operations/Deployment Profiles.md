@@ -459,8 +459,8 @@ consensus-incompatible rollback requires the matching backup/genesis domain.
 ## WebAuthn validity pins
 
 Locked-profile startup requires the API WebAuthn policy to equal the values compiled
-into shared native/guest verification: RP ID `app.62-171-170-238.nip.io`, origin
-`https://app.62-171-170-238.nip.io`, and user verification enabled. A mismatch
+into shared native/guest verification: RP ID `app.sybil.exchange`, origin
+`https://app.sybil.exchange`, and user verification enabled. A mismatch
 would let the API admit an assertion the validity guest must reject, so the
 deployment preflight fails closed. Serving another hostname requires an
 intentional guest rebuild/repin and fresh genesis, not only changing Compose

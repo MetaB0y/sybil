@@ -22,7 +22,7 @@ use p256::ecdsa::{Signature, SigningKey};
 use proptest::prelude::*;
 use sha2::{Digest as _, Sha256};
 use sybil_verifier::{
-    AccountReservationSnapshot, AccountSnapshot, EXPECTED_RP_ID_HASH, EXPECTED_WEBAUTHN_RP_ID,
+    AccountReservationSnapshot, AccountSnapshot, EXPECTED_RP_ID_HASH, EXPECTED_WEBAUTHN_ORIGIN,
     KeyOpAuth, KeyRecord, MarketSnapshot, MarketStatusSnapshot, commitments::state_schema,
 };
 use sybil_zk::{
@@ -306,7 +306,7 @@ fn sign_webauthn(input: &mut EscapeClaimGuestInput, signing: &SigningKey) {
     let digest = Sha256::digest(canonical(input));
     let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest);
     let client_data_json = format!(
-        "{{\"type\":\"webauthn.get\",\"challenge\":\"{challenge}\",\"origin\":\"https://{EXPECTED_WEBAUTHN_RP_ID}\",\"crossOrigin\":false}}"
+        "{{\"type\":\"webauthn.get\",\"challenge\":\"{challenge}\",\"origin\":\"{EXPECTED_WEBAUTHN_ORIGIN}\",\"crossOrigin\":false}}"
     )
     .into_bytes();
     let mut authenticator_data = EXPECTED_RP_ID_HASH.to_vec();

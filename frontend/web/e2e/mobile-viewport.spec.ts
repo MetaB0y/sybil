@@ -1,8 +1,8 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const MOBILE_VIEWPORT = { width: 390, height: 844 };
-const APP_BASE = process.env.E2E_BASE_URL ?? "https://app.62-171-170-238.nip.io";
-const API_BASE = process.env.E2E_API_BASE ?? "https://62-171-170-238.nip.io";
+const APP_BASE = process.env.E2E_BASE_URL ?? "https://app.sybil.exchange";
+const API_BASE = process.env.E2E_API_BASE ?? "https://api.sybil.exchange";
 
 test.describe("mobile viewport smoke", () => {
   test.use({ viewport: MOBILE_VIEWPORT, isMobile: true, hasTouch: true });

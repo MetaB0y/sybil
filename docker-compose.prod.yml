@@ -167,8 +167,8 @@ services:
     environment:
       CADDY_OPS_AUTH_USER: "${CADDY_OPS_AUTH_USER:?Set CADDY_OPS_AUTH_USER in /opt/sybil/.env}"
       CADDY_OPS_AUTH_HASH: "${CADDY_OPS_AUTH_HASH:?Set CADDY_OPS_AUTH_HASH in /opt/sybil/.env}"
-      SYBIL_API_SITE: "${SYBIL_API_SITE:-https://62-171-170-238.nip.io}"
-      SYBIL_APP_SITE: "${SYBIL_APP_SITE:-https://app.62-171-170-238.nip.io}"
+      SYBIL_API_SITE: "${SYBIL_API_SITE:-https://api.sybil.exchange}"
+      SYBIL_APP_SITE: "${SYBIL_APP_SITE:-https://app.sybil.exchange}"
       SYBIL_ARENA_SITE: "${SYBIL_ARENA_SITE:-https://arena.62-171-170-238.nip.io}"
       SYBIL_GRAFANA_SITE: "${SYBIL_GRAFANA_SITE:-https://grafana.62-171-170-238.nip.io}"
       SYBIL_PROVER_SITE: "${SYBIL_PROVER_SITE:-https://prover.62-171-170-238.nip.io}"

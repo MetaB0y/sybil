@@ -7,7 +7,7 @@ const nextConfig: NextConfig = {
   // is unaffected by this development-only setting.
   allowedDevOrigins: [
     "app.172-104-31-54.nip.io",
-    "app.62-171-170-238.nip.io",
+    "app.sybil.exchange",
   ],
   // Emit a self-contained server bundle (.next/standalone) so the Docker image
   // can run `node server.js` without pnpm/node_modules. See frontend/web/Dockerfile.

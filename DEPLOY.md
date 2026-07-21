@@ -30,8 +30,8 @@ nginx sites or exposing Docker services directly.
 
 | Public port | Hostname | Service | Auth |
 | --- | --- | --- | --- |
-| 80, 443 via nginx | `62-171-170-238.nip.io` | `sybil-api` trading and realtime API | Public |
-| 80, 443 via nginx | `app.62-171-170-238.nip.io` | Next.js web UI | Public |
+| 80, 443 via nginx | `api.sybil.exchange` | `sybil-api` trading and realtime API | Public |
+| 80, 443 via nginx | `app.sybil.exchange` | Next.js web UI | Public |
 | 80, 443 via nginx | `arena.62-171-170-238.nip.io` | Streamlit arena dashboard | Caddy basic auth |
 | 80, 443 via nginx | `grafana.62-171-170-238.nip.io` | Grafana | Caddy basic auth, then Grafana login |
 | 80, 443 via nginx | `prover.62-171-170-238.nip.io` | Prover status/API | Caddy basic auth |
@@ -53,15 +53,15 @@ Create `/opt/sybil/.env` on the deploy host before running remote Compose comman
 
 ```bash
 SYBIL_SERVICE_TOKEN=<strong random bearer token for service/operator routes>
-SYBIL_WEBAUTHN_RP_ID=app.62-171-170-238.nip.io
-SYBIL_WEBAUTHN_ORIGIN=https://app.62-171-170-238.nip.io
+SYBIL_WEBAUTHN_RP_ID=sybil.exchange
+SYBIL_WEBAUTHN_ORIGIN=https://app.sybil.exchange
 GF_SECURITY_ADMIN_PASSWORD=<strong grafana admin password>
 CADDY_OPS_AUTH_USER=ops
 CADDY_OPS_AUTH_HASH='<bcrypt hash from caddy hash-password>'
 SYBIL_CADDY_HTTP_BIND=127.0.0.1:3108
 SYBIL_CADDY_HTTPS_BIND=127.0.0.1:3143
-SYBIL_API_SITE=http://62-171-170-238.nip.io
-SYBIL_APP_SITE=http://app.62-171-170-238.nip.io
+SYBIL_API_SITE=http://api.sybil.exchange
+SYBIL_APP_SITE=http://app.sybil.exchange
 SYBIL_ARENA_SITE=http://arena.62-171-170-238.nip.io
 SYBIL_GRAFANA_SITE=http://grafana.62-171-170-238.nip.io
 SYBIL_PROVER_SITE=http://prover.62-171-170-238.nip.io
@@ -87,11 +87,16 @@ it on subsequent boots. A normal container restart therefore does not rotate
 the admin feed. `just deploy-reset-state CONFIRM` deletes `sybil-data`, so it
 also intentionally discards that key and creates a new chain/admin identity.
 
-`SYBIL_WEBAUTHN_RP_ID` is the web-app hostname only; `SYBIL_WEBAUTHN_ORIGIN` is
-the exact browser origin including `https://`. Both must match the app hostname
-baked into the web image via `NEXT_PUBLIC_WEBAUTHN_RP_ID`; changing them
-requires a frontend rebuild. The API hostname is not the relying party when the
-browser ceremony runs on `app.62-171-170-238.nip.io`.
+`SYBIL_WEBAUTHN_RP_ID` is the registrable domain (`sybil.exchange`), not the
+`app.` host that serves the UI. A passkey minted under it stays valid across
+subdomains, so moving the app later does not force another guest repin.
+`SYBIL_WEBAUTHN_ORIGIN` is the exact browser origin including `https://`, and is
+deliberately narrower than the RP: only `https://app.sybil.exchange` may
+authorize actions. Both are pinned inside the guests
+(`crates/sybil-verifier/src/key_op_auth.rs`) and are checked at API startup by
+`preflight.rs`, so a mismatch fails the boot rather than failing silently. The
+RP ID must also match `NEXT_PUBLIC_WEBAUTHN_RP_ID` baked into the web image;
+changing either requires a frontend rebuild.
 
 Generate the Caddy hash with:
 
@@ -321,7 +326,7 @@ just deploy-shell
 Check public API health:
 
 ```bash
-curl https://62-171-170-238.nip.io/v1/health
+curl https://api.sybil.exchange/v1/health
 ```
 
 Store backup/restore and the five-minute synthetic monitor have dedicated

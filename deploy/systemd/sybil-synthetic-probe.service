@@ -12,6 +12,6 @@ Environment=SYBIL_COMPOSE_PROJECT=sybil
 # Prelaunch intentionally has no validity service. An explicit
 # validity deployment overrides this to fail in a systemd drop-in.
 Environment=SYBIL_SMOKE_PROOF_LAG=off
-ExecStart=/opt/sybil/scripts/synthetic-probe.sh --base-url https://62-171-170-238.nip.io --app-origin https://app.62-171-170-238.nip.io --block-interval 10
+ExecStart=/opt/sybil/scripts/synthetic-probe.sh --base-url https://api.sybil.exchange --app-origin https://app.sybil.exchange --block-interval 10
 TimeoutStartSec=120
 NoNewPrivileges=true
