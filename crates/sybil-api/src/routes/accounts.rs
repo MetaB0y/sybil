@@ -16,7 +16,9 @@ use matching_sequencer::{
 use p256::Sec1Point;
 use p256::ecdsa::{Signature, VerifyingKey};
 
-use crate::convert::{account_balance_breakdown, account_to_response};
+use crate::convert::{
+    account_balance_breakdown, account_positions_to_response, account_to_response,
+};
 use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::request::{
@@ -1174,16 +1176,7 @@ pub async fn get_private_summary(
         .get_account_summary_with_reserved_balance(AccountId(id))
         .await?
         .ok_or_else(|| AppError::not_found(format!("Account {id} not found")))?;
-    let positions: Vec<PositionResponse> = account
-        .positions
-        .iter()
-        .filter(|&(_, &qty)| qty != 0)
-        .map(|(&(market_id, outcome), &qty)| PositionResponse {
-            market_id: market_id.0,
-            outcome: if outcome == 0 { "YES" } else { "NO" }.to_string(),
-            quantity: qty,
-        })
-        .collect();
+    let positions = account_positions_to_response(&account);
     let (available_balance_nanos, reserved_balance_nanos) =
         account_balance_breakdown(account.balance, reserved_balance);
     Ok(Json(PrivateAccountSummaryResponse {

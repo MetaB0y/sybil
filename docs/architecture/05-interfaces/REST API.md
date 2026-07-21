@@ -157,7 +157,9 @@ Order quantity fields (`quantity`, `max_fill`, `fill_qty`,
 [[Fractional Quantities|share-units]], not display shares. `1000` units equals
 1 full YES/NO share; the minimum increment is `1` unit = 0.001 share. Client
 layers may expose ordinary decimal shares, but signed/canonical API payloads
-use integer units.
+use integer units. Account and private-summary position arrays are ordered by
+`market_id` and then outcome (`YES`, `NO`), so repeated reads and exact restore
+checks do not inherit randomized in-process map iteration.
 
 Atomic order submission reports market lifecycle rejection through the shared
 error envelope, not through prose conventions. An unknown market returns `404

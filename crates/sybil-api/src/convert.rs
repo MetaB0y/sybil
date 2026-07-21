@@ -177,12 +177,17 @@ pub fn account_balance_breakdown(balance_nanos: i64, reserved_balance_nanos: i64
 }
 
 /// Convert an Account to an AccountResponse.
-pub fn account_to_response(account: &Account, reserved_balance_nanos: i64) -> AccountResponse {
-    let positions: Vec<PositionResponse> = account
+pub fn account_positions_to_response(account: &Account) -> Vec<PositionResponse> {
+    let mut positions: Vec<_> = account
         .positions
         .iter()
         .filter(|&(_, &qty)| qty != 0)
-        .map(|(&(market_id, outcome), &qty)| PositionResponse {
+        .map(|(&(market_id, outcome), &qty)| (market_id, outcome, qty))
+        .collect();
+    positions.sort_unstable_by_key(|&(market_id, outcome, _)| (market_id.0, outcome));
+    positions
+        .into_iter()
+        .map(|(market_id, outcome, qty)| PositionResponse {
             market_id: market_id.0,
             outcome: if outcome == 0 {
                 "YES".to_string()
@@ -191,7 +196,12 @@ pub fn account_to_response(account: &Account, reserved_balance_nanos: i64) -> Ac
             },
             quantity: qty,
         })
-        .collect();
+        .collect()
+}
+
+/// Convert an Account to an AccountResponse.
+pub fn account_to_response(account: &Account, reserved_balance_nanos: i64) -> AccountResponse {
+    let positions = account_positions_to_response(account);
 
     let (available_balance_nanos, reserved_balance_nanos) =
         account_balance_breakdown(account.balance, reserved_balance_nanos);
@@ -779,14 +789,24 @@ mod tests {
     #[test]
     fn test_account_to_response() {
         let mut account = Account::new(AccountId(42), 100 * NANOS_PER_DOLLAR as i64);
-        account.positions.insert((MarketId::new(0), 0), 10);
+        account.positions.insert((MarketId::new(2), 0), 10);
+        account.positions.insert((MarketId::new(1), 1), 20);
+        account.positions.insert((MarketId::new(1), 0), 30);
+        account.positions.insert((MarketId::new(0), 0), 0);
 
         let resp = account_to_response(&account, 25 * NANOS_PER_DOLLAR as i64);
         assert_eq!(resp.account_id, 42);
         assert_eq!(resp.balance_nanos, 100 * NANOS_PER_DOLLAR as i64);
         assert_eq!(resp.available_balance_nanos, 75 * NANOS_PER_DOLLAR as i64);
         assert_eq!(resp.reserved_balance_nanos, 25 * NANOS_PER_DOLLAR as i64);
-        assert_eq!(resp.positions.len(), 1);
+        assert_eq!(resp.positions.len(), 3);
+        assert_eq!(
+            resp.positions
+                .iter()
+                .map(|position| (position.market_id, position.outcome.as_str()))
+                .collect::<Vec<_>>(),
+            vec![(1, "YES"), (1, "NO"), (2, "YES")]
+        );
     }
 
     #[test]
