@@ -411,16 +411,19 @@ export function EventHoldings({ marketId }: { marketId: number }) {
           flexWrap: "wrap",
         }}
       >
+        <div className="eyebrow">{"your positions & orders"}</div>
+        {/* The switcher and the filter it scopes stay together: one names the
+            view, the other narrows it, and split across two lines on a phone
+            they read as unrelated controls. */}
         <div
           style={{
             display: "flex",
             alignItems: "center",
-            gap: "var(--space-3)",
+            gap: "var(--space-2)",
             minWidth: 0,
-            flexWrap: "wrap",
           }}
         >
-          <div className="eyebrow">{"your positions & orders"}</div>
+          <ViewSwitcher value={view} onChange={setView} />
           {outcomes.length > 1 && (
             <OutcomeFilter
               outcomes={outcomes}
@@ -433,7 +436,6 @@ export function EventHoldings({ marketId }: { marketId: number }) {
             />
           )}
         </div>
-        <ViewSwitcher value={view} onChange={setView} />
       </div>
 
       {view === "holdings" ? (
@@ -594,7 +596,10 @@ function ViewSwitcher({
             onClick={() => onChange(t.id)}
             style={{
               whiteSpace: "nowrap",
-              padding: "4px 10px",
+              // Tighter on a phone: the outcome filter shares this row, and the
+              // 2px per side buys it the width to read "All outcomes" whole
+              // rather than "All outc…".
+              padding: compact ? "4px 8px" : "4px 10px",
               border: 0,
               borderRadius: 3,
               background: active ? "var(--surface-2)" : "transparent",
@@ -656,6 +661,7 @@ function OutcomeFilter({
     };
   }, []);
 
+  const compact = useCompactLayout();
   const selectedIndex = outcomes.findIndex((o) => o.marketId === selected);
   const selectedOutcome = selectedIndex >= 0 ? outcomes[selectedIndex] : null;
   const selectedColor =
@@ -667,17 +673,23 @@ function OutcomeFilter({
   }
 
   return (
-    <div ref={ref} style={{ position: "relative" }}>
+    <div
+      ref={ref}
+      /* Capped here, not on the button, so the trigger shrinks with the row
+         instead of pushing the switcher beside it onto its own line. */
+      style={{ position: "relative", maxWidth: 200, minWidth: 0 }}
+    >
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="listbox"
         aria-expanded={open}
+        className="hit-target"
         style={{
-          display: "inline-flex",
+          display: "flex",
           alignItems: "center",
           gap: 6,
-          maxWidth: 200,
+          maxWidth: "100%",
           padding: "4px 8px",
           borderRadius: 4,
           background: "var(--bg-2)",
@@ -685,7 +697,10 @@ function OutcomeFilter({
           cursor: "pointer",
           fontFamily: "var(--font-mono)",
           fontSize: 11,
-          letterSpacing: "var(--track-wide)",
+          // Sharing a row with the view switcher at 390px leaves ~115px here,
+          // and the tracking alone was the difference between "All outcomes"
+          // and "All outcom…".
+          letterSpacing: compact ? "normal" : "var(--track-wide)",
           color: "var(--fg-2)",
         }}
       >
@@ -734,9 +749,10 @@ function OutcomeFilter({
           style={{
             position: "absolute",
             top: "calc(100% + 4px)",
-            left: 0,
+            right: 0,
             zIndex: 30,
             minWidth: 200,
+            maxWidth: "calc(100vw - var(--space-6))",
             background: "var(--surface-2)",
             border: "1px solid var(--border-2)",
             borderRadius: 6,
