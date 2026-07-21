@@ -77,7 +77,9 @@ shock time, participant observation and network latency, valuations,
 quantities, budget, and initial inventory. Both mechanisms receive that tape.
 
 The CLOB baseline has price-time priority, immediate execution, cancel/replace,
-and explicit venue-arrival ordering. It is evaluated with two capital policies:
+explicit venue-arrival ordering, IOC informed flow, and window-resting natural
+limit orders that can match each other without a maker. It is evaluated with
+two capital policies:
 
 - firm reservation, where every displayed maker quote reserves worst-case
   capital; and

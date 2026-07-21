@@ -14,6 +14,11 @@ name = "solver-experiments"
 path = "src/bin/solver-experiments.rs"
 required-features = ["lp", "conic", "milp"]
 
+[[bin]]
+name = "market-structure-experiments"
+path = "src/bin/market-structure-experiments.rs"
+required-features = ["lp"]
+
 [dependencies]
 blake3 = { workspace = true }
 matching-engine = { path = "../matching-engine" }
@@ -25,6 +30,8 @@ comfy-table = "7"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 rmp-serde = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
 
 [features]
 default = ["lp", "conic"]

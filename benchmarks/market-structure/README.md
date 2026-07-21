@@ -36,12 +36,28 @@ Historical API captures retain only fields needed for the analysis. Participant
 addresses and profile metadata are discarded. Transaction hashes remain as
 public provenance anchors.
 
-## Intended commands
+## Commands
 
-The development protocol names the planned binaries and artifact contract.
-Once the harness lands, `--help` is authoritative for flags and defaults. The
-frozen protocol and retained result README will contain the exact regeneration
-commands used for publishable evidence.
+`--help` owns the runner's flags and defaults:
+
+```sh
+cargo run -p matching-sim --bin market-structure-experiments --features lp -- --help
+```
+
+A bounded diagnostic run is:
+
+```sh
+cargo run -p matching-sim --bin market-structure-experiments --features lp -- \
+  --protocol benchmarks/market-structure/protocol-development.json \
+  --suite all --max-configs 1 --seed-count 1 \
+  --output /tmp/sybil-market-structure-development.jsonl
+```
+
+The runner refuses seeds outside the protocol's active range, and a development
+protocol cannot unlock its held-out embargo. It writes via a temporary file and
+renames only after every attempted row is flushed. The frozen protocol and
+retained result README will contain the exact regeneration commands used for
+publishable evidence.
 
 ## Publication boundary
 
