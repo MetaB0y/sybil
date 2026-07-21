@@ -130,8 +130,11 @@ type SortKey =
   | "closed";
 /* Ten columns: the outcome 1fr absorbs the slack, the rest stay compact. Qty
    needs a touch more width for values like "234.375". */
+/* Closed needs 86px: "21:17 Jul 21" is ~80px of 11px mono, and the cell is
+   right-aligned + nowrap, so anything narrower spills past the card edge
+   instead of truncating. Value and P&L give up the width for it. */
 const GRID =
-  "minmax(0, 1fr) 56px 48px 82px 62px 74px 78px 70px 76px 62px";
+  "minmax(0, 1fr) 56px 48px 82px 62px 74px 78px 62px 56px 86px";
 
 const COLUMNS: Column<SortKey>[] = [
   { key: "outcome", label: "Outcome", align: "left" },
