@@ -17,8 +17,10 @@ export const GLOSSARY: Record<string, string> = {
     "The price the current batch would clear at if it ran right now. Updates as new orders come in. Not final until the batch closes.",
   "Last price":
     "The price this outcome last traded at. If it's been quiet, the most recent midpoint (mark) price.",
+  // The band is a server setting (`liquidity_band_nanos`, 5¢ by default), so
+  // naming a figure here would go stale the moment it's retuned.
   Liquidity:
-    "Resting orders within 5¢ of the price. Averaged over the last few batches.",
+    "Resting orders close to the current price — the depth you could trade against. Averaged over the last few batches.",
   IEV: "Indicative Executable Volume — the $ that would trade when this batch clears.",
   Imbalance:
     "Net direction of unmatched orders. Buy = more demand than supply at current price; sell = the reverse. Tells you which side is leaning.",
