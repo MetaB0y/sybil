@@ -698,7 +698,6 @@ textarea {
 .portfolio-grid-table > * {
   min-width: 860px;
 }
-
 /* Dev-zone sub-nav tabs — same hover / active feedback as the global route
    tabs, kept compact for the dev toolbar's density. */
 .dev-sub-nav-tab {
@@ -1183,14 +1182,6 @@ textarea {
 
   .portfolio-toolbar-search > * {
     width: 100% !important;
-  }
-
-  .withdrawal-row {
-    grid-template-columns: 1fr !important;
-  }
-
-  .withdrawal-row > :last-child {
-    justify-self: start;
   }
 
   .activity-hero-stats,

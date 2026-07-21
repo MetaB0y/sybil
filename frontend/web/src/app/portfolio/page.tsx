@@ -19,7 +19,6 @@ import { DisconnectedAccountPrompt } from "@/components/auth/disconnected-accoun
 import { EquityChart } from "@/components/portfolio/equity-chart";
 import { HistoryFeed } from "@/components/portfolio/history-feed";
 import { IdentityHeader } from "@/components/portfolio/identity-header";
-import { L1DepositGuide } from "@/components/portfolio/l1-deposit-guide";
 import { OpenOrdersList } from "@/components/portfolio/open-orders-list";
 import { PortfolioHero } from "@/components/portfolio/portfolio-hero";
 import {
@@ -28,7 +27,6 @@ import {
 } from "@/components/portfolio/portfolio-tabs";
 import { PositionsList } from "@/components/portfolio/positions-list";
 import { RangeTabs } from "@/components/portfolio/range-tabs";
-import { WithdrawalEtas } from "@/components/portfolio/withdrawal-etas";
 import {
   AuthenticatedReadState,
   authenticatedReadStatus,
@@ -279,10 +277,6 @@ function Connected({
           headerRight={<RangeTabs value={range} onChange={setRange} />}
         />
       </section>
-
-      <L1DepositGuide accountId={accountId} />
-
-      <WithdrawalEtas accountId={accountId} />
 
       {tab === "positions" && (
         <PositionsList

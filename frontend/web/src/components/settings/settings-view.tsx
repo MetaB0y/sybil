@@ -23,6 +23,7 @@ import {
 import { createPortal } from "react-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from "@/components/page-header";
+import { AccountKeySection } from "./account-key-section";
 import { Panel, PanelBody, PanelHead } from "@/components/dev/primitives/panel";
 import {
   addAgentKey,
@@ -64,6 +65,7 @@ export function SettingsView({
       />
       <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
         <ProfileSection accountId={accountId} publicKeyHex={publicKeyHex} />
+        <AccountKeySection accountId={accountId} />
         <SigningKeysSection
           accountId={accountId}
           publicKeyHex={publicKeyHex}
@@ -76,7 +78,7 @@ export function SettingsView({
   );
 }
 
-function SettingsSectionReadState({
+export function SettingsSectionReadState({
   title,
   status,
   loadingMessage,
