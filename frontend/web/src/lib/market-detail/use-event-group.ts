@@ -95,50 +95,63 @@ export function useEventGroup(marketId: number): {
     // Short labels need the full sibling set — derive once, index-aligned.
     const shortLabels = deriveShortLabels(siblings.map((m) => m.name));
 
-    const outcomes: EventOutcome[] = siblings.map((m, i) => {
-      const price = prices[m.market_id];
-      const yesNanos = price?.yes ?? null;
-      const noNanos = price?.no ?? null;
-      const yesCents =
-        yesNanos == null ? null : Math.round(Number(yesNanos) / 1e7);
-      // Real 24h delta from the list snapshot (current YES − YES 24h ago), in
-      // cents; both fields ride `/v1/markets`. Self-consistent (same payload)
-      // and independent of the live store price.
-      const curYes =
-        m.yes_price_nanos != null ? BigInt(m.yes_price_nanos) : null;
-      const agoYes =
-        m.yes_price_24h_ago_nanos != null
-          ? BigInt(m.yes_price_24h_ago_nanos)
-          : null;
-      const delta24Cents =
-        curYes != null && agoYes != null ? Number(curYes - agoYes) / 1e7 : 0;
-      return {
-        marketId: m.market_id,
-        closed: m.closed === true,
-        label: m.name,
-        shortLabel: shortLabels[i] ?? m.name,
-        yesPriceNanos: yesNanos,
-        noPriceNanos: noNanos,
-        yesCents,
-        delta24Cents,
-        volume24hNanos: m.volume_24h_nanos ? BigInt(m.volume_24h_nanos) : 0n,
-        volumeNanos: m.volume_nanos ? BigInt(m.volume_nanos) : 0n,
-        liquidityNanos: m.liquidity_avg10_nanos
-          ? BigInt(m.liquidity_avg10_nanos)
-          : 0n,
-        createdAtMs: m.created_at_ms ?? null,
-        endDateMs: m.market_end_date_ms ?? m.expiry_timestamp_ms ?? null,
-      };
-    });
+    // Each outcome is paired with the price the ordering below sorts on. That
+    // key is deliberately the `/v1/markets` snapshot, NOT the live store price
+    // used for display: the live price ticks every batch, and sorting on it
+    // reshuffled the chip strip on its own whenever two outcomes crossed —
+    // taking each outcome's palette colour with it, since colours are keyed to
+    // position in this array. The snapshot only moves on a markets-list refetch.
+    const ranked: { outcome: EventOutcome; rankYesNanos: bigint | null }[] =
+      siblings.map((m, i) => {
+        const price = prices[m.market_id];
+        const yesNanos = price?.yes ?? null;
+        const noNanos = price?.no ?? null;
+        const yesCents =
+          yesNanos == null ? null : Math.round(Number(yesNanos) / 1e7);
+        // Real 24h delta from the list snapshot (current YES − YES 24h ago), in
+        // cents; both fields ride `/v1/markets`. Self-consistent (same payload)
+        // and independent of the live store price.
+        const curYes =
+          m.yes_price_nanos != null ? BigInt(m.yes_price_nanos) : null;
+        const agoYes =
+          m.yes_price_24h_ago_nanos != null
+            ? BigInt(m.yes_price_24h_ago_nanos)
+            : null;
+        const delta24Cents =
+          curYes != null && agoYes != null ? Number(curYes - agoYes) / 1e7 : 0;
+        const outcome: EventOutcome = {
+          marketId: m.market_id,
+          closed: m.closed === true,
+          label: m.name,
+          shortLabel: shortLabels[i] ?? m.name,
+          yesPriceNanos: yesNanos,
+          noPriceNanos: noNanos,
+          yesCents,
+          delta24Cents,
+          volume24hNanos: m.volume_24h_nanos ? BigInt(m.volume_24h_nanos) : 0n,
+          volumeNanos: m.volume_nanos ? BigInt(m.volume_nanos) : 0n,
+          liquidityNanos: m.liquidity_avg10_nanos
+            ? BigInt(m.liquidity_avg10_nanos)
+            : 0n,
+          createdAtMs: m.created_at_ms ?? null,
+          endDateMs: m.market_end_date_ms ?? m.expiry_timestamp_ms ?? null,
+        };
+        return { outcome, rankYesNanos: curYes };
+      });
 
-    // Sort closed outcomes last so the picker/chart default lands on a
-    // tradeable outcome; within each tier sort by YES probability descending.
-    outcomes.sort((a, b) => {
-      // Closed outcomes always sort below open ones, so the picker/chart
-      // default lands on a tradeable outcome.
-      if (a.closed !== b.closed) return a.closed ? 1 : -1;
-      return (b.yesCents ?? -1) - (a.yesCents ?? -1);
+    // Closed outcomes always sort below open ones, so the picker/chart default
+    // lands on a tradeable one; within each tier, favourite first.
+    ranked.sort((a, b) => {
+      if (a.outcome.closed !== b.outcome.closed)
+        return a.outcome.closed ? 1 : -1;
+      const av = a.rankYesNanos ?? -1n;
+      const bv = b.rankYesNanos ?? -1n;
+      if (av !== bv) return av > bv ? -1 : 1;
+      // Ties (a fresh event where nothing has traded) resolve on market_id so
+      // the order is at least deterministic instead of feed-arrival order.
+      return a.outcome.marketId - b.outcome.marketId;
     });
+    const outcomes = ranked.map((r) => r.outcome);
 
     return {
       eventId: currentMarket.event_id ?? null,

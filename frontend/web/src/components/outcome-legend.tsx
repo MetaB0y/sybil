@@ -56,8 +56,8 @@ export function OutcomeLegend({
   selectedIds: number[];
   onChange: (next: number[]) => void;
   maxSelected?: number;
-  /** The chosen outcome (the market in the URL). Its chip is floated first,
-   *  accent-ringed, and pinned (non-removable) so it stays on the chart. */
+  /** The chosen outcome (the market in the URL). Its chip is tinted and
+   *  colour-ringed in place — chips never reorder on a switch. */
   highlightId?: number | undefined;
   /** Reports the rendered height (px) of one chip row, so the parent can
    *  reserve two rows above the chart and keep it from jumping when the legend
@@ -79,16 +79,11 @@ export function OutcomeLegend({
 
   const sel = new Set(selectedIds);
   const colorOf = (o: EventOutcome) => colorForOutcome(o, outcomes.indexOf(o));
-  // Float the chosen outcome (the market in the URL) to the front so it always
-  // leads the list above the chart; the rest keep their favourite-first order.
-  const shownAll = outcomes.filter((o) => sel.has(o.marketId));
-  const shown =
-    highlightId == null
-      ? shownAll
-      : [
-          ...shownAll.filter((o) => o.marketId === highlightId),
-          ...shownAll.filter((o) => o.marketId !== highlightId),
-        ];
+  // Chips keep the group's favourite-first order, chosen or not. Floating the
+  // chosen one to the front meant every switch reshuffled the whole strip under
+  // the cursor — the chip you just tapped jumped left and the rest slid right.
+  // The tint + colour-matched border below is what marks the chosen outcome.
+  const shown = outcomes.filter((o) => sel.has(o.marketId));
   const hidden = outcomes.filter((o) => !sel.has(o.marketId));
   const atCap = shown.length >= maxSelected;
   const interactive = outcomes.length > 1;
