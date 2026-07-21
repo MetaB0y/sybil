@@ -53,6 +53,11 @@ def test_credit_failure_degrades_and_backs_off_until_success():
         "sybil_arena_llm_provider_degraded",
         {"component": "news-gate"},
     ) == 1
+    assert _value(
+        metrics,
+        "sybil_arena_llm_provider_last_failure_timestamp_seconds",
+        {"component": "news-gate", "kind": "credit"},
+    ) > 0
 
     now[0] = 160
     assert circuit.can_attempt() is True

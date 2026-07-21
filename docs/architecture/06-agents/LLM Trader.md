@@ -48,7 +48,7 @@ provider ignores a requested generation limit.
 Parse fallbacks are counted. Provider capability is tracked independently from
 that local experiment budget: relevance-gate and analyst calls classify
 authentication, credit, rate-limit, timeout, upstream, contract, and other failures;
-publish degraded/last-success/backoff metrics; and use bounded backoff for
+publish degraded, last-success, per-class last-failure, and backoff metrics; and use bounded backoff for
 401/402/429. Failed analyst calls retain their evidence batch for retry and
 still consume the normal call cadence, so a transient failure cannot become a
 per-block retry loop. Relevance-gate failure passes already-seen candidates to

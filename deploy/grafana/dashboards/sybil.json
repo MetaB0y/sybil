@@ -1163,17 +1163,17 @@
       }
     },
     {
-      "title": "LLM Provider Failures",
+      "title": "LLM Provider Last-Failure Age",
       "type": "timeseries",
       "gridPos": { "h": 4, "w": 8, "x": 16, "y": 197 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [{
-        "expr": "sum by (component, kind) (increase(sybil_arena_llm_provider_failures_total[10m]))",
+        "expr": "time() - sybil_arena_llm_provider_last_failure_timestamp_seconds > 0",
         "legendFormat": "{{component}}: {{kind}}",
         "refId": "A"
       }],
       "fieldConfig": {
-        "defaults": { "unit": "none", "min": 0, "custom": { "drawStyle": "bars", "fillOpacity": 35 } },
+        "defaults": { "unit": "s", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10 } },
         "overrides": []
       }
     },

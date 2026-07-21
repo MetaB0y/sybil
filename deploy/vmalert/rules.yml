@@ -1021,13 +1021,11 @@ groups:
 
       - alert: ArenaLlmProviderAuthOrCreditRejected
         expr: |
-          sum(
-            increase(
-              sybil_arena_llm_provider_failures_total{
-                kind=~"authentication|credit"
-              }[10m]
-            )
-          ) > 0
+          time() - max(
+            sybil_arena_llm_provider_last_failure_timestamp_seconds{
+              kind=~"authentication|credit"
+            }
+          ) < 10 * 60
         for: 0m
         labels:
           severity: critical

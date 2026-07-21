@@ -7,10 +7,31 @@ rule_files:
 evaluation_interval: 1m
 
 tests:
+  # A labelled counter does not exist until the first failure. The per-kind
+  # failure timestamp therefore owns the first and only non-retryable provider
+  # rejection even when its series is born on that failure's first scrape.
   - interval: 1m
     input_series:
-      - series: 'sybil_arena_llm_provider_failures_total{component="news-gate",kind="credit"}'
-        values: "0 1+0x10"
+      - series: 'sybil_arena_llm_provider_last_failure_timestamp_seconds{component="news-gate",kind="credit"}'
+        values: "_ 60+0x11"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: ArenaLlmProviderAuthOrCreditRejected
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              component: arena
+            exp_annotations:
+              summary: "Arena LLM provider rejected authentication or credit"
+              description: "An Arena relevance-gate or analyst call received HTTP 401/402 in the last 10m. Synthetic trading may remain healthy while the LLM product capability is degraded; local experiment budget does not represent provider credit."
+      - eval_time: 12m
+        alertname: ArenaLlmProviderAuthOrCreditRejected
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'sybil_arena_llm_provider_last_failure_timestamp_seconds{component="analyst",kind="authentication"}'
+        values: "0 60+0x10"
     alert_rule_test:
       - eval_time: 2m
         alertname: ArenaLlmProviderAuthOrCreditRejected

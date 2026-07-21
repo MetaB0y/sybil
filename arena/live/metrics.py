@@ -207,8 +207,8 @@ class ArenaMetrics:
         )
         self.llm_provider_last_failure = Gauge(
             "sybil_arena_llm_provider_last_failure_timestamp_seconds",
-            "Unix time of the caller's latest failed provider response (0 = never).",
-            ["component"],
+            "Unix time of the caller's latest failed provider response of this kind.",
+            ["component", "kind"],
             registry=self.registry,
         )
         self.llm_provider_backoff_until = Gauge(
@@ -306,7 +306,7 @@ class ArenaMetrics:
             now = time.time()
             self.llm_provider_failures.labels(component=component, kind=kind).inc()
             self.llm_provider_degraded.labels(component=component).set(1)
-            self.llm_provider_last_failure.labels(component=component).set(now)
+            self.llm_provider_last_failure.labels(component=component, kind=kind).set(now)
             self.llm_provider_backoff_until.labels(component=component).set(
                 now + backoff_seconds if backoff_seconds > 0 else 0
             )
