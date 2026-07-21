@@ -100,6 +100,7 @@ uses that same overlay with the two explicit funding overrides above.
 | --- | --- | --- | --- | --- |
 | `SYBIL_SEQUENCER_REDB_CACHE_BYTES` | `134217728` (128 MiB) | same | same | no |
 | `SYBIL_HISTORY_REDB_CACHE_BYTES` | `67108864` (64 MiB) | same | same | no |
+| `MALLOC_ARENA_MAX` (`sybil-history` Compose service) | libc default outside Compose | `2` | `2` | no |
 | `SYBIL_RECENT_BLOCK_CACHE_CAPACITY` | `100` | `100` | `100` | no |
 | `SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS` | `0` (no prune) | `0` | `60480` (7 days at 10s/block) | no |
 | `SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS` | `8640` in Compose; `0` for direct runs | `8640` (1 day at 10s/block) | `60480` (7 days at 10s/block) | no |
@@ -416,6 +417,10 @@ The history service accepts authenticated MessagePack batches, limits active
 blocking queries to `SYBIL_HISTORY_MAX_QUERY_CONCURRENCY`, and persists the
 configured candle-resolution set. Changing that set requires an explicit
 reprojection/new history volume rather than silently starting a partial series.
+The Compose service also caps glibc allocator arenas at two. Tokio blocking
+workers may be retired and replaced near the block cadence, but their former
+arenas must not accumulate anonymous RSS outside the separately bounded redb
+cache.
 
 ## Admin resolution key durability
 

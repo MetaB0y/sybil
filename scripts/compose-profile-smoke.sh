@@ -182,6 +182,19 @@ pass "L1 indexer is explicit opt-in deployment state"
 compose config --quiet
 pass "compose config parses"
 
+history_allocator_arenas=$(
+    compose config | python3 -c '
+import sys
+import yaml
+
+history = yaml.safe_load(sys.stdin)["services"]["sybil-history"]
+print(history["environment"].get("MALLOC_ARENA_MAX", ""))
+'
+)
+[[ "$history_allocator_arenas" == "2" ]] \
+    || fail "sybil-history does not bound glibc allocator arenas inside its tight cgroup"
+pass "history allocator arenas are bounded independently of blocking-worker churn"
+
 telegram_log_contract=$(
     compose_telegram config | python3 -c '
 import sys

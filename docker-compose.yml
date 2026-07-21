@@ -87,6 +87,10 @@ services:
       SYBIL_HISTORY_MAX_QUERY_CONCURRENCY: "16"
       # redb defaults to a 1 GiB cache, which is incompatible with this 256 MiB cgroup.
       SYBIL_HISTORY_REDB_CACHE_BYTES: "67108864"
+      # Tokio blocking-worker churn can leave glibc arenas resident after the
+      # worker exits. Bound them explicitly so the redb ceiling is also a
+      # useful predictor of this tight cgroup's steady-state RSS.
+      MALLOC_ARENA_MAX: "2"
       RUST_LOG: "warn,sybil_history=info"
     volumes:
       - history-data:/history-data

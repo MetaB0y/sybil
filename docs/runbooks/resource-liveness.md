@@ -72,13 +72,18 @@ The API's canonical sequencer store runs with a 128 MiB redb page-cache ceiling
 (`SYBIL_HISTORY_REDB_CACHE_BYTES=67108864`) inside its 256 MiB cgroup. Redb's
 upstream 1 GiB default is intentionally not used for either store: page-cache
 warm-up otherwise looks like a gradual process leak and can consume the whole
-history budget or leave the API without recovery headroom. Confirm both values
-in startup logs before attributing a slope to application state. Treat
-sustained history memory above roughly 160 MiB after cache warm-up as
-unexpected; separate anonymous RSS from reclaimable file cache and inspect
-query concurrency before raising either limit. The API cache ceiling is not a
-total-RSS ceiling: correlate it with qMDB/account state, recent blocks, queues,
-and the existing absolute and slope alerts.
+history budget or leave the API without recovery headroom. Compose also sets
+`MALLOC_ARENA_MAX=2` for `sybil-history`: blocking-query workers can otherwise
+leave many glibc arenas resident after the worker threads exit, allowing
+anonymous RSS to grow independently of the redb cache ceiling. Confirm both
+cache values and the allocator bound in the resolved Compose configuration
+before attributing a slope to application state. Treat sustained history
+memory above roughly 160 MiB after cache warm-up as unexpected; separate
+anonymous RSS from reclaimable file cache, compare live thread count with the
+anonymous arena mappings in `/proc/1/smaps`, and inspect query concurrency
+before raising either limit. The API cache ceiling is not a total-RSS ceiling:
+correlate it with qMDB/account state, recent blocks, queues, and the existing
+absolute and slope alerts.
 
 The production `sybil-web` boundary is a Next standalone server inside a
 512 MiB cgroup because dynamic `/m/[id]` routes and the allowlisted runtime
