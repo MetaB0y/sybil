@@ -44,6 +44,38 @@ fn genesis_hash_from_health(health: &Value) -> [u8; 32] {
     bytes.try_into().expect("genesis_hash is 32 bytes")
 }
 
+fn unlabelled_u64_metric(metrics: &str, name: &str) -> u64 {
+    let prefix = format!("{name} ");
+    let encoded = metrics
+        .lines()
+        .find_map(|line| line.strip_prefix(&prefix))
+        .unwrap_or_else(|| panic!("metrics output is missing {name}"));
+    let (whole, fractional) = encoded.split_once('.').unwrap_or((encoded, ""));
+    assert!(
+        fractional.chars().all(|digit| digit == '0'),
+        "{name} must render an exact integer, got {encoded}"
+    );
+    whole
+        .parse()
+        .unwrap_or_else(|_| panic!("{name} is not an unsigned integer: {encoded}"))
+}
+
+async fn acknowledged_write_metrics(client: &reqwest::Client, base_url: &str) -> (u64, u64, u64) {
+    let metrics = client
+        .get(format!("{base_url}/metrics"))
+        .send()
+        .await
+        .expect("metrics request succeeds")
+        .text()
+        .await
+        .expect("metrics body reads");
+    (
+        unlabelled_u64_metric(&metrics, "sybil_acknowledged_write_committed_floor"),
+        unlabelled_u64_metric(&metrics, "sybil_acknowledged_write_next_sequence"),
+        unlabelled_u64_metric(&metrics, "sybil_acknowledged_write_pending_rows"),
+    )
+}
+
 fn admin_feed(feeds: &Value) -> &Value {
     feeds
         .as_array()
@@ -481,6 +513,17 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
     )
     .await;
     assert!(pending_after_cancel.as_array().unwrap().is_empty());
+    let pre_restart_wal = acknowledged_write_metrics(&client, &writer.base_url).await;
+    assert!(
+        pre_restart_wal.2 > 0,
+        "paused acknowledged writes must appear as live pending rows"
+    );
+    assert_eq!(
+        pre_restart_wal.2,
+        pre_restart_wal.1 - pre_restart_wal.0,
+        "pending rows must equal the exact durable sequence interval"
+    );
+
     let reader = restart_api_with_env(writer, &root, 60_000, &test_admission_env).await;
     let post_restart_health = wait_for_health(&client, &reader.base_url).await;
     assert_eq!(
@@ -490,6 +533,11 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
     );
     assert_eq!(genesis_hash_from_health(&post_restart_health), genesis_hash);
     pause_blocks(&client, &reader.base_url).await;
+    assert_eq!(
+        acknowledged_write_metrics(&client, &reader.base_url).await,
+        pre_restart_wal,
+        "restore must republish the same pending WAL watermarks"
+    );
 
     let restored_account = get_json(
         &client,
@@ -613,6 +661,11 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
         signed_buy_yes_payload(market_id as u32, 450, 2, 3, genesis_hash, &signing_key),
     )
     .await;
+    let after_post_restart_append = acknowledged_write_metrics(&client, &reader.base_url).await;
+    assert_eq!(after_post_restart_append.0, pre_restart_wal.0);
+    assert_eq!(after_post_restart_append.1, pre_restart_wal.1 + 1);
+    assert_eq!(after_post_restart_append.2, pre_restart_wal.2 + 1);
+
     let post_restart_pending = get_json(
         &client,
         &reader.base_url,
@@ -624,6 +677,11 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
     let committer = restart_api_with_env(reader, &root, 50, &test_admission_env).await;
     wait_for_height_at_least(&client, &committer.base_url, pre_write_height + 1).await;
     pause_blocks(&client, &committer.base_url).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let post_commit_wal = acknowledged_write_metrics(&client, &committer.base_url).await;
+    assert_eq!(post_commit_wal.0, post_commit_wal.1);
+    assert_eq!(post_commit_wal.2, 0);
+
     let committed_funding_history = get_json(
         &client,
         &committer.base_url,

@@ -2,6 +2,7 @@ use matching_engine::{MarketSet, MmConstraint, MmId, NANOS_PER_DOLLAR, outcome_b
 use redb::{Database, TableDefinition};
 
 use super::testutil::*;
+use super::wal::AcknowledgedWriteTelemetry;
 use super::*;
 use crate::OrderSubmission;
 use crate::account::AccountStore;
@@ -1341,6 +1342,17 @@ async fn acknowledged_write_sequence_remains_monotonic_across_block_fences() {
     let restored = store.load_state().await.unwrap().unwrap();
     assert_eq!(restored.acknowledged_writes.len(), 1);
     assert_eq!(restored.acknowledged_writes[0].sequence, 1);
+}
+
+#[test]
+fn acknowledged_write_telemetry_reports_the_exact_pending_interval() {
+    let telemetry = AcknowledgedWriteTelemetry::new(41, 44).unwrap();
+    assert_eq!(telemetry.pending_rows(), 3);
+
+    let fenced = AcknowledgedWriteTelemetry::new(44, 44).unwrap();
+    assert_eq!(fenced.pending_rows(), 0);
+
+    assert!(AcknowledgedWriteTelemetry::new(45, 44).is_err());
 }
 
 #[tokio::test]

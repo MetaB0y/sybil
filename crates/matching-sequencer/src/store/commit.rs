@@ -1,3 +1,4 @@
+use super::wal::AcknowledgedWriteTelemetry;
 use super::*;
 
 // ---------------------------------------------------------------------------
@@ -361,14 +362,17 @@ fn write_redb_block_commit(
     db: &Database,
     commit: RedbBlockCommit,
     fault_injection: Arc<Mutex<StoreFaultInjection>>,
-) -> Result<(), StoreError> {
+) -> Result<AcknowledgedWriteTelemetry, StoreError> {
     write_redb_block_commit_inner(db, commit, || {
         pop_save_block_fault(&fault_injection, StoreFaultPoint::BeforeRedbFenceCommit)
     })
 }
 
 #[cfg(not(test))]
-fn write_redb_block_commit(db: &Database, commit: RedbBlockCommit) -> Result<(), StoreError> {
+fn write_redb_block_commit(
+    db: &Database,
+    commit: RedbBlockCommit,
+) -> Result<AcknowledgedWriteTelemetry, StoreError> {
     write_redb_block_commit_inner(db, commit, || Ok(()))
 }
 
@@ -376,7 +380,7 @@ fn write_redb_block_commit_inner<F>(
     db: &Database,
     commit: RedbBlockCommit,
     before_commit: F,
-) -> Result<(), StoreError>
+) -> Result<AcknowledgedWriteTelemetry, StoreError>
 where
     F: FnOnce() -> Result<(), StoreError>,
 {
@@ -584,11 +588,10 @@ where
         table.insert(KEY_BRIDGE_STATE, commit.bridge_state_bytes.as_slice())?;
     }
 
-    {
+    let acknowledged_write_telemetry = {
         let mut table = txn.open_table(ACKNOWLEDGED_WRITES)?;
         table.retain(|_, _| false)?;
-    }
-    {
+        drop(table);
         let mut counters = txn.open_table(COUNTERS)?;
         let next = counters
             .get(KEY_NEXT_ACKNOWLEDGED_WRITE_SEQ)?
@@ -597,7 +600,8 @@ where
             })?
             .value();
         counters.insert(KEY_ACKNOWLEDGED_WRITE_FLOOR, next)?;
-    }
+        AcknowledgedWriteTelemetry::new(next, next)?
+    };
 
     {
         let mut table = txn.open_table(TRADER_TRACKER)?;
@@ -670,7 +674,7 @@ where
 
     before_commit()?;
     txn.commit()?;
-    Ok(())
+    Ok(acknowledged_write_telemetry)
 }
 
 impl Store {
@@ -951,17 +955,19 @@ impl Store {
             build_redb_block_commit(&snapshot, witness, replay_block, next_slot, proof_job_bytes)?;
         #[cfg(test)]
         let fault_injection = self.save_block_faults();
-        self.redb_write(move |db| {
-            #[cfg(test)]
-            {
-                write_redb_block_commit(&db, commit, fault_injection)
-            }
-            #[cfg(not(test))]
-            {
-                write_redb_block_commit(&db, commit)
-            }
-        })
-        .await?;
+        let acknowledged_write_telemetry = self
+            .redb_write(move |db| {
+                #[cfg(test)]
+                {
+                    write_redb_block_commit(&db, commit, fault_injection)
+                }
+                #[cfg(not(test))]
+                {
+                    write_redb_block_commit(&db, commit)
+                }
+            })
+            .await?;
+        acknowledged_write_telemetry.record();
 
         #[cfg(test)]
         self.fail_save_block_at(StoreFaultPoint::AfterRedbFenceCommit)?;

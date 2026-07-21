@@ -1,4 +1,4 @@
-use super::wal::AcknowledgedWriteEnvelope;
+use super::wal::{AcknowledgedWriteEnvelope, AcknowledgedWriteTelemetry};
 use super::*;
 
 /// Store-restored analytics projections. These are grouped separately from
@@ -63,12 +63,6 @@ fn read_acknowledged_writes(
     }
 }
 
-// Prometheus gauges use f64 at the metrics-library boundary; restored
-// protocol state and all validation remain integer-only.
-#[allow(
-    clippy::disallowed_types,
-    reason = "restored integer state is converted only at the Prometheus boundary"
-)]
 fn read_acknowledged_writes_inner(
     txn: &redb::ReadTransaction,
 ) -> Result<Vec<SequencedAcknowledgedWrite>, StoreError> {
@@ -83,11 +77,7 @@ fn read_acknowledged_writes_inner(
             StoreError::CorruptLayout("missing acknowledged-write next sequence".to_string())
         })?
         .value();
-    if next < floor {
-        return Err(StoreError::CorruptLayout(format!(
-            "acknowledged-write next sequence {next} is below floor {floor}"
-        )));
-    }
+    let telemetry = AcknowledgedWriteTelemetry::new(floor, next)?;
 
     let table = txn.open_table(ACKNOWLEDGED_WRITES)?;
     let mut expected = floor;
@@ -132,9 +122,7 @@ fn read_acknowledged_writes_inner(
         )));
     }
 
-    metrics::gauge!("sybil_acknowledged_write_committed_floor").set(floor as f64);
-    metrics::gauge!("sybil_acknowledged_write_next_sequence").set(next as f64);
-    metrics::gauge!("sybil_acknowledged_write_pending_rows").set(writes.len() as f64);
+    telemetry.record();
     Ok(writes)
 }
 

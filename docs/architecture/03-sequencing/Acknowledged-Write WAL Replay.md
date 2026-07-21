@@ -145,6 +145,12 @@ The store exports:
 - `sybil_acknowledged_write_pending_rows`; and
 - `sybil_restore_acknowledged_write_failures_total{kind}`.
 
+The three watermark gauges are refreshed after every successful restore,
+acknowledged-write append, and block-fence commit. `pending_rows` is the exact
+integer interval `next_sequence - committed_floor`; it normally rises between
+blocks and returns to zero when the next block commits. A fixed startup value
+is not live WAL evidence.
+
 Structural/envelope failures use `kind="stored_log"`; deterministic replay
 failures use the acknowledged-write variant kind.
 

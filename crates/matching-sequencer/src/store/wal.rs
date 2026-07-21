@@ -283,12 +283,11 @@ impl Store {
     )]
     async fn append_acknowledged_write(&self, write: AcknowledgedWrite) -> Result<u64, StoreError> {
         let kind = write.kind();
-        let sequence = self
+        let (sequence, telemetry) = self
             .redb_write(move |db| append_acknowledged_write_row(&db, write))
             .await?;
         metrics::counter!("sybil_acknowledged_writes_appended_total", "kind" => kind).increment(1);
-        metrics::gauge!("sybil_acknowledged_write_next_sequence")
-            .set(sequence.saturating_add(1) as f64);
+        telemetry.record();
         Ok(sequence)
     }
 }
@@ -356,12 +355,49 @@ pub(super) struct AcknowledgedWriteEnvelope {
     pub write: AcknowledgedWrite,
 }
 
+/// Exact durable bounds for the between-block acknowledged-write interval.
+///
+/// Every successful restore, append, and block fence records the same three
+/// gauges from this value so none of them can remain a startup-only snapshot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct AcknowledgedWriteTelemetry {
+    floor: u64,
+    next: u64,
+}
+
+impl AcknowledgedWriteTelemetry {
+    pub(super) fn new(floor: u64, next: u64) -> Result<Self, StoreError> {
+        if next < floor {
+            return Err(StoreError::CorruptLayout(format!(
+                "acknowledged-write next sequence {next} is below floor {floor}"
+            )));
+        }
+        Ok(Self { floor, next })
+    }
+
+    pub(super) const fn pending_rows(self) -> u64 {
+        self.next - self.floor
+    }
+
+    // Prometheus gauges use f64 at the metrics-library boundary; protocol
+    // state and sequence allocation remain integer-only.
+    #[allow(
+        clippy::disallowed_types,
+        reason = "integer sequence values are converted only at the Prometheus boundary"
+    )]
+    pub(super) fn record(self) {
+        metrics::gauge!("sybil_acknowledged_write_committed_floor").set(self.floor as f64);
+        metrics::gauge!("sybil_acknowledged_write_next_sequence").set(self.next as f64);
+        metrics::gauge!("sybil_acknowledged_write_pending_rows").set(self.pending_rows() as f64);
+    }
+}
+
 fn append_acknowledged_write_row(
     db: &Database,
     write: AcknowledgedWrite,
-) -> Result<u64, StoreError> {
+) -> Result<(u64, AcknowledgedWriteTelemetry), StoreError> {
     let txn = db.begin_write()?;
-    let sequence = {
+    let (sequence, telemetry) = {
         let mut counters = txn.open_table(COUNTERS)?;
         if counters.get(KEY_HEIGHT)?.is_none() {
             return Err(StoreError::AcknowledgedWriteBeforeSnapshot);
@@ -387,7 +423,7 @@ fn append_acknowledged_write_row(
             StoreError::CorruptLayout("acknowledged-write sequence exhausted".to_string())
         })?;
         counters.insert(KEY_NEXT_ACKNOWLEDGED_WRITE_SEQ, following)?;
-        next
+        (next, AcknowledgedWriteTelemetry::new(floor, following)?)
     };
     let envelope = AcknowledgedWriteEnvelope {
         version: ACKNOWLEDGED_WRITE_ENVELOPE_VERSION,
@@ -405,5 +441,5 @@ fn append_acknowledged_write_row(
         table.insert(sequence, bytes.as_slice())?;
     }
     txn.commit()?;
-    Ok(sequence)
+    Ok((sequence, telemetry))
 }
