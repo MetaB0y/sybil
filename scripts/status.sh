@@ -10,7 +10,10 @@ remote_api_get() {
 }
 
 remote_alerts_get() {
-    ssh "$S" "cd /opt/sybil && $COMPOSE exec -T victoriametrics wget -qO- 'http://127.0.0.1:8428/api/v1/query?query=ALERTS'"
+    # ALERTS is persisted for history through remote write, but its last firing
+    # sample remains queryable briefly after resolution. Use vmalert's live API
+    # for the operator-facing current-state view.
+    ssh "$S" "cd /opt/sybil && $COMPOSE exec -T vmalert wget -qO- 'http://127.0.0.1:8880/api/v1/alerts'"
 }
 
 echo "=== Containers ==="
@@ -38,13 +41,15 @@ import json
 import sys
 
 payload = json.load(sys.stdin)
-results = payload.get("data", {}).get("result", [])
+results = payload.get("data", {}).get("alerts")
+if payload.get("status") != "success" or not isinstance(results, list):
+    raise SystemExit("vmalert returned an invalid active-alert response")
 active = sorted(
     (
-        sample.get("metric", {}).get("alertstate", "unknown"),
-        sample.get("metric", {}).get("severity", "unknown"),
-        sample.get("metric", {}).get("alertname", "unnamed"),
-        sample.get("metric", {}).get("component", "unknown"),
+        sample.get("state", "unknown"),
+        sample.get("labels", {}).get("severity", "unknown"),
+        sample.get("name") or sample.get("labels", {}).get("alertname", "unnamed"),
+        sample.get("labels", {}).get("component", "unknown"),
     )
     for sample in results
 )
