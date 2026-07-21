@@ -126,11 +126,14 @@ export function GlobalNav() {
           color: "var(--fg-1)",
         }}
       >
+        {/* Size lives in globals.css (`.global-nav-wordmark`), not here: the
+            phone header scales it up, and an inline font-size would outrank
+            the media query. */}
         <span
+          className="global-nav-wordmark"
           style={{
             fontFamily: "var(--font-display)",
             fontWeight: 700,
-            fontSize: "var(--fs-18)",
             letterSpacing: "var(--track-tight)",
             textTransform: "uppercase",
           }}

@@ -193,6 +193,10 @@ textarea {
   padding: 0 var(--space-5);
 }
 
+.global-nav-wordmark {
+  font-size: var(--fs-18);
+}
+
 .global-nav-tabs {
   display: flex;
   align-items: center;
@@ -1351,7 +1355,40 @@ textarea {
 
 @media (max-width: 640px) {
   :root {
-    --nav-height: 56px;
+    /* Roomier than the desktop bar, because on a touch device it holds three
+       44px controls: at 56px they filled the bar edge to edge and read as a
+       row of boxes with a wordmark squeezed in beside them. */
+    --nav-height: 64px;
+    /* The ticker is hidden at this width (below), so pages must not reserve
+       space for it or every title would sit 36px low. */
+    --ticker-offset: 0px;
+  }
+
+  /* RECENT TRADES is a marquee of clipped mid-sentence text that ate 44px of a
+     phone screen directly under the header. The same live block height is on
+     the batch pill and the activity page. */
+  .clearing-ticker {
+    display: none !important;
+  }
+
+  /* The wordmark is the brand; at 18px it was the smallest thing in a bar of
+     44px controls. Sizing it up and stripping the boxes off the two icon
+     buttons puts the emphasis back where it belongs — the buttons keep their
+     44px targets, they just stop being drawn as buttons. */
+  .global-nav-wordmark {
+    font-size: var(--fs-22, 22px);
+  }
+
+  .global-nav .nav-icon-btn,
+  .global-nav-menu-button {
+    background: transparent;
+    border-color: transparent;
+    color: var(--fg-2);
+  }
+
+  /* One bordered control in the bar, and it is the one that does something. */
+  .global-nav .nav-chip {
+    height: 36px;
   }
 
   /* A 40px display title plus a range bar does not fit on one phone line, and
@@ -1414,6 +1451,23 @@ textarea {
     overflow-x: auto;
     overscroll-behavior-inline: contain;
     scrollbar-width: none;
+  }
+
+  /* The filter block was ~110px of chrome above the first market: 14px tabs on
+     a 44px row, then three 44px boxes. The tabs come down a size and the chips
+     keep the height they were designed at (their 44px is hit area now), which
+     reads as a filter strip rather than a second toolbar. */
+  .markets-category-tab {
+    font-size: var(--fs-13) !important;
+  }
+
+  .markets-category-tabs {
+    gap: var(--space-3) !important;
+  }
+
+  .markets-sort-chip {
+    font-size: 10px !important;
+    padding: 0 var(--space-2) !important;
   }
 
   .market-detail-header-pad,

@@ -48,7 +48,7 @@ export default function LeaderboardPage() {
       <div
         className="sybil-page-pad"
         style={{
-          paddingTop: "calc(var(--space-6) + 36px)",
+          paddingTop: "calc(var(--space-6) + var(--ticker-offset))",
         }}
       >
         <PageHeader

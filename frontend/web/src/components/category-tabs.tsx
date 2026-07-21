@@ -74,6 +74,7 @@ export function CategoryTabs() {
     <>
       <nav
         aria-label="market categories"
+        className="markets-category-tabs"
         style={{
           display: "flex",
           alignItems: "center",
@@ -118,6 +119,7 @@ export function CategoryTabs() {
               }
               aria-disabled={faded || undefined}
               tabIndex={faded ? -1 : undefined}
+              className="markets-category-tab"
               style={{
                 position: "relative",
                 flexShrink: 0,

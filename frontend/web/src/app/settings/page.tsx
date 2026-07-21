@@ -68,7 +68,7 @@ function Shell({ children }: { children: React.ReactNode }) {
       className="sybil-page-pad"
       style={{
         width: "100%",
-        paddingTop: "calc(var(--space-6) + 36px)",
+        paddingTop: "calc(var(--space-6) + var(--ticker-offset))",
         paddingBottom: "var(--space-9)",
         display: "flex",
         flexDirection: "column",

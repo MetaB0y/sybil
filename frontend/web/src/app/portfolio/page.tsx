@@ -341,9 +341,9 @@ function Shell({ children }: { children: React.ReactNode }) {
       className="sybil-page-pad"
       style={{
         width: "100%",
-        // +36px = markets ClearingTicker height, so the title aligns
+        // The ticker offset keeps this title on the markets page's baseline
         // with /'s "All markets" across pages
-        paddingTop: "calc(var(--space-6) + 36px)",
+        paddingTop: "calc(var(--space-6) + var(--ticker-offset))",
         paddingBottom: "var(--space-9)",
         display: "flex",
         flexDirection: "column",
