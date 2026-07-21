@@ -1259,6 +1259,27 @@ textarea {
   .activity-batch-detail-grid {
     grid-template-columns: 1fr !important;
   }
+
+  /* Dev Zone's two-column views pin their right column at 360px, which is wider
+     than a phone once the page padding is taken out — every one of them pushed
+     the document 6px past the viewport. */
+  .dev-split-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  /* Dev filter/picker selects size to their longest option (a market question
+     runs to ~780px). Nothing else in the row needs the width. */
+  .dev-select,
+  .dev-zone select {
+    max-width: 100%;
+    min-width: 0 !important;
+  }
+
+  /* Dev stat rows go up to four across; on a phone that is ~60px a cell and
+     the figures spill out of them. */
+  .dev-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
 }
 
 @media (max-width: 900px) {

@@ -62,6 +62,10 @@ export function StatGrid({
 }) {
   return (
     <div
+      // `.dev-stat-grid` drops the column count on a phone (globals.css): a
+      // four-column row of stats leaves each cell ~60px at 320px, and the
+      // numbers spill out of them.
+      className="dev-stat-grid"
       style={{
         display: "grid",
         gap: 12,

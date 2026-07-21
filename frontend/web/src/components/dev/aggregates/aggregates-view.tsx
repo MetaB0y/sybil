@@ -306,6 +306,7 @@ export function AggregatesView() {
           title="Open-Batch Indicative"
           actions={
             <select
+              className="dev-select"
               value={openBatchMarketId}
               onChange={(e) => setOpenBatchMarketId(Number(e.target.value))}
               style={{ ...controlStyle, minWidth: 280 }}

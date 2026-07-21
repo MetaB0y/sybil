@@ -74,6 +74,7 @@ export function MarketsView() {
             style={fullWidthControl}
           />
           <select
+            className="dev-select"
             value={selectedGroup}
             onChange={(e) => setSelectedGroup(e.target.value)}
             style={fullWidthControl}
@@ -86,6 +87,7 @@ export function MarketsView() {
             ))}
           </select>
           <select
+            className="dev-select"
             value={marketStateFilter}
             onChange={(e) => setMarketStateFilter(e.target.value)}
             style={fullWidthControl}

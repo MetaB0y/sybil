@@ -152,6 +152,7 @@ export function OverviewView() {
       </StatGrid>
 
       <div
+        className="dev-split-grid"
         style={{
           display: "grid",
           gridTemplateColumns: "minmax(0,1.4fr) minmax(360px,0.8fr)",
