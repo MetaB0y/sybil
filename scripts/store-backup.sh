@@ -243,7 +243,8 @@ python3 "$SCRIPT_DIR/store-manifest.py" build \
     --container "$CONTAINER" \
     --image "$SOURCE_IMAGE" \
     --image-id "$SOURCE_IMAGE_ID" \
-    --data-dir "$DATA_DIR"
+    --data-dir "$DATA_DIR" \
+    --retain-validity-artifacts "$SOURCE_RETAIN_VALIDITY_ARTIFACTS"
 
 docker rm -f "$INSPECT_CONTAINER" >/dev/null
 rm -rf "$INSPECT_ROOT"

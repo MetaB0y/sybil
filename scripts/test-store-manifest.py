@@ -34,6 +34,14 @@ class StoreManifestTests(unittest.TestCase):
             },
         }
 
+    def v3_manifest(self, retain_validity_artifacts: bool = False) -> dict[str, object]:
+        manifest = self.v2_manifest()
+        manifest["schema"] = store_manifest.SCHEMA_V3
+        manifest["source"] = {
+            "retain_validity_artifacts": retain_validity_artifacts,
+        }
+        return manifest
+
     def run_compare(
         self,
         manifest: dict[str, object],
@@ -90,6 +98,24 @@ class StoreManifestTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(message, result.stderr)
 
+    def test_v3_records_the_chain_validity_retention_mode(self) -> None:
+        manifest = self.v3_manifest(retain_validity_artifacts=False)
+        self.assertFalse(store_manifest.retention_mode(manifest))
+        self.assertEqual(
+            self.run_compare(manifest, "a" * 64, "b" * 64).returncode, 0
+        )
+
+        manifest["source"] = {"retain_validity_artifacts": "false"}
+        with self.assertRaises(store_manifest.ManifestError):
+            store_manifest.validate_manifest(manifest)
+
+    def test_legacy_manifest_requires_explicit_retention_mode(self) -> None:
+        with self.assertRaisesRegex(
+            store_manifest.ManifestError,
+            "does not record validity-artifact retention",
+        ):
+            store_manifest.retention_mode(self.v2_manifest())
+
     def test_v1_preserves_single_root_contract(self) -> None:
         manifest = {
             "schema": store_manifest.SCHEMA_V1,
@@ -109,7 +135,7 @@ class StoreManifestTests(unittest.TestCase):
 
     def test_rejects_unknown_schema_and_malformed_roots(self) -> None:
         manifest = self.v2_manifest()
-        manifest["schema"] = "sybil.store-backup.v3"
+        manifest["schema"] = "sybil.store-backup.v4"
         with self.assertRaises(store_manifest.ManifestError):
             store_manifest.validate_manifest(manifest)
 

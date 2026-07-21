@@ -19,6 +19,7 @@ services:
       SYBIL_DEV_MODE: "true"
       SYBIL_BLOCK_INTERVAL_MS: "${SYBIL_ITEST_BLOCK_INTERVAL_MS:-1000}"
       SYBIL_DATA_DIR: "/itest-data"
+      SYBIL_RETAIN_VALIDITY_ARTIFACTS: "${SYBIL_ITEST_RETAIN_VALIDITY_ARTIFACTS:-true}"
       SYBIL_ARENA_READ_URL: ""
       SYBIL_ARENA_READ_TOKEN: ""
       # The full money-path harness supplies a complete mock bridge domain.

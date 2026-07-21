@@ -3,6 +3,7 @@
 #
 # Usage:
 #   scripts/store-restore-drill.sh BACKUP_DIR [--port PORT] [--timeout SECONDS]
+#                               [--retain-validity-artifacts true|false]
 #                               [--no-build] [--allow-live-host] [--dry-run]
 #
 # The drill uses standalone docker-compose.itest.yml, a unique project, and a
@@ -19,6 +20,7 @@ TIMEOUT=120
 BUILD=1
 DRY_RUN=0
 ALLOW_LIVE_HOST=0
+RETAIN_VALIDITY_ARTIFACTS=""
 
 usage() { grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
@@ -27,6 +29,10 @@ while [[ $# -gt 0 ]]; do
         -h|--help) usage 0 ;;
         --port) PORT="${2:?missing port}"; shift 2 ;;
         --timeout) TIMEOUT="${2:?missing timeout}"; shift 2 ;;
+        --retain-validity-artifacts)
+            RETAIN_VALIDITY_ARTIFACTS="${2:?missing validity-artifact retention mode}"
+            shift 2
+            ;;
         --no-build) BUILD=0; shift ;;
         --allow-live-host) ALLOW_LIVE_HOST=1; shift ;;
         --dry-run) DRY_RUN=1; shift ;;
@@ -43,6 +49,10 @@ done
 [[ "$PORT" =~ ^[1-9][0-9]{0,4}$ && "$PORT" -le 65535 ]] \
     || { echo "error: invalid port '$PORT'" >&2; exit 2; }
 [[ "$TIMEOUT" =~ ^[1-9][0-9]*$ ]] || { echo "error: timeout must be positive" >&2; exit 2; }
+case "$RETAIN_VALIDITY_ARTIFACTS" in
+    ""|true|false) ;;
+    *) echo "error: --retain-validity-artifacts must be true or false" >&2; exit 2 ;;
+esac
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -52,7 +62,8 @@ dry-run: validate $BACKUP_DIR/manifest.json and SHA256SUMS
 dry-run: refuse a Docker daemon serving sybil-data unless --allow-live-host was explicit
 dry-run: create a unique project from standalone docker-compose.itest.yml only
 dry-run: populate only that project's fresh itest-data volume from $BACKUP_DIR/store
-dry-run: $BUILD_DESCRIPTION sybil-api with a 24h block interval on 127.0.0.1:$PORT
+dry-run: read the chain's validity-artifact retention mode from the manifest (legacy manifests require an explicit override)
+dry-run: $BUILD_DESCRIPTION sybil-api with that exact chain mode and a 24h block interval on 127.0.0.1:$PORT
 dry-run: require health and exact manifest matches for latest height, committed/replayed state roots, and sampled account
 dry-run: docker compose down -v --remove-orphans (production sybil-data is never referenced)
 EOF
@@ -95,6 +106,20 @@ if [[ "$ALLOW_LIVE_HOST" -ne 1 ]]; then
 fi
 
 python3 "$SCRIPT_DIR/store-manifest.py" validate "$BACKUP_DIR/manifest.json"
+if MANIFEST_RETENTION_MODE="$(
+    python3 "$SCRIPT_DIR/store-manifest.py" retention-mode \
+        "$BACKUP_DIR/manifest.json" 2>&1
+)"; then
+    if [[ -n "$RETAIN_VALIDITY_ARTIFACTS" \
+        && "$RETAIN_VALIDITY_ARTIFACTS" != "$MANIFEST_RETENTION_MODE" ]]; then
+        echo "error: explicit validity-artifact retention mode conflicts with the manifest" >&2
+        exit 2
+    fi
+    RETAIN_VALIDITY_ARTIFACTS="$MANIFEST_RETENTION_MODE"
+elif [[ -z "$RETAIN_VALIDITY_ARTIFACTS" ]]; then
+    echo "error: $MANIFEST_RETENTION_MODE" >&2
+    exit 2
+fi
 (
     cd "$BACKUP_DIR/store"
     sha256sum -c "$BACKUP_DIR/SHA256SUMS"
@@ -104,6 +129,7 @@ PROJECT="sybil-restore-drill-$(date +%s)-$$"
 export COMPOSE_PROJECT_NAME="$PROJECT"
 export SYBIL_ITEST_PORT="$PORT"
 export SYBIL_ITEST_BLOCK_INTERVAL_MS=86400000
+export SYBIL_ITEST_RETAIN_VALIDITY_ARTIFACTS="$RETAIN_VALIDITY_ARTIFACTS"
 # docker-compose.itest.yml is intentionally complete enough for this one
 # service. Merging the base file would append sybil-data:/data and expose the
 # globally named production volume to `down -v` cleanup.

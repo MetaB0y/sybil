@@ -59,7 +59,10 @@ The manifest records two roots because acknowledged WAL rows replay on startup:
 `committed_state_root` is the root in `/v1/blocks/latest`, while
 `replayed_state_root` is the current in-memory root served by `/v1/state-root`.
 They may legitimately differ until the next block folds replayed writes into a
-committed snapshot.
+committed snapshot. Version 3 manifests also record the source chain's
+`SYBIL_RETAIN_VALIDITY_ARTIFACTS` binding. Restore drills pass that exact mode
+to the isolated API; guessing the opposite mode correctly makes the store
+refuse startup.
 
 ## Take a production backup
 
@@ -152,10 +155,14 @@ does not weaken storage isolation.
 - `GET /v1/accounts/<sample>` is structurally equal to the complete account
   object recorded in the manifest.
 
-The drill also accepts legacy `sybil.store-backup.v1` manifests. Those manifests
-recorded only `state_root`, so their original contract remains strict: both
-endpoints must equal that one root. Unknown schemas or malformed/missing roots
-fail before the restore container is started.
+The drill also accepts legacy `sybil.store-backup.v1` and
+`sybil.store-backup.v2` manifests. Version 1 recorded only `state_root`, so its
+original contract remains strict: both endpoints must equal that one root.
+Neither legacy schema recorded the chain's validity-artifact retention binding;
+pass `--retain-validity-artifacts true|false` explicitly after establishing the
+source mode. Version 3 rejects an override that conflicts with its recorded
+mode. Unknown schemas or malformed/missing roots fail before the restore
+container is started.
 
 Any difference exits nonzero. A 24-hour drill block interval prevents the
 restored node from advancing before those exact comparisons.

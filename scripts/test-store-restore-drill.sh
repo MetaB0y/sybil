@@ -13,7 +13,7 @@ mkdir -p "$BACKUP/store/sybil.qmdb" "$FAKE_BIN" "$TMP/work"
 printf 'redb\n' > "$BACKUP/store/sybil.redb"
 printf 'qmdb\n' > "$BACKUP/store/sybil.qmdb/state"
 printf '%s\n' \
-    '{"schema":"sybil.store-backup.v2","expected":{"height":9,"committed_state_root":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","replayed_state_root":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","account_id":42,"account":{"account_id":42,"balance_nanos":7}}}' \
+    '{"schema":"sybil.store-backup.v3","source":{"retain_validity_artifacts":false},"expected":{"height":9,"committed_state_root":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","replayed_state_root":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","account_id":42,"account":{"account_id":42,"balance_nanos":7}}}' \
     > "$BACKUP/manifest.json"
 (
     cd "$BACKUP/store"
@@ -28,7 +28,7 @@ printf '%s\n' \
     > "$FAKE_BIN/docker"
 printf '%s\n' \
     '#!/usr/bin/env bash' \
-    'printf "%s\n" "$*" >> "${FAKE_COMPOSE_LOG:?}"' \
+    'printf "%s|retain=%s\n" "$*" "${SYBIL_ITEST_RETAIN_VALIDITY_ARTIFACTS:-unset}" >> "${FAKE_COMPOSE_LOG:?}"' \
     'case " $* " in' \
     '  *" up -d --no-build sybil-api "*) touch "${FAKE_UP:?}" ;;' \
     '  *" down -v --remove-orphans "*) touch "${FAKE_DOWN:?}" ;;' \
@@ -78,6 +78,8 @@ fi
     || { echo "FAIL: restore drill did not run down -v after hangup" >&2; exit 1; }
 grep -Fq -- '-f '"$ROOT"'/docker-compose.itest.yml down -v --remove-orphans' "$FAKE_COMPOSE_LOG" \
     || { echo "FAIL: cleanup did not use the standalone itest definition" >&2; exit 1; }
+grep -Fq 'retain=false' "$FAKE_COMPOSE_LOG" \
+    || { echo "FAIL: restore drill did not pass the manifest chain mode to Compose" >&2; exit 1; }
 if grep -Fq 'docker-compose.yml' "$FAKE_COMPOSE_LOG"; then
     echo "FAIL: restore drill cleanup referenced the base Compose file" >&2
     exit 1

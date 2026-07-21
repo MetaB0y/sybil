@@ -13,6 +13,7 @@ from typing import Any
 
 SCHEMA_V1 = "sybil.store-backup.v1"
 SCHEMA_V2 = "sybil.store-backup.v2"
+SCHEMA_V3 = "sybil.store-backup.v3"
 
 
 class ManifestError(ValueError):
@@ -43,7 +44,7 @@ def expected_roots(manifest: dict[str, Any]) -> tuple[str, str]:
     if schema == SCHEMA_V1:
         root = require_root(expected.get("state_root"), "expected.state_root")
         return root, root
-    if schema == SCHEMA_V2:
+    if schema in (SCHEMA_V2, SCHEMA_V3):
         return (
             require_root(
                 expected.get("committed_state_root"),
@@ -76,7 +77,25 @@ def validate_manifest(manifest: Any) -> dict[str, Any]:
         raise ManifestError("expected.account_id must be a non-negative integer")
     if not isinstance(account, dict) or account.get("account_id") != account_id:
         raise ManifestError("expected.account must match expected.account_id")
+    if manifest.get("schema") == SCHEMA_V3:
+        source = manifest.get("source")
+        if not isinstance(source, dict):
+            raise ManifestError("source must be an object")
+        if not isinstance(source.get("retain_validity_artifacts"), bool):
+            raise ManifestError(
+                "source.retain_validity_artifacts must be a boolean"
+            )
     return manifest
+
+
+def retention_mode(manifest: Any) -> bool:
+    validated = validate_manifest(manifest)
+    if validated.get("schema") != SCHEMA_V3:
+        raise ManifestError(
+            "legacy backup manifest does not record validity-artifact retention; "
+            "pass --retain-validity-artifacts explicitly"
+        )
+    return validated["source"]["retain_validity_artifacts"]
 
 
 def build_manifest(args: argparse.Namespace) -> None:
@@ -95,7 +114,7 @@ def build_manifest(args: argparse.Namespace) -> None:
         raise ManifestError("inspector returned an invalid account sample")
 
     manifest = {
-        "schema": SCHEMA_V2,
+        "schema": SCHEMA_V3,
         "created_utc": args.stamp,
         "host": socket.gethostname(),
         "source": {
@@ -105,6 +124,7 @@ def build_manifest(args: argparse.Namespace) -> None:
             "image": args.image,
             "image_id": args.image_id,
             "data_dir": args.data_dir,
+            "retain_validity_artifacts": args.retain_validity_artifacts,
         },
         "consistency": {
             "mechanism": "docker-pause-whole-container",
@@ -159,6 +179,20 @@ def command_validate(args: argparse.Namespace) -> None:
     validate_manifest(load_json(args.manifest))
 
 
+def command_retention_mode(args: argparse.Namespace) -> None:
+    value = retention_mode(load_json(args.manifest))
+    print("true" if value else "false")
+
+
+def parse_bool(value: str) -> bool:
+    normalized = value.lower()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    raise argparse.ArgumentTypeError("expected true or false")
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     subparsers = result.add_subparsers(dest="command", required=True)
@@ -175,11 +209,20 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--image", required=True)
     build.add_argument("--image-id", required=True)
     build.add_argument("--data-dir", required=True)
+    build.add_argument(
+        "--retain-validity-artifacts",
+        required=True,
+        type=parse_bool,
+    )
     build.set_defaults(func=build_manifest)
 
     validate = subparsers.add_parser("validate")
     validate.add_argument("manifest")
     validate.set_defaults(func=command_validate)
+
+    mode = subparsers.add_parser("retention-mode")
+    mode.add_argument("manifest")
+    mode.set_defaults(func=command_retention_mode)
 
     compare = subparsers.add_parser("compare")
     compare.add_argument("--manifest", required=True)

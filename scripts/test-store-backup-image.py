@@ -37,5 +37,9 @@ if '--entrypoint sybil-api "$SOURCE_IMAGE"' in SCRIPT:
     raise SystemExit("FAIL: isolation validation still follows the mutable image tag")
 require('--image "$SOURCE_IMAGE"', "manifest lost the configured image reference")
 require('--image-id "$SOURCE_IMAGE_ID"', "manifest lost the immutable image ID")
+require(
+    '--retain-validity-artifacts "$SOURCE_RETAIN_VALIDITY_ARTIFACTS"',
+    "manifest lost the source chain validity-retention mode",
+)
 
 print("store backup immutable-image contract: ok")
