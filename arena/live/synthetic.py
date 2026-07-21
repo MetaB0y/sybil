@@ -380,8 +380,14 @@ class CrossingNoiseStrategy:
         buy_yes_by_group: dict[frozenset[int], int] = {}
         orders: list[OrderSpec] = []
         for market in chosen:
-            # Anchor on the previous Sybil price; fresh markets default to 0.5.
-            mid = _previous_sybil_price(block, market)
+            # A fresh external reference is the economically meaningful anchor
+            # for mirrored flow. Feeding synthetic clears back into themselves
+            # would otherwise create a random walk that the reference traders
+            # must continually undo. Native markets have no external truth, so
+            # they retain the previous Sybil mark (or 0.5 at genesis).
+            mid = _reference_price(market)
+            if mid is None:
+                mid = _previous_sybil_price(block, market)
             if mid is None:
                 mid = 0.5
             # Small jitter so prices differ across accounts and over time.

@@ -287,6 +287,34 @@ def test_crossing_noise_randomness_is_keyed_by_block_height():
     assert following != first
 
 
+def test_crossing_noise_anchors_mirrored_flow_to_fresh_reference():
+    edge = 0.03
+    strategy = CrossingNoiseStrategy(
+        SyntheticStrategyConfig(
+            random_seed=123,
+            randomization_range=0.0,
+            crossing_edge=edge,
+            crossing_markets_per_block=1,
+        )
+    )
+
+    orders = strategy.generate_orders(
+        _block(0.80),
+        {1: _market(ref=0.20)},
+        {},
+        cash=100.0,
+    )
+
+    assert len(orders) == 1
+    order = orders[0]
+    if isinstance(order, BuyYes):
+        inferred_mid = order.limit_price_nanos / 1_000_000_000 - edge
+    else:
+        assert isinstance(order, BuyNo)
+        inferred_mid = 1.0 + edge - order.limit_price_nanos / 1_000_000_000
+    assert abs(inferred_mid - 0.20) < 1e-9
+
+
 def test_fifteen_sparse_noise_streams_cover_about_quarter_catalog():
     markets = {market_id: _market(market_id) for market_id in range(1, 207)}
     block = _block(0.50)

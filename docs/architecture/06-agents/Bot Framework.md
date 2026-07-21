@@ -66,7 +66,9 @@ configured actor count, so adding actors changes scheduling granularity rather
 than minting capital. Crossing-noise choices are deterministic from
 `(actor seed, block height)`, which makes a replay or restart reproduce the
 same block decision. Each actor emits at most one order per selected market;
-for core mutually-exclusive MarketGroups it also suppresses the final YES buy
+mirrored orders anchor to their fresh external reference while native orders
+anchor to the prior Sybil mark, avoiding recursive synthetic price drift; for
+core mutually-exclusive MarketGroups it also suppresses the final YES buy
 that would complete every group outcome in one account submission.
 
 Market discovery has two deliberately separate outputs. The analyst/sizer
