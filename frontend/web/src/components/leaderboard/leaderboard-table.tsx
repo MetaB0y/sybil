@@ -13,6 +13,8 @@
 
 import { useMemo, useState } from "react";
 import { Pager, usePaged } from "@/components/event-list-pager";
+import { DataCard, DataCardList } from "@/components/data-card";
+import { useCompactLayout } from "@/lib/responsive/use-compact";
 import { formatCompactDollars, formatInt } from "@/lib/format/nanos";
 import {
   formatRoiBps,
@@ -107,18 +109,7 @@ export function LeaderboardTable({
           onRetry={onRetry}
         />
       )}
-      <div
-        className="leaderboard-grid-table"
-        style={{
-          background: "var(--surface-1)",
-          // border-2 is the "card outline" token — border-1 (hairline) is too
-          // faint where the header (--bg-1) meets the identical page bg, so the
-          // table's top edge disappears in light theme.
-          border: "1px solid var(--border-2)",
-          borderRadius: 6,
-          overflowY: "hidden",
-        }}
-      >
+      <TableShell>
         <Header sort={sort} onSort={onSort} />
         {sorted.length === 0 && readState !== "unavailable" && (
           <div
@@ -147,8 +138,33 @@ export function LeaderboardTable({
             <Pager paged={paged} />
           </div>
         )}
-      </div>
+      </TableShell>
     </section>
+  );
+}
+
+/**
+ * The bordered table card, or — on a phone — a plain stack, since the rows
+ * inside render as `DataCard`s that bring their own border.
+ */
+function TableShell({ children }: { children: React.ReactNode }) {
+  const compact = useCompactLayout();
+  if (compact) return <DataCardList>{children}</DataCardList>;
+  return (
+    <div
+      className="leaderboard-grid-table"
+      style={{
+        background: "var(--surface-1)",
+        // border-2 is the "card outline" token — border-1 (hairline) is too
+        // faint where the header (--bg-1) meets the identical page bg, so the
+        // table's top edge disappears in light theme.
+        border: "1px solid var(--border-2)",
+        borderRadius: 6,
+        overflowY: "hidden",
+      }}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -216,15 +232,17 @@ function Header({
   sort: Sort | null;
   onSort: (key: SortKey) => void;
 }) {
+  const compact = useCompactLayout();
   return (
     <div
+      {...(compact ? { className: "table-sort-strip" } : {})}
       style={{
         display: "grid",
         gridTemplateColumns: GRID,
         gap: GRID_GAP,
         alignItems: "center",
         padding: "0 22px",
-        height: 36,
+        height: compact ? undefined : 36,
         fontFamily: "var(--font-mono)",
         fontSize: 10,
         textTransform: "uppercase",
@@ -232,7 +250,7 @@ function Header({
         color: "var(--fg-3)",
         borderLeft: ROW_BORDER_LEFT,
         background: "var(--bg-1)",
-        position: "sticky",
+        position: compact ? undefined : "sticky",
         top: 0,
         zIndex: 1,
       }}
@@ -346,6 +364,59 @@ const cell: React.CSSProperties = {
 };
 
 function Row({ row, isMe }: { row: LeaderboardRow; isMe: boolean }) {
+  const compact = useCompactLayout();
+
+  if (compact) {
+    return (
+      <DataCard
+        highlighted={isMe}
+        title={
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "baseline",
+              gap: 8,
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            <span style={{ color: "var(--fg-3)" }}>#{row.rank}</span>
+            {row.label}
+            {isMe && (
+              <span style={{ fontSize: 9, color: "var(--accent)" }}>YOU</span>
+            )}
+            {row.kind === "bot" && (
+              <span style={{ fontSize: 9, color: "var(--fg-3)" }}>BOT</span>
+            )}
+          </span>
+        }
+        pairs={[
+          {
+            label: "PnL",
+            value: (
+              <span style={{ color: signColor(row.pnlNanos) }}>
+                {formatSignedDollars(row.pnlNanos)}
+              </span>
+            ),
+          },
+          {
+            label: "ROI",
+            value: (
+              <span style={{ color: signColor(row.roiBps) }}>
+                {formatRoiBps(row.roiBps)}
+              </span>
+            ),
+          },
+          {
+            label: "Markets",
+            value:
+              row.marketsTraded == null ? "—" : formatInt(row.marketsTraded),
+          },
+          { label: "Equity", value: formatCompactDollars(row.equityNanos) },
+        ]}
+      />
+    );
+  }
+
   return (
     <div
       style={{

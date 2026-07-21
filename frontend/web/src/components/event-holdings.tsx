@@ -51,6 +51,8 @@ import { EventClosedOrders } from "@/components/event-closed-orders";
 import { EventOpenOrders } from "@/components/event-open-orders";
 import { Pager, usePaged } from "@/components/event-list-pager";
 import { SidePill } from "@/components/portfolio/side-pill";
+import { DataCard } from "@/components/data-card";
+import { useCompactLayout } from "@/lib/responsive/use-compact";
 import {
   cmpBig,
   cmpNullableBig,
@@ -831,43 +833,72 @@ function OutcomeOption({
 function HoldingRow({ holding }: { holding: Holding }) {
   const { label, quantity, outcome, avgNanos, markNanos, valueNanos, pnlNanos } =
     holding;
+  const compact = useCompactLayout();
+
+  const price =
+    avgNanos == null ? (
+      formatCentsPrecise(markNanos)
+    ) : (
+      // entry → mark. Fade the entry (what you paid, historical) so the eye
+      // lands on the mark — the live price that's actually true right now.
+      <span>
+        <span style={{ color: "var(--fg-4)" }}>
+          {formatCentsPrecise(avgNanos)}
+        </span>
+        <span style={{ color: "var(--fg-4)" }}>{" → "}</span>
+        {formatCentsPrecise(markNanos)}
+      </span>
+    );
+
+  const pnl = (
+    <span
+      style={{
+        fontFamily: "var(--font-mono)",
+        fontSize: 12,
+        color:
+          pnlNanos == null
+            ? "var(--fg-3)"
+            : pnlNanos >= 0n
+              ? "var(--yes)"
+              : "var(--no)",
+      }}
+    >
+      {pnlNanos == null
+        ? "—"
+        : formatDollarsRounded(pnlNanos, { decimals: 1, sign: true })}
+    </span>
+  );
+
+  if (compact) {
+    return (
+      <DataCard
+        title={label}
+        chips={
+          <>
+            <SidePill outcome={outcome} />
+            <span>{formatShareUnits(quantity, 1)} shares</span>
+          </>
+        }
+        pairs={[
+          { label: "Price", value: price, wide: true },
+          {
+            label: "Value",
+            value: formatDollarsRounded(valueNanos, { decimals: 1 }),
+          },
+          { label: "P&L", value: pnl },
+        ]}
+      />
+    );
+  }
+
   return (
     <EventRow columns={GRID}>
       <OutcomeLabel>{label}</OutcomeLabel>
       <SidePill outcome={outcome} />
       <Right mono>{formatShareUnits(quantity, 1)}</Right>
-      <Right mono>
-        {avgNanos == null ? (
-          formatCentsPrecise(markNanos)
-        ) : (
-          // entry → mark. Fade the entry (what you paid, historical) so the eye
-          // lands on the mark — the live price that's actually true right now.
-          <span>
-            <span style={{ color: "var(--fg-4)" }}>{formatCentsPrecise(avgNanos)}</span>
-            <span style={{ color: "var(--fg-4)" }}>{" → "}</span>
-            {formatCentsPrecise(markNanos)}
-          </span>
-        )}
-      </Right>
+      <Right mono>{price}</Right>
       <Right mono>{formatDollarsRounded(valueNanos, { decimals: 1 })}</Right>
-      <Right>
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 12,
-            color:
-              pnlNanos == null
-                ? "var(--fg-3)"
-                : pnlNanos >= 0n
-                  ? "var(--yes)"
-                  : "var(--no)",
-          }}
-        >
-          {pnlNanos == null
-            ? "—"
-            : formatDollarsRounded(pnlNanos, { decimals: 1, sign: true })}
-        </span>
-      </Right>
+      <Right>{pnl}</Right>
     </EventRow>
   );
 }

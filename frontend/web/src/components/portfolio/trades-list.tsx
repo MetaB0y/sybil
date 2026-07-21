@@ -58,7 +58,6 @@ import {
   bodyRowGrid,
   cmpNullableBig,
   Empty,
-  headerRowGrid,
   MarketLabel,
   Muted,
   nextSort,
@@ -66,10 +65,13 @@ import {
   RightCell,
   SortHeader,
   TableCard,
+  TableHead,
   TimeCell,
   type Column,
   type Sort,
 } from "./table";
+import { DataCard } from "@/components/data-card";
+import { useCompactLayout } from "@/lib/responsive/use-compact";
 
 type Market = components["schemas"]["MarketResponse"];
 
@@ -443,14 +445,14 @@ export function TradesList({
         <Empty>No trades match these filters.</Empty>
       ) : (
         <TableCard>
-          <div style={headerRowGrid(GRID)}>
+          <TableHead columns={GRID}>
             <span />
             {COLUMNS.map((col) => (
               <SortHeader key={col.key} col={col} sort={sort} onSort={onSort}>
                 {col.info ? <Glossary term={col.info} /> : null}
               </SortHeader>
             ))}
-          </div>
+          </TableHead>
           {paged.visible.map((r) => (
             <TradeRow key={r.id} row={r} />
           ))}
@@ -476,6 +478,90 @@ function TradeRow({ row }: { row: TradeRowData }) {
     e.stopPropagation();
     setExpanded((x) => !x);
   };
+
+  const compact = useCompactLayout();
+  if (compact) {
+    return (
+      <div>
+        <DataCard
+          href={`/m/${marketId}`}
+          thumb={
+            <MarketThumb
+              marketId={marketId}
+              name={label}
+              imageUrl={
+                market?.market_image_url ?? market?.event_image_url ?? null
+              }
+              fallbackIconUrl={
+                market?.market_icon_url ?? market?.event_icon_url ?? null
+              }
+              size={28}
+            />
+          }
+          title={label}
+          chips={
+            <>
+              <ActionCell side={row.side} />
+              {row.outcome ? <SidePill outcome={row.outcome} /> : <Muted>—</Muted>}
+              <TimeCell ms={row.filledAtMs} />
+            </>
+          }
+          pairs={[
+            {
+              label: "Qty",
+              value: row.qty == null ? "—" : formatShareUnits(row.qty),
+            },
+            {
+              label: "Price",
+              value: (
+                <PriceCell
+                  settledNanos={row.priceNanos}
+                  requestedNanos={row.requestedPriceNanos}
+                />
+              ),
+            },
+            {
+              label: "Value",
+              value:
+                row.valueNanos != null
+                  ? formatDollars(row.valueNanos, { decimals: 2 })
+                  : "—",
+            },
+            { label: "P&L", value: <PnlCell pnlNanos={row.realizedPnlNanos} /> },
+            {
+              label: "Welfare",
+              value: <WelfareCell welfareNanos={row.welfareNanos} />,
+              wide: true,
+            },
+          ]}
+          {...(canExpand
+            ? {
+                footer: (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    aria-expanded={expanded}
+                    onClick={toggle}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") toggle(e);
+                    }}
+                    style={{ color: "var(--accent)", cursor: "pointer" }}
+                  >
+                    {expanded ? "hide partial fills" : "show partial fills"}
+                  </span>
+                ),
+              }
+            : {})}
+        />
+        {canExpand && expanded && (
+          <ExpandedFills
+            fills={row.fills}
+            requestedPriceNanos={row.requestedPriceNanos}
+          />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -606,6 +692,7 @@ function FillSubRow({
   fill: HistoryEvent;
   requestedPriceNanos: bigint | null;
 }) {
+  const compact = useCompactLayout();
   const qty = fill.qty ?? null;
   const price = fill.priceNanos ?? null;
   const valueNanos =
@@ -620,6 +707,41 @@ function FillSubRow({
     const edge = notionalNanos(requestedPriceNanos - price, qty);
     welfareNanos = fill.side === "BUY" ? edge : -edge;
   }
+  if (compact) {
+    // No grid to align under on a phone, so the fill states which one it is
+    // rather than relying on blank identity columns to imply it.
+    return (
+      <DataCard
+        title={
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
+            partial fill
+          </span>
+        }
+        chips={<TimeCell ms={fill.timestampMs} />}
+        pairs={[
+          { label: "Qty", value: qty == null ? "—" : formatShareUnits(qty) },
+          {
+            label: "Price",
+            value: (
+              <PriceCell
+                settledNanos={price}
+                requestedNanos={requestedPriceNanos}
+              />
+            ),
+          },
+          {
+            label: "Value",
+            value:
+              valueNanos != null
+                ? formatDollars(valueNanos, { decimals: 2 })
+                : "—",
+          },
+          { label: "Welfare", value: <WelfareCell welfareNanos={welfareNanos} /> },
+        ]}
+      />
+    );
+  }
+
   // Same 10-column grid as a trade row → columns align. Identity columns
   // (thumb/market/action/side) and the P&L column stay blank for a fill.
   return (

@@ -26,16 +26,18 @@ import {
   cmpBig,
   cmpNullableBig,
   Empty,
-  headerRowGrid,
   MarketLabel,
   nextSort,
   PagerFooter,
   RightCell,
   SortHeader,
   TableCard,
+  TableHead,
   type Column,
   type Sort,
 } from "./table";
+import { DataCard } from "@/components/data-card";
+import { useCompactLayout } from "@/lib/responsive/use-compact";
 import { avgEntryPriceNanos } from "@/lib/account/positions";
 import type { AccountFill } from "@/lib/account/use-account-fills";
 import type { Portfolio } from "@/lib/account/use-portfolio";
@@ -214,11 +216,16 @@ export function PositionsList({
         <Empty>No positions match “{query}”.</Empty>
       ) : (
         <TableCard>
-          <div style={headerRowGrid(GRID)}>
+          <TableHead columns={GRID}>
             <span />
             {COLUMNS.map((col) =>
               "spark" in col ? (
-                <span key={col.spark} style={{ textAlign: "center" }}>
+                // Nothing to sort by, so it drops out of the phone sort strip.
+                <span
+                  key={col.spark}
+                  className="sort-strip-omit"
+                  style={{ textAlign: "center" }}
+                >
                   {col.spark}
                 </span>
               ) : (
@@ -230,7 +237,7 @@ export function PositionsList({
                 />
               ),
             )}
-          </div>
+          </TableHead>
           {paged.visible.map((r) => (
             <PositionRow
               key={`${r.position.market_id}:${r.position.outcome}`}
@@ -257,6 +264,89 @@ function PositionRow({ row }: { row: PositionRowData }) {
     pnlNanos,
     pnlPct,
   } = row;
+  const compact = useCompactLayout();
+
+  const thumb = (
+    <MarketThumb
+      marketId={position.market_id}
+      name={label}
+      imageUrl={market?.market_image_url ?? market?.event_image_url ?? null}
+      fallbackIconUrl={market?.market_icon_url ?? market?.event_icon_url ?? null}
+      size={28}
+    />
+  );
+
+  // Amount and percent on ONE line: the percent is a restatement of the amount,
+  // not a second fact, so it reads as a suffix rather than a stacked value.
+  // Keeps every row a single text line tall.
+  const pnl = (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "baseline",
+        justifyContent: "flex-end",
+        gap: 5,
+        fontFamily: "var(--font-mono)",
+        whiteSpace: "nowrap",
+        color:
+          pnlNanos == null
+            ? "var(--fg-3)"
+            : pnlNanos >= 0n
+              ? "var(--yes)"
+              : "var(--no)",
+      }}
+    >
+      <span style={{ fontSize: 12 }}>
+        {pnlNanos == null
+          ? "—"
+          : formatDollars(pnlNanos, { decimals: 2, sign: true })}
+      </span>
+      {pnlPct != null && (
+        <span style={{ fontSize: 10, opacity: 0.75 }}>
+          {`${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%`}
+        </span>
+      )}
+    </span>
+  );
+
+  if (compact) {
+    return (
+      <DataCard
+        href={`/m/${position.market_id}`}
+        thumb={thumb}
+        title={label}
+        chips={
+          <>
+            <SidePill outcome={position.outcome} />
+            <span>{formatShareUnits(position.quantity)} shares</span>
+          </>
+        }
+        pairs={[
+          {
+            label: "Entry",
+            value: avgNanos == null ? "—" : formatCentsPrecise(avgNanos),
+          },
+          { label: "Mark", value: formatCentsPrecise(markNanos) },
+          {
+            label: "Value",
+            value: formatDollars(valueNanos, { decimals: 2 }),
+          },
+          { label: "P&L", value: pnl },
+        ]}
+        footer={
+          <>
+            <span>resolves {formatResolves(market)}</span>
+            <span style={{ marginLeft: "auto", display: "inline-flex" }}>
+              <PositionSparkline
+                marketId={position.market_id}
+                outcome={position.outcome}
+              />
+            </span>
+          </>
+        }
+      />
+    );
+  }
 
   return (
     <Link
@@ -268,15 +358,7 @@ function PositionRow({ row }: { row: PositionRowData }) {
         color: "inherit",
       }}
     >
-      <MarketThumb
-        marketId={position.market_id}
-        name={label}
-        imageUrl={market?.market_image_url ?? market?.event_image_url ?? null}
-        fallbackIconUrl={
-          market?.market_icon_url ?? market?.event_icon_url ?? null
-        }
-        size={28}
-      />
+      {thumb}
       <MarketLabel>{label}</MarketLabel>
       <SidePill outcome={position.outcome} />
       <RightCell mono>{formatShareUnits(position.quantity)}</RightCell>
@@ -291,38 +373,7 @@ function PositionRow({ row }: { row: PositionRowData }) {
         />
       </span>
       <RightCell mono>{formatDollars(valueNanos, { decimals: 2 })}</RightCell>
-      <RightCell>
-        {/* Amount and percent on ONE line: the percent is a restatement of the
-            amount, not a second fact, so it reads as a suffix rather than a
-            stacked value. Keeps every row a single text line tall. */}
-        <span
-          style={{
-            display: "inline-flex",
-            alignItems: "baseline",
-            justifyContent: "flex-end",
-            gap: 5,
-            fontFamily: "var(--font-mono)",
-            whiteSpace: "nowrap",
-            color:
-              pnlNanos == null
-                ? "var(--fg-3)"
-                : pnlNanos >= 0n
-                  ? "var(--yes)"
-                  : "var(--no)",
-          }}
-        >
-          <span style={{ fontSize: 12 }}>
-            {pnlNanos == null
-              ? "—"
-              : formatDollars(pnlNanos, { decimals: 2, sign: true })}
-          </span>
-          {pnlPct != null && (
-            <span style={{ fontSize: 10, opacity: 0.75 }}>
-              {`${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%`}
-            </span>
-          )}
-        </span>
-      </RightCell>
+      <RightCell>{pnl}</RightCell>
       <RightCell mono>{formatResolves(market)}</RightCell>
     </Link>
   );

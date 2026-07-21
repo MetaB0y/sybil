@@ -27,6 +27,8 @@ import {
 import { formatCentsPrecise, formatDollars } from "@/lib/format/nanos";
 import { formatShareUnits, notionalNanosCeil } from "@/lib/account/quantity";
 import type { components } from "@/lib/api/schema";
+import { DataCard } from "@/components/data-card";
+import { useCompactLayout } from "@/lib/responsive/use-compact";
 import { FilterDropdown } from "./filter-dropdown";
 import { PortfolioToolbar } from "./portfolio-toolbar";
 import { SearchField } from "./search-field";
@@ -36,7 +38,6 @@ import {
   bodyRowGrid,
   cmpNullableBig,
   Empty,
-  headerRowGrid,
   MarketLabel,
   Muted,
   nextSort,
@@ -44,6 +45,7 @@ import {
   RightCell,
   SortHeader,
   TableCard,
+  TableHead,
   TimeCell,
   type Column,
   type Sort,
@@ -321,12 +323,12 @@ export function HistoryFeed({
         </Empty>
       ) : (
         <TableCard>
-          <div style={headerRowGrid(GRID)}>
+          <TableHead columns={GRID}>
             <span />
             {COLUMNS.map((col) => (
               <SortHeader key={col.key} col={col} sort={sort} onSort={onSort} />
             ))}
-          </div>
+          </TableHead>
           {paged.visible.map((r) => (
             <EventRow key={r.event.id} row={r} />
           ))}
@@ -341,23 +343,60 @@ export function HistoryFeed({
 
 function EventRow({ row }: { row: HistoryRow }) {
   const { event, market, marketName } = row;
+  const compact = useCompactLayout();
+
+  const thumb =
+    event.marketId != null ? (
+      <MarketThumb
+        marketId={event.marketId}
+        name={marketName}
+        imageUrl={market?.market_image_url ?? market?.event_image_url ?? null}
+        fallbackIconUrl={
+          market?.market_icon_url ?? market?.event_icon_url ?? null
+        }
+        size={28}
+      />
+    ) : null;
+
+  if (compact) {
+    return (
+      <DataCard
+        {...(event.marketId != null ? { href: `/m/${event.marketId}` } : {})}
+        {...(thumb ? { thumb } : {})}
+        title={marketName || <Muted>account event</Muted>}
+        chips={
+          <>
+            <TypeBadge type={event.type} side={event.side} />
+            <ActionCell side={event.side} />
+            {event.outcome ? <SidePill outcome={event.outcome} /> : null}
+            <TimeCell ms={event.timestampMs} />
+          </>
+        }
+        pairs={[
+          {
+            label: "Qty",
+            value: event.qty == null ? "—" : formatShareUnits(event.qty),
+          },
+          { label: "Price", value: priceLabel(event) },
+          { label: "Amount", value: <AmountCell event={event} /> },
+          {
+            label: "Block",
+            value: (
+              <span style={{ color: "var(--accent)" }}>
+                #{event.blockHeight.toLocaleString()}
+              </span>
+            ),
+          },
+        ]}
+      />
+    );
+  }
+
   const body = (
     <>
       {/* Funding and account events have no market: the thumbnail slot stays
           empty and the label reads "—", so the grid still lines up. */}
-      {event.marketId != null ? (
-        <MarketThumb
-          marketId={event.marketId}
-          name={marketName}
-          imageUrl={market?.market_image_url ?? market?.event_image_url ?? null}
-          fallbackIconUrl={
-            market?.market_icon_url ?? market?.event_icon_url ?? null
-          }
-          size={28}
-        />
-      ) : (
-        <span />
-      )}
+      {thumb ?? <span />}
       {marketName ? (
         <MarketLabel>{marketName}</MarketLabel>
       ) : (

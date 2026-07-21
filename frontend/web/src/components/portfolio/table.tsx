@@ -18,6 +18,8 @@
 
 import type { CSSProperties, ReactNode } from "react";
 
+import { DataCardList } from "@/components/data-card";
+import { useCompactLayout } from "@/lib/responsive/use-compact";
 import type { Column, Sort } from "@/lib/table/sort";
 
 // Re-exported so the portfolio tabs keep importing their whole table toolkit
@@ -67,8 +69,14 @@ export function bodyRowGrid(columns: string): CSSProperties {
   };
 }
 
-/** The bordered, horizontally scrollable card every tab's table sits in. */
+/**
+ * The bordered, horizontally scrollable card every tab's table sits in — or, on
+ * a phone, a plain stack, because the rows inside are `DataCard`s that bring
+ * their own border and no longer need an 860px scroll port.
+ */
 export function TableCard({ children }: { children: ReactNode }) {
+  const compact = useCompactLayout();
+  if (compact) return <DataCardList>{children}</DataCardList>;
   return (
     <div
       className="portfolio-grid-table"
@@ -78,6 +86,29 @@ export function TableCard({ children }: { children: ReactNode }) {
         borderRadius: 6,
         overflowY: "hidden",
       }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
+ * The header row. On a phone the column grid collapses to a wrapped strip of
+ * sort buttons (`.table-sort-strip`) — the cards below carry their own labels,
+ * but sorting has nowhere else to live.
+ */
+export function TableHead({
+  columns,
+  children,
+}: {
+  columns: string;
+  children: ReactNode;
+}) {
+  const compact = useCompactLayout();
+  return (
+    <div
+      {...(compact ? { className: "table-sort-strip" } : {})}
+      style={headerRowGrid(columns)}
     >
       {children}
     </div>

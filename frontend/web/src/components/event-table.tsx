@@ -19,7 +19,9 @@
 import type { CSSProperties, ReactNode } from "react";
 
 import type { Column, Sort } from "@/lib/table/sort";
+import { DataCardList } from "@/components/data-card";
 import { Glossary } from "@/components/glossary";
+import { useCompactLayout } from "@/lib/responsive/use-compact";
 
 export {
   cmpBig,
@@ -68,12 +70,24 @@ export function eventRowGrid(
   };
 }
 
-/** Wrapper that cancels the rows' bleed so columns line up with the section. */
+/**
+ * Wrapper that cancels the rows' bleed so columns line up with the section —
+ * or, on a phone, the plain stack the `DataCard` rows sit in (there is no bleed
+ * to cancel once the rows are cards).
+ */
 export function EventTable({ children }: { children: ReactNode }) {
+  const compact = useCompactLayout();
+  if (compact) return <DataCardList>{children}</DataCardList>;
   return <div style={{ margin: `0 ${-ROW_INSET}px` }}>{children}</div>;
 }
 
-/** One row. Body rows carry `.event-row` for the hover tint (see globals.css). */
+/**
+ * One row. Body rows carry `.event-row` for the hover tint (see globals.css).
+ *
+ * On a phone the body rows are rendered as cards by their lists, and only the
+ * header comes through here — as a wrapped strip of sort buttons, since the
+ * cards label their own values but have nowhere to put the sort controls.
+ */
 export function EventRow({
   columns,
   header,
@@ -83,9 +97,15 @@ export function EventRow({
   header?: boolean;
   children: ReactNode;
 }) {
+  const compact = useCompactLayout();
+  const className = header
+    ? compact
+      ? "table-sort-strip"
+      : undefined
+    : "event-row";
   return (
     <div
-      {...(header ? {} : { className: "event-row" })}
+      {...(className ? { className } : {})}
       style={eventRowGrid(columns, header)}
     >
       {children}

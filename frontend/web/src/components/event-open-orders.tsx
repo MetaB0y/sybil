@@ -37,6 +37,8 @@ import { selectLatestBlock, useStore } from "@/lib/store";
 import { Pager, usePaged } from "@/components/event-list-pager";
 import { SidePill } from "@/components/portfolio/side-pill";
 import { TifCell } from "@/components/portfolio/tif-cell";
+import { DataCard } from "@/components/data-card";
+import { useCompactLayout } from "@/lib/responsive/use-compact";
 import {
   ActionCell,
   CancelButton,
@@ -297,6 +299,7 @@ function OrderRow({
   } = row;
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const compact = useCompactLayout();
 
   async function onCancel() {
     setCancelError(null);
@@ -321,21 +324,71 @@ function OrderRow({
     }
   }
 
+  const filledCell =
+    placed === 0 ? (
+      <>{formatShareUnits(order.remaining_quantity, 1)}</>
+    ) : (
+      // Rounded to 1dp in view.
+      <span>
+        {`${formatShareUnits(filled, 1)} / ${formatShareUnits(placed, 1)}`}
+      </span>
+    );
+
+  const cancel = (
+    <CancelButton
+      cancelling={cancelling}
+      title={cancelError || undefined}
+      onClick={onCancel}
+    />
+  );
+
+  if (compact) {
+    return (
+      <DataCard
+        title={label}
+        chips={
+          <>
+            <ActionCell side={action} />
+            <SidePill outcome={outcome} />
+            <TifCell expiresAtBlock={order.expires_at_block} />
+          </>
+        }
+        pairs={[
+          { label: "Filled / placed", value: filledCell, wide: true },
+          { label: "Limit", value: formatCentsPrecise(limitNanos) },
+          {
+            label: "Avg fill",
+            value: <AvgFillCell priceNanos={avgPriceNanos} count={fillCount} />,
+          },
+          {
+            label: "Value",
+            value: formatDollarsRounded(valueNanos, { decimals: 1 }),
+          },
+          {
+            label: "Created",
+            value: <CreatedCell placedAtMs={placedAtMs} nowMs={nowMs} />,
+          },
+        ]}
+        footer={
+          <>
+            {cancel}
+            {cancelError && (
+              <span role="alert" style={{ color: "var(--no)" }}>
+                {cancelError}
+              </span>
+            )}
+          </>
+        }
+      />
+    );
+  }
+
   return (
     <EventRow columns={GRID}>
       <OutcomeLabel>{label}</OutcomeLabel>
       <ActionCell side={action} />
       <SidePill outcome={outcome} />
-      <Right mono>
-        {placed === 0 ? (
-          <>{formatShareUnits(order.remaining_quantity, 1)}</>
-        ) : (
-          // Rounded to 1dp in view.
-          <span>
-            {`${formatShareUnits(filled, 1)} / ${formatShareUnits(placed, 1)}`}
-          </span>
-        )}
-      </Right>
+      <Right mono>{filledCell}</Right>
       <Right mono>{formatCentsPrecise(limitNanos)}</Right>
       <Right mono>
         <AvgFillCell priceNanos={avgPriceNanos} count={fillCount} />
@@ -347,11 +400,7 @@ function OrderRow({
       <Right>
         <TifCell expiresAtBlock={order.expires_at_block} />
       </Right>
-      <CancelButton
-        cancelling={cancelling}
-        title={cancelError || undefined}
-        onClick={onCancel}
-      />
+      {cancel}
       {cancelError && (
         <span
           role="alert"

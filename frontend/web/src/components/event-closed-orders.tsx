@@ -48,6 +48,8 @@ import {
 } from "@/lib/format/nanos";
 import { Pager, usePaged } from "@/components/event-list-pager";
 import { SidePill, valueChipStyle } from "@/components/portfolio/side-pill";
+import { DataCard } from "@/components/data-card";
+import { useCompactLayout } from "@/lib/responsive/use-compact";
 import {
   ActionCell,
   cmpNullableBig,
@@ -423,6 +425,65 @@ export function EventClosedOrders({
 }
 
 function ClosedRow({ order }: { order: ClosedOrder }) {
+  const compact = useCompactLayout();
+
+  const qtyCell =
+    order.qty == null ? (
+      "—"
+    ) : order.status === "PARTIAL" && order.remainderQty != null ? (
+      // filled / ordered — the faded total makes the unfilled (expired /
+      // cancelled) part visible without a separate phantom row.
+      <span>
+        {formatShareUnits(order.qty, 1)}
+        <span style={{ color: "var(--fg-4)" }}>
+          {` / ${formatShareUnits(order.qty + order.remainderQty, 1)}`}
+        </span>
+      </span>
+    ) : (
+      <span>{formatShareUnits(order.qty, 1)}</span>
+    );
+
+  if (compact) {
+    return (
+      <DataCard
+        title={order.label}
+        chips={
+          <>
+            <StatusBadge status={order.status} />
+            <ActionCell side={order.side} />
+            {order.outcome ? <SidePill outcome={order.outcome} /> : null}
+            <EventTime ms={order.closedAtMs} />
+          </>
+        }
+        pairs={[
+          { label: "Qty", value: qtyCell },
+          {
+            label: "Price",
+            value: (
+              <PriceCell
+                settledNanos={order.priceNanos}
+                requestedNanos={order.requestedPriceNanos}
+              />
+            ),
+          },
+          {
+            label: "Value",
+            value:
+              order.valueNanos != null
+                ? formatDollarsRounded(order.valueNanos, { decimals: 1 })
+                : "—",
+          },
+          { label: "P&L", value: <PnlCell pnlNanos={order.realizedPnlNanos} /> },
+          {
+            label: "Welfare",
+            value: <WelfareCell welfareNanos={order.welfareNanos} />,
+            wide: true,
+          },
+        ]}
+      />
+    );
+  }
+
   return (
     <EventRow columns={GRID}>
       <OutcomeLabel>{order.label}</OutcomeLabel>
@@ -431,22 +492,7 @@ function ClosedRow({ order }: { order: ClosedOrder }) {
       <Right>
         <StatusBadge status={order.status} />
       </Right>
-      <Right mono>
-        {order.qty == null ? (
-          "—"
-        ) : order.status === "PARTIAL" && order.remainderQty != null ? (
-          // filled / ordered — the faded total makes the unfilled (expired /
-          // cancelled) part visible without a separate phantom row.
-          <span>
-            {formatShareUnits(order.qty, 1)}
-            <span style={{ color: "var(--fg-4)" }}>
-              {` / ${formatShareUnits(order.qty + order.remainderQty, 1)}`}
-            </span>
-          </span>
-        ) : (
-          <span>{formatShareUnits(order.qty, 1)}</span>
-        )}
-      </Right>
+      <Right mono>{qtyCell}</Right>
       <Right mono dim={order.unfilled}>
         <PriceCell
           settledNanos={order.priceNanos}

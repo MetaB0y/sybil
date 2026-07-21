@@ -52,16 +52,18 @@ import {
   cmpBig,
   cmpNullableBig,
   Empty,
-  headerRowGrid,
   MarketLabel,
   nextSort,
   PagerFooter,
   RightCell,
   SortHeader,
   TableCard,
+  TableHead,
   type Column,
   type Sort,
 } from "./table";
+import { DataCard } from "@/components/data-card";
+import { useCompactLayout } from "@/lib/responsive/use-compact";
 
 type Market = components["schemas"]["MarketResponse"];
 
@@ -254,13 +256,13 @@ export function OpenOrdersList({
         <Empty>No open orders match “{query}”.</Empty>
       ) : (
         <TableCard>
-          <div style={headerRowGrid(GRID)}>
+          <TableHead columns={GRID}>
             <span />
             {COLUMNS.map((col) => (
               <SortHeader key={col.key} col={col} sort={sort} onSort={onSort} />
             ))}
             <span />
-          </div>
+          </TableHead>
           {paged.visible.map((r) => (
             <OrderRow
               key={r.order.order_id}
@@ -297,6 +299,7 @@ export function OrderRow({
     row;
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const compact = useCompactLayout();
 
   async function onCancel() {
     setError(null);
@@ -319,6 +322,124 @@ export function OrderRow({
       setError(err instanceof Error ? err.message : String(err));
       setCancelling(false);
     }
+  }
+
+  const cancelButton = (
+    <button
+      type="button"
+      onClick={onCancel}
+      disabled={cancelling}
+      style={{
+        padding: "3px 9px",
+        background: "transparent",
+        border: "1px solid color-mix(in srgb, var(--no) 32%, transparent)",
+        borderRadius: 3,
+        color: "var(--no)",
+        fontFamily: "var(--font-mono)",
+        fontSize: 10,
+        cursor: cancelling ? "not-allowed" : "pointer",
+        textTransform: "uppercase",
+        letterSpacing: "var(--track-wide)",
+      }}
+    >
+      {cancelling ? "…" : "Cancel"}
+    </button>
+  );
+
+  const cancelError = error && (
+    <span
+      role="alert"
+      style={{
+        gridColumn: "1 / -1",
+        color: "var(--no)",
+        fontFamily: "var(--font-mono)",
+        fontSize: 11,
+        lineHeight: 1.4,
+      }}
+    >
+      Couldn&apos;t cancel order: {error}
+    </span>
+  );
+
+  if (compact) {
+    // Cancel is a button inside the row, so the card cannot be a link — the
+    // market name carries the navigation instead, as it does in the desktop
+    // Orders row for the same reason.
+    return (
+      <DataCard
+        thumb={
+          <MarketThumb
+            marketId={order.market_id}
+            name={label}
+            imageUrl={market?.market_image_url ?? market?.event_image_url ?? null}
+            fallbackIconUrl={
+              market?.market_icon_url ?? market?.event_icon_url ?? null
+            }
+            size={28}
+          />
+        }
+        title={
+          // Deliberately not `MarketLabel`: that one truncates to a single
+          // nowrap line for the desktop column, which on a card runs the
+          // question straight off the right edge.
+          <Link
+            href={`/m/${order.market_id}`}
+            style={{ color: "inherit", textDecoration: "none" }}
+          >
+            {label}
+          </Link>
+        }
+        chips={
+          <>
+            <ActionCell side={action} />
+            <SidePill outcome={outcome} />
+            <TifCell expiresAtBlock={order.expires_at_block} />
+          </>
+        }
+        pairs={[
+          {
+            label: "Filled / placed",
+            value: (
+              <FilledCell
+                placed={placed}
+                filled={filled}
+                remaining={remaining}
+              />
+            ),
+            wide: true,
+          },
+          { label: "Limit", value: formatCentsPrecise(row.limitNanos) },
+          {
+            label: "Avg fill",
+            value: (
+              <AvgFillCell
+                agg={{ count: row.fillCount, avgPriceNanos: row.avgPriceNanos }}
+              />
+            ),
+          },
+          {
+            label: "Value",
+            value: formatDollars(row.valueNanos, { decimals: 2 }),
+          },
+          {
+            label: "Created",
+            value: (
+              <CreatedCell
+                ms={row.createdMs}
+                block={row.createdBlock}
+                nowMs={nowMs}
+              />
+            ),
+          },
+        ]}
+        footer={
+          <>
+            {cancelButton}
+            {cancelError}
+          </>
+        }
+      />
+    );
   }
 
   return (
@@ -376,41 +497,8 @@ export function OrderRow({
       <RightCell>
         <TifCell expiresAtBlock={order.expires_at_block} />
       </RightCell>
-      <RightCell>
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={cancelling}
-          style={{
-            padding: "3px 9px",
-            background: "transparent",
-            border: "1px solid color-mix(in srgb, var(--no) 32%, transparent)",
-            borderRadius: 3,
-            color: "var(--no)",
-            fontFamily: "var(--font-mono)",
-            fontSize: 10,
-            cursor: cancelling ? "not-allowed" : "pointer",
-            textTransform: "uppercase",
-            letterSpacing: "var(--track-wide)",
-          }}
-        >
-          {cancelling ? "…" : "Cancel"}
-        </button>
-      </RightCell>
-      {error && (
-        <span
-          role="alert"
-          style={{
-            gridColumn: "1 / -1",
-            color: "var(--no)",
-            fontFamily: "var(--font-mono)",
-            fontSize: 11,
-            lineHeight: 1.4,
-          }}
-        >
-          Couldn&apos;t cancel order: {error}
-        </span>
-      )}
+      <RightCell>{cancelButton}</RightCell>
+      {cancelError}
     </div>
   );
 }

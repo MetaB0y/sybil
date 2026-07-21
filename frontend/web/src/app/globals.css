@@ -699,6 +699,165 @@ textarea {
   min-width: 860px;
 }
 
+/* ── Card rows ───────────────────────────────────────────────────────────────
+   Phone-width form of a table row, rendered by `DataCard` below
+   COMPACT_BREAKPOINT_PX. The 860px floor above is what these replace: rather
+   than swiping a ten-column grid, each row becomes a card with its identity on
+   top and its numbers as labelled pairs, two per line. */
+.data-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.data-card {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 12px 14px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-1);
+  border-radius: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+
+/* The viewer's own row, matching the desktop tables' self-highlight. */
+.data-card[data-highlighted="true"] {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-1));
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-1));
+}
+
+.data-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.data-card-thumb {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+/* Wraps rather than truncating: the market question is the whole point of the
+   row, and a phone has the vertical room a table column did not. */
+.data-card-title {
+  min-width: 0;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--fg-1);
+  overflow-wrap: anywhere;
+}
+
+.data-card-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+}
+
+/* Two pairs to a line on a phone, more on a tablet. The `max-width` stops a
+   wide card from stretching one pair across half a screen, which left the
+   label and its value at opposite ends of a lot of empty space. */
+.data-card-pairs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 7px var(--space-4);
+  max-width: 680px;
+}
+
+.data-card-pair {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.data-card-pair[data-wide="true"] {
+  grid-column: 1 / -1;
+}
+
+.data-card-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--track-wide);
+  text-transform: uppercase;
+  color: var(--fg-4);
+  white-space: nowrap;
+}
+
+.data-card-value {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg-1);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.data-card-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+}
+
+/* The header row keeps its sort buttons in card mode — losing the ability to
+   sort on a phone would be a worse trade than the strip is ugly. The grid
+   template is inline on the header element, hence the !important. */
+.table-sort-strip {
+  display: flex !important;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px var(--space-3) !important;
+  min-width: 0 !important;
+  padding: 0 2px var(--space-2) !important;
+}
+
+.table-sort-strip::before {
+  content: "sort";
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--track-wide);
+  text-transform: uppercase;
+  color: var(--fg-4);
+}
+
+/* Cells with no sort button — thumbnail spacers, the non-sortable sparkline
+   column, trailing action slots — have nothing to say in the strip. Empty
+   spacers go by `:empty`; a cell with static text opts out by class. */
+.table-sort-strip > :empty,
+.table-sort-strip > .sort-strip-omit {
+  display: none;
+}
+
+/* Header cells stretch to fill their column on desktop — the buttons and the
+   wrappers some columns put around them both carry `width: 100%`. Left as-is
+   each one claims a full strip line and the sort controls stack vertically. */
+.table-sort-strip > *,
+.table-sort-strip button {
+  width: auto !important;
+  min-width: 0 !important;
+  flex: 0 0 auto;
+}
+
+.table-sort-strip button {
+  justify-content: flex-start !important;
+  min-height: 0 !important;
+  padding: 2px 0 !important;
+}
+
 /* Portfolio table rows (Positions / Orders / Trades / History). Every row is a
    route into its market, so hovering tints the whole row on --surface-2 — the
    same feedback the dev, arena and activity tables give — and the market label
