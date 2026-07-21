@@ -46,9 +46,12 @@ publish degraded/last-success/backoff metrics; and use bounded backoff for
 401/402/429. Failed analyst calls retain their evidence batch for retry and
 still consume the normal call cadence, so a transient failure cannot become a
 per-block retry loop. Relevance-gate failure passes already-seen candidates to
-the analyst rather than destroying evidence. A successful provider response
-clears the degraded state. Alerts, Grafana, and `live.status` make this
-capability distinct from container health and local budget remaining.
+the analyst rather than destroying evidence. The relevance classifier disables
+its model's optional reasoning explicitly: its bounded completion budget belongs
+to the exact `NONE` or comma-separated-index answer, not hidden reasoning tokens.
+A successful provider response clears the degraded state. Alerts, Grafana, and
+`live.status` make this capability distinct from container health and local budget
+remaining.
 
 A durable sizer decision is written exactly once,
 when a fresh `FairValueUpdate` is first applied; it records the raw/effective fair value, age,

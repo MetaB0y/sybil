@@ -195,6 +195,10 @@ async def llm_gate_batch(
         messages=[{"role": "user", "content": prompt}],
         temperature=0.0,
         max_tokens=100,
+        # This classifier needs only a tiny exact answer. The model exposes
+        # optional reasoning that currently defaults to high, so disable it to
+        # keep hidden reasoning from consuming the bounded completion budget.
+        extra_body={"reasoning": {"effort": "none"}},
     )
     answer = (resp.choices[0].message.content or "").strip().upper()
     if answer == "NONE":

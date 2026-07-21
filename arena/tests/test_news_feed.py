@@ -51,6 +51,18 @@ def test_relevance_gate_uses_live_deepseek_model():
     assert GATE_MODEL == "deepseek/deepseek-v4-flash"
 
 
+async def test_relevance_gate_disables_optional_reasoning():
+    client = MagicMock()
+    response = MagicMock()
+    response.choices[0].message.content = "1"
+    client.chat.completions.create = AsyncMock(return_value=response)
+
+    assert await llm_gate_batch(client, ["one", "two"], "market") == [True, False]
+    assert client.chat.completions.create.await_args.kwargs["extra_body"] == {
+        "reasoning": {"effort": "none"}
+    }
+
+
 def test_search_query_retains_late_subject_terms():
     market = _market(
         46,
