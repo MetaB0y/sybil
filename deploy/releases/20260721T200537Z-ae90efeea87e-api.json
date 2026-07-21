@@ -1,0 +1,53 @@
+{
+  "schema": "sybil.release.v1",
+  "release_id": "20260721T200537Z-ae90efeea87e-api",
+  "created_at": "2026-07-21T20:05:37Z",
+  "verified_at": "2026-07-21T20:05:59Z",
+  "status": "verified",
+  "scope": "api",
+  "promotion_source_revision": "ae90efeea87e7ba6c710891fc78f0c47abb65321",
+  "images": {
+    "sybil-api": {
+      "ref": "sybil-api:ae90efeea87e7ba6c710891fc78f0c47abb65321",
+      "image_id": "sha256:a9797789e21c0c09877247f0ee318e267d0217ca8f390a1d4c232fc52bedb7df",
+      "source_revision": "ae90efeea87e7ba6c710891fc78f0c47abb65321"
+    },
+    "sybil-arena": {
+      "ref": "sybil-arena:7d7dc9884c127adb71b20046a55ad8d222c7eef4",
+      "image_id": "sha256:ac998e357e9f51e8717083776f79105c77a13896dbfd4a1ee7a5cbbce19fa555",
+      "source_revision": "7d7dc9884c127adb71b20046a55ad8d222c7eef4"
+    },
+    "sybil-web": {
+      "ref": "sybil-web:a770e0ff415be32899906793498181bf0233c3c4",
+      "image_id": "sha256:307e2eb5065a929dce74e875622622caf7a2e0b6dcfbbaa40464e888d1e83a7f",
+      "source_revision": "a770e0ff415be32899906793498181bf0233c3c4"
+    },
+    "caddy": {
+      "ref": "caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648",
+      "image_id": "sha256:af555904a0961945f16bb323a501457b13a4f7e9bde969b145b97da80b38ecbe",
+      "source_revision": null
+    }
+  },
+  "verified_containers": {
+    "sybil-api": {
+      "image_id": "sha256:a9797789e21c0c09877247f0ee318e267d0217ca8f390a1d4c232fc52bedb7df",
+      "state": "running"
+    },
+    "sybil-history": {
+      "image_id": "sha256:a9797789e21c0c09877247f0ee318e267d0217ca8f390a1d4c232fc52bedb7df",
+      "state": "running"
+    },
+    "sybil-native-admin": {
+      "image_id": "sha256:a9797789e21c0c09877247f0ee318e267d0217ca8f390a1d4c232fc52bedb7df",
+      "state": "exited:0"
+    },
+    "sybil-native-mm": {
+      "image_id": "sha256:a9797789e21c0c09877247f0ee318e267d0217ca8f390a1d4c232fc52bedb7df",
+      "state": "running"
+    },
+    "sybil-polymarket": {
+      "image_id": "sha256:a9797789e21c0c09877247f0ee318e267d0217ca8f390a1d4c232fc52bedb7df",
+      "state": "running"
+    }
+  }
+}
