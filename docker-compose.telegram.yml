@@ -18,6 +18,12 @@ services:
     volumes:
       - ./deploy/telegram-alerts.py:/app/telegram-alerts.py:ro
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/-/healthy', timeout=3).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
     logging:
       driver: "json-file"
       options:
@@ -40,4 +46,4 @@ services:
       victoriametrics:
         condition: service_healthy
       telegram-alerts:
-        condition: service_started
+        condition: service_healthy

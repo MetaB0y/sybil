@@ -129,6 +129,30 @@ def _send_telegram(message: str) -> None:
             raise RuntimeError(f"Telegram returned HTTP {response.status}")
 
 
+def _deliver_alerts(alerts: list[Any]) -> tuple[int, int, int]:
+    sent = 0
+    skipped = 0
+    failed = 0
+    for alert in alerts:
+        if not isinstance(alert, dict):
+            skipped += 1
+            continue
+        if not _should_send(alert):
+            skipped += 1
+            continue
+        try:
+            _send_telegram(_format_alert(alert))
+        except (urllib.error.URLError, RuntimeError) as exc:
+            # A transient delivery failure must not suppress this alert
+            # (don't record _last_sent) nor abort the rest of the batch.
+            failed += 1
+            print(f"telegram alert delivery failed: {exc}", flush=True)
+            continue
+        _record_sent(alert)
+        sent += 1
+    return sent, skipped, failed
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "sybil-telegram-alerts/1.0"
 
@@ -161,27 +185,12 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(alerts, list):
                 raise ValueError("payload must be a JSON list")
 
-            sent = 0
-            skipped = 0
-            failed = 0
-            for alert in alerts:
-                if not isinstance(alert, dict):
-                    skipped += 1
-                    continue
-                if not _should_send(alert):
-                    skipped += 1
-                    continue
-                try:
-                    _send_telegram(_format_alert(alert))
-                except (urllib.error.URLError, RuntimeError) as exc:
-                    # A transient delivery failure must not suppress this alert
-                    # (don't record _last_sent) nor abort the rest of the batch.
-                    failed += 1
-                    print(f"telegram alert delivery failed: {exc}", flush=True)
-                    continue
-                _record_sent(alert)
-                sent += 1
-            self._write(200, f"sent={sent} skipped={skipped} failed={failed}\n")
+            sent, skipped, failed = _deliver_alerts(alerts)
+            # Tell vmalert that at least one notification was not delivered.
+            # It will retry the batch; already-sent siblings are deduplicated,
+            # while failed alerts were deliberately not recorded above.
+            status = 502 if failed else 200
+            self._write(status, f"sent={sent} skipped={skipped} failed={failed}\n")
         except (ValueError, json.JSONDecodeError) as exc:
             self._write(400, f"invalid alert payload: {exc}\n")
 

@@ -609,6 +609,7 @@ monitoring-check: compose-smoke
     bash scripts/test-ops-smoke.sh
     bash scripts/test-synthetic-probe.sh
     bash scripts/test-deploy-release.sh
+    python3 -m unittest discover -s deploy -p 'test_telegram_alerts.py'
     if command -v promtool >/dev/null 2>&1; then
         promtool check config deploy/prometheus.yml
         promtool check rules deploy/vmalert/rules.yml
@@ -758,7 +759,7 @@ deploy-monitoring: deploy-install-synthetic-probe deploy-prelaunch-env-check dep
 
 # Enable Telegram delivery for vmalert alerts. Requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in /opt/sybil/.env on the server.
 deploy-telegram-alerts: deploy-sync deploy-prelaunch-env-check deploy-release-env-check
-    ssh {{SERVER}} 'cd /opt/sybil && test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env && {{COMPOSE_TELEGRAM}} up -d telegram-alerts vmalert'
+    ssh {{SERVER}} 'cd /opt/sybil && test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env && {{COMPOSE_TELEGRAM}} up -d --force-recreate telegram-alerts vmalert'
 
 # Build and deploy the Next.js web frontend, then reload Caddy for its vhost.
 # NEXT_PUBLIC_* are baked at build time; override the API/WS base or WebAuthn

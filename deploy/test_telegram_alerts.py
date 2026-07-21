@@ -7,11 +7,13 @@ of the remaining alerts in the same batch.
 
 from __future__ import annotations
 
+import http.client
 import importlib.util
 import json
+import threading
+import unittest
 from pathlib import Path
-
-import pytest
+from unittest import mock
 
 _MODULE_PATH = Path(__file__).with_name("telegram-alerts.py")
 _spec = importlib.util.spec_from_file_location("telegram_alerts", _MODULE_PATH)
@@ -24,70 +26,91 @@ def _alert(name: str) -> dict:
     return {"status": "firing", "labels": {"alertname": name}}
 
 
-@pytest.fixture(autouse=True)
-def _clear_state():
-    tg._last_sent.clear()
-    yield
-    tg._last_sent.clear()
+class TelegramAlertsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        tg._last_sent.clear()
 
+    def tearDown(self) -> None:
+        tg._last_sent.clear()
 
-def test_failure_does_not_record_last_sent(monkeypatch):
-    alert = _alert("BlockProductionStalled")
+    def test_failure_does_not_record_last_sent(self) -> None:
+        alert = _alert("BlockProductionStalled")
 
-    def boom(_message: str) -> None:
-        raise RuntimeError("telegram down")
+        with mock.patch.object(
+            tg, "_send_telegram", side_effect=RuntimeError("telegram down")
+        ):
+            self.assertTrue(tg._should_send(alert))
+            with self.assertRaises(RuntimeError):
+                tg._send_telegram(tg._format_alert(alert))
 
-    monkeypatch.setattr(tg, "_send_telegram", boom)
+        key = (tg._alert_key(alert), tg._alert_status(alert))
+        self.assertNotIn(key, tg._last_sent)
+        self.assertTrue(tg._should_send(alert))
 
-    assert tg._should_send(alert) is True
-    try:
-        tg._send_telegram(tg._format_alert(alert))
-    except RuntimeError:
-        pass
-    # On failure we must NOT record the send, so a retry is still allowed.
-    key = (tg._alert_key(alert), tg._alert_status(alert))
-    assert key not in tg._last_sent
-    assert tg._should_send(alert) is True
+    def test_one_failure_does_not_abort_remaining_alerts(self) -> None:
+        alerts = [_alert("FirstAlert"), _alert("SecondAlert")]
+        attempted: list[str] = []
 
+        def record_and_maybe_fail(message: str) -> None:
+            attempted.append(message)
+            if "FirstAlert" in message:
+                raise RuntimeError("transient failure on first alert")
 
-def test_one_failure_does_not_abort_remaining_alerts(monkeypatch):
-    alerts = [_alert("FirstAlert"), _alert("SecondAlert")]
-    attempted: list[str] = []
+        with mock.patch.object(tg, "_send_telegram", side_effect=record_and_maybe_fail):
+            sent, skipped, failed = tg._deliver_alerts(alerts)
 
-    def record_and_maybe_fail(message: str) -> None:
-        attempted.append(message)
-        if "FirstAlert" in message:
-            raise RuntimeError("transient failure on first alert")
+        self.assertTrue(any("SecondAlert" in message for message in attempted))
+        self.assertEqual((sent, skipped, failed), (1, 0, 1))
+        first_key = (tg._alert_key(alerts[0]), tg._alert_status(alerts[0]))
+        second_key = (tg._alert_key(alerts[1]), tg._alert_status(alerts[1]))
+        self.assertNotIn(first_key, tg._last_sent)
+        self.assertIn(second_key, tg._last_sent)
 
-    monkeypatch.setattr(tg, "_send_telegram", record_and_maybe_fail)
+    def test_http_failure_is_retryable_and_visible_to_vmalert(self) -> None:
+        attempts = 0
 
-    # Drive the same per-alert loop logic used by do_POST.
-    sent = 0
-    failed = 0
-    for alert in alerts:
-        if not tg._should_send(alert):
-            continue
+        def fail_once(_message: str) -> None:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise RuntimeError("telegram temporarily unavailable")
+
+        server = tg.ThreadingHTTPServer(("127.0.0.1", 0), tg.Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
         try:
-            tg._send_telegram(tg._format_alert(alert))
-        except RuntimeError:
-            failed += 1
-            continue
-        tg._record_sent(alert)
-        sent += 1
+            payload = json.dumps([_alert("RetryMe")])
+            statuses = []
+            bodies = []
+            with mock.patch.object(tg, "_send_telegram", side_effect=fail_once):
+                for _ in range(2):
+                    connection = http.client.HTTPConnection(
+                        *server.server_address, timeout=2
+                    )
+                    connection.request(
+                        "POST",
+                        "/api/v2/alerts",
+                        body=payload,
+                        headers={"Content-Type": "application/json"},
+                    )
+                    response = connection.getresponse()
+                    statuses.append(response.status)
+                    bodies.append(response.read().decode())
+                    connection.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
-    # The second alert was still attempted and delivered despite the first failing.
-    assert any("SecondAlert" in m for m in attempted)
-    assert sent == 1
-    assert failed == 1
-    # Failed alert not recorded; successful one recorded.
-    first_key = (tg._alert_key(alerts[0]), tg._alert_status(alerts[0]))
-    second_key = (tg._alert_key(alerts[1]), tg._alert_status(alerts[1]))
-    assert first_key not in tg._last_sent
-    assert second_key in tg._last_sent
+        self.assertEqual(statuses, [502, 200])
+        self.assertIn("failed=1", bodies[0])
+        self.assertIn("sent=1", bodies[1])
+        self.assertEqual(attempts, 2)
+
+    def test_json_payload_shape(self) -> None:
+        message = tg._format_alert(_alert("SanityCheck"))
+        self.assertIn("SanityCheck", message)
 
 
-def test_json_payload_shape(monkeypatch):
-    # Sanity: format still produces a non-empty HTML message.
-    msg = tg._format_alert(_alert("SanityCheck"))
-    assert "SanityCheck" in msg
-    assert json.dumps({"ok": True})  # json import used
+if __name__ == "__main__":
+    unittest.main()

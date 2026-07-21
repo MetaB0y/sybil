@@ -621,6 +621,16 @@ groups:
           summary: "Sybil synthetic probe has stopped reporting"
           description: "No synthetic result reached VictoriaMetrics for 15m. Check the sybil-synthetic-probe timer, Docker access, and VictoriaMetrics ingestion."
 
+      - alert: AlertNotifierDeliveryErrors
+        expr: increase(vmalert_alerts_send_errors_total[15m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          component: alerting
+        annotations:
+          summary: "Alert notifier delivery is failing"
+          description: "vmalert could not deliver at least one notification to {{ $labels.addr }} in the last 15m. Check the Telegram bridge health/logs and upstream API reachability; the bridge returns non-2xx so failed alerts remain retryable."
+
       - alert: SyntheticProofLagHigh
         expr: |
           last_over_time(sybil_synthetic_proof_lag_blocks{job="sybil-synthetic"}[15m])

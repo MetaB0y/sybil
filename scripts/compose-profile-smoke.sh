@@ -187,14 +187,20 @@ telegram_log_contract=$(
 import sys
 import yaml
 
-logging = yaml.safe_load(sys.stdin)["services"]["telegram-alerts"]["logging"]
+services = yaml.safe_load(sys.stdin)["services"]
+telegram = services["telegram-alerts"]
+logging = telegram["logging"]
 options = logging["options"]
-print("|".join((logging["driver"], options["max-size"], options["max-file"])))
+assert logging["driver"] == "json-file"
+assert options == {"max-file": "5", "max-size": "50m"}
+assert "/-/healthy" in " ".join(telegram["healthcheck"]["test"])
+assert services["vmalert"]["depends_on"]["telegram-alerts"]["condition"] == "service_healthy"
+print("ok")
 '
 )
-[[ "$telegram_log_contract" == "json-file|50m|5" ]] \
-    || fail "Telegram alert-forwarder logs are not size/count bounded"
-pass "Telegram alert-forwarder logs are bounded on the shared host"
+[[ "$telegram_log_contract" == "ok" ]] \
+    || fail "Telegram alert-forwarder health/logging contract is incomplete"
+pass "Telegram alert-forwarder health and logs are bounded on the shared host"
 
 prover_service_block=$(
     awk '
@@ -654,6 +660,17 @@ grep -Eq '^deploy-monitoring:.*deploy-install-synthetic-probe' justfile \
 grep -Eq '^deploy-all:.*deploy-install-synthetic-probe' justfile \
     || fail "all-stack deploy does not converge the scheduled probe"
 pass "monitoring deploys converge checked-in scripts and systemd units"
+
+telegram_deploy_recipe=$(
+    awk '
+        /^deploy-telegram-alerts:/ { in_recipe = 1; next }
+        in_recipe && /^[[:alnum:]_-]+[^:]*:/ { exit }
+        in_recipe { print }
+    ' justfile
+)
+grep -Fq -- '--force-recreate' <<<"$telegram_deploy_recipe" \
+    || fail "Telegram deploy does not reload bind-mounted bridge code and alert rules"
+pass "Telegram deploy reloads its bind-mounted code and alert rules"
 
 deploy_verify_recipe=$(
     awk '

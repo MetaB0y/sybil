@@ -97,12 +97,19 @@ port. `SYBIL_SYNTHETIC_VM_URL` can instead name a directly reachable VM URL.
   cgroup limit; `ContainerMemoryCritical` fires after two minutes above 95%.
   The current and creation-lifetime peak series make a 24-hour plateau claim
   inspectable instead of relying on a final `docker stats` snapshot.
+- `AlertNotifierDeliveryErrors` warns when vmalert has observed a notifier
+  delivery error in the last 15 minutes. This remains visible in Grafana and
+  `just status` even when the failed channel cannot deliver its own page.
 
 The existing Telegram overlay loads the same rules and configures vmalert's
 notifier as `http://telegram-alerts:8080`. The bridge accepts vmalert's
 Alertmanager-v2 `/api/v2/alerts` payload and uses `TELEGRAM_BOT_TOKEN` /
 `TELEGRAM_CHAT_ID` from `/opt/sybil/.env`. The probe never calls Telegram and
-does not duplicate delivery or deduplication logic.
+does not duplicate delivery or deduplication logic. A failed Telegram send
+returns HTTP 502 to vmalert, which increments its send-error counter and
+retries; alerts already delivered from the same batch are deduplicated while
+failed alerts remain eligible. Compose healthchecks the bridge locally and
+bounds its Docker log to five 50 MiB files.
 
 ### L1 indexer alert path
 
@@ -262,8 +269,8 @@ The one-line journal reason identifies the first broken contract:
 4. For CORS, compare `SYBIL_CORS_ORIGINS` and the timer's `--app-origin`; do not
    make production CORS permissive as a workaround.
 5. For missing/delivery alerts, check the timer, `victoriametrics` health,
-   vmalert rule status, `telegram-alerts` logs, and that both Telegram secrets
-   remain set.
+   vmalert rule status plus `vmalert_alerts_send_errors_total`,
+   `telegram-alerts` health/logs, and that both Telegram secrets remain set.
 6. After remediation, run the probe once. A `0` sample resolves
    `SyntheticProbeFailed`; verify the resolved Telegram notification arrives.
 

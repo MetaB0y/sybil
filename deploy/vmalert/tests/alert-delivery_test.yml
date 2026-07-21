@@ -1,0 +1,26 @@
+# Prometheus-compatible tests for alert-notifier delivery visibility.
+
+rule_files:
+  - ../rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'vmalert_alerts_send_errors_total{addr="http://telegram-alerts:8080/api/v2/alerts"}'
+        values: "0+0x2 1+0x20"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: AlertNotifierDeliveryErrors
+        exp_alerts:
+          - exp_labels:
+              addr: "http://telegram-alerts:8080/api/v2/alerts"
+              severity: warning
+              component: alerting
+            exp_annotations:
+              summary: "Alert notifier delivery is failing"
+              description: "vmalert could not deliver at least one notification to http://telegram-alerts:8080/api/v2/alerts in the last 15m. Check the Telegram bridge health/logs and upstream API reachability; the bridge returns non-2xx so failed alerts remain retryable."
+      - eval_time: 18m
+        alertname: AlertNotifierDeliveryErrors
+        exp_alerts: []
