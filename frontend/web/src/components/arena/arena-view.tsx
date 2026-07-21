@@ -71,7 +71,9 @@ export type ArenaFeedUiState = {
   kind: "loading" | "transport_error" | "server_error" | "ready";
   showDashboard: boolean;
   meta: string;
-  badge: string;
+  /** Status pill next to the title. Omitted when the feed is simply healthy —
+   *  a green chip naming the storage engine is operator detail, not product. */
+  badge?: string;
   tone: Tone;
   title?: string;
   message?: string;
@@ -128,7 +130,6 @@ export function arenaFeedUiState({
     kind: "ready",
     showDashboard: true,
     meta: "live arena bot feed · decisions, portfolios, reasoning, platform activity",
-    badge: "SQLite mounted",
     tone: "yes",
   };
 }
@@ -667,7 +668,11 @@ export function ArenaView() {
     <PageHeader
       title="Bot Arena"
       meta={feedState.meta}
-      action={<Pill tone={feedState.tone}>{feedState.badge}</Pill>}
+      action={
+        feedState.badge ? (
+          <Pill tone={feedState.tone}>{feedState.badge}</Pill>
+        ) : undefined
+      }
     />
   );
   const feedNotice = (
