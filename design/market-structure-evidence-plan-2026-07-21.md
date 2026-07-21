@@ -215,6 +215,15 @@ candidate frozen matrix because two 5-share traders already exhaust the
 10-share maker quote, while eight retains the higher-demand and lower-fill-rate
 boundary. No result from the held-out seed range informed that reduction.
 
+### Freeze boundary
+
+The implementation and development decisions were pushed at Git revision
+`29c4651c661cba312f6a1419d06ef9b747e56cc5` before the confirmatory protocol was
+created. `benchmarks/market-structure/protocol-heldout-2026-07-21-v1.json`
+freezes the retained axes, all metrics and failure rules, 10,000 paired
+bootstrap resamples, and untouched seeds 10000 through 10127. The protocol file
+must itself be pushed before the first held-out execution.
+
 ## Stop conditions
 
 Implementation may improve clearly mechanical research support, capture

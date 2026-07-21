@@ -25,12 +25,18 @@ tier, comparator, regime, and uncertainty.
 
 - `protocol-development.json` is diagnostic. Its seeds and results are never
   publishable evidence.
+- `protocol-heldout-2026-07-21-v1.json` is frozen against pushed implementation
+  revision `29c4651c661cba312f6a1419d06ef9b747e56cc5`. It consumes untouched
+  seeds 10000 through 10127 exactly once.
 - A versioned protocol becomes frozen only after the implementation revision
   is pushed and its hash is recorded. Frozen held-out seeds must not have been
   run during development.
 - A retained result directory contains the exact protocol, implementation
   revision, environment, complete raw rows (including failures), tidy paired
   rows, deterministic summary, and a short interpretation.
+
+Do not run the frozen protocol partially for inspection or reuse its consumed
+seeds after the complete retained run.
 
 Historical API captures retain only fields needed for the analysis. Participant
 addresses and profile metadata are discarded. Transaction hashes remain as
