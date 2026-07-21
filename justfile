@@ -606,6 +606,7 @@ monitoring-check: compose-smoke
     set -euo pipefail
     bash scripts/test-smoke-common.sh
     bash scripts/test-post-deploy-smoke.sh
+    bash scripts/test-ops-smoke.sh
     bash scripts/test-deploy-release.sh
     if command -v promtool >/dev/null 2>&1; then
         promtool check config deploy/prometheus.yml

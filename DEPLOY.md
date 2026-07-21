@@ -257,16 +257,14 @@ cd /opt/sybil
 ./scripts/ops-smoke.sh
 ```
 
-The script fails if it finds non-loopback TCP listeners outside the Caddy port
-allowlist (`80 443` by default), or if OpenRouter-style key material appears in
-host process arguments or Docker command arrays.
-
-If host SSH is intentionally public and should be tolerated by the smoke check,
-run:
-
-```bash
-OPS_SMOKE_ALLOWED_PUBLIC_PORTS="22 80 443" ./scripts/ops-smoke.sh
-```
+The script scopes discovery to containers owned by the `sybil` Compose project.
+It fails if any of them use host networking, publish a non-loopback host
+binding, or carry OpenRouter-style key material in Docker command arrays.
+Container environment values are never inspected or printed. This ownership
+scope is deliberate on `patty`: host nginx, SSH, and founder-owned listeners
+are outside Sybil and must not be treated as Sybil exposures or inspected for
+secrets. Public API/app/auth behavior is checked separately through the HTTPS
+post-deploy gate.
 
 ## Operations
 

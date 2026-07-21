@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Host-side production smoke check.
-# Run on the deploy host from /opt/sybil after compose services are up.
+# Shared-host-safe production smoke check.
+# Run on the deploy host from /opt/sybil after compose services are up. Inspect
+# only the Sybil Compose project; unrelated host services are outside its
+# ownership boundary.
 
-allowed_ports="${OPS_SMOKE_ALLOWED_PUBLIC_PORTS:-80 443}"
+compose_project="${OPS_SMOKE_COMPOSE_PROJECT:-sybil}"
 secret_regex="${OPS_SMOKE_SECRET_REGEX:-sk-or-[A-Za-z0-9_-]+}"
 
 tmpdir="$(mktemp -d)"
@@ -13,100 +15,76 @@ cleanup() {
 }
 trap cleanup EXIT
 
-is_allowed_port() {
-    local port=$1
-    local allowed
-    for allowed in $allowed_ports; do
-        [[ "$port" == "$allowed" ]] && return 0
-    done
-    return 1
-}
-
-is_loopback_v4_hex() {
-    local addr=$1
-    # /proc/net/tcp stores IPv4 addresses little-endian; 127/8 ends in 7F.
-    [[ "$addr" == *7F ]]
-}
-
-is_loopback_v6_hex() {
-    local addr=$1
-    # Linux /proc/net/tcp6 loopback representation for ::1.
-    [[ "$addr" == "00000000000000000000000001000000" ]]
-}
-
-scan_tcp_table() {
-    local file=$1
-    local family=$2
-
-    [[ -r "$file" ]] || return 0
-
-    awk 'NR > 1 && $4 == "0A" { print $2 }' "$file" | while IFS=: read -r addr port_hex; do
-        [[ -n "$addr" && -n "$port_hex" ]] || continue
-
-        if [[ "$family" == "tcp4" ]] && is_loopback_v4_hex "$addr"; then
-            continue
-        fi
-        if [[ "$family" == "tcp6" ]] && is_loopback_v6_hex "$addr"; then
-            continue
-        fi
-
-        port=$((16#$port_hex))
-        if ! is_allowed_port "$port"; then
-            printf "%s %s:%s\n" "$family" "$addr" "$port"
-        fi
-    done
-}
-
-public_findings="$tmpdir/public_ports.txt"
-{
-    scan_tcp_table /proc/net/tcp tcp4
-    scan_tcp_table /proc/net/tcp6 tcp6
-} | sort -u > "$public_findings"
-
 status=0
-
-if [[ -s "$public_findings" ]]; then
-    echo "Unexpected public listening ports found (allowed: $allowed_ports):" >&2
-    sed 's/^/  /' "$public_findings" >&2
-    status=1
-else
-    echo "Public listening ports OK (allowed: $allowed_ports)"
-fi
-
-ps_out="$tmpdir/ps.txt"
-ps -eo pid=,args= > "$ps_out"
-if grep -E "$secret_regex" "$ps_out" >/dev/null; then
-    echo "Secret-like material found in process arguments:" >&2
-    grep -En "$secret_regex" "$ps_out" \
-        | sed -E "s/$secret_regex/sk-or-REDACTED/g; s/^/  /" >&2
-    status=1
-else
-    echo "Process arguments OK"
-fi
 
 inspect_out="$tmpdir/docker-command-arrays.txt"
 if command -v docker >/dev/null 2>&1; then
     container_ids_file="$tmpdir/container-ids.txt"
-    if ! docker ps -q > "$container_ids_file"; then
-        echo "docker ps failed" >&2
+    if ! docker ps -q \
+        --filter "label=com.docker.compose.project=$compose_project" \
+        > "$container_ids_file"; then
+        echo "docker ps failed for Compose project $compose_project" >&2
+        status=1
+    elif [[ ! -s "$container_ids_file" ]]; then
+        echo "No running containers found for Compose project $compose_project" >&2
         status=1
     else
-        if [[ -s "$container_ids_file" ]]; then
-            # Check command-bearing fields only, not container environment values.
-            docker inspect \
-                --format '{{.Name}} entrypoint={{json .Config.Entrypoint}} cmd={{json .Config.Cmd}} path={{json .Path}} args={{json .Args}}' \
-                $(cat "$container_ids_file") > "$inspect_out"
+        mapfile -t container_ids < "$container_ids_file"
+        network_modes="$tmpdir/docker-network-modes.txt"
+        port_bindings="$tmpdir/docker-port-bindings.txt"
+        public_findings="$tmpdir/public-bindings.txt"
+
+        if ! docker inspect \
+            --format '{{println .Name .HostConfig.NetworkMode}}' \
+            "${container_ids[@]}" > "$network_modes"; then
+            echo "docker inspect failed while reading Sybil network modes" >&2
+            status=1
         else
-            : > "$inspect_out"
+            awk '$2 == "host" { print $1 " network_mode=host" }' \
+                "$network_modes" > "$public_findings"
         fi
 
-        if grep -E "$secret_regex" "$inspect_out" >/dev/null; then
-            echo "Secret-like material found in docker inspect command arrays:" >&2
+        if ! docker inspect \
+            --format '{{range $port, $bindings := .NetworkSettings.Ports}}{{range $bindings}}{{println $.Name $port .HostIp .HostPort}}{{end}}{{end}}' \
+            "${container_ids[@]}" \
+            | sed '/^[[:space:]]*$/d' > "$port_bindings"; then
+            echo "docker inspect failed while reading Sybil port bindings" >&2
+            status=1
+        else
+            while read -r name container_port host_ip host_port; do
+                [[ -n "$name" ]] || continue
+                case "$host_ip" in
+                    127.*|"::1"|"[::1]") ;;
+                    *)
+                        printf '%s %s -> %s:%s\n' \
+                            "$name" "$container_port" "$host_ip" "$host_port" \
+                            >> "$public_findings"
+                        ;;
+                esac
+            done < "$port_bindings"
+        fi
+
+        if [[ -s "$public_findings" ]]; then
+            echo "Unexpected public Sybil Docker exposure (project: $compose_project):" >&2
+            sed 's/^/  /' "$public_findings" >&2
+            status=1
+        else
+            echo "Sybil Docker bindings are loopback-only (project: $compose_project)"
+        fi
+
+        # Check command-bearing fields only, never container environment values.
+        if ! docker inspect \
+            --format '{{.Name}} entrypoint={{json .Config.Entrypoint}} cmd={{json .Config.Cmd}} path={{json .Path}} args={{json .Args}}' \
+            "${container_ids[@]}" > "$inspect_out"; then
+            echo "docker inspect failed while reading Sybil command arrays" >&2
+            status=1
+        elif grep -E "$secret_regex" "$inspect_out" >/dev/null; then
+            echo "Secret-like material found in Sybil Docker command arrays:" >&2
             grep -En "$secret_regex" "$inspect_out" \
                 | sed -E "s/$secret_regex/sk-or-REDACTED/g; s/^/  /" >&2
             status=1
         else
-            echo "Docker command arrays OK"
+            echo "Sybil Docker command arrays OK"
         fi
     fi
 else
