@@ -114,7 +114,6 @@ export function HeroAllTime({
                 ? "—"
                 : formatCompactInt(allTime.traderOrdersAdmitted)
             }
-            sub="fresh non-MM admissions"
           />
           <BigKv
             label="Bots"
@@ -129,7 +128,6 @@ export function HeroAllTime({
                 ? "—"
                 : formatCompactInt(allTime.traderOrdersFirstFilled)
             }
-            sub="received a positive fill"
             accent="var(--yes)"
           />
         </div>
@@ -184,7 +182,8 @@ function BigKv({
 }: {
   label: string;
   value: string;
-  sub: string;
+  /** Optional gloss under the number; omitted where the label speaks for itself. */
+  sub?: string;
   accent?: string;
 }) {
   const numberEl = (
@@ -217,17 +216,19 @@ function BigKv({
       >
         {numberEl}
       </div>
-      <span
-        style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 10,
-          color: "var(--fg-3)",
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-        }}
-      >
-        {sub}
-      </span>
+      {sub != null && (
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            color: "var(--fg-3)",
+            textTransform: "uppercase",
+            letterSpacing: "0.04em",
+          }}
+        >
+          {sub}
+        </span>
+      )}
     </div>
   );
 }
