@@ -59,6 +59,20 @@ renames only after every attempted row is flushed. The frozen protocol and
 retained result README will contain the exact regeneration commands used for
 publishable evidence.
 
+The historical case-study capture is independent of simulation seeds:
+
+```sh
+uv run scripts/benchmarks/capture_polymarket_spikes.py \
+  --protocol benchmarks/market-structure/protocol-development.json \
+  --output /tmp/polymarket-spikes.jsonl.gz \
+  --manifest /tmp/polymarket-spikes.manifest.json
+```
+
+It fails rather than retain a partial event family or a truncated API page.
+Wallets, names, pseudonyms, biographies, and profile images are never written.
+Resting-side trade records remain anonymous and are not classified as market
+makers.
+
 ## Publication boundary
 
 A result may support a founder-facing statement only when:
