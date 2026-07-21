@@ -70,10 +70,13 @@ import {
 /** Which sub-view the "your holdings" section is showing. */
 type View = "holdings" | "open" | "closed";
 
-const VIEW_TABS: { id: View; label: string }[] = [
-  { id: "holdings", label: "Holdings" },
-  { id: "open", label: "Open orders" },
-  { id: "closed", label: "Closed orders" },
+// `short` is what a phone shows: three full labels do not fit one line at
+// 390px, and the section heading above them ("your positions & orders") already
+// says what kind of thing is being switched.
+const VIEW_TABS: { id: View; label: string; short: string }[] = [
+  { id: "holdings", label: "Holdings", short: "Holdings" },
+  { id: "open", label: "Open orders", short: "Open" },
+  { id: "closed", label: "Closed orders", short: "Closed" },
 ];
 
 const sectionStyle: React.CSSProperties = {
@@ -565,8 +568,14 @@ function ViewSwitcher({
   value: View;
   onChange: (v: View) => void;
 }) {
+  const compact = useCompactLayout();
   return (
     <div
+      /* Three 11px labels in one track — see `.hit-target-group`. At the coarse
+         floor each grew to 44px, which wrapped "open orders" and "closed
+         orders" over two lines and made the switch taller than the card's
+         title. */
+      className="hit-target-group"
       style={{
         display: "inline-flex",
         background: "var(--bg-2)",
@@ -584,6 +593,7 @@ function ViewSwitcher({
             type="button"
             onClick={() => onChange(t.id)}
             style={{
+              whiteSpace: "nowrap",
               padding: "4px 10px",
               border: 0,
               borderRadius: 3,
@@ -597,7 +607,7 @@ function ViewSwitcher({
               transition: "background 120ms",
             }}
           >
-            {t.label}
+            {compact ? t.short : t.label}
           </button>
         );
       })}

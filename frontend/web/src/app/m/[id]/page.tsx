@@ -410,6 +410,7 @@ function ChartSection({
   onKeepVisited: (kept: readonly number[]) => void;
 }) {
   const [range, setRange] = useState<ChartRange>("ALL");
+  const compact = useCompactLayout();
   // Measured height of one legend chip row (reported by OutcomeLegend). We
   // reserve two of these above the chart so wrapping onto a second row fills
   // already-reserved space instead of pushing the chart down.
@@ -548,13 +549,17 @@ function ChartSection({
               // once known; LEGEND_RESERVED_H covers the first paint. The legend
               // sits at the top of this block wrapper, so the reserved space
               // falls below it.
-              minHeight: group?.isMultiOutcome
-                ? legendRowH > 0
-                  ? // two rows + the wrap gap, plus a few px of slack so a row
-                    // with the slightly-taller "+N more" chip can't nudge it
-                    legendRowH * 2 + LEGEND_ROW_GAP + 6
-                  : LEGEND_RESERVED_H
-                : undefined,
+              // Nothing to reserve on a phone: the legend is one dropdown of
+              // fixed height, and it never wraps.
+              minHeight: compact
+                ? undefined
+                : group?.isMultiOutcome
+                  ? legendRowH > 0
+                    ? // two rows + the wrap gap, plus a few px of slack so a row
+                      // with the slightly-taller "+N more" chip can't nudge it
+                      legendRowH * 2 + LEGEND_ROW_GAP + 6
+                    : LEGEND_RESERVED_H
+                  : undefined,
             }}
           >
             <OutcomeLegend

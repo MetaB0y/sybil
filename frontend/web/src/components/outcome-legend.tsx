@@ -7,6 +7,10 @@
  * outcome picker); tapping its ✕ removes it from the chart. "+N more" opens a
  * dropdown to add hidden outcomes, up to `maxSelected` (8).
  *
+ * On a phone the strip becomes one dropdown. Five chips wrapped to three rows
+ * there — more vertical space than the chart got — and the list reads better
+ * than a wall of pills anyway: same actions, one row per outcome.
+ *
  * Colors are keyed to each outcome's index in the full favourite-first
  * group, so a given outcome keeps its color whether shown or hidden — and
  * matches the chart, which uses the same `colorForOutcome`.
@@ -15,6 +19,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getCategoryColor } from "@/lib/categorize";
 import { useSelectOutcome } from "@/lib/market-detail/active-outcome";
+import { useCompactLayout } from "@/lib/responsive/use-compact";
 import type { EventOutcome } from "@/lib/market-detail/use-event-group";
 
 // Reuse the category palette for outcome accents. Binary YES/NO use the
@@ -65,6 +70,7 @@ export function OutcomeLegend({
   onRowHeight?: (px: number) => void;
 }) {
   const selectOutcome = useSelectOutcome();
+  const compact = useCompactLayout();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
   const firstChipRef = useRef<HTMLSpanElement | null>(null);
@@ -116,6 +122,147 @@ export function OutcomeLegend({
     // rail + page switch to what you just pulled onto the chart.
     selectOutcome(id);
   };
+
+  if (compact && interactive) {
+    const chosen =
+      shown.find((o) => o.marketId === highlightId) ?? shown[0] ?? null;
+    const extra = shown.length - (chosen ? 1 : 0);
+    return (
+      <div ref={ref} style={{ position: "relative", minWidth: 0 }}>
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          className="hit-target"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 7,
+            maxWidth: "100%",
+            padding: "4px 8px",
+            borderRadius: 4,
+            background: "var(--bg-2)",
+            border: "1px solid var(--border-1)",
+            cursor: "pointer",
+            fontFamily: "var(--font-sans)",
+            fontSize: 12,
+            color: "var(--fg-1)",
+          }}
+        >
+          {chosen && (
+            <span
+              aria-hidden
+              style={{
+                width: 8,
+                height: 8,
+                background: colorOf(chosen),
+                borderRadius: 1,
+                flexShrink: 0,
+              }}
+            />
+          )}
+          <span
+            style={{
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {chosen ? chosen.shortLabel : "outcomes"}
+          </span>
+          {extra > 0 && (
+            <span
+              className="text-mono"
+              style={{ color: "var(--fg-3)", fontSize: 11, flexShrink: 0 }}
+            >
+              +{extra}
+            </span>
+          )}
+          <svg
+            aria-hidden
+            width="10"
+            height="10"
+            viewBox="0 0 12 12"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            style={{
+              flexShrink: 0,
+              marginLeft: "auto",
+              color: "var(--fg-4)",
+              transform: open ? "rotate(180deg)" : "none",
+              transition: "transform var(--dur-fast) var(--ease-standard)",
+            }}
+          >
+            <path d="m3 4.5 3 3 3-3" />
+          </svg>
+        </button>
+
+        {open && (
+          <div
+            role="listbox"
+            aria-label="Outcomes on the chart"
+            style={{
+              position: "absolute",
+              top: "calc(100% + 6px)",
+              left: 0,
+              zIndex: 30,
+              width: "max(220px, 100%)",
+              maxWidth: "calc(100vw - var(--space-6))",
+              maxHeight: 300,
+              overflowY: "auto",
+              background: "var(--surface-2)",
+              border: "1px solid var(--border-2)",
+              borderRadius: 6,
+              padding: 4,
+              boxShadow: "var(--shadow-popover, 0 8px 24px rgba(0,0,0,0.4))",
+            }}
+          >
+            <div
+              className="text-mono"
+              style={{
+                padding: "6px 10px 4px",
+                fontSize: 9,
+                color: "var(--fg-4)",
+                textTransform: "uppercase",
+                letterSpacing: "0.04em",
+              }}
+            >
+              {atCap
+                ? `max ${maxSelected} on the chart`
+                : `${shown.length} of ${outcomes.length} on the chart`}
+            </div>
+            {outcomes.map((o) => (
+              <CompactOutcomeRow
+                key={o.marketId}
+                outcome={o}
+                color={colorOf(o)}
+                charted={sel.has(o.marketId)}
+                chosen={o.marketId === highlightId}
+                // A charted outcome can always be dropped while another line
+                // remains; an uncharted one only joins while there is room.
+                disabled={!sel.has(o.marketId) && atCap}
+                onPick={() => {
+                  if (!sel.has(o.marketId)) {
+                    add(o.marketId);
+                  } else if (o.marketId !== highlightId) {
+                    selectOutcome(o.marketId);
+                  }
+                  setOpen(false);
+                }}
+                onRemove={
+                  sel.has(o.marketId) && shown.length > 1
+                    ? () => remove(o.marketId)
+                    : undefined
+                }
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div
@@ -371,5 +518,126 @@ export function OutcomeLegend({
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * One outcome in the phone dropdown. The body carries the same action the
+ * desktop chip's body does — add it to the chart, or switch to it if it is
+ * already there — and the ✕ the same removal, so the two forms of the legend
+ * behave identically.
+ */
+function CompactOutcomeRow({
+  outcome,
+  color,
+  charted,
+  chosen,
+  disabled,
+  onPick,
+  onRemove,
+}: {
+  outcome: EventOutcome;
+  color: string;
+  charted: boolean;
+  chosen: boolean;
+  disabled: boolean;
+  onPick: () => void;
+  onRemove?: (() => void) | undefined;
+}) {
+  return (
+    <span
+      role="option"
+      aria-selected={charted}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        borderRadius: 4,
+        background: chosen ? "var(--bg-2)" : "transparent",
+        opacity: disabled ? 0.4 : outcome.closed ? 0.6 : 1,
+      }}
+    >
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onPick}
+        style={{
+          flex: 1,
+          minWidth: 0,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "8px 10px",
+          background: "transparent",
+          border: 0,
+          cursor: disabled ? "not-allowed" : "pointer",
+          textAlign: "left",
+        }}
+      >
+        <span
+          aria-hidden
+          style={{
+            width: 8,
+            height: 8,
+            background: color,
+            borderRadius: 1,
+            flexShrink: 0,
+            // An uncharted outcome keeps its colour, hollow: the swatch says
+            // "this is the line it would draw", not "this line is drawn".
+            boxShadow: charted ? undefined : "inset 0 0 0 8px var(--surface-2)",
+            outline: charted ? undefined : `1px solid ${color}`,
+          }}
+        />
+        <span
+          style={{
+            flex: 1,
+            minWidth: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            fontFamily: "var(--font-sans)",
+            fontSize: 13,
+            fontWeight: chosen ? 500 : 400,
+            color: "var(--fg-1)",
+          }}
+        >
+          {outcome.shortLabel}
+        </span>
+        <span
+          className="text-mono"
+          style={{
+            fontSize: 12,
+            color: outcome.closed ? "var(--fg-4)" : color,
+            flexShrink: 0,
+          }}
+        >
+          {outcome.closed
+            ? "closed"
+            : outcome.yesCents == null
+              ? "—"
+              : `${outcome.yesCents}¢`}
+        </span>
+      </button>
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={`Remove ${outcome.label} from chart`}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 34,
+            alignSelf: "stretch",
+            background: "transparent",
+            border: 0,
+            cursor: "pointer",
+            color: "var(--fg-4)",
+            fontSize: 11,
+          }}
+        >
+          ✕
+        </button>
+      )}
+    </span>
   );
 }

@@ -52,6 +52,22 @@ export function ResearchNudge() {
     return () => media.removeEventListener("change", sync);
   }, []);
 
+  // The same query the 44px control floor uses in globals.css. The name sits in
+  // a fixed-height clipping slot, and a 44px link inside a 15px slot rendered
+  // its text below the clip — the row read as "not sure? ask" and nothing else.
+  // The slot grows to hold it rather than the link shrinking, so the target
+  // stays real and nothing invisible overlaps the bet button above.
+  const [coarse, setCoarse] = useState(false);
+  useEffect(() => {
+    const media = window.matchMedia(
+      "(max-width: 1280px) and (pointer: coarse)",
+    );
+    const sync = () => setCoarse(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
+
   // Frozen, not fixed: the rotation exists so no one service owns the slot, so
   // a touch device draws its one service at random instead of always the first.
   // Only read on the no-hover path, which never runs during hydration (the
@@ -111,8 +127,8 @@ export function ResearchNudge() {
           display: "inline-block",
           overflow: "hidden",
           minWidth: 108,
-          height: "1.4em",
-          lineHeight: "1.4em",
+          height: coarse ? 44 : "1.4em",
+          lineHeight: coarse ? "44px" : "1.4em",
         }}
       >
         {outgoingPlatform && (

@@ -226,6 +226,9 @@ function ExportCsvButton({
       onClick={onExport}
       disabled={count === 0}
       aria-label="Export fills as CSV"
+      /* Sits in the same control row as the filter chips; the coarse floor made
+         it half again their height. See `.hit-target`. */
+      className="hit-target"
       style={{
         display: "inline-flex",
         alignItems: "center",

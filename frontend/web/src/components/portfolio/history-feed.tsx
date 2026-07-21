@@ -570,6 +570,10 @@ function Chip({
     <button
       type="button"
       onClick={onClick}
+      /* An 11px mono chip, same family as the market sort chips and the filter
+         dropdowns beside it — it keeps that size on touch and carries its 44px
+         as hit area. See `.hit-target`. */
+      className="hit-target"
       style={{
         padding: "4px 12px",
         background: active ? "var(--accent)" : "transparent",
