@@ -19,46 +19,30 @@ import { api } from "@/lib/api/client";
 
 export type Market = components["schemas"]["MarketResponse"];
 
-/**
- * Fields required to render, filter, and sort the markets index. The full
- * MarketResponse also carries long descriptions, resolution links, and
- * detail-only counters; serializing those through the Server→Client boundary
- * made the index HTML hundreds of KiB larger without changing its first paint.
- */
-export const INDEX_MARKET_FIELDS = [
-  "market_id",
-  "name",
-  "status",
-  "closed",
-  "categories",
-  "category",
-  "volume_nanos",
-  "liquidity_avg10_nanos",
-  "trader_count",
-  "market_image_url",
-  "market_icon_url",
-  "event_id",
-  "event_title",
-  "event_image_url",
-  "event_icon_url",
-  "group_item_title",
-  "polymarket_condition_id",
-  "created_at_ms",
-  "event_start_date_ms",
-  "market_start_date_ms",
-] as const satisfies readonly (keyof Market)[];
-
-export type IndexMarket = Pick<Market, (typeof INDEX_MARKET_FIELDS)[number]>;
-
-/** Keep null/undefined optionals out of the serialized RSC payload entirely. */
-export function toIndexMarket(market: Market): IndexMarket {
-  return Object.fromEntries(
-    INDEX_MARKET_FIELDS.flatMap((key) => {
-      const value = market[key];
-      return value == null ? [] : [[key, value]];
-    }),
-  ) as IndexMarket;
-}
+/** Fields required to render, filter, and sort the markets index. */
+export type IndexMarket = Pick<
+  Market,
+  | "market_id"
+  | "name"
+  | "status"
+  | "closed"
+  | "categories"
+  | "category"
+  | "volume_nanos"
+  | "liquidity_avg10_nanos"
+  | "trader_count"
+  | "market_image_url"
+  | "market_icon_url"
+  | "event_id"
+  | "event_title"
+  | "event_image_url"
+  | "event_icon_url"
+  | "group_item_title"
+  | "polymarket_condition_id"
+  | "created_at_ms"
+  | "event_start_date_ms"
+  | "market_start_date_ms"
+>;
 
 /** A market Polymarket has closed (resolved / past deadline). */
 export function isClosed(m: IndexMarket): boolean {
@@ -132,19 +116,11 @@ export function useMarketsList(initialData?: Market[]) {
   };
 }
 
-/**
- * Index-only observer. Its compact server payload is placeholderData, which
- * React Query deliberately does not persist in the shared cache. Hydration
- * therefore starts an authoritative full `/v1/markets` fetch immediately;
- * detail/portfolio consumers either receive that full result or remain in
- * their normal loading state, never a partial MarketResponse masquerading as
- * canonical data.
- */
-export function useMarketsIndex(initialData?: IndexMarket[]) {
+/** Index-only view of the canonical full-market browser query. */
+export function useMarketsIndex() {
   const marketsQ = useQuery<IndexMarket[]>({
     queryKey: ["markets", "all"],
     queryFn: fetchMarkets,
-    ...(initialData ? { placeholderData: initialData } : {}),
     staleTime: 60_000,
   });
 

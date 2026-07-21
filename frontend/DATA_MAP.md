@@ -5,7 +5,7 @@
 > pages to endpoint families and records trust/durability boundaries; it does
 > not duplicate every rendered field or serve as a product backlog.
 
-Last implementation audit: 2026-07-18. A Vitest guard checks that every path
+Last implementation audit: 2026-07-21. A Vitest guard checks that every path
 named here exists in generated OpenAPI types and that every path called through
 the frontend API client appears here.
 
@@ -22,6 +22,11 @@ flowchart LR
 ```
 
 - REST uses `src/lib/api/client.ts` and generated `schema.d.ts`.
+- The market index is a static application shell; its canonical `/v1/markets`
+  query starts in the browser after hydration. Do not serialize the catalog
+  through the server-rendered App Router tree: repeated standalone renders
+  retain memory in proportion to that large payload and can exhaust the web
+  process heap.
 - Realtime hydration reads `GET /v1/blocks/latest` and
   `GET /v1/markets/prices`, and independently bootstraps one bounded
   `GET /v1/blocks` window before opening `/v2/blocks/ws` with height resume.

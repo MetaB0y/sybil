@@ -22,24 +22,16 @@ import { buildIndexCards } from "@/lib/markets/build-index-cards";
 /** Cards (events) shown per page on the markets index. */
 const PAGE_SIZE = 15;
 
-export default function MarketsPageClient({
-  initialMarkets,
-}: {
-  initialMarkets: IndexMarket[] | undefined;
-}) {
+export default function MarketsPageClient() {
   return (
     <Suspense fallback={null}>
-      <MarketsPageInner initialMarkets={initialMarkets} />
+      <MarketsPageInner />
     </Suspense>
   );
 }
 
-function MarketsPageInner({
-  initialMarkets,
-}: {
-  initialMarkets: IndexMarket[] | undefined;
-}) {
-  const { bundle, isPending, error, refetch } = useMarketsIndex(initialMarkets);
+function MarketsPageInner() {
+  const { bundle, isPending, error, refetch } = useMarketsIndex();
   const prices = useStore(selectPricesByMarketId);
 
   // The clearing ticker is an active-board readout — exclude closed markets,
