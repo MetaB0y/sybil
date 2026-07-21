@@ -24,6 +24,7 @@ import {
 import { getCategoryColor, pickDisplayCategory } from "@/lib/categorize";
 import { useMarket } from "@/lib/markets/use-market";
 import { SelectOutcomeProvider } from "@/lib/market-detail/active-outcome";
+import { chartLineSelection } from "@/lib/market-detail/chart-selection";
 import { useEventGroup } from "@/lib/market-detail/use-event-group";
 import { useMarketStats } from "@/lib/market-detail/use-market-stats";
 import { useEventPriceHistory } from "@/lib/markets/use-event-price-history";
@@ -73,9 +74,26 @@ export default function MarketDetailPage({
   // rather than navigating, so the [id] segment never remounts and the screen
   // doesn't blink. A fresh load / real navigation re-seeds from the new param.
   const [marketId, setMarketId] = useState(initialId);
+  // Outcomes visited during this session, oldest first. Switching to an outcome
+  // put its line on the chart, but only as a side effect of it being *active* —
+  // the moment you switched again it vanished, which made the rail's outcome
+  // picker feel like it hadn't done anything. Recording the switch here makes
+  // those lines stick; ChartSection unions them into the chart selection.
+  const [visitedOutcomeIds, setVisitedOutcomeIds] = useState<number[]>([]);
   const selectOutcome = useCallback((next: number) => {
     setMarketId(next);
+    setVisitedOutcomeIds((prev) =>
+      prev.includes(next) ? prev : [...prev, next],
+    );
     window.history.replaceState(window.history.state, "", `/m/${next}`);
+  }, []);
+  // Closing a line from the legend also forgets the visit — otherwise the ✕
+  // would be undone on the next render by the union above.
+  const keepVisited = useCallback((kept: readonly number[]) => {
+    setVisitedOutcomeIds((prev) => {
+      const next = prev.filter((id) => kept.includes(id));
+      return next.length === prev.length ? prev : next;
+    });
   }, []);
 
   const marketQ = useMarket(marketId);
@@ -110,7 +128,11 @@ export default function MarketDetailPage({
               data-testid="market-detail-grid"
             >
               <div className="no-scrollbar market-detail-content">
-                <ChartSection marketId={marketId} />
+                <ChartSection
+                  marketId={marketId}
+                  visitedOutcomeIds={visitedOutcomeIds}
+                  onKeepVisited={keepVisited}
+                />
                 <EventHoldings marketId={marketId} />
                 <DescriptionBlock market={market} />
                 <EventActivity marketId={marketId} />
@@ -398,7 +420,17 @@ function StatusPill({ status, closed }: { status: string; closed: boolean }) {
   );
 }
 
-function ChartSection({ marketId }: { marketId: number }) {
+function ChartSection({
+  marketId,
+  visitedOutcomeIds,
+  onKeepVisited,
+}: {
+  marketId: number;
+  /** Outcomes switched to during this visit; their lines stay on the chart. */
+  visitedOutcomeIds: number[];
+  /** Report the surviving set after a legend ✕ so the visit is forgotten too. */
+  onKeepVisited: (kept: readonly number[]) => void;
+}) {
   const [range, setRange] = useState<ChartRange>("ALL");
   // Measured height of one legend chip row (reported by OutcomeLegend). We
   // reserve two of these above the chart so wrapping onto a second row fills
@@ -422,11 +454,12 @@ function ChartSection({ marketId }: { marketId: number }) {
   const setSelectedIds = useCallback(
     (next: number[] | null) => {
       setSelectedIdsState(next);
+      if (next) onKeepVisited(next);
       if (eventKey == null) return;
       if (next && next.length > 0) chartSelectionByEvent.set(eventKey, next);
       else chartSelectionByEvent.delete(eventKey);
     },
-    [eventKey],
+    [eventKey, onKeepVisited],
   );
 
   const outcomes = useMemo(() => group?.outcomes ?? [], [group]);
@@ -450,22 +483,23 @@ function ChartSection({ marketId }: { marketId: number }) {
         .map((o) => o.marketId),
     [outcomes],
   );
-  // Self-heals across navigation: stale ids from another event drop out, and
-  // an empty result falls back to the favourite-first default. The active
-  // outcome is always on the chart so it can be highlighted — but APPENDED as
-  // the last line (replacing the last when already at the cap), never prepended.
-  // Switching to an off-chart outcome then just adds a line at the end instead
-  // of reshuffling the whole chart.
-  const effectiveSelected = useMemo(() => {
-    const valid = (selectedIds ?? []).filter((id) => idSet.has(id));
-    const base = valid.length > 0 ? valid : defaultIds;
-    if (idSet.has(marketId) && !base.includes(marketId)) {
-      return base.length >= MAX_CHART_LINES
-        ? [...base.slice(0, MAX_CHART_LINES - 1), marketId]
-        : [...base, marketId];
-    }
-    return base;
-  }, [selectedIds, idSet, defaultIds, marketId]);
+  // Self-heals across navigation: stale ids from another event drop out, and an
+  // empty result falls back to the favourite-first default. Outcomes you have
+  // switched to — plus the active one — are APPENDED after that base, never
+  // prepended, so adding a line doesn't reshuffle the chart. At the cap the
+  // base gives way first: the lines you asked for outrank the defaults.
+  const effectiveSelected = useMemo(
+    () =>
+      chartLineSelection({
+        selectedIds,
+        visitedIds: visitedOutcomeIds,
+        activeId: marketId,
+        availableIds: idSet,
+        defaultIds,
+        max: MAX_CHART_LINES,
+      }),
+    [selectedIds, idSet, defaultIds, marketId, visitedOutcomeIds],
+  );
 
   // The selected outcome leads and receives the subtle legend treatment; chart
   // lines themselves remain uniformly weighted.
