@@ -256,6 +256,24 @@ class BaseAgent(ABC):
         while len(self.block_stats) > max_entries:
             del self.block_stats[next(iter(self.block_stats))]
 
+    async def initialize_live_observation_tail(self) -> None:
+        """Start live observation at the retained fill tail and canonical state.
+
+        Live strategies do not derive state from historical fill callbacks.
+        Seeding the cursor avoids replaying an account's entire durable fill
+        history after every container restart while still tailing new fills.
+        """
+        self._last_fill_cursor = await self._latest_fill_cursor()
+        account = await self.client.get_account(self.account_id)
+        self._apply_canonical_account(account)
+
+    async def _latest_fill_cursor(self) -> str:
+        latest = await self.client.get_account_fills(self.account_id, limit=1)
+        if latest:
+            return latest[0].cursor
+        health = await self.client.health()
+        return f"{int(health['height'])}.{2**64 - 1}"
+
     async def _reconcile_fill_cursor(self) -> None:
         """Resume live fill tailing after retained history overtakes our cursor.
 
@@ -265,13 +283,7 @@ class BaseAgent(ABC):
         the canonical snapshot after choosing that boundary. Future fills continue
         normally from the new cursor.
         """
-        latest = await self.client.get_account_fills(self.account_id, limit=1)
-        if latest:
-            cursor = latest[0].cursor
-        else:
-            health = await self.client.health()
-            cursor = f"{int(health['height'])}.{2**64 - 1}"
-
+        cursor = await self._latest_fill_cursor()
         account = await self.client.get_account(self.account_id)
         self._last_fill_cursor = cursor
         self._apply_canonical_account(account, replace_latest_balance=True)

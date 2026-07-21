@@ -792,8 +792,10 @@ async def _start_live_tasks(
     runtime_id: str | None = None,
     required_baseline_trader_names: set[str] | None = None,
 ) -> list[asyncio.Task]:
-    """Persist every account baseline before starting any live worker."""
+    """Initialize canonical tails, persist baselines, then start live workers."""
     snapshot_traders = [*traders, *fast_traders, *noise_traders]
+    for trader in snapshot_traders:
+        await trader.initialize_live_observation_tail()
     if runtime_id is not None:
         await snapshot_portfolios_once(
             snapshot_traders,

@@ -44,6 +44,7 @@ def _trader(name: str, account_id: int, *, pnl: float = 0.0):
     trader._fill_history = [object()]
     trader.total_fills_observed = 1
     trader.total_orders_submitted = 2
+    trader.initialize_live_observation_tail = AsyncMock()
     trader.client.get_portfolio = AsyncMock(
         return_value=SimpleNamespace(
             balance_dollars=500.0,
@@ -151,6 +152,8 @@ async def test_initial_baseline_is_awaited_before_any_worker_starts(monkeypatch)
     try:
         await asyncio.sleep(0)
         assert baseline_complete is True
+        for initialized in (trader, fast, noise):
+            initialized.initialize_live_observation_tail.assert_awaited_once_with()
         assert set(worker_starts) == {"feed", "analyst", "trader", "fast", "noise"}
     finally:
         stop_event.set()
