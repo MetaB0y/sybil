@@ -24,3 +24,25 @@ tests:
       - eval_time: 18m
         alertname: AlertNotifierDeliveryErrors
         exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'vmalert_alerting_rules_errors_total{job="vmalert",instance="vmalert:8880",alertname="BlockProductionStalled"}'
+        values: "0+0x2 1+0x20"
+      - series: 'vmalert_alerting_rules_errors_total{job="vmalert",instance="vmalert:8880",alertname="ArenaDown"}'
+        values: "0+0x2 1+0x20"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: VmalertRuleEvaluationErrors
+        exp_alerts:
+          - exp_labels:
+              job: "vmalert"
+              instance: "vmalert:8880"
+              severity: warning
+              component: alerting
+            exp_annotations:
+              summary: "Alert rules are failing to evaluate"
+              description: "At least one alert-rule query failed in the last 15m. vmalert may be blind to application failures; inspect its logs and datasource health before trusting an empty alert set."
+      - eval_time: 18m
+        alertname: VmalertRuleEvaluationErrors
+        exp_alerts: []

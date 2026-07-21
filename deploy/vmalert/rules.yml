@@ -631,6 +631,19 @@ groups:
           summary: "Alert notifier delivery is failing"
           description: "vmalert could not deliver at least one notification to {{ $labels.addr }} in the last 15m. Check the Telegram bridge health/logs and upstream API reachability; the bridge returns non-2xx so failed alerts remain retryable."
 
+      - alert: VmalertRuleEvaluationErrors
+        expr: |
+          sum by (job, instance) (
+            increase(vmalert_alerting_rules_errors_total[15m])
+          ) > 0
+        for: 0m
+        labels:
+          severity: warning
+          component: alerting
+        annotations:
+          summary: "Alert rules are failing to evaluate"
+          description: "At least one alert-rule query failed in the last 15m. vmalert may be blind to application failures; inspect its logs and datasource health before trusting an empty alert set."
+
       - alert: SyntheticProofLagHigh
         expr: |
           last_over_time(sybil_synthetic_proof_lag_blocks{job="sybil-synthetic"}[15m])

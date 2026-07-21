@@ -102,6 +102,9 @@ port. `SYBIL_SYNTHETIC_VM_URL` can instead name a directly reachable VM URL.
   `just status` even when the failed channel cannot deliver its own page.
   VictoriaMetrics scrapes vmalert's internal-only `/metrics` endpoint so this
   rule reads the notifier counter rather than an absent synthetic series.
+- `VmalertRuleEvaluationErrors` warns after any alert query fails. The counter
+  remains observable after the datasource recovers, covering the otherwise
+  misleading case where the alert list is empty because evaluation was blind.
 
 The existing Telegram overlay loads the same rules and configures vmalert's
 notifier as `http://telegram-alerts:8080`. The bridge accepts vmalert's
@@ -272,7 +275,8 @@ The one-line journal reason identifies the first broken contract:
    make production CORS permissive as a workaround.
 5. For missing/delivery alerts, check the timer, `victoriametrics` health,
    vmalert rule status plus `vmalert_alerts_send_errors_total`,
-   `telegram-alerts` health/logs, and that both Telegram secrets remain set.
+   `vmalert_alerting_rules_errors_total`, `telegram-alerts` health/logs, and
+   that both Telegram secrets remain set.
 6. After remediation, run the probe once. A `0` sample resolves
    `SyntheticProbeFailed`; verify the resolved Telegram notification arrives.
 
