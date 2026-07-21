@@ -55,8 +55,10 @@ local_compose() {
 }
 
 source_revision() {
-    jj diff --quiet || die "commit the working copy before building a release"
-    local revision main
+    local working_revision revision main
+    working_revision="$(jj log -r '@ & ~empty()' --no-graph -T 'commit_id ++ "\n"')"
+    [[ -z "$working_revision" ]] \
+        || die "start a new empty jj change before building a release"
     revision="$(jj log -r 'latest(::@ & ~empty())' --no-graph -T 'commit_id ++ "\n"')"
     main="$(jj log -r 'main@origin' --no-graph -T 'commit_id ++ "\n"')"
     [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || die "could not derive a 40-hex source revision"

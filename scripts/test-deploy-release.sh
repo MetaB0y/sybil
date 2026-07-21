@@ -14,6 +14,43 @@ arena_ref="sybil-arena:$revision"
 web_ref="sybil-web:$revision"
 image_id="sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
+fake_working_revision=""
+fake_latest_revision="$revision"
+fake_main_revision="$revision"
+jj() {
+    local rev=""
+    while [[ $# -gt 0 ]]; do
+        if [[ "$1" == "-r" ]]; then
+            rev="$2"
+            shift 2
+        else
+            shift
+        fi
+    done
+    case "$rev" in
+        '@ & ~empty()') printf '%s' "$fake_working_revision" ;;
+        'latest(::@ & ~empty())') printf '%s\n' "$fake_latest_revision" ;;
+        'main@origin') printf '%s\n' "$fake_main_revision" ;;
+        *) return 2 ;;
+    esac
+}
+
+[[ "$(source_revision)" == "$revision" ]]
+fake_working_revision=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+if (source_revision >"$work/nonempty.out" 2>"$work/nonempty.err"); then
+    echo "nonempty jj change passed release source validation" >&2
+    exit 1
+fi
+grep -q 'start a new empty jj change' "$work/nonempty.err"
+fake_working_revision=""
+fake_main_revision=cccccccccccccccccccccccccccccccccccccccc
+if (source_revision >"$work/diverged.out" 2>"$work/diverged.err"); then
+    echo "unpushed jj revision passed release source validation" >&2
+    exit 1
+fi
+grep -q 'is not the pushed main@origin' "$work/diverged.err"
+fake_main_revision="$revision"
+
 portable_a="$(
     image_runtime_fingerprint <<'JSON'
 [{
