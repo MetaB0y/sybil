@@ -58,7 +58,8 @@ function compareBy(a: LeaderboardRow, b: LeaderboardRow, key: SortKey): number {
     case "roi":
       return a.roiBps - b.roiBps;
     case "markets":
-      return a.marketsTraded - b.marketsTraded;
+      // Unknown (bots) sorts below any real count in ascending order.
+      return (a.marketsTraded ?? -1) - (b.marketsTraded ?? -1);
     case "equity":
       return cmpBig(a.equityNanos, b.equityNanos);
   }
@@ -134,9 +135,11 @@ export function LeaderboardTable({
         )}
         {paged.visible.map((row) => (
           <Row
-            key={row.accountId}
+            // Account ids are only unique within a ledger — an Arena bot and a
+            // sequencer account can share a number.
+            key={`${row.kind}:${row.accountId}`}
             row={row}
-            isMe={row.accountId === myAccountId}
+            isMe={row.kind === "human" && row.accountId === myAccountId}
           />
         ))}
         {paged.pageCount > 1 && (
@@ -405,6 +408,24 @@ function Row({ row, isMe }: { row: LeaderboardRow; isMe: boolean }) {
             you
           </span>
         )}
+        {row.kind === "bot" && (
+          /* These figures come from the Arena ledger, not sequencer state —
+             say so rather than letting the row read as a human trader. */
+          <span
+            title="Arena bot · figures from the Arena feed"
+            style={{
+              fontSize: 9,
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+              color: "var(--fg-3)",
+              border: "1px solid var(--border-2)",
+              borderRadius: 3,
+              padding: "1px 4px",
+            }}
+          >
+            bot
+          </span>
+        )}
       </span>
 
       {/* pnl */}
@@ -417,9 +438,9 @@ function Row({ row, isMe }: { row: LeaderboardRow; isMe: boolean }) {
         {formatRoiBps(row.roiBps)}
       </span>
 
-      {/* markets traded */}
+      {/* markets traded — unknown for bots, which track fills not markets */}
       <span style={{ ...cell, color: "var(--fg-2)" }}>
-        {formatInt(row.marketsTraded)}
+        {row.marketsTraded == null ? "—" : formatInt(row.marketsTraded)}
       </span>
 
       {/* equity */}
