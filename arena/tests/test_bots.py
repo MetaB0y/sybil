@@ -296,6 +296,49 @@ async def test_base_agent_cursor_tailing_handles_new_fills_between_polls():
 
 
 @pytest.mark.anyio
+async def test_base_agent_can_bound_live_observation_tails_without_losing_totals():
+    client = AsyncMock()
+    client.get_account.side_effect = [
+        Account(id=7, balance_nanos=50_000_000_000, positions=[]),
+        Account(id=7, balance_nanos=49_000_000_000, positions=[]),
+        Account(id=7, balance_nanos=48_000_000_000, positions=[]),
+    ]
+    client.get_account_fills.side_effect = [
+        [
+            AccountFill(
+                cursor=f"{height}.{height}",
+                order_id=height,
+                fill_qty=1,
+                fill_price_nanos=500_000_000,
+                block_height=height,
+                timestamp_ms=height,
+            )
+        ]
+        for height in range(1, 4)
+    ]
+    agent = _DummyAgent(client=client, account_id=7, name="Dummy")
+    agent.bound_observation_history(2)
+
+    for height in range(1, 4):
+        block = Block(
+            height=height,
+            parent_hash="",
+            state_root="",
+            fills=[],
+            clearing_prices={},
+            total_welfare=0,
+            total_volume=0,
+            orders_filled=0,
+        )
+        await agent._update_state(block)
+
+    assert list(agent.balance_history) == [49.0, 48.0]
+    assert [fill.order_id for fill in agent._fill_history] == [2, 3]
+    assert agent.total_fills_observed == 3
+    assert agent.pnl == -2.0
+
+
+@pytest.mark.anyio
 async def test_base_agent_cursor_tailing_continues_after_retention_trims_tail():
     client = AsyncMock()
     client.get_account.return_value = Account(id=7, balance_nanos=50_000_000_000, positions=[])

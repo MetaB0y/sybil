@@ -44,6 +44,8 @@ from .trader import LiveLlmTrader
 
 log = logging.getLogger(__name__)
 
+LIVE_OBSERVATION_HISTORY_MAX_ENTRIES = 1_000
+
 # When --require-reference-prices is set, arena may start before the Polymarket
 # mirror has published any reference prices. Rather than exit, poll for a
 # reference-backed market set on this cadence until one appears.
@@ -119,6 +121,12 @@ def _noise_order_time_in_force(
 ) -> TimeInForce:
     """Keep crossing flow ephemeral while preserving native-noise policy."""
     return CROSSING_NOISE_TIME_IN_FORCE if crossing_enabled else ordinary_time_in_force
+
+
+def _bound_live_observation_histories(traders) -> None:
+    """Keep process-local diagnostics bounded for unattended live runtimes."""
+    for trader in traders:
+        trader.bound_observation_history(LIVE_OBSERVATION_HISTORY_MAX_ENTRIES)
 
 
 def _validate_stage1_ab_config(config: LiveConfig) -> str | None:
@@ -439,7 +447,11 @@ async def snapshot_portfolios_once(
                 portfolio_value=portfolio.portfolio_value_dollars,
                 pnl=portfolio.pnl_dollars,
                 positions=positions,
-                total_fills=len(getattr(trader, "_fill_history", [])),
+                total_fills=getattr(
+                    trader,
+                    "total_fills_observed",
+                    len(getattr(trader, "_fill_history", [])),
+                ),
                 total_orders=getattr(trader, "total_orders_submitted", 0),
             )
             recorded += 1
@@ -1188,6 +1200,7 @@ async def run_live(config: LiveConfig):
         for trader in [*traders, *fast_traders, *noise_traders]:
             trader.order_admission_policy = order_admission_policy
             trader.metrics = metrics
+        _bound_live_observation_histories([*traders, *fast_traders, *noise_traders])
 
         # Wire feed into analysts (news subscription) and sizers (price cache
         # only). Each analyst registers its own subscriber view of the feed so

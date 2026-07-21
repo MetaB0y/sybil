@@ -25,12 +25,24 @@ def test_crossing_noise_is_always_ioc():
     assert runner._noise_order_time_in_force(False, "GTC") == "GTC"
 
 
+def test_live_observation_histories_are_bounded_for_every_trader():
+    traders = [MagicMock(), MagicMock()]
+
+    runner._bound_live_observation_histories(traders)
+
+    for trader in traders:
+        trader.bound_observation_history.assert_called_once_with(
+            runner.LIVE_OBSERVATION_HISTORY_MAX_ENTRIES
+        )
+
+
 def _trader(name: str, account_id: int, *, pnl: float = 0.0):
     trader = MagicMock()
     trader.name = name
     trader.account_id = account_id
     trader.positions = {(7, "YES"): 3, (8, "NO"): 0}
     trader._fill_history = [object()]
+    trader.total_fills_observed = 1
     trader.total_orders_submitted = 2
     trader.client.get_portfolio = AsyncMock(
         return_value=SimpleNamespace(

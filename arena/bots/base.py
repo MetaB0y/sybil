@@ -2,6 +2,7 @@
 
 import logging
 from abc import ABC, abstractmethod
+from collections import deque
 
 from sybil_client import (
     SHARE_SCALE,
@@ -35,7 +36,8 @@ class BaseAgent(ABC):
         self.market_ids = set(market_ids) if market_ids else None  # None means all markets
         self.max_blocks = max_blocks  # None = unlimited
         self.positions: dict[tuple[int, str], int] = {}
-        self.balance_history: list[float] = []
+        self.balance_history: list[float] | deque[float] = []
+        self._initial_balance: float | None = None
         self._running = False
         # MM budget constraint (None = regular orders, set to enable flash liquidity)
         self.mm_budget_nanos: int | None = None
@@ -46,12 +48,14 @@ class BaseAgent(ABC):
         self.total_orders_submitted: int = 0
         self.on_block_error_count: int = 0
         # Per-block order log: (block_height, orders_submitted)
-        self.block_log: list[tuple[int, list[OrderSpec]]] = []
+        self.block_log: list[tuple[int, list[OrderSpec]]] | deque[tuple[int, list[OrderSpec]]] = []
         # Per-block stats from the sequencer (welfare, volume, fills)
         self.block_stats: dict[int, tuple[int, int, int]] = {}  # height -> (welfare, volume, fills)
         # Fill tracking via get_account_fills(after=cursor)
         self._last_fill_cursor: str = "0.0"
-        self._fill_history: list = []  # list[AccountFill], available to subclasses
+        self._fill_history: list | deque = []  # AccountFill tail, available to subclasses
+        self.total_fills_observed: int = 0
+        self._observation_history_limit: int | None = None
         self.order_admission_policy: OrderAdmissionPolicy | None = None
         self.metrics = None
         self.orders_suppressed_count = 0
@@ -107,6 +111,11 @@ class BaseAgent(ABC):
                     block.total_volume,
                     block.orders_filled,
                 )
+                if (
+                    self._observation_history_limit is not None
+                    and len(self.block_stats) > self._observation_history_limit
+                ):
+                    del self.block_stats[next(iter(self.block_stats))]
 
                 # Get orders from strategy. Strategy errors are isolated to this
                 # block so one bad model response or bot bug cannot kill the task.
@@ -200,6 +209,7 @@ class BaseAgent(ABC):
                 if not new_fills:
                     break
                 self._fill_history.extend(new_fills)
+                self.total_fills_observed += len(new_fills)
                 for fill in new_fills:
                     await self.on_fill(fill.order_id, fill.fill_qty, fill.fill_price)
                 self._last_fill_cursor = new_fills[-1].cursor
@@ -219,10 +229,32 @@ class BaseAgent(ABC):
     def _apply_canonical_account(self, account, *, replace_latest_balance: bool = False) -> None:
         """Replace strategy state from the canonical account snapshot."""
         self.positions = {(pos.market_id, pos.outcome): pos.quantity for pos in account.positions}
+        if self._initial_balance is None:
+            self._initial_balance = (
+                self.balance_history[0]
+                if self.balance_history
+                else account.balance_dollars
+            )
         if replace_latest_balance and self.balance_history:
             self.balance_history[-1] = account.balance_dollars
         else:
             self.balance_history.append(account.balance_dollars)
+
+    def bound_observation_history(self, max_entries: int) -> None:
+        """Bound in-memory diagnostic tails while preserving lifetime counters.
+
+        Simulations leave histories unbounded because result generation consumes
+        every block. The long-running live service opts into a bounded tail;
+        canonical account state and durable Arena snapshots remain authoritative.
+        """
+        if max_entries < 1:
+            raise ValueError("max_entries must be positive")
+        self._observation_history_limit = max_entries
+        self.balance_history = deque(self.balance_history, maxlen=max_entries)
+        self.block_log = deque(self.block_log, maxlen=max_entries)
+        self._fill_history = deque(self._fill_history, maxlen=max_entries)
+        while len(self.block_stats) > max_entries:
+            del self.block_stats[next(iter(self.block_stats))]
 
     async def _reconcile_fill_cursor(self) -> None:
         """Resume live fill tailing after retained history overtakes our cursor.
@@ -315,9 +347,14 @@ class BaseAgent(ABC):
     @property
     def pnl(self) -> float:
         """Get profit/loss from initial balance."""
-        if len(self.balance_history) < 2:
+        if not self.balance_history:
             return 0.0
-        return self.balance_history[-1] - self.balance_history[0]
+        initial_balance = (
+            self._initial_balance
+            if self._initial_balance is not None
+            else self.balance_history[0]
+        )
+        return self.balance_history[-1] - initial_balance
 
     def get_position(self, market_id: int, outcome: str) -> int:
         """Get position quantity for a market outcome."""
