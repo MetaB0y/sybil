@@ -100,6 +100,8 @@ port. `SYBIL_SYNTHETIC_VM_URL` can instead name a directly reachable VM URL.
 - `AlertNotifierDeliveryErrors` warns when vmalert has observed a notifier
   delivery error in the last 15 minutes. This remains visible in Grafana and
   `just status` even when the failed channel cannot deliver its own page.
+  VictoriaMetrics scrapes vmalert's internal-only `/metrics` endpoint so this
+  rule reads the notifier counter rather than an absent synthetic series.
 
 The existing Telegram overlay loads the same rules and configures vmalert's
 notifier as `http://telegram-alerts:8080`. The bridge accepts vmalert's

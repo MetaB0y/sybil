@@ -277,6 +277,10 @@ for optional_job in sybil-prover sybil-l1-indexer; do
     grep -Fq "/etc/prometheus/targets/$optional_job.json" deploy/prometheus.yml \
         || fail "optional $optional_job job does not use profile-selected file discovery"
 done
+grep -Fq 'job_name: vmalert' deploy/prometheus.yml \
+    || fail "VictoriaMetrics does not scrape vmalert notifier health"
+grep -Fq 'targets: ["vmalert:8880"]' deploy/prometheus.yml \
+    || fail "VictoriaMetrics cannot evaluate vmalert notifier delivery errors"
 python3 - <<'PY' || fail "optional monitoring target files have invalid profile semantics"
 import json
 from pathlib import Path
@@ -290,7 +294,7 @@ assert json.loads((root / "sybil-l1-indexer.json").read_text()) == [
     {"targets": ["sybil-l1-indexer:9102"]}
 ]
 PY
-pass "optional owner processes are discovered only when their profile overlay is selected"
+pass "monitoring owners are scraped and optional targets remain profile-selected"
 
 polymarket_service_block=$(
     awk '
