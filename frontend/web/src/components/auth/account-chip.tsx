@@ -291,13 +291,13 @@ function PasskeyNotice() {
         padding: "8px 10px",
         display: "flex",
         flexDirection: "column",
-        gap: 3,
+        gap: 2,
       }}
     >
       <span
         style={{
           fontFamily: "var(--font-mono)",
-          fontSize: 10,
+          fontSize: 9,
           letterSpacing: "var(--track-wide)",
           textTransform: "uppercase",
           color: "var(--warn)",
@@ -305,11 +305,13 @@ function PasskeyNotice() {
       >
         Passkey account
       </span>
+      {/* The menu is pinned to the account chip's width, so this notice sits in
+          a narrow column — it reads a step down from the rest of the menu. */}
       <span
         style={{
           fontFamily: "var(--font-sans)",
-          fontSize: 12,
-          lineHeight: 1.4,
+          fontSize: 11,
+          lineHeight: 1.35,
           color: "var(--fg-3)",
         }}
       >
