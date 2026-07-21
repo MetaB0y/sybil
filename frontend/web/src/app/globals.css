@@ -767,7 +767,9 @@ textarea {
   background: var(--bg-1);
   color: var(--fg-1);
   font-family: var(--font-sans);
-  padding: var(--space-6) var(--space-5) var(--space-9);
+  /* +36px = markets ClearingTicker height. Every other page header offsets by
+     it so titles land on one baseline; without it "Bot Arena" sat 36px high. */
+  padding: calc(var(--space-6) + 36px) var(--space-5) var(--space-9);
 }
 
 .arena-panel-grid {
@@ -1219,7 +1221,9 @@ textarea {
   }
 
   .arena-main {
-    padding: var(--space-5) var(--space-4) var(--space-8);
+    /* Sibling pages keep the full offset at every width, so match them here
+       rather than reintroducing the misalignment on small screens. */
+    padding: calc(var(--space-6) + 36px) var(--space-4) var(--space-8);
   }
 
   .arena-panel-grid,
