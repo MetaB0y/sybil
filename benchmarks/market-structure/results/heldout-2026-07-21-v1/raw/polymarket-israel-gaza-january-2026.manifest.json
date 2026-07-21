@@ -1,0 +1,627 @@
+{
+  "artifact": {
+    "blake3": "136274cbe7e63457258cf5b02dab45949443fd073a0dad87ebbd791b67dd0305",
+    "bytes": 2349696,
+    "compression": "gzip",
+    "path": "benchmarks/market-structure/results/heldout-2026-07-21-v1/raw/polymarket-israel-gaza-january-2026.jsonl.gz",
+    "uncompressed_blake3": "07e4650e1bf4b63c1f2ba28311ae957cedea3bb382bb927f2a83f38ebfb30554",
+    "uncompressed_bytes": 32954330
+  },
+  "captured_at": "2026-07-21T12:34:02.569069+00:00",
+  "completeness": {
+    "captured_markets": 31,
+    "counterpart_rows": 43086,
+    "exact_reconstructions": 21189,
+    "expected_markets": 31,
+    "known_transactions_found": [
+      "0x452214d579e4dc8c3e38cb514d72ed9fe895eef78a46ea52b217132fc5e75b0a",
+      "0x5c2c0e8c6d0b9fbacdf318698d1a8171a1e19364d5684af19f2410289febd9f1",
+      "0x81639a8e6f4864877ff20de22fa86bac85bb5e8855f6b27ac01de07e90334206",
+      "0xcfd69a1cbd921d7d6711431c76a94bb1ebe61b460b1808c345e5c63c13717f8f"
+    ],
+    "pagination": [
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 768
+          }
+        ],
+        "condition_id": "0x49c4a432cb3769e5e1797e1686a51b61db9e267fcab91d0c42e512e580762bf3",
+        "counterpart_rows": 480,
+        "exact_reconstructions": 288,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 288
+          }
+        ],
+        "transactions": 288
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 970
+          }
+        ],
+        "condition_id": "0x37826cd43d3924246cb2818c0a40183de9ee9193571c78239c530e0641c72135",
+        "counterpart_rows": 641,
+        "exact_reconstructions": 329,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 329
+          }
+        ],
+        "transactions": 329
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 714
+          }
+        ],
+        "condition_id": "0x1ce3dc01158cb0bfd4bd3a63eab414a9c28ea6d40d10b5fd176ba332949a843f",
+        "counterpart_rows": 488,
+        "exact_reconstructions": 226,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 226
+          }
+        ],
+        "transactions": 226
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 2956
+          }
+        ],
+        "condition_id": "0x8962a594b344214bc8bcc4043698214466412b7ebdfb1547bb5e99ca19de9285",
+        "counterpart_rows": 1980,
+        "exact_reconstructions": 976,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 976
+          }
+        ],
+        "transactions": 976
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 763
+          }
+        ],
+        "condition_id": "0x7376790d1a3095a8b169122714d361a9ed2d3d1df492a2144b727a8d6bcae71b",
+        "counterpart_rows": 485,
+        "exact_reconstructions": 278,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 278
+          }
+        ],
+        "transactions": 278
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 1964
+          }
+        ],
+        "condition_id": "0x5d5fbb4c3009a651b3c6af3a536b35ce95b43de7c76ca0e756e011fb4f7a6d47",
+        "counterpart_rows": 1341,
+        "exact_reconstructions": 623,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 623
+          }
+        ],
+        "transactions": 623
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 2003
+          }
+        ],
+        "condition_id": "0x68534b2e1e9b78f9b4d82551feb72f12407c1bf49d8350314b3c408b596c84b1",
+        "counterpart_rows": 1300,
+        "exact_reconstructions": 702,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 703
+          }
+        ],
+        "transactions": 703
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 1080
+          }
+        ],
+        "condition_id": "0x3c96c207ad1d5cf89ec70cac0b39d3db33809fa0362030d97316d802d8834665",
+        "counterpart_rows": 707,
+        "exact_reconstructions": 373,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 373
+          }
+        ],
+        "transactions": 373
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 3687
+          }
+        ],
+        "condition_id": "0xca3d9586be6e6f86e87531b6b919ec79ec387905cc412eca1078841581adc3ca",
+        "counterpart_rows": 2448,
+        "exact_reconstructions": 1239,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 1239
+          }
+        ],
+        "transactions": 1239
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 1608
+          }
+        ],
+        "condition_id": "0x648b9b39410a16d18dc3b8a5211502664dce35a2ed3052f86f3fb3183aa3fd0d",
+        "counterpart_rows": 1057,
+        "exact_reconstructions": 551,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 551
+          }
+        ],
+        "transactions": 551
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 1708
+          }
+        ],
+        "condition_id": "0xab99192c204134baebf14b9e7b0f26d05649ce001a379172edd45730afdaec39",
+        "counterpart_rows": 1140,
+        "exact_reconstructions": 568,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 568
+          }
+        ],
+        "transactions": 568
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 2280
+          }
+        ],
+        "condition_id": "0xa72b22f3fd5c31d7cad384be84a2ff3bc30730fb79231e74521737cb4b689b2b",
+        "counterpart_rows": 1519,
+        "exact_reconstructions": 761,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 761
+          }
+        ],
+        "transactions": 761
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 2744
+          }
+        ],
+        "condition_id": "0xdd5808b8f538909761a28948959b55711fc0f883dfb04f22ddf7567294227359",
+        "counterpart_rows": 1896,
+        "exact_reconstructions": 848,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 848
+          }
+        ],
+        "transactions": 848
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 2695
+          }
+        ],
+        "condition_id": "0xf3f788e4619c0b02fd474eb9b3265b64ba4fd0974228a5f861953f0f59a98950",
+        "counterpart_rows": 1847,
+        "exact_reconstructions": 848,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 848
+          }
+        ],
+        "transactions": 848
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 4806
+          }
+        ],
+        "condition_id": "0x9e29cfed8e32f7c4e36bd79adc172dac2ea9793d843cfe0a1370141b7c302683",
+        "counterpart_rows": 3372,
+        "exact_reconstructions": 1434,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 1434
+          }
+        ],
+        "transactions": 1434
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 3330
+          }
+        ],
+        "condition_id": "0xf962cc29fc091557c7e09a73b5996296d73179330d78d3600d87be01f0b58406",
+        "counterpart_rows": 2276,
+        "exact_reconstructions": 1054,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 1054
+          }
+        ],
+        "transactions": 1054
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 2564
+          }
+        ],
+        "condition_id": "0x633180c3c22e6ad6ca500bdcc370a0f3228367bc87ca3ee5d0bb0d0d749cf573",
+        "counterpart_rows": 1736,
+        "exact_reconstructions": 828,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 828
+          }
+        ],
+        "transactions": 828
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 1249
+          }
+        ],
+        "condition_id": "0x25ac9d2a86cb02a5db4347478f025703c9f2c8a6fab61b35d2ddc21de67058a6",
+        "counterpart_rows": 841,
+        "exact_reconstructions": 408,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 408
+          }
+        ],
+        "transactions": 408
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 1838
+          }
+        ],
+        "condition_id": "0x6c8ccaaa388e3f672024cace6ce7586d3a03dcb128285b1bdf928c9c627aeaa9",
+        "counterpart_rows": 1226,
+        "exact_reconstructions": 612,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 612
+          }
+        ],
+        "transactions": 612
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 1461
+          }
+        ],
+        "condition_id": "0xefaedf66cda6b6d3d5d22bfafbb11ac09c0ed37d6834127e69935e889d7049b7",
+        "counterpart_rows": 959,
+        "exact_reconstructions": 502,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 502
+          }
+        ],
+        "transactions": 502
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 1734
+          }
+        ],
+        "condition_id": "0xfa3e640cf6f2bd6d1d2c55d9ba3288b2ab12b88600298a1d00f14be1bddfd663",
+        "counterpart_rows": 1171,
+        "exact_reconstructions": 563,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 563
+          }
+        ],
+        "transactions": 563
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 2101
+          }
+        ],
+        "condition_id": "0x87020e07b30921e93db4473ccd2f63d4d98b2766eee571eadc9552b6cc521e17",
+        "counterpart_rows": 1451,
+        "exact_reconstructions": 650,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 650
+          }
+        ],
+        "transactions": 650
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 1156
+          }
+        ],
+        "condition_id": "0x64bd4fb1eef5ec8d4e8f6ed219df12304cf56087f1a191852f9f7af7ccfc140a",
+        "counterpart_rows": 748,
+        "exact_reconstructions": 408,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 408
+          }
+        ],
+        "transactions": 408
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 842
+          }
+        ],
+        "condition_id": "0xc7ce6c0c8f5fbcc12587f264cbf8795a8a254df10bf50ebbaae05a9179ba5959",
+        "counterpart_rows": 547,
+        "exact_reconstructions": 295,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 295
+          }
+        ],
+        "transactions": 295
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 3132
+          }
+        ],
+        "condition_id": "0x9b5ee18bf924e75a0038640dfb51db702a75a8d002dfbed7c7bdbe01520ebad7",
+        "counterpart_rows": 2114,
+        "exact_reconstructions": 1018,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 1018
+          }
+        ],
+        "transactions": 1018
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 3694
+          }
+        ],
+        "condition_id": "0x01dbcbf01823f946ab2d1c587fa987e377909369d4263df5ca82f7b993d31d7f",
+        "counterpart_rows": 2451,
+        "exact_reconstructions": 1243,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 1243
+          }
+        ],
+        "transactions": 1243
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 2301
+          }
+        ],
+        "condition_id": "0x2b84316a2019d17e37153ebbcfd6a8a4ccf8ab5db10635c0f176ead6ed4f4368",
+        "counterpart_rows": 1527,
+        "exact_reconstructions": 774,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 774
+          }
+        ],
+        "transactions": 774
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 3946
+          }
+        ],
+        "condition_id": "0xafb59650bee2289c4d1283f53ba454b5e37b86ed978c9fcfc2833ab1cb8249e1",
+        "counterpart_rows": 2679,
+        "exact_reconstructions": 1267,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 1267
+          }
+        ],
+        "transactions": 1267
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 1354
+          }
+        ],
+        "condition_id": "0xf5cc72be80b4daa0c4d0043a74abd8d2d8871c699bde1acf0570239994f8251f",
+        "counterpart_rows": 873,
+        "exact_reconstructions": 481,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 481
+          }
+        ],
+        "transactions": 481
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 801
+          }
+        ],
+        "condition_id": "0x235726cacefb617463b46929961c9778274954bb14ffff9683e179aff0acc32e",
+        "counterpart_rows": 498,
+        "exact_reconstructions": 303,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 303
+          }
+        ],
+        "transactions": 303
+      },
+      {
+        "all_rows": [
+          {
+            "offset": 0,
+            "rows": 2027
+          }
+        ],
+        "condition_id": "0xd944f57cf6ea5104d724a7319944069b47ac2fe3cb1bd2369cdd632c60e5d181",
+        "counterpart_rows": 1288,
+        "exact_reconstructions": 739,
+        "taker_only": [
+          {
+            "offset": 0,
+            "rows": 739
+          }
+        ],
+        "transactions": 739
+      }
+    ],
+    "taker_transactions": 21190,
+    "unreconciled_reconstructions": 1
+  },
+  "corpus_id": "polymarket-israel-gaza-january-2026-complete-event-v1",
+  "limitations": [
+    "Public trade rows do not reconstruct canceled quotes or venue arrival times.",
+    "Resting-side counterparties are not assumed to be professional market makers.",
+    "Settlement or later-price markout is gross of fees, hedges, rebates, and inventory history.",
+    "No historical FBA counterfactual price is identified."
+  ],
+  "projection": {
+    "identity_fields_retained": false,
+    "no_maker_classification": true,
+    "price_unit": "integer nanos per $1 payoff",
+    "quantity_unit": "integer microshares",
+    "retained_provenance": [
+      "condition_id",
+      "transaction_hash",
+      "timestamp"
+    ]
+  },
+  "protocol": {
+    "blake3": "4bcc039457dde40f9a1ae84e8bd37f2073b117b9014fea3ff2820ae077e99aa9",
+    "path": "benchmarks/market-structure/protocol-heldout-2026-07-21-v1.json",
+    "protocol_id": "sybil-market-structure-heldout-2026-07-21-v1"
+  },
+  "schema_version": 1,
+  "source": {
+    "event_id": "133144",
+    "event_slug": "will-israel-strike-gaza-on-358",
+    "gamma_endpoint": "https://gamma-api.polymarket.com/events/133144",
+    "trade_query": {
+      "limit": 10000,
+      "market": "one condition ID at a time",
+      "offsets": [
+        0,
+        10000
+      ],
+      "takerOnly": [
+        true,
+        false
+      ]
+    },
+    "trades_endpoint": "https://data-api.polymarket.com/trades"
+  }
+}
