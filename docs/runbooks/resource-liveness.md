@@ -80,6 +80,26 @@ query concurrency before raising either limit. The API cache ceiling is not a
 total-RSS ceiling: correlate it with qMDB/account state, recent blocks, queues,
 and the existing absolute and slope alerts.
 
+The production `sybil-web` boundary is a Next standalone server inside a
+512 MiB cgroup because dynamic `/m/[id]` routes and the allowlisted runtime
+image optimizer still need server execution. The market index itself is a
+prerendered 15 KiB shell; the browser fetches the canonical market catalog
+after hydration. With that boundary, 600 index requests peaked at 87 MiB and
+recovered to 72 MiB, while 1,200 dynamic-market requests peaked at 129 MiB and
+settled near 118 MiB. Normal post-deploy traffic has remained around
+92-101 MiB with a roughly 141 MiB creation-lifetime peak. Treat sustained use
+above roughly 160 MiB after warm-up, or monotonic route-correlated growth, as
+unexpected rather than as a reason to consume the 512 MiB safety margin.
+
+For frontend growth, separate the route class before changing limits. The
+former server-rendered index fetched a roughly 564 KiB catalog for every
+request and serialized it into an approximately 280 KiB RSC response, retaining
+memory until V8 exited 139 near its heap ceiling; Docker reported
+`OOMKilled=false`. Compare lightweight routes, `/`, and `/m/[id]`, then inspect
+both the Next/V8 fatal log and the retained synthetic restart/OOM/current/peak
+series. A healthy container after an automatic replacement does not prove a
+plateau, and a V8 heap abort is not necessarily a memcg OOM.
+
 The in-flight gauge increments before each DA task is spawned and decrements
 after its write result is recorded. A task panic deliberately leaves the gauge
 high for that process lifetime, making the lost writer visible; restarting the
