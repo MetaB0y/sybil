@@ -164,6 +164,32 @@ tests:
               summary: "A Sybil container is nearing its memory limit"
               description: "Compose service sybil-web has used more than 85% of its memory limit for 10m (current ratio: 90%). Inspect its current/peak memory curve and restart/OOM history before changing the limit."
 
+  # The real probe's work plus timer jitter can put successive samples just
+  # beyond the query engine's five-minute instant lookback. The 10-minute
+  # warning must retain its `for` state across those brief no-sample gaps.
+  - interval: 15s
+    input_series:
+      - series: 'sybil_synthetic_container_memory_usage_bytes{job="sybil-synthetic",instance="https://devnet.example",service="sybil-web"}'
+        values: "90 _x24 90 _x24 90"
+      - series: 'sybil_synthetic_container_memory_limit_bytes{job="sybil-synthetic",instance="https://devnet.example",service="sybil-web"}'
+        values: "100 _x24 100 _x24 100"
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: ContainerMemoryHigh
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: ContainerMemoryHigh
+        exp_alerts:
+          - exp_labels:
+              job: "sybil-synthetic"
+              instance: "https://devnet.example"
+              service: "sybil-web"
+              severity: warning
+              component: resources
+            exp_annotations:
+              summary: "A Sybil container is nearing its memory limit"
+              description: "Compose service sybil-web has used more than 85% of its memory limit for 10m (current ratio: 90%). Inspect its current/peak memory curve and restart/OOM history before changing the limit."
+
   - interval: 1m
     input_series:
       - series: 'sybil_synthetic_container_memory_usage_bytes{job="sybil-synthetic",instance="https://devnet.example",service="sybil-web"}'

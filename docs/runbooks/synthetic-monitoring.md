@@ -95,6 +95,8 @@ port. `SYBIL_SYNTHETIC_VM_URL` can instead name a directly reachable VM URL.
   the durable host-level fallback after an automatic restart clears it.
 - `ContainerMemoryHigh` warns after ten minutes above 85% of a configured
   cgroup limit; `ContainerMemoryCritical` fires after two minutes above 95%.
+  Both compare the latest sample in ten minutes so timer jitter beyond the
+  query engine's five-minute instant lookback cannot reset a sustained alert.
   The current and creation-lifetime peak series make a 24-hour plateau claim
   inspectable instead of relying on a final `docker stats` snapshot.
 - `AlertNotifierDeliveryErrors` warns when vmalert has observed a notifier

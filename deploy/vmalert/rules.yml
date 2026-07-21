@@ -865,9 +865,9 @@ groups:
 
       - alert: ContainerMemoryHigh
         expr: |
-          sybil_synthetic_container_memory_usage_bytes
-            / sybil_synthetic_container_memory_limit_bytes > 0.85
-          and sybil_synthetic_container_memory_limit_bytes > 0
+          last_over_time(sybil_synthetic_container_memory_usage_bytes[10m])
+            / last_over_time(sybil_synthetic_container_memory_limit_bytes[10m]) > 0.85
+          and last_over_time(sybil_synthetic_container_memory_limit_bytes[10m]) > 0
         for: 10m
         labels:
           severity: warning
@@ -878,9 +878,9 @@ groups:
 
       - alert: ContainerMemoryCritical
         expr: |
-          sybil_synthetic_container_memory_usage_bytes
-            / sybil_synthetic_container_memory_limit_bytes > 0.95
-          and sybil_synthetic_container_memory_limit_bytes > 0
+          last_over_time(sybil_synthetic_container_memory_usage_bytes[10m])
+            / last_over_time(sybil_synthetic_container_memory_limit_bytes[10m]) > 0.95
+          and last_over_time(sybil_synthetic_container_memory_limit_bytes[10m]) > 0
         for: 2m
         labels:
           severity: critical
