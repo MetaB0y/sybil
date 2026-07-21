@@ -94,9 +94,11 @@ port. `SYBIL_SYNTHETIC_VM_URL` can instead name a directly reachable VM URL.
 - `ContainerRestartObserved` fires when a service's Docker restart count
   increases or its process start timestamp changes after observation began.
   The latter also catches a Compose replacement whose new container resets the
-  restart counter to zero. `ContainerOomKilled` adds exact service attribution
-  while Docker's current flag remains set; `HostOomKill` remains the durable
-  host-level fallback after an automatic restart clears it.
+  restart counter to zero. Its 20-minute comparison window deliberately spans
+  one failed five-minute probe plus timer jitter; `SyntheticProbeMissing`
+  covers longer gaps. `ContainerOomKilled` adds exact service attribution while
+  Docker's current flag remains set; `HostOomKill` remains the durable host-level
+  fallback after an automatic restart clears it.
 - `ContainerMemoryHigh` warns after ten minutes above 85% of a configured
   cgroup limit; `ContainerMemoryCritical` fires after two minutes above 95%.
   Both compare the latest sample in ten minutes so timer jitter beyond the

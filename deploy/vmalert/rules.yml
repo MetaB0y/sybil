@@ -842,17 +842,20 @@ groups:
         # restart and a Compose replacement. RestartCount catches the former;
         # StartedAt catches either and remains useful when a new container's
         # restart counter resets to zero. The OR keeps one alert identity when
-        # both branches observe the same automatic restart.
+        # both branches observe the same automatic restart. Keep 20m of
+        # identity history so one failed five-minute synthetic run plus timer
+        # jitter cannot hide the replacement; SyntheticProbeMissing pages at
+        # 15m if the gap lasts longer.
         expr: |
           (
-            max_over_time(sybil_synthetic_container_restart_count[10m])
-              > min_over_time(sybil_synthetic_container_restart_count[10m])
-            and last_over_time(sybil_synthetic_container_restart_count[10m]) > 0
+            max_over_time(sybil_synthetic_container_restart_count[20m])
+              > min_over_time(sybil_synthetic_container_restart_count[20m])
+            and last_over_time(sybil_synthetic_container_restart_count[20m]) > 0
           )
           or
           (
-            max_over_time(sybil_synthetic_container_started_at_seconds[10m])
-              > min_over_time(sybil_synthetic_container_started_at_seconds[10m])
+            max_over_time(sybil_synthetic_container_started_at_seconds[20m])
+              > min_over_time(sybil_synthetic_container_started_at_seconds[20m])
           )
         for: 0m
         labels:

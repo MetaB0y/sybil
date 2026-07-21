@@ -143,6 +143,32 @@ tests:
               summary: "A Sybil container process started again"
               description: "Compose service sybil-history restarted or was replaced. Inspect its retained start-time/restart series, Docker events, container logs, and the host OOM counter before treating current health as recovery."
 
+  # A deploy-time probe can fail before publishing lifecycle rows. Retain
+  # enough identity history for the next successful five-minute probe to
+  # compare across that missing sample, including timer jitter.
+  - interval: 5m
+    input_series:
+      - series: 'sybil_synthetic_container_restart_count{job="sybil-synthetic",instance="https://devnet.example",service="sybil-api"}'
+        values: "0 _ 0+0x6"
+      - series: 'sybil_synthetic_container_started_at_seconds{job="sybil-synthetic",instance="https://devnet.example",service="sybil-api"}'
+        values: "100 _ 200+0x6"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: ContainerRestartObserved
+        exp_alerts:
+          - exp_labels:
+              job: "sybil-synthetic"
+              instance: "https://devnet.example"
+              service: "sybil-api"
+              severity: warning
+              component: lifecycle
+            exp_annotations:
+              summary: "A Sybil container process started again"
+              description: "Compose service sybil-api restarted or was replaced. Inspect its retained start-time/restart series, Docker events, container logs, and the host OOM counter before treating current health as recovery."
+      - eval_time: 31m
+        alertname: ContainerRestartObserved
+        exp_alerts: []
+
   - interval: 1m
     input_series:
       - series: 'sybil_synthetic_container_oom_killed{job="sybil-synthetic",instance="https://devnet.example",service="sybil-web"}'
