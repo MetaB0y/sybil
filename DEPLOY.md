@@ -1,6 +1,6 @@
 # Deployment Runbook
 
-Prelaunch is a single Linode host running Docker Compose from `/opt/sybil`.
+Prelaunch is a shared 12 GB host running Docker Compose from `/opt/sybil`.
 Images are built locally, transferred with `docker save | ssh docker load`, and
 started with the `deploy-*` recipes in the `justfile`. Application releases use
 full source-revision tags; production Compose reads one recorded image set from
@@ -8,15 +8,20 @@ full source-revision tags; production Compose reads one recorded image set from
 
 ## Public Surface
 
-Only Caddy publishes host ports in the locked remote Compose stack.
+Only Caddy publishes host ports in the locked remote Compose stack. On the
+shared prelaunch host those ports are loopback-only (`127.0.0.1:3108` and
+`127.0.0.1:3143`); the host's existing nginx owns public ports 80/443,
+terminates TLS, and forwards Sybil hostnames to Caddy. This preserves Caddy's
+application routing and dashboard authentication without altering unrelated
+nginx sites or exposing Docker services directly.
 
 | Public port | Hostname | Service | Auth |
 | --- | --- | --- | --- |
-| 80, 443 | `172-104-31-54.nip.io` | `sybil-api` trading and realtime API | Public |
-| 80, 443 | `app.172-104-31-54.nip.io` | Next.js web UI | Public |
-| 80, 443 | `arena.172-104-31-54.nip.io` | Streamlit arena dashboard | Caddy basic auth |
-| 80, 443 | `grafana.172-104-31-54.nip.io` | Grafana | Caddy basic auth, then Grafana login |
-| 80, 443 | `prover.172-104-31-54.nip.io` | Prover status/API | Caddy basic auth |
+| 80, 443 via nginx | `62-171-170-238.nip.io` | `sybil-api` trading and realtime API | Public |
+| 80, 443 via nginx | `app.62-171-170-238.nip.io` | Next.js web UI | Public |
+| 80, 443 via nginx | `arena.62-171-170-238.nip.io` | Streamlit arena dashboard | Caddy basic auth |
+| 80, 443 via nginx | `grafana.62-171-170-238.nip.io` | Grafana | Caddy basic auth, then Grafana login |
+| 80, 443 via nginx | `prover.62-171-170-238.nip.io` | Prover status/API | Caddy basic auth |
 
 These services are Docker-network-only in prelaunch and must not publish host ports:
 `sybil-api`, `sybil-prover`, `sybil-arena-dashboard`, `victoriametrics`,
@@ -35,11 +40,18 @@ Create `/opt/sybil/.env` on the deploy host before running remote Compose comman
 
 ```bash
 SYBIL_SERVICE_TOKEN=<strong random bearer token for service/operator routes>
-SYBIL_WEBAUTHN_RP_ID=app.172-104-31-54.nip.io
-SYBIL_WEBAUTHN_ORIGIN=https://app.172-104-31-54.nip.io
+SYBIL_WEBAUTHN_RP_ID=app.62-171-170-238.nip.io
+SYBIL_WEBAUTHN_ORIGIN=https://app.62-171-170-238.nip.io
 GF_SECURITY_ADMIN_PASSWORD=<strong grafana admin password>
 CADDY_OPS_AUTH_USER=ops
 CADDY_OPS_AUTH_HASH='<bcrypt hash from caddy hash-password>'
+SYBIL_CADDY_HTTP_BIND=127.0.0.1:3108
+SYBIL_CADDY_HTTPS_BIND=127.0.0.1:3143
+SYBIL_API_SITE=http://62-171-170-238.nip.io
+SYBIL_APP_SITE=http://app.62-171-170-238.nip.io
+SYBIL_ARENA_SITE=http://arena.62-171-170-238.nip.io
+SYBIL_GRAFANA_SITE=http://grafana.62-171-170-238.nip.io
+SYBIL_PROVER_SITE=http://prover.62-171-170-238.nip.io
 ```
 
 `SYBIL_SERVICE_TOKEN` is injected into `sybil-api`, `sybil-polymarket`, and
@@ -66,7 +78,7 @@ also intentionally discards that key and creates a new chain/admin identity.
 the exact browser origin including `https://`. Both must match the app hostname
 baked into the web image via `NEXT_PUBLIC_WEBAUTHN_RP_ID`; changing them
 requires a frontend rebuild. The API hostname is not the relying party when the
-browser ceremony runs on `app.172-104-31-54.nip.io`.
+browser ceremony runs on `app.62-171-170-238.nip.io`.
 
 Generate the Caddy hash with:
 
@@ -190,8 +202,8 @@ names; they do not print or pass secret values in command arguments.
 
 ### Local build fast path
 
-Build deployable images on the native Linux/amd64 development machine, never on
-the 2 GB Linode. The deploy recipes then stream the locally built images through
+Build deployable images on the native Linux/amd64 development machine, not on
+the shared runtime host. The deploy recipes then stream the locally built images through
 `docker save | ssh docker load`; the server only loads and starts them.
 
 Measured on the development machine on 2026-07-10, a full-stack build with warm
@@ -262,7 +274,7 @@ just deploy-shell
 Check public API health:
 
 ```bash
-curl https://172-104-31-54.nip.io/v1/health
+curl https://62-171-170-238.nip.io/v1/health
 ```
 
 Store backup/restore and the five-minute synthetic monitor have dedicated

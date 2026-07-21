@@ -9,7 +9,7 @@ evaluation_interval: 1m
 tests:
   - interval: 1m
     input_series:
-      - series: 'sybil_synthetic_probe_failure{job="sybil-synthetic",instance="https://172-104-31-54.nip.io"}'
+      - series: 'sybil_synthetic_probe_failure{job="sybil-synthetic",instance="https://62-171-170-238.nip.io"}'
         values: "0+0x4 1+0x5"
     alert_rule_test:
       - eval_time: 4m
@@ -20,16 +20,16 @@ tests:
         exp_alerts:
           - exp_labels:
               job: "sybil-synthetic"
-              instance: "https://172-104-31-54.nip.io"
+              instance: "https://62-171-170-238.nip.io"
               severity: critical
               component: synthetic-monitor
             exp_annotations:
               summary: "External Sybil synthetic probe failed"
-              description: "The five-minute read-only probe failed for https://172-104-31-54.nip.io. Health, block advancement, markets, CORS, or container health is broken; inspect the systemd journal for the one-line cause."
+              description: "The five-minute read-only probe failed for https://62-171-170-238.nip.io. Health, block advancement, markets, CORS, or container health is broken; inspect the systemd journal for the one-line cause."
 
   - interval: 1m
     input_series:
-      - series: 'sybil_synthetic_probe_failure{job="sybil-synthetic",instance="https://172-104-31-54.nip.io"}'
+      - series: 'sybil_synthetic_probe_failure{job="sybil-synthetic",instance="https://62-171-170-238.nip.io"}'
         values: "1+0x4 0+0x5"
     alert_rule_test:
       - eval_time: 6m
@@ -38,7 +38,7 @@ tests:
 
   - interval: 1m
     input_series:
-      - series: 'sybil_synthetic_probe_failure{job="sybil-synthetic",instance="https://172-104-31-54.nip.io"}'
+      - series: 'sybil_synthetic_probe_failure{job="sybil-synthetic",instance="https://62-171-170-238.nip.io"}'
         values: "0 _x20"
     alert_rule_test:
       - eval_time: 14m
@@ -61,9 +61,9 @@ tests:
   # alert confirms it over the next two.
   - interval: 1m
     input_series:
-      - series: 'sybil_synthetic_proof_lag_blocks{job="sybil-synthetic",instance="https://172-104-31-54.nip.io"}'
+      - series: 'sybil_synthetic_proof_lag_blocks{job="sybil-synthetic",instance="https://62-171-170-238.nip.io"}'
         values: "1 _x4 1 _x4 45 _x4 78 _x4 110 _x4 140 _x4"
-      - series: 'sybil_synthetic_proof_lag_limit_blocks{job="sybil-synthetic",instance="https://172-104-31-54.nip.io"}'
+      - series: 'sybil_synthetic_proof_lag_limit_blocks{job="sybil-synthetic",instance="https://62-171-170-238.nip.io"}'
         values: "30 _x4 30 _x4 30 _x4 30 _x4 30 _x4 30 _x4"
     alert_rule_test:
       - eval_time: 19m
@@ -74,19 +74,19 @@ tests:
         exp_alerts:
           - exp_labels:
               job: "sybil-synthetic"
-              instance: "https://172-104-31-54.nip.io"
+              instance: "https://62-171-170-238.nip.io"
               severity: warning
               component: prover
             exp_annotations:
               summary: "Proof pipeline is lagging the chain head"
-              description: "The synthetic probe measured /proofs/latest beyond its configured lag limit for https://172-104-31-54.nip.io (current lag: 110 blocks). The prover or mock-prover pipeline is likely wedged; see the proof-lag section of the synthetic-monitoring runbook."
+              description: "The synthetic probe measured /proofs/latest beyond its configured lag limit for https://62-171-170-238.nip.io (current lag: 110 blocks). The prover or mock-prover pipeline is likely wedged; see the proof-lag section of the synthetic-monitoring runbook."
 
   - name: native product liquidity gap persists
     interval: 1m
     input_series:
-      - series: 'sybil_synthetic_mm_eligible_markets{job="sybil-synthetic",instance="https://172-104-31-54.nip.io",catalog="native"}'
+      - series: 'sybil_synthetic_mm_eligible_markets{job="sybil-synthetic",instance="https://62-171-170-238.nip.io",catalog="native"}'
         values: "134+0x20"
-      - series: 'sybil_synthetic_mm_liquid_markets{job="sybil-synthetic",instance="https://172-104-31-54.nip.io",catalog="native"}'
+      - series: 'sybil_synthetic_mm_liquid_markets{job="sybil-synthetic",instance="https://62-171-170-238.nip.io",catalog="native"}'
         values: "97+0x20"
     alert_rule_test:
       - eval_time: 9m
@@ -97,7 +97,7 @@ tests:
         exp_alerts:
           - exp_labels:
               job: "sybil-synthetic"
-              instance: "https://172-104-31-54.nip.io"
+              instance: "https://62-171-170-238.nip.io"
               catalog: native
               severity: warning
               component: native-mm
@@ -108,9 +108,9 @@ tests:
   - name: polymarket product liquidity gap recovers
     interval: 1m
     input_series:
-      - series: 'sybil_synthetic_mm_eligible_markets{job="sybil-synthetic",instance="https://172-104-31-54.nip.io",catalog="polymarket"}'
+      - series: 'sybil_synthetic_mm_eligible_markets{job="sybil-synthetic",instance="https://62-171-170-238.nip.io",catalog="polymarket"}'
         values: "60+0x20"
-      - series: 'sybil_synthetic_mm_liquid_markets{job="sybil-synthetic",instance="https://172-104-31-54.nip.io",catalog="polymarket"}'
+      - series: 'sybil_synthetic_mm_liquid_markets{job="sybil-synthetic",instance="https://62-171-170-238.nip.io",catalog="polymarket"}'
         values: "40+0x5 60+0x15"
     alert_rule_test:
       - eval_time: 9m
@@ -123,9 +123,9 @@ tests:
   # Healthy devnet: the mock prover trails by at most a block or two.
   - interval: 1m
     input_series:
-      - series: 'sybil_synthetic_proof_lag_blocks{job="sybil-synthetic",instance="https://172-104-31-54.nip.io"}'
+      - series: 'sybil_synthetic_proof_lag_blocks{job="sybil-synthetic",instance="https://62-171-170-238.nip.io"}'
         values: "0 _x4 1 _x4 0 _x4 1 _x4"
-      - series: 'sybil_synthetic_proof_lag_limit_blocks{job="sybil-synthetic",instance="https://172-104-31-54.nip.io"}'
+      - series: 'sybil_synthetic_proof_lag_limit_blocks{job="sybil-synthetic",instance="https://62-171-170-238.nip.io"}'
         values: "30 _x4 30 _x4 30 _x4 30 _x4"
     alert_rule_test:
       - eval_time: 19m
@@ -135,9 +135,9 @@ tests:
   # A one-cycle spike that recovers before the 10m confirmation never fires.
   - interval: 1m
     input_series:
-      - series: 'sybil_synthetic_proof_lag_blocks{job="sybil-synthetic",instance="https://172-104-31-54.nip.io"}'
+      - series: 'sybil_synthetic_proof_lag_blocks{job="sybil-synthetic",instance="https://62-171-170-238.nip.io"}'
         values: "45 _x4 45 _x4 2 _x4 2 _x4"
-      - series: 'sybil_synthetic_proof_lag_limit_blocks{job="sybil-synthetic",instance="https://172-104-31-54.nip.io"}'
+      - series: 'sybil_synthetic_proof_lag_limit_blocks{job="sybil-synthetic",instance="https://62-171-170-238.nip.io"}'
         values: "30 _x4 30 _x4 30 _x4 30 _x4"
     alert_rule_test:
       - eval_time: 9m
@@ -152,9 +152,9 @@ tests:
   # devnet default but remains healthy under a configured 100-block limit.
   - interval: 1m
     input_series:
-      - series: 'sybil_synthetic_proof_lag_blocks{job="sybil-synthetic",instance="https://172-104-31-54.nip.io"}'
+      - series: 'sybil_synthetic_proof_lag_blocks{job="sybil-synthetic",instance="https://62-171-170-238.nip.io"}'
         values: "45 _x4 45 _x4 45 _x4 45 _x4"
-      - series: 'sybil_synthetic_proof_lag_limit_blocks{job="sybil-synthetic",instance="https://172-104-31-54.nip.io"}'
+      - series: 'sybil_synthetic_proof_lag_limit_blocks{job="sybil-synthetic",instance="https://62-171-170-238.nip.io"}'
         values: "100 _x4 100 _x4 100 _x4 100 _x4"
     alert_rule_test:
       - eval_time: 19m

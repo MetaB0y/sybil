@@ -14,7 +14,7 @@ import type {
 } from "./types";
 
 const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE ?? "https://172-104-31-54.nip.io";
+  process.env.NEXT_PUBLIC_API_BASE ?? "https://62-171-170-238.nip.io";
 
 /** Raw fetch for endpoints/params not modelled in the generated schema. */
 async function rawGet<T>(path: string): Promise<T | null> {

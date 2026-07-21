@@ -19,18 +19,18 @@ use p256::ecdsa::{Signature, VerifyingKey, signature::hazmat::PrehashVerifier};
 ///
 /// Changing this is a protocol migration: both the main and escape guests must
 /// be rebuilt and repinned together, and the API RP configuration must match.
-pub const EXPECTED_WEBAUTHN_RP_ID: &str = "app.172-104-31-54.nip.io";
+pub const EXPECTED_WEBAUTHN_RP_ID: &str = "app.62-171-170-238.nip.io";
 
 /// Exact browser origin accepted by the guest for the pinned deployment.
 /// This is deliberately stricter than matching only the RP ID hash: an
 /// assertion minted by another origin under the same RP must not authorize a
 /// Sybil action.
-pub const EXPECTED_WEBAUTHN_ORIGIN: &str = "https://app.172-104-31-54.nip.io";
+pub const EXPECTED_WEBAUTHN_ORIGIN: &str = "https://app.62-171-170-238.nip.io";
 
 /// `SHA256(EXPECTED_WEBAUTHN_RP_ID)`, pinned as bytes for guest use.
 pub const EXPECTED_RP_ID_HASH: [u8; 32] = [
-    0xfd, 0x37, 0x1b, 0x6c, 0x3a, 0x2f, 0x68, 0x64, 0x80, 0x73, 0x5c, 0x34, 0x98, 0x5e, 0x03, 0x36,
-    0x46, 0x3c, 0xff, 0x60, 0x30, 0xe7, 0x65, 0xc3, 0xfa, 0x74, 0x79, 0xff, 0x5a, 0x73, 0x59, 0x87,
+    0xb5, 0x98, 0xc6, 0xc3, 0x35, 0x55, 0xba, 0x99, 0xe3, 0xc8, 0x07, 0xf1, 0x85, 0x60, 0xc8, 0xaa,
+    0x89, 0x40, 0xf2, 0xd4, 0x02, 0xc9, 0xc2, 0x95, 0x07, 0xec, 0x90, 0x05, 0x3d, 0x30, 0xe6, 0x20,
 ];
 
 const FLAG_UP: u8 = 0x01;
@@ -540,9 +540,9 @@ mod tests {
     #[test]
     fn browser_client_data_corpus_extracts_exact_fields() {
         let samples: &[&[u8]] = &[
-            br#"{"type":"webauthn.get","challenge":"chrome-token","origin":"https://app.172-104-31-54.nip.io","crossOrigin":false}"#,
-            br#"{"type": "webauthn.get", "challenge": "safari-token", "origin": "https://app.172-104-31-54.nip.io"}"#,
-            br#"{"challenge":"firefox-token","origin":"https://app.172-104-31-54.nip.io","type":"webauthn.get","crossOrigin":false,"tokenBinding":{"status":"supported"}}"#,
+            br#"{"type":"webauthn.get","challenge":"chrome-token","origin":"https://app.62-171-170-238.nip.io","crossOrigin":false}"#,
+            br#"{"type": "webauthn.get", "challenge": "safari-token", "origin": "https://app.62-171-170-238.nip.io"}"#,
+            br#"{"challenge":"firefox-token","origin":"https://app.62-171-170-238.nip.io","type":"webauthn.get","crossOrigin":false,"tokenBinding":{"status":"supported"}}"#,
         ];
         for (sample, expected) in samples.iter().zip([
             b"chrome-token".as_slice(),
@@ -559,7 +559,7 @@ mod tests {
 
     #[test]
     fn challenge_and_member_names_decode_all_json_escape_classes() {
-        let json = br#"{"t\u0079pe":"webauthn\u002eget","chall\u0065nge":"a\/b\\c\"d\b\f\n\r\t\u00e9\ud83d\ude00","ori\u0067in":"https:\/\/app.172-104-31-54.nip.io","cross\u004frigin":false}"#;
+        let json = br#"{"t\u0079pe":"webauthn\u002eget","chall\u0065nge":"a\/b\\c\"d\b\f\n\r\t\u00e9\ud83d\ude00","ori\u0067in":"https:\/\/app.62-171-170-238.nip.io","cross\u004frigin":false}"#;
         let fields = extract_client_data_fields(json).unwrap();
         assert_eq!(fields.type_, b"webauthn.get");
         assert_eq!(
@@ -604,8 +604,8 @@ mod tests {
         let rejected: &[&[u8]] = &[
             br#"{"type":"webauthn.get","challenge":"bad","challenge":"good"}"#,
             br#"{"type":"bad","type":"webauthn.get","challenge":"good"}"#,
-            br#"{"type":"webauthn.get","challenge":"good","origin":"https://app.172-104-31-54.nip.io","origin":"https://evil.example"}"#,
-            br#"{"type":"webauthn.get","challenge":"good","origin":"https://app.172-104-31-54.nip.io","crossOrigin":false,"crossOrigin":true}"#,
+            br#"{"type":"webauthn.get","challenge":"good","origin":"https://app.62-171-170-238.nip.io","origin":"https://evil.example"}"#,
+            br#"{"type":"webauthn.get","challenge":"good","origin":"https://app.62-171-170-238.nip.io","crossOrigin":false,"crossOrigin":true}"#,
             br#"{"type":"webauthn.get","challenge":"bad","nested":{"challenge":"good"}}"#,
             br#"{"type":"webauthn.get","challenge":"bad\u0022,\u0022challenge\u0022:\u0022good"}"#,
             br#"{"type":"webauthn.get","challenge":"good\ud800"}"#,

@@ -109,7 +109,7 @@ no `_bucket` series** — use the `quantile` label, not
 - **Disk full / near-full.** redb writes stall or fail as the volume fills.
   Check `df -h` on the host and the `sybil-data` / `arena-data` volumes. This has
   taken down block production before; a full disk also blocks logging and metrics.
-- **Host saturation.** CPU/swap pressure on the single 2GB host inflates every
+- **Host saturation.** CPU/memory pressure on the shared host inflates every
   block. If `HostLoadVeryHigh` / `HostSwapHigh` are also firing, treat the host
   as the root cause (the known "TCP accepts but nothing responds" zombie mode).
 

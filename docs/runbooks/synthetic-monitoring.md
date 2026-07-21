@@ -44,8 +44,8 @@ Manual run:
 ```bash
 cd /opt/sybil
 scripts/synthetic-probe.sh \
-  --base-url https://172-104-31-54.nip.io \
-  --app-origin https://app.172-104-31-54.nip.io \
+  --base-url https://62-171-170-238.nip.io \
+  --app-origin https://app.62-171-170-238.nip.io \
   --block-interval 10
 ```
 
@@ -182,7 +182,7 @@ Modes (`SYBIL_SMOKE_PROOF_LAG` / `--proof-lag`):
   established; return to `fail` — with `SYBIL_SMOKE_PROOF_LAG_MAX` raised to
   match observed real-prover cadence — once it holds a steady lag.
 - `off`: skip entirely (deployments with no prover at all). The checked-in
-  systemd unit selects this for the 2 GB prelaunch host. Override it to `fail`
+  systemd unit selects this for the product prelaunch stack. Override it to `fail`
   in a systemd drop-in only when the validity profile is enabled.
 
 The 30-block default threshold is one probe period (5 min) at the 10s block

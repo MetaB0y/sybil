@@ -672,7 +672,7 @@ polymarket-dev port="3001" max_events="10":
 # (persistence, service auth, durable state, and Caddy).
 # docker-compose.override.yml (build contexts) is NOT shipped to the server.
 
-SERVER := "root@172.104.31.54"
+SERVER := env_var_or_default("SYBIL_DEPLOY_SERVER", "patty")
 COMPOSE_REMOTE := "docker compose --env-file .env --env-file releases/current.env -f docker-compose.yml -f docker-compose.prod.yml --profile integrations --profile ops"
 COMPOSE_REMOTE_VALIDITY := "docker compose --env-file .env --env-file releases/current.env -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.validity.yml --profile integrations --profile ops --profile validity"
 COMPOSE_REMOTE_L1 := "docker compose --env-file .env --env-file releases/current.env -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.l1.yml --profile integrations --profile ops --profile l1-indexer"
@@ -704,7 +704,7 @@ deploy-sync:
 # Both operations are idempotent, so monitoring/all-stack deploys cannot leave
 # an older unit active after scripts or proof-lag policy change.
 deploy-install-synthetic-probe: deploy-sync
-    ssh {{SERVER}} 'install -m 0644 /opt/sybil/deploy/systemd/sybil-synthetic-probe.service /etc/systemd/system/sybil-synthetic-probe.service && install -m 0644 /opt/sybil/deploy/systemd/sybil-synthetic-probe.timer /etc/systemd/system/sybil-synthetic-probe.timer && systemctl daemon-reload && systemctl enable --now sybil-synthetic-probe.timer'
+    ssh {{SERVER}} 'sudo install -m 0644 /opt/sybil/deploy/systemd/sybil-synthetic-probe.service /etc/systemd/system/sybil-synthetic-probe.service && sudo install -m 0644 /opt/sybil/deploy/systemd/sybil-synthetic-probe.timer /etc/systemd/system/sybil-synthetic-probe.timer && sudo systemctl daemon-reload && sudo systemctl enable --now sybil-synthetic-probe.timer'
 
 deploy-prelaunch-env-check:
     ssh {{SERVER}} 'cd /opt/sybil && test -f .env && grep -q "^GF_SECURITY_ADMIN_PASSWORD=." .env && grep -q "^CADDY_OPS_AUTH_USER=." .env && grep -q "^CADDY_OPS_AUTH_HASH=." .env && grep -q "^SYBIL_SERVICE_TOKEN=." .env && grep -q "^SYBIL_HISTORY_TOKEN=." .env && grep -q "^SYBIL_ARENA_READ_TOKEN=." .env && grep -q "^SYBIL_WEBAUTHN_RP_ID=." .env && grep -q "^SYBIL_WEBAUTHN_ORIGIN=." .env'
@@ -718,7 +718,7 @@ deploy-release-env-check:
 
 # Build and deploy one immutable sybil-api artifact across the API, history,
 # native, and Polymarket services that execute binaries from that image.
-# Validity is a separate deployment boundary: the 2 GB product host does not
+# Validity is a separate deployment boundary: the product deployment does not
 # claim ZK/TEE/L1 validity and cannot safely retain the current mock job stock.
 deploy-api: deploy-sync deploy-prelaunch-env-check deploy-trading-preflight && deploy-verify
     ./scripts/deploy-release.sh promote api {{SERVER}}

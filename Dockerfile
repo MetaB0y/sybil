@@ -17,9 +17,9 @@ RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
 
-# Default to server-safe Rust build settings for the prod Linode
-# (1 vCPU / 2 GB RAM / 495 MB swap). Local compose builds can override these
-# through Docker build args without making remote builds more memory-hungry.
+# Keep deploy builds conservative and reproducible even though the shared
+# prelaunch host has substantially more headroom. Local compose builds can
+# override these settings through Docker build args.
 ARG CARGO_BUILD_JOBS=1
 ARG CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
 ARG TARGETARCH

@@ -66,7 +66,7 @@ STAGE1_AB_VARIANTS = (
 
 @dataclass
 class LiveConfig:
-    sybil_url: str = "http://172.104.31.54:3000"
+    sybil_url: str = "https://62-171-170-238.nip.io"
     api_key: str = ""
     model_name: str = "deepseek/deepseek-v4-flash"
     initial_balance: float = 500.0
@@ -1326,7 +1326,7 @@ async def run_live(config: LiveConfig):
 
 def main():
     parser = argparse.ArgumentParser(description="Live AI trading bots")
-    parser.add_argument("--sybil-url", default="http://172.104.31.54:3000")
+    parser.add_argument("--sybil-url", default="https://62-171-170-238.nip.io")
     parser.add_argument("--model", default="deepseek/deepseek-v4-flash")
     parser.add_argument(
         "--max-markets",

@@ -159,11 +159,19 @@ services:
     mem_limit: "128m"
     memswap_limit: "128m"
     ports:
-      - "80:80"
-      - "443:443"
+      # Defaults preserve the single-purpose-host topology. Shared hosts can
+      # bind Caddy to loopback high ports and place their existing nginx in
+      # front without exposing Docker or disturbing unrelated sites.
+      - "${SYBIL_CADDY_HTTP_BIND:-0.0.0.0:80}:80"
+      - "${SYBIL_CADDY_HTTPS_BIND:-0.0.0.0:443}:443"
     environment:
       CADDY_OPS_AUTH_USER: "${CADDY_OPS_AUTH_USER:?Set CADDY_OPS_AUTH_USER in /opt/sybil/.env}"
       CADDY_OPS_AUTH_HASH: "${CADDY_OPS_AUTH_HASH:?Set CADDY_OPS_AUTH_HASH in /opt/sybil/.env}"
+      SYBIL_API_SITE: "${SYBIL_API_SITE:-https://62-171-170-238.nip.io}"
+      SYBIL_APP_SITE: "${SYBIL_APP_SITE:-https://app.62-171-170-238.nip.io}"
+      SYBIL_ARENA_SITE: "${SYBIL_ARENA_SITE:-https://arena.62-171-170-238.nip.io}"
+      SYBIL_GRAFANA_SITE: "${SYBIL_GRAFANA_SITE:-https://grafana.62-171-170-238.nip.io}"
+      SYBIL_PROVER_SITE: "${SYBIL_PROVER_SITE:-https://prover.62-171-170-238.nip.io}"
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data

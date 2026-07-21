@@ -4,8 +4,8 @@
 # Build context is this directory (frontend/web).
 #
 #   docker build \
-#     --build-arg NEXT_PUBLIC_API_BASE=https://172-104-31-54.nip.io \
-#     --build-arg NEXT_PUBLIC_WS_BASE=wss://172-104-31-54.nip.io \
+#     --build-arg NEXT_PUBLIC_API_BASE=https://62-171-170-238.nip.io \
+#     --build-arg NEXT_PUBLIC_WS_BASE=wss://62-171-170-238.nip.io \
 #     -t sybil-web:latest frontend/web
 #
 # IMPORTANT: NEXT_PUBLIC_* are inlined into the client bundle at BUILD time.
@@ -31,8 +31,8 @@ RUN corepack enable
 # override per environment. WEBAUTHN_RP_ID must match the public domain that
 # serves this app (passkeys are scoped to the rpId) — leave empty to use the
 # page's own host, or set it explicitly when the app is on a subdomain.
-ARG NEXT_PUBLIC_API_BASE=https://172-104-31-54.nip.io
-ARG NEXT_PUBLIC_WS_BASE=wss://172-104-31-54.nip.io
+ARG NEXT_PUBLIC_API_BASE=https://62-171-170-238.nip.io
+ARG NEXT_PUBLIC_WS_BASE=wss://62-171-170-238.nip.io
 ARG NEXT_PUBLIC_WEBAUTHN_RP_ID=
 ARG NEXT_PUBLIC_SENTRY_DSN=
 ENV NEXT_PUBLIC_API_BASE=$NEXT_PUBLIC_API_BASE \

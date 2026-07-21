@@ -100,8 +100,8 @@ signature covers authenticatorData || SHA-256(clientDataJSON)
 The API checks credential/public-key association, `webauthn.get`, challenge,
 origin, RP ID hash, user presence, user verification, signature shape, and
 configured envelope limits. Shared guest-safe verification independently pins
-RP `app.172-104-31-54.nip.io`, exact origin
-`https://app.172-104-31-54.nip.io`, and rejects `crossOrigin: true`. Changing
+RP `app.62-171-170-238.nip.io`, exact origin
+`https://app.62-171-170-238.nip.io`, and rejects `crossOrigin: true`. Changing
 either pin is a fresh guest/deployment migration.
 
 Account reads use a separate read-scoped bearer. Passkey login creates such a

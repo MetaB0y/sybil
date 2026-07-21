@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const baseURL =
-  process.env.E2E_BASE_URL ?? "https://app.172-104-31-54.nip.io";
+  process.env.E2E_BASE_URL ?? "https://app.62-171-170-238.nip.io";
 const localHosts = (process.env.E2E_LOCAL_HOSTS ?? "")
   .split(",")
   .map((host) => host.trim())
@@ -29,7 +29,7 @@ const localHostLaunchArgs = localHosts.length > 0
  * `E2E_BASE_URL` (web app) and, if the API is not on the app host's parent
  * domain, `E2E_API_BASE`.
  *
- *   E2E_BASE_URL=https://app.172-104-31-54.nip.io pnpm e2e
+ *   E2E_BASE_URL=https://app.62-171-170-238.nip.io pnpm e2e
  *
  * A local HTTPS proxy can still exercise the validity-pinned devnet RP without
  * changing machine DNS or weakening verifier checks. Build the web/API with

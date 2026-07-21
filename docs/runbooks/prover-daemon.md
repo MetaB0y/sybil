@@ -20,7 +20,7 @@ debugging tools; they do not provide the daemon's recovery guarantees.
 
 The repository default is `stark`; Compose explicitly selects `mock` because
 the small runtime image does not contain the pinned OpenVM toolchain. The
-current 2 GB prelaunch host does not enable that profile: the mock daemon's
+current prelaunch product stack does not enable that profile: the mock daemon's
 retained job stock exhausted its cgroup during a live soak (#137). Run bounded
 mock integration tests locally and STARK mode from a repository checkout on
 measured prover hardware.

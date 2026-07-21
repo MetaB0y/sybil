@@ -1,7 +1,7 @@
 //! Deployment-profile guardrails (SYB-133).
 //!
-//! The public 2 GB devnet box is tuned with dev-only tradeoffs (in-memory
-//! store, permissive dev mode, reduced caches). Nothing used to stop those
+//! The public devnet is tuned with dev-only tradeoffs (in-memory store,
+//! permissive dev mode, reduced caches). Nothing used to stop those
 //! tradeoffs from silently leaking into a `prod` / devnet-v2 deployment. This
 //! module:
 //!

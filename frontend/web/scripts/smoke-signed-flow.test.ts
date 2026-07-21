@@ -39,7 +39,7 @@ import {
   fromHex,
 } from "../src/lib/auth/canonical";
 
-const BASE = process.env.SYBIL_API_BASE ?? "https://172-104-31-54.nip.io";
+const BASE = process.env.SYBIL_API_BASE ?? "https://62-171-170-238.nip.io";
 const SERVICE_TOKEN = process.env.SYBIL_SERVICE_TOKEN;
 const SMOKE_FUND_NANOS = "1000000000000";
 interface RestResult<T = unknown> {

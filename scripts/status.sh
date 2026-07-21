@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-S=${SYBIL_STATUS_SSH:-root@172.104.31.54}
+S=${SYBIL_STATUS_SSH:-patty}
 COMPOSE="docker compose --env-file .env --env-file releases/current.env -f docker-compose.yml -f docker-compose.prod.yml --profile integrations --profile ops"
 
 remote_api_get() {

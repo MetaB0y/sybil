@@ -140,11 +140,11 @@ services:
     build:
       context: ./frontend/web
       args:
-        NEXT_PUBLIC_API_BASE: "${NEXT_PUBLIC_API_BASE:-https://172-104-31-54.nip.io}"
-        NEXT_PUBLIC_WS_BASE: "${NEXT_PUBLIC_WS_BASE:-wss://172-104-31-54.nip.io}"
+        NEXT_PUBLIC_API_BASE: "${NEXT_PUBLIC_API_BASE:-https://62-171-170-238.nip.io}"
+        NEXT_PUBLIC_WS_BASE: "${NEXT_PUBLIC_WS_BASE:-wss://62-171-170-238.nip.io}"
         NEXT_PUBLIC_WEBAUTHN_RP_ID: "${NEXT_PUBLIC_WEBAUTHN_RP_ID:-}"
-    mem_limit: "256m"
-    memswap_limit: "256m"
+    mem_limit: "512m"
+    memswap_limit: "512m"
     restart: unless-stopped
     healthcheck:
       # node:slim ships no curl/wget; use Node's global fetch instead.

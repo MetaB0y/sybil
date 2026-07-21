@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fingerprint": "sha256:9fb0c12b5a361d9f11e1ed2ea88a2a768a1e03db3d54f77b5d89be49d18d7db7",
+  "fingerprint": "sha256:c1c3a932c281de09bbae3f139b6017a7baf0c714b17d034a5b56cbad73a72499",
   "inputs": {
     "commonware_packages": [
       {
@@ -74,31 +74,31 @@
     "guests": {
       "state_transition": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "8c9dd78a7062264618470ea0a4936d9bd625a9458563a4bbcb151259eecab581",
-        "app_exe_commit": "0x00837ae158d26c9265be2096f50d2864efb51225c116ddcee794dc8294d45369",
+        "source_sha256": "7968826fd3773b34fd76b36ac7ec13ca22bbf14247c672303b2c8d8a57349fc0",
+        "app_exe_commit": "0x0075a20eff341d436c027a0186d0511f577f49e5aa17fdf6dff495e96f17788c",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       },
       "escape_claim": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "1ced6574e9423d720b245938427262e5c1651dc30966c2f717829140e04cb8b5",
-        "app_exe_commit": "0x00026aa313d5f7c0158118be7a9ed89883625bb6b9622f0976377c0ae9173351",
+        "source_sha256": "5e5a896cefa2cf85bfe9ab0fe4b6f1a6b94ffe6ffcef60fe80bd913251d2bd56",
+        "app_exe_commit": "0x0052975428c506265dc5e2762aef205352e5d5282f2f556bba00a668930fb97e",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       }
     },
     "desired_validity_pins": {
       "state_transition": {
-        "app_exe_commit": "0x00837ae158d26c9265be2096f50d2864efb51225c116ddcee794dc8294d45369",
+        "app_exe_commit": "0x0075a20eff341d436c027a0186d0511f577f49e5aa17fdf6dff495e96f17788c",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       },
       "escape_claim": {
-        "app_exe_commit": "0x00026aa313d5f7c0158118be7a9ed89883625bb6b9622f0976377c0ae9173351",
+        "app_exe_commit": "0x0052975428c506265dc5e2762aef205352e5d5282f2f556bba00a668930fb97e",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       }
     }
   },
   "decision": {
     "action": "fresh_genesis",
-    "reason": "Witness v12 market-group identity plus final MM settlement source; rebuilt both guests from the post-rebase tree",
+    "reason": "WebAuthn RP/origin migrated to app.62-171-170-238.nip.io for the new prelaunch host; no prior chain state is compatible with the rebuilt main and escape guests.",
     "reference": "docs/runbooks/fresh-genesis-redeploy.md"
   }
 }

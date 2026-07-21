@@ -44,7 +44,7 @@ above. The unprofiled default is the core: `sybil-api`, `sybil-history`, and
 - `ops` — VictoriaMetrics, vmalert, Grafana, and node-exporter;
 - `l1-indexer` — the separately credentialed L1 lifecycle sidecar.
 
-`just docker-up-all` selects the first three on a workstation. The 2 GB
+`just docker-up-all` selects the first three on a workstation. The shared
 prelaunch deploy recipes select `integrations` and `ops`; both `validity` and
 `l1-indexer` remain independent opt-ins. Product Compose sets
 `SYBIL_RETAIN_VALIDITY_ARTIFACTS=false`, so it keeps native verification,
@@ -164,7 +164,7 @@ retention and swaps VictoriaMetrics' empty prover discovery file for the exact
 daemon target. It must be selected from block 1; use
 `just deploy-prover-daemon CONFIRM`, never add the profile to a running product
 chain.
-It is not part of the 2 GB prelaunch host. A live soak reached 303 MiB anonymous
+It is not part of the product prelaunch profile. A live soak reached 303 MiB anonymous
 RSS and its 384 MiB cgroup ceiling after only 140 retained jobs, so the profile
 uses bounded restart attempts and remains opt-in while #137 defines and
 implements retention. Production-capable STARK mode runs from a pinned
@@ -452,8 +452,8 @@ consensus-incompatible rollback requires the matching backup/genesis domain.
 ## WebAuthn validity pins
 
 Locked-profile startup requires the API WebAuthn policy to equal the values compiled
-into shared native/guest verification: RP ID `app.172-104-31-54.nip.io`, origin
-`https://app.172-104-31-54.nip.io`, and user verification enabled. A mismatch
+into shared native/guest verification: RP ID `app.62-171-170-238.nip.io`, origin
+`https://app.62-171-170-238.nip.io`, and user verification enabled. A mismatch
 would let the API admit an assertion the validity guest must reject, so the
 deployment preflight fails closed. Serving another hostname requires an
 intentional guest rebuild/repin and fresh genesis, not only changing Compose

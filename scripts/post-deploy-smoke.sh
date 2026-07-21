@@ -32,11 +32,11 @@
 #
 # Configuration (flags override env; env overrides defaults):
 #   base_url / SYBIL_SMOKE_BASE          API root host
-#                                        (default https://172-104-31-54.nip.io;
+#                                        (default https://62-171-170-238.nip.io;
 #                                        the API is at the ROOT host, not api.*)
 #   --service-token / SYBIL_SERVICE_TOKEN   bearer for service-gated routes
 #   --app-origin / SYBIL_SMOKE_APP_ORIGIN   browser origin for the CORS check
-#                                        (default https://app.172-104-31-54.nip.io)
+#                                        (default https://app.62-171-170-238.nip.io)
 #   --block-interval / SYBIL_SMOKE_INTERVAL block time seconds (default 10)
 #   SYBIL_SMOKE_STARTUP_TIMEOUT
 #                                        seconds to wait for /v1/health after a
@@ -71,7 +71,7 @@
 #                                        unavailable, malformed, or too stale.
 #
 #   SYBIL_SMOKE_DOCKER_SSH   run the container-health probe over this ssh target
-#                            (e.g. root@172.104.31.54) instead of local docker.
+#                            (e.g. patty) instead of local docker.
 #   SYBIL_COMPOSE_PROJECT    compose project label to enumerate (default sybil).
 #   SYBIL_SMOKE_SIGN_BIN     path to a prebuilt smoke_sign binary (skips cargo).
 #
@@ -80,8 +80,8 @@
 set -uo pipefail
 
 # ── Configuration ───────────────────────────────────────────────────────────
-BASE="${SYBIL_SMOKE_BASE:-https://172-104-31-54.nip.io}"
-APP_ORIGIN="${SYBIL_SMOKE_APP_ORIGIN:-https://app.172-104-31-54.nip.io}"
+BASE="${SYBIL_SMOKE_BASE:-https://62-171-170-238.nip.io}"
+APP_ORIGIN="${SYBIL_SMOKE_APP_ORIGIN:-https://app.62-171-170-238.nip.io}"
 SERVICE_TOKEN="${SYBIL_SERVICE_TOKEN:-}"
 INTERVAL="${SYBIL_SMOKE_INTERVAL:-10}"
 STARTUP_TIMEOUT="${SYBIL_SMOKE_STARTUP_TIMEOUT:-60}"

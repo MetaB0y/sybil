@@ -8,7 +8,7 @@
     }
 }
 
-172-104-31-54.nip.io {
+{$SYBIL_API_SITE:https://62-171-170-238.nip.io} {
     encode zstd gzip
 
     # WebSocket block streams: no upstream timeout.
@@ -40,26 +40,26 @@
 # are baked to point at). Caddy auto-provisions TLS for this name too.
 # For a real product domain, Valery can instead make the apex serve the app and
 # move the API to api.<domain> (rebuild sybil-web with the new NEXT_PUBLIC_* args).
-app.172-104-31-54.nip.io {
+{$SYBIL_APP_SITE:https://app.62-171-170-238.nip.io} {
     encode zstd gzip
     reverse_proxy sybil-web:3000
 }
 
-arena.172-104-31-54.nip.io {
+{$SYBIL_ARENA_SITE:https://arena.62-171-170-238.nip.io} {
     encode zstd gzip
 
     import ops_auth
     reverse_proxy sybil-arena-dashboard:8501
 }
 
-grafana.172-104-31-54.nip.io {
+{$SYBIL_GRAFANA_SITE:https://grafana.62-171-170-238.nip.io} {
     encode zstd gzip
 
     import ops_auth
     reverse_proxy grafana:3000
 }
 
-prover.172-104-31-54.nip.io {
+{$SYBIL_PROVER_SITE:https://prover.62-171-170-238.nip.io} {
     encode zstd gzip
 
     import ops_auth

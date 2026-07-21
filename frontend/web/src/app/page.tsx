@@ -5,7 +5,7 @@ import {
   type Market,
 } from "@/lib/markets/use-markets";
 
-const DEFAULT_API_BASE = "https://172-104-31-54.nip.io";
+const DEFAULT_API_BASE = "https://62-171-170-238.nip.io";
 const INITIAL_MARKETS_TIMEOUT_MS = 2_500;
 
 /**
