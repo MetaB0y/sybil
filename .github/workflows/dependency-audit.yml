@@ -1,0 +1,61 @@
+name: Dependency Advisory Audit
+
+# Keep this manual while GitHub Actions billing is disabled (SYB-251). The
+# weekly Dependabot refreshes do not consume Actions minutes. Restore a weekly
+# schedule here with the other automatic workflows once billing is available.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-advisory-audit
+  cancel-in-progress: false
+
+env:
+  CARGO_AUDIT_VERSION: "0.22.2"
+  PNPM_VERSION: "11.11.0"
+  UV_VERSION: "0.11.28"
+
+jobs:
+  audit:
+    name: Audit all maintained lockfiles
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: "1.97.0"
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/web/pnpm-lock.yaml
+
+      - uses: taiki-e/install-action@1e7bd61f4b270e749b15995a9e7aa0fe7449dc13 # just
+
+      - name: Install pinned cargo-audit
+        run: >-
+          cargo install cargo-audit
+          --version "$CARGO_AUDIT_VERSION"
+          --locked
+
+      - name: Verify immutable action references
+        run: just actions-pin-check
+
+      - name: Audit Rust, pnpm, and uv lockfiles
+        run: just audit-dependencies

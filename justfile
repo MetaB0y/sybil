@@ -31,6 +31,11 @@ feature-lint:
 audit-dependencies:
     ./scripts/check-dependency-advisories.sh
 
+# Every external GitHub Action must be immutable and retain a readable tag/ref
+# comment that Dependabot can update alongside the reviewed commit SHA.
+actions-pin-check:
+    ./scripts/check-github-actions-pins.py
+
 # Compile every target in the normal workspace build.
 workspace-check:
     cargo check --workspace --all-targets
@@ -404,10 +409,11 @@ frontend-check:
     pnpm tsc --noEmit
     pnpm lint
     pnpm test
+    pnpm sharp:check
     pnpm build
 
 # Fast developer gate: metadata, formatting, compilation, and lints.
-check-fast: rust-workspaces-check fmt-check workspace-check lint
+check-fast: actions-pin-check rust-workspaces-check fmt-check workspace-check lint
 
 # Exhaustive Rust feature gate. Keep this out of the edit/compile loop while
 # still making every optional integration part of the complete gate.

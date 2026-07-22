@@ -1,0 +1,74 @@
+# All updates are review-only. Never auto-merge dependency changes, especially
+# updates that touch the fingerprinted OpenVM guest closure.
+version: 2
+
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "05:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(actions)"
+
+  - package-ecosystem: "cargo"
+    directories:
+      - "/"
+      - "/fuzz"
+      - "/zk/openvm-guest"
+      - "/zk/openvm-escape-guest"
+      - "/zk/openvm-tools"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "05:20"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 8
+    groups:
+      shared-cargo-dependencies:
+        group-by: "dependency-name"
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "deps(rust)"
+
+  # Dependabot names the pnpm ecosystem `npm`; this directory is pinned to
+  # pnpm 11 by package.json and owns the maintained frontend lockfile.
+  - package-ecosystem: "npm"
+    directory: "/frontend/web"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "05:40"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 5
+    groups:
+      frontend-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    commit-message:
+      prefix: "deps(web)"
+
+  - package-ecosystem: "uv"
+    directories:
+      - "/arena"
+      - "/viz"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 5
+    groups:
+      shared-python-dependencies:
+        group-by: "dependency-name"
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "deps(python)"

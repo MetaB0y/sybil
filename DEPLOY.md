@@ -182,6 +182,36 @@ then configure the named fast checks as required in branch protection. The L4
 job is explicitly guarded from pull-request events so restoring frontend PR
 triggers cannot accidentally put the browser journey on the fast path.
 
+### Dependency and workflow supply chain
+
+Every external action in `.github/workflows/` is pinned to a reviewed full
+commit SHA. The adjacent tag/ref comment is part of the contract: Dependabot
+updates both the immutable pin and its readable release annotation. `just
+actions-pin-check` runs in `check-fast` and rejects mutable tags, branches,
+aliases, unpinned container actions, or pins without a readable comment.
+
+`.github/dependabot.yml` opens review-only weekly updates for GitHub Actions,
+the root/fuzz/OpenVM Cargo workspaces, the pnpm frontend, and both uv projects.
+There is no dependency auto-merge. Changes to an OpenVM lockfile or any source
+in the guest closure require the normal fingerprint, commitment, consensus, and
+fresh-genesis review; a green dependency PR is not permission to bypass those
+gates. Deployed image digests remain a separate release concern.
+
+Run `just audit-dependencies` locally before merging dependency updates. It
+requires cargo-audit 0.22.2 and invokes pip-audit 2.10.1 exactly; the manual
+`Dependency Advisory Audit` workflow additionally pins Rust 1.97.0, uv 0.11.28,
+and pnpm 11.11.0. The workflow remains manual while Actions billing is disabled;
+restore its weekly schedule with the other automatic workflows after billing
+returns. Dependabot refresh scheduling is independent of Actions minutes.
+
+The repository maintainer owns first triage. A new advisory fails closed unless
+the affected graph is removed or a narrow, documented, time-bounded exception
+is justified in `scripts/check-dependency-advisories.sh` and tracked in GitHub.
+Updater failures are diagnosed from Dependabot or workflow logs; never loosen
+the audit, change a consensus pin, or merge a broad lockfile rewrite merely to
+make the automation green. Existing upstream-only RustSec removals are tracked
+by issue #194.
+
 ```bash
 just deploy-api
 just deploy-arena

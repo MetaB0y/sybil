@@ -35,8 +35,11 @@ for lock_path in (Path("Cargo.lock"), Path("fuzz/Cargo.lock")):
         )
 PY
 
-if ! cargo audit --version >/dev/null 2>&1; then
-    echo "cargo-audit 0.22.2 is required (cargo install cargo-audit --version 0.22.2 --locked)" >&2
+expected_cargo_audit="0.22.2"
+cargo_audit_version="$(cargo audit --version 2>/dev/null | awk '{print $NF}')"
+if [[ "$cargo_audit_version" != "$expected_cargo_audit" ]]; then
+    echo "cargo-audit $expected_cargo_audit is required (cargo install cargo-audit --version $expected_cargo_audit --locked)" >&2
+    echo "found: ${cargo_audit_version:-unavailable}" >&2
     exit 1
 fi
 
