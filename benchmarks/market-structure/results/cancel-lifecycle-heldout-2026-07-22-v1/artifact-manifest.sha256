@@ -1,0 +1,9 @@
+70c9c1ca74076c20e82610d948c83fd845b3b369704e08747db34e80abfb6784  benchmarks/market-structure/protocol-cancel-lifecycle-heldout-2026-07-22-v1.json
+5586d0e7f7def0c0871f9b592ba507e3ac44bcfa637dc62a451b894c78d2db07  benchmarks/market-structure/results/cancel-lifecycle-heldout-2026-07-22-v1/REPORT.md
+e5b0227405fb24d19c2dfcd6d553b5ca76025cbf7009b197c988edc4280f0b80  benchmarks/market-structure/results/cancel-lifecycle-heldout-2026-07-22-v1/REPRODUCE.md
+fbd4fc78ca831a700a3d0c9fa398ddfd0c3c0aa4f1eeb8a1501506b1c91c9614  benchmarks/market-structure/results/cancel-lifecycle-heldout-2026-07-22-v1/analysis/README.md
+3e156c5fb5b2612b82d4f388ca8ffb332a65f646735162f9e3ddf421afbb3c15  benchmarks/market-structure/results/cancel-lifecycle-heldout-2026-07-22-v1/analysis/analysis-manifest.json
+f308d33d138a55a9024552b278a8ddeab21e04df6a1419b47f8e900d64959838  benchmarks/market-structure/results/cancel-lifecycle-heldout-2026-07-22-v1/analysis/engine-metrics.csv.gz
+5818c180f02583b32d856b7fee36a0a8a249cf356dce194e10e642b0f6cdfe44  benchmarks/market-structure/results/cancel-lifecycle-heldout-2026-07-22-v1/analysis/paired-differences.csv.gz
+37e4dde26868834545867f8f05e9000c0e6bd9ded629f1d148083ac146560cfd  benchmarks/market-structure/results/cancel-lifecycle-heldout-2026-07-22-v1/analysis/paired-summary.csv
+350d5ce98cf7ba3fdd1d168bab2ffad20cbf9e1cb138604144339dedec547820  benchmarks/market-structure/results/cancel-lifecycle-heldout-2026-07-22-v1/raw/paired-runs.jsonl.gz
