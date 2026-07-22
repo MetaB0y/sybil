@@ -710,7 +710,7 @@ deploy-install-synthetic-probe: deploy-sync
     ssh {{SERVER}} 'sudo install -m 0644 /opt/sybil/deploy/systemd/sybil-synthetic-probe.service /etc/systemd/system/sybil-synthetic-probe.service && sudo install -m 0644 /opt/sybil/deploy/systemd/sybil-synthetic-probe.timer /etc/systemd/system/sybil-synthetic-probe.timer && sudo systemctl daemon-reload && sudo systemctl enable --now sybil-synthetic-probe.timer'
 
 deploy-prelaunch-env-check:
-    ssh {{SERVER}} 'cd /opt/sybil && test -f .env && grep -q "^GF_SECURITY_ADMIN_PASSWORD=." .env && grep -q "^CADDY_OPS_AUTH_USER=." .env && grep -q "^CADDY_OPS_AUTH_HASH=." .env && grep -q "^SYBIL_SERVICE_TOKEN=." .env && grep -q "^SYBIL_HISTORY_TOKEN=." .env && grep -q "^SYBIL_ARENA_READ_TOKEN=." .env && grep -q "^SYBIL_WEBAUTHN_RP_ID=." .env && grep -q "^SYBIL_WEBAUTHN_ORIGIN=." .env'
+    ssh {{SERVER}} 'cd /opt/sybil && test -f .env && grep -q "^GF_SECURITY_ADMIN_PASSWORD=." .env && grep -q "^CADDY_OPS_AUTH_USER=." .env && grep -q "^CADDY_OPS_AUTH_HASH=." .env && grep -q "^SYBIL_SERVICE_TOKEN=." .env && grep -q "^SYBIL_HISTORY_TOKEN=." .env && grep -q "^SYBIL_ARENA_READ_TOKEN=." .env && grep -q "^SYBIL_WEBAUTHN_RP_ID=." .env && grep -q "^SYBIL_WEBAUTHN_ORIGIN=." .env && for key in SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS; do value=$(sed -n "s/^${key}=//p" .env); test -z "$value" || test "$value" = 60480 || { echo "$key must be unset or 60480 for prelaunch" >&2; exit 1; }; done'
 
 deploy-openrouter-env-check:
     ssh {{SERVER}} 'cd /opt/sybil && test -f arena.env && grep -q "^OPENROUTER_API_KEY=." arena.env'

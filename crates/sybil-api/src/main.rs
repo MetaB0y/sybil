@@ -290,6 +290,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::error!("{msg}");
         return Err(std::io::Error::other(msg).into());
     }
+    let deployment_profile =
+        sybil_api::preflight::DeploymentProfile::parse(&config.deployment_profile)
+            .map_err(std::io::Error::other)?;
 
     // SYB-153: raw Polymarket event JSON must survive restart. The snapshot dir
     // lives on the durable data volume; ensure it exists WITHOUT wiping it, so
@@ -320,6 +323,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             0.0
         },
     );
+    metrics::gauge!(
+        "sybil_configured_retention_blocks",
+        "policy" => "canonical_archive",
+        "deployment_profile" => deployment_profile.as_str(),
+    )
+    .set(config.canonical_archive_retention_blocks as f64);
+    metrics::gauge!(
+        "sybil_configured_retention_blocks",
+        "policy" => "acknowledged_proof_job",
+        "deployment_profile" => deployment_profile.as_str(),
+    )
+    .set(config.acknowledged_proof_job_retention_blocks as f64);
 
     let store = if !config.data_dir.is_empty() {
         let data_dir = std::path::Path::new(&config.data_dir);

@@ -1,0 +1,36 @@
+# Prometheus-compatible tests for locked deployment retention posture.
+# Run: promtool test rules deploy/vmalert/tests/retention-policy-drift_test.yml
+
+rule_files:
+  - ../rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: shortened locked retention pages but the exact policy and devnet do not
+    interval: 1m
+    input_series:
+      - series: 'sybil_configured_retention_blocks{job="sybil-api",instance="sybil-api:3000",deployment_profile="prelaunch",policy="canonical_archive"}'
+        values: "1000 60480"
+      - series: 'sybil_configured_retention_blocks{job="sybil-api",instance="sybil-api:3000",deployment_profile="prod",policy="acknowledged_proof_job"}'
+        values: "60480 60480"
+      - series: 'sybil_configured_retention_blocks{job="local-api",instance="localhost:3000",deployment_profile="devnet",policy="canonical_archive"}'
+        values: "1000 1000"
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: LockedRetentionPolicyDrift
+        exp_alerts:
+          - exp_labels:
+              job: sybil-api
+              instance: sybil-api:3000
+              deployment_profile: prelaunch
+              policy: canonical_archive
+              severity: critical
+              component: sequencer
+            exp_annotations:
+              summary: "Locked deployment retention differs from seven days"
+              description: "The canonical_archive retention policy is 1000 blocks, but prelaunch/prod requires 60480. Startup normally refuses this drift; if the dev-knob override was used, restore the locked policy without resetting canonical state."
+              runbook_url: "https://github.com/MetaB0y/sybil/blob/main/docs/runbooks/resource-liveness.md#signals-and-thresholds"
+      - eval_time: 1m
+        alertname: LockedRetentionPolicyDrift
+        exp_alerts: []

@@ -1070,6 +1070,20 @@ groups:
           description: "The sequencer retained all source rows after proof-job maintenance failed. Inspect digest integrity and redb health before changing retention or deleting data."
           runbook_url: "https://github.com/MetaB0y/sybil/blob/main/docs/runbooks/prover-daemon.md#source-retention-and-ownership"
 
+      - alert: LockedRetentionPolicyDrift
+        expr: |
+          sybil_configured_retention_blocks{
+            deployment_profile=~"prelaunch|prod"
+          } != 60480
+        for: 0m
+        labels:
+          severity: critical
+          component: sequencer
+        annotations:
+          summary: "Locked deployment retention differs from seven days"
+          description: "The {{ $labels.policy }} retention policy is {{ $value }} blocks, but prelaunch/prod requires 60480. Startup normally refuses this drift; if the dev-knob override was used, restore the locked policy without resetting canonical state."
+          runbook_url: "https://github.com/MetaB0y/sybil/blob/main/docs/runbooks/resource-liveness.md#signals-and-thresholds"
+
       - alert: ProverInactive
         expr: |
           max(sybil_prover_artifact_directories_total) == 0

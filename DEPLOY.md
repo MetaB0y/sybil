@@ -143,7 +143,9 @@ DA artifact/manifest rows follow the canonical archive policy; acknowledged
 proof jobs become eligible only after the standalone prover has durably
 accepted their exact bytes. A pass runs every 60 blocks (ten minutes) and
 deletes at most 10,000 rows. `just compose-smoke` checks these effective
-merged-Compose values without starting containers.
+merged-Compose values without starting containers. Locked-profile startup also
+refuses a host override that changes either retention family from 60,480;
+`LockedRetentionPolicyDrift` remains armed for the loud dev-knob escape hatch.
 
 This is not a product-history budget, hard disk quota, or escape-availability
 promise. The separate `sybil-history` store currently retains raw batches,

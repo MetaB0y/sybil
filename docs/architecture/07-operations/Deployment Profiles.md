@@ -102,8 +102,8 @@ uses that same overlay with the two explicit funding overrides above.
 | `SYBIL_HISTORY_REDB_CACHE_BYTES` | `67108864` (64 MiB) | same | same | no |
 | `MALLOC_ARENA_MAX` (`sybil-history` Compose service) | libc default outside Compose | `2` | `2` | no |
 | `SYBIL_RECENT_BLOCK_CACHE_CAPACITY` | `100` | `100` | `100` | no |
-| `SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS` | `0` (no prune) | `0` | `60480` (7 days at 10s/block) | no |
-| `SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS` | `8640` in Compose; `0` for direct runs | `8640` (1 day at 10s/block) | `60480` (7 days at 10s/block) | no |
+| `SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS` | `0` (no prune) | `0` | `60480` (7 days at 10s/block) | **yes — blocks** |
+| `SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS` | `8640` in Compose; `0` for direct runs | `8640` (1 day at 10s/block) | `60480` (7 days at 10s/block) | **yes — blocks** |
 | `SYBIL_ACKNOWLEDGED_PROOF_JOB_MAINTENANCE_INTERVAL_BLOCKS` / `MAX_ROWS_PER_PASS` | `60` / `1000` in Compose | `60` / `1000` | `60` / `10000` | no |
 | `SYBIL_CANONICAL_ARCHIVE_MAINTENANCE_INTERVAL_BLOCKS` / `MAX_ROWS_PER_PASS` | `1000` / `10000` | same as default | `60` / `10000` | no |
 | `SYBIL_MIN_RESTING_ORDER_NOTIONAL_NANOS` | `1000000` | `1000000` | `1000000` | no |

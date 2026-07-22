@@ -1,7 +1,7 @@
 ---
 tags: [runbook, observability, resources, data-availability]
 status: current
-last_verified: 2026-07-21
+last_verified: 2026-07-22
 ---
 
 # Resource and DA liveness alerts
@@ -22,7 +22,8 @@ last_verified: 2026-07-21
 `SequencerAccountStockGrowingFast`,
 `PublicAccountCapacityLow`, `PublicAccountCapacityExhausted`,
 `ProductHistoryOutboxStale`, `ProductHistoryOutboxLarge`,
-`WitnessPayloadLarge`, and `DaArtifactWriteBacklog`.
+`WitnessPayloadLarge`, `DaArtifactWriteBacklog`, and
+`LockedRetentionPolicyDrift`.
 
 ## Signals and thresholds
 
@@ -45,12 +46,17 @@ last_verified: 2026-07-21
 | `ProductHistoryOutboxLarge` | Encoded source payloads above 256 MiB for 5 minutes | This is an early warning below normal host capacity. It excludes redb key/page/fragmentation overhead, which the filesystem alerts cover. |
 | `WitnessPayloadLarge` | Rolling p99 canonical witness payload above 8 MiB for 5 minutes | At the 10-second deployment cadence, retaining an 8 MiB payload every block is about 68 GiB/day before database overhead. The threshold is an early operating-cost warning, well below host-memory exhaustion. |
 | `DaArtifactWriteBacklog` | More than two DA writes in flight for 2 minutes | One write per block is expected. Sustained overlap means the post-commit writer is not keeping pace and can consume memory through cloned witnesses and queued write tasks. |
+| `LockedRetentionPolicyDrift` | Either locked-profile retention family differs from 60,480 blocks | Prelaunch/prod startup normally refuses the mismatch. The alert preserves a specific signal when the loud dev-knob override is deliberately used. |
 
 `sybil_da_artifact_persist_duration_seconds` is supporting context. Compare its
 rolling p99 with the configured block interval; persistence consistently near
 or above that interval explains a growing in-flight count. DA payload, latency,
 and in-flight metrics exist only when `SYBIL_DATA_DIR` enables the artifact
 path. `sybil_state_accounts_total` is emitted on every committed block.
+`sybil_configured_retention_blocks` publishes the canonical archive and
+acknowledged proof-job policies with `policy` and `deployment_profile` labels;
+it is configuration evidence, not proof that previously pruned rows still
+exist.
 
 Product-history stock metrics are emitted whenever a persistent sequencer store
 exists, even if `SYBIL_HISTORY_URL` is missing. The payload-byte counter is

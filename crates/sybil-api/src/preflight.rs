@@ -135,6 +135,8 @@ fn is_set(value: &str) -> bool {
 ///   regenerated on every restart, so the configured signer is not durable.
 /// - `SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS` nonzero — anonymous play-money minting
 ///   must not enter a real-value production balance domain.
+/// - canonical-archive or acknowledged proof-job retention differing from the
+///   seven-day locked-profile policy — silently changes replay or recovery.
 ///
 /// Informational-only deviations (logged, never block):
 /// - `SYBIL_RECENT_BLOCK_CACHE_CAPACITY` — recent canonical-block cache size.
@@ -237,6 +239,22 @@ pub fn collect_deviations(config: &ApiConfig) -> Vec<Deviation> {
             value: config.recent_block_cache_capacity.to_string(),
             prod_intended: "100",
             dev_only: false,
+        });
+    }
+    if config.canonical_archive_retention_blocks != 60_480 {
+        out.push(Deviation {
+            knob: "SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS",
+            value: config.canonical_archive_retention_blocks.to_string(),
+            prod_intended: "60480",
+            dev_only: true,
+        });
+    }
+    if config.acknowledged_proof_job_retention_blocks != 60_480 {
+        out.push(Deviation {
+            knob: "SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS",
+            value: config.acknowledged_proof_job_retention_blocks.to_string(),
+            prod_intended: "60480",
+            dev_only: true,
         });
     }
     if config.ws_client_idle_timeout_ms != 90_000 {
@@ -386,6 +404,8 @@ mod tests {
             webauthn_require_uv: true,
             public_account_grant_nanos: 0,
             recent_block_cache_capacity: 100,
+            canonical_archive_retention_blocks: 60_480,
+            acknowledged_proof_job_retention_blocks: 60_480,
             ..ApiConfig::default()
         }
     }
@@ -623,5 +643,27 @@ mod tests {
                 .any(|deviation| deviation.knob == "SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS")
         );
         assert!(run_preflight(&config).is_err());
+    }
+
+    #[test]
+    fn shortened_retention_blocks_locked_profiles() {
+        for config in [
+            ApiConfig {
+                canonical_archive_retention_blocks: 1_000,
+                ..prod_ready_config()
+            },
+            ApiConfig {
+                acknowledged_proof_job_retention_blocks: 1_000,
+                ..prod_ready_config()
+            },
+        ] {
+            let report = build_report(&config).unwrap();
+            assert!(report.blocks_start(false));
+            assert!(report.violations().iter().any(|deviation| {
+                deviation.knob == "SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS"
+                    || deviation.knob == "SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS"
+            }));
+            assert!(run_preflight(&config).is_err());
+        }
     }
 }

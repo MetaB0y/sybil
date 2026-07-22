@@ -22,7 +22,7 @@ settlement remain sequencer-owned.
 - Public onboarding receives a server-selected fixed grant and has separate
   lifetime account stock and rate budgets. Account IDs are never reused.
 - Locked-profile preflight fails closed on dev mode, missing auth/persistence,
-  and invalid WebAuthn configuration.
+  invalid WebAuthn configuration, and canonical/proof-job retention drift.
 - Proxy headers affect client identity only from explicitly trusted peer CIDRs.
 - Public trading accepts only the supported single-market shapes.
 - First-key bootstrap is zero-key-only; later key changes are signed,
