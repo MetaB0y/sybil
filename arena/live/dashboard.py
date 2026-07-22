@@ -266,18 +266,19 @@ if cost_df is None:
 elif cost_df.empty:
     st.info("No token usage yet.")
 else:
-    cost_df["est_cost"] = (cost_df["prompt_tokens"] + cost_df["completion_tokens"]) * 0.70 / 1_000_000
     d = cost_df.rename(columns={
         "trader_name": "Trader", "calls": "Calls",
         "prompt_tokens": "Prompt", "completion_tokens": "Completion",
-        "avg_latency_s": "Avg Latency (s)", "est_cost": "Est. Cost ($)",
+        "max_completion_tokens": "Max Completion",
+        "avg_latency_s": "Avg Latency (s)", "max_latency_s": "Max Latency (s)",
+        "recorded_cost_usd": "Recorded Cost ($)", "cost_sources": "Cost Sources",
     })
-    d["Est. Cost ($)"] = d["Est. Cost ($)"].apply(lambda x: f"${x:.4f}")
+    d["Recorded Cost ($)"] = d["Recorded Cost ($)"].apply(lambda x: f"${x:.6f}")
     d["Avg Latency (s)"] = d["Avg Latency (s)"].apply(lambda x: f"{x:.1f}")
+    d["Max Latency (s)"] = d["Max Latency (s)"].apply(lambda x: f"{x:.1f}")
     st.dataframe(d, use_container_width=True, hide_index=True)
 
-    total = cost_df["prompt_tokens"].sum() + cost_df["completion_tokens"].sum()
-    st.metric("Total Estimated Cost", f"${total * 0.70 / 1_000_000:.4f}")
+    st.metric("Total Recorded Cost", f"${cost_df['recorded_cost_usd'].sum():.6f}")
 
 # --------------------------------------------------------------------------- #
 # 8. Market Maker (MtM)
@@ -296,7 +297,7 @@ else:
 # --------------------------------------------------------------------------- #
 # 9. Stats
 # --------------------------------------------------------------------------- #
-st.header("Stats")
+st.header("Durable Row Stock (all time)")
 stats = queries.get_stats(conn)
 col1, col2, col3 = st.columns(3)
 col1.metric("Decisions", stats["decisions"])

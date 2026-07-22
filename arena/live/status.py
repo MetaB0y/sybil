@@ -234,12 +234,28 @@ def run(
         print()
 
     # --- LLM Cost ---
-    cost_df = queries.get_llm_cost(conn)
+    cost_df = queries.get_llm_cost(conn, cutoff=cutoff)
     if cost_df is not None and not cost_df.empty:
         total_tokens = cost_df["prompt_tokens"].sum() + cost_df["completion_tokens"].sum()
-        cost = total_tokens * 0.70 / 1_000_000
-        print("--- LLM Cost ---")
-        print(f"  Total calls: {int(cost_df['calls'].sum())}  tokens: {int(total_tokens):,}  est. cost: ${cost:.4f}\n")
+        cost = cost_df["recorded_cost_usd"].sum()
+        sources = sorted(
+            {
+                source
+                for value in cost_df["cost_sources"].dropna()
+                for source in str(value).split(",")
+            }
+        )
+        print(f"--- LLM Cost (last {hours}h) ---")
+        print(
+            f"  Total calls: {int(cost_df['calls'].sum())}"
+            f"  tokens: {int(total_tokens):,}"
+            f"  recorded cost: ${cost:.6f}"
+            f"  sources: {','.join(sources) or 'unknown'}"
+        )
+        print(
+            f"  Max completion: {int(cost_df['max_completion_tokens'].max())} tokens"
+            f"  max latency: {cost_df['max_latency_s'].max():.1f}s\n"
+        )
 
     # --- Market Maker ---
     mm = queries.get_mm_mtm()
@@ -250,7 +266,7 @@ def run(
 
     # --- Stats ---
     stats = queries.get_stats(conn)
-    print("--- Stats ---")
+    print("--- Durable Row Stock (all time) ---")
     print(f"  Decisions: {stats['decisions']}  Articles: {stats['articles']}  Snapshots: {stats['snapshots']}")
 
     conn.close()

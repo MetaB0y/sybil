@@ -262,7 +262,12 @@ def get_llm_cost(conn: sqlite3.Connection, cutoff: str | None = None) -> pd.Data
         f"SELECT trader_name, COUNT(*) as calls, "
         f"  SUM(prompt_tokens) as prompt_tokens, "
         f"  SUM(completion_tokens) as completion_tokens, "
-        f"  AVG(duration_s) as avg_latency_s "
+        f"  MAX(completion_tokens) as max_completion_tokens, "
+        f"  AVG(duration_s) as avg_latency_s, "
+        f"  MAX(duration_s) as max_latency_s, "
+        f"  COALESCE(SUM(usd_cost), 0.0) as recorded_cost_usd, "
+        f"  GROUP_CONCAT(DISTINCT COALESCE(NULLIF(cost_source, ''), 'unknown')) "
+        f"    as cost_sources "
         f"FROM token_usage {clause} GROUP BY trader_name",
         conn,
     )
