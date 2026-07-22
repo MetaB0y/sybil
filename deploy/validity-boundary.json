@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fingerprint": "sha256:8279a477cc0d02112e7c4708afbc518407ead4e178f13bdb421c30b671137e16",
+  "fingerprint": "sha256:fc69373c1fb64054b19edc11890fdd79532147c50c33d89057b51ad284c1c7f2",
   "inputs": {
     "commonware_packages": [
       {
@@ -74,20 +74,20 @@
     "guests": {
       "state_transition": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "7272dd5848fc7d1a4b13c23348b48d01fbb2d74b6c71a9cbb9d14993c699ddbb",
-        "app_exe_commit": "0x0091d73b3aa304c08feb00091fd9cb47e8dab963c9d5725809b58e5171aef12c",
+        "source_sha256": "a46d555253998e4ceba0365ff43244b22a8951e90111de56a8ea7f378112d398",
+        "app_exe_commit": "0x0060f5d194b975e3e513396bb23c8fb8b047a9f78e5b61884eb2b31e1fab6f4e",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       },
       "escape_claim": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "5ed4d92e21eaa6c4b2de87583b7cf33ae15c7fff15ef4f22589085867faac2b2",
+        "source_sha256": "28f8a660b39515c24d7c2f669ad5f6796f3901f2a6b6b2222a678700eb267b22",
         "app_exe_commit": "0x0042bd996a1b16e62053164e0f5080e8be33aadba10ebac862def073d2fdee6f",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       }
     },
     "desired_validity_pins": {
       "state_transition": {
-        "app_exe_commit": "0x0091d73b3aa304c08feb00091fd9cb47e8dab963c9d5725809b58e5171aef12c",
+        "app_exe_commit": "0x0060f5d194b975e3e513396bb23c8fb8b047a9f78e5b61884eb2b31e1fab6f4e",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       },
       "escape_claim": {
@@ -98,7 +98,7 @@
   },
   "decision": {
     "action": "fresh_genesis",
-    "reason": "Witness v14 adds authenticated atomic MM bundle replacement and cancellation; store layout v6 rejects prior state and requires coordinated repinning.",
+    "reason": "Correct the witness v14 empty-transition hash pin; the rebuilt guest commitment is repinned while deployed evidence remains unset, so prelaunch must use a fresh genesis.",
     "reference": "docs/runbooks/fresh-genesis-redeploy.md"
   }
 }
