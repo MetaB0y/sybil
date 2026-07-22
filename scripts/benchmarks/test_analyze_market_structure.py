@@ -106,6 +106,34 @@ class AnalysisTests(unittest.TestCase):
         )
         self.assertEqual(first, second)
 
+    def test_bundle_lifecycle_requires_all_candidates_and_compares_each_tradeoff(self):
+        rows = []
+        for engine, fill_rate in [
+            ("sybil-fba", 1_000_000),
+            ("fba-atomic-cancel", 500_000),
+            ("fba-atomic-replace", 1_000_000),
+        ]:
+            row = run_row(engine, self.protocol_hash, fill_rate=fill_rate)
+            row["suite"] = "deferred-bundle-lifecycle"
+            row["case_id"] = "bundle-case"
+            row["regime"] = "jump"
+            rows.append(row)
+
+        validation = analysis.validate_runs(rows, self.protocol, self.protocol_hash)
+        self.assertEqual(validation["paired_episode_groups"], 1)
+        comparisons = {
+            (row["target_engine"], row["comparator_engine"])
+            for row in analysis.paired_rows(rows)
+        }
+        self.assertEqual(
+            comparisons,
+            {
+                ("fba-atomic-cancel", "sybil-fba"),
+                ("fba-atomic-replace", "sybil-fba"),
+                ("fba-atomic-replace", "fba-atomic-cancel"),
+            },
+        )
+
     def test_historical_identity_keys_fail_closed(self):
         with self.assertRaisesRegex(ValueError, "identity keys"):
             analysis.recursively_reject_identity_keys(

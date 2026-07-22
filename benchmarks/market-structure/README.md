@@ -25,6 +25,11 @@ tier, comparator, regime, and uncertainty.
 
 - `protocol-development.json` is diagnostic. Its seeds and results are never
   publishable evidence.
+- `protocol-cancel-lifecycle-development.json` is the separate diagnostic
+  design space for issue #200. It compares current, whole-bundle cancel, and
+  whole-bundle replacement semantics at the actor cutoff; its embargoed seeds
+  must not be used until a pushed implementation revision and frozen protocol
+  declare a new range.
 - `protocol-heldout-2026-07-21-v1.json` is frozen against pushed implementation
   revision `29c4651c661cba312f6a1419d06ef9b747e56cc5`. It consumes untouched
   seeds 10000 through 10127 exactly once.
@@ -58,6 +63,23 @@ cargo run -p matching-sim --bin market-structure-experiments --features lp -- \
   --suite all --max-configs 1 --seed-count 1 \
   --output /tmp/sybil-market-structure-development.jsonl
 ```
+
+The deferred-bundle lifecycle diagnostic is similarly bounded:
+
+```sh
+cargo run -p matching-sim --bin market-structure-experiments --features lp -- \
+  --protocol benchmarks/market-structure/protocol-cancel-lifecycle-development.json \
+  --suite bundle-lifecycle --max-configs 1 --seed-count 1 \
+  --output /tmp/sybil-cancel-lifecycle-development.jsonl
+```
+
+Each paired lifecycle episode uses one actor-order cutoff rule across all
+engines: only an action processed strictly before the block tick may change the
+pending bundle. Atomic cancel removes every quote; atomic replace swaps every
+quote and the shared budget; a late or rejected action leaves the old bundle
+unchanged. Informed IOC flow is never silently carried, while natural GTD flow
+may wait for the next normal fresh quote. Stale loss, fills, delay, and both
+trader-surplus classes are reported together.
 
 The runner refuses seeds outside the protocol's active range, and a development
 protocol cannot unlock its held-out embargo. It writes via a temporary file and

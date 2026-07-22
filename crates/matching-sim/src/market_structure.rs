@@ -71,6 +71,7 @@ pub struct Cli {
 enum SuiteChoice {
     Microstructure,
     Portfolio,
+    BundleLifecycle,
     #[default]
     All,
 }
@@ -133,6 +134,20 @@ struct PortfolioAxes {
     flow_concentration: Vec<String>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+struct BundleLifecycleAxes {
+    market_count: Vec<usize>,
+    shocked_market_count: Vec<usize>,
+    batch_interval_ms: Vec<u64>,
+    quote_half_spread_nanos: Vec<u64>,
+    maker_reaction_ms: Vec<u64>,
+    taker_reaction_ms: Vec<u64>,
+    taker_edge_nanos: Vec<u64>,
+    jump_nanos: Vec<u64>,
+    mm_budget_fraction_ppm: Vec<u64>,
+    bundle_action_policy: Vec<String>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum Side {
@@ -184,13 +199,13 @@ struct PortfolioTape {
     arrival_order: Vec<usize>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize)]
 enum Role {
     Maker,
     Trader(TraderKind),
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize)]
 struct OrderMeta {
     role: Role,
     side: Side,
@@ -198,9 +213,10 @@ struct OrderMeta {
     submitted_at_ms: u64,
     quote_fundamental_nanos: Option<u64>,
     market_index: usize,
+    intent_id: Option<u64>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize)]
 struct FillObservation {
     meta: OrderMeta,
     quantity_units: u64,
@@ -293,6 +309,57 @@ struct PortfolioConfig {
     market_count: usize,
     budget_fraction_ppm: u64,
     concentration: String,
+}
+
+#[derive(Clone, Debug)]
+struct BundleLifecycleConfig {
+    market_count: usize,
+    shocked_market_count: usize,
+    batch_interval_ms: u64,
+    quote_half_spread_nanos: u64,
+    maker_reaction_ms: u64,
+    taker_reaction_ms: u64,
+    taker_edge_nanos: u64,
+    jump_nanos: u64,
+    mm_budget_fraction_ppm: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct BundleLifecycleTape {
+    seed: u64,
+    initial_fundamentals_nanos: Vec<u64>,
+    final_fundamentals_nanos: Vec<u64>,
+    shock_at_ms: u64,
+    maker_action_arrival_ms: u64,
+    batch_interval_ms: u64,
+    maker_quote_quantity_units: u64,
+    trader_intents: Vec<TraderIntent>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BundleActionPolicy {
+    CurrentNoncancellable,
+    AtomicCancelBeforeCutoff,
+    AtomicReplaceBeforeCutoff,
+}
+
+impl BundleActionPolicy {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "current-noncancellable" => Ok(Self::CurrentNoncancellable),
+            "atomic-cancel-before-cutoff" => Ok(Self::AtomicCancelBeforeCutoff),
+            "atomic-replace-before-cutoff" => Ok(Self::AtomicReplaceBeforeCutoff),
+            other => Err(format!("unknown bundle action policy {other}")),
+        }
+    }
+
+    fn engine(self) -> &'static str {
+        match self {
+            Self::CurrentNoncancellable => "sybil-fba",
+            Self::AtomicCancelBeforeCutoff => "fba-atomic-cancel",
+            Self::AtomicReplaceBeforeCutoff => "fba-atomic-replace",
+        }
+    }
 }
 
 pub fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
@@ -466,6 +533,88 @@ pub fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         ),
                     )?;
                     rows += 1;
+                }
+            }
+        }
+    }
+
+    if matches!(cli.suite, SuiteChoice::BundleLifecycle | SuiteChoice::All) {
+        let lifecycle_family = protocol
+            .episode_families
+            .iter()
+            .find(|family| family.id == "deferred-bundle-lifecycle");
+        if matches!(cli.suite, SuiteChoice::BundleLifecycle) && lifecycle_family.is_none() {
+            return Err("protocol is missing episode family deferred-bundle-lifecycle".into());
+        }
+        if let Some(family) = lifecycle_family {
+            let axes: BundleLifecycleAxes = family.parse_axes()?;
+            let policies = validate_bundle_action_policies(&axes.bundle_action_policy)?;
+            let configs = bundle_lifecycle_configs(&axes, cli.max_configs)?;
+            for config in &configs {
+                for &seed in &seeds {
+                    let tape = generate_bundle_lifecycle_tape(seed, config);
+                    let tape_hash = fingerprint(&tape)?;
+                    let total_reserve = tape
+                        .initial_fundamentals_nanos
+                        .iter()
+                        .map(|&fundamental| {
+                            two_sided_quote_reserve(
+                                fundamental,
+                                config.quote_half_spread_nanos,
+                                tape.maker_quote_quantity_units,
+                            )
+                        })
+                        .fold(0u64, u64::saturating_add);
+                    let budget = mul_ppm(total_reserve, config.mm_budget_fraction_ppm).max(1);
+                    let parameters = json!({
+                        "market_count": config.market_count,
+                        "shocked_market_count": config.shocked_market_count,
+                        "batch_interval_ms": config.batch_interval_ms,
+                        "quote_half_spread_nanos": config.quote_half_spread_nanos,
+                        "maker_reaction_ms": config.maker_reaction_ms,
+                        "taker_reaction_ms": config.taker_reaction_ms,
+                        "taker_edge_nanos": config.taker_edge_nanos,
+                        "jump_nanos": config.jump_nanos,
+                        "mm_budget_fraction_ppm": config.mm_budget_fraction_ppm,
+                        "mm_budget_nanos": budget,
+                        "maker_quote_shares_per_side": MICRO_MAKER_SHARES,
+                        "trader_order_shares": MICRO_TRADER_SHARES,
+                        "cutoff_rule": "actor action must be processed strictly before block tick",
+                        "same_timestamp_priority": "block_tick_before_bundle_action",
+                        "atomic_scope": "entire deferred bundle",
+                        "informed_time_in_force": "ioc",
+                        "natural_time_in_force": "gtd-through-next-batch"
+                    });
+                    let case_id = bundle_lifecycle_case_id(config);
+                    for policy in &policies {
+                        let mut engine_parameters = parameters.clone();
+                        engine_parameters["bundle_action_policy"] =
+                            Value::String(axes.bundle_action_policy[policy.0].clone());
+                        let outcome = run_bundle_lifecycle_fba(
+                            &tape,
+                            config.quote_half_spread_nanos,
+                            budget,
+                            policy.1,
+                        );
+                        write_record(
+                            &mut output,
+                            record(
+                                &protocol,
+                                &protocol_hash,
+                                "deferred-bundle-lifecycle",
+                                &case_id,
+                                seed,
+                                &tape_hash,
+                                policy.1.engine(),
+                                "jump",
+                                engine_parameters,
+                                outcome,
+                                &tape.trader_intents,
+                                &tape.final_fundamentals_nanos,
+                            ),
+                        )?;
+                        rows += 1;
+                    }
                 }
             }
         }
@@ -707,6 +856,401 @@ fn portfolio_configs(
     Ok(configs)
 }
 
+fn validate_bundle_action_policies(
+    values: &[String],
+) -> Result<Vec<(usize, BundleActionPolicy)>, String> {
+    let policies: Vec<_> = values
+        .iter()
+        .enumerate()
+        .map(|(index, value)| BundleActionPolicy::parse(value).map(|policy| (index, policy)))
+        .collect::<Result<_, _>>()?;
+    let required = [
+        BundleActionPolicy::CurrentNoncancellable,
+        BundleActionPolicy::AtomicCancelBeforeCutoff,
+        BundleActionPolicy::AtomicReplaceBeforeCutoff,
+    ];
+    if policies.len() != required.len()
+        || required
+            .iter()
+            .any(|required| !policies.iter().any(|(_, policy)| policy == required))
+    {
+        return Err(
+            "bundle_action_policy must contain each current/cancel/replace policy exactly once"
+                .to_string(),
+        );
+    }
+    Ok(policies)
+}
+
+fn bundle_lifecycle_configs(
+    axes: &BundleLifecycleAxes,
+    max_configs: Option<usize>,
+) -> Result<Vec<BundleLifecycleConfig>, String> {
+    if axes.market_count.is_empty()
+        || axes.shocked_market_count.is_empty()
+        || axes.batch_interval_ms.is_empty()
+        || axes.quote_half_spread_nanos.is_empty()
+        || axes.maker_reaction_ms.is_empty()
+        || axes.taker_reaction_ms.is_empty()
+        || axes.taker_edge_nanos.is_empty()
+        || axes.jump_nanos.is_empty()
+        || axes.mm_budget_fraction_ppm.is_empty()
+    {
+        return Err("deferred-bundle lifecycle axes must be non-empty".to_string());
+    }
+    let max_market_count = *axes.market_count.iter().max().expect("checked non-empty");
+    let max_batch_interval = *axes
+        .batch_interval_ms
+        .iter()
+        .max()
+        .expect("checked non-empty");
+    let min_batch_interval = *axes
+        .batch_interval_ms
+        .iter()
+        .min()
+        .expect("checked non-empty");
+    let max_spread = *axes
+        .quote_half_spread_nanos
+        .iter()
+        .max()
+        .expect("checked non-empty");
+    let min_edge = *axes
+        .taker_edge_nanos
+        .iter()
+        .min()
+        .expect("checked non-empty");
+    let max_edge = *axes
+        .taker_edge_nanos
+        .iter()
+        .max()
+        .expect("checked non-empty");
+    let max_jump = *axes.jump_nanos.iter().max().expect("checked non-empty");
+    if axes.market_count.contains(&0)
+        || axes.shocked_market_count.iter().any(|&count| count < 2)
+        || axes
+            .shocked_market_count
+            .iter()
+            .any(|&count| count > max_market_count)
+        || axes.batch_interval_ms.contains(&0)
+        || axes
+            .taker_reaction_ms
+            .iter()
+            .any(|&latency| latency >= min_batch_interval.saturating_mul(3) / 4)
+        || axes
+            .quote_half_spread_nanos
+            .iter()
+            .any(|&spread| spread >= NANOS_PER_DOLLAR / 4)
+        || min_edge <= max_spread
+        || axes
+            .taker_edge_nanos
+            .iter()
+            .any(|&value| value >= NANOS_PER_DOLLAR / 2)
+        || max_jump
+            .saturating_add(max_edge)
+            .saturating_add(max_spread)
+            .saturating_add(10_000_000)
+            >= MAX_PRICE
+        || axes
+            .mm_budget_fraction_ppm
+            .iter()
+            .any(|&fraction| fraction == 0 || fraction > 1_000_000)
+        || max_configs == Some(0)
+        || max_batch_interval == 0
+    {
+        return Err("deferred-bundle lifecycle axes contain an out-of-range value".to_string());
+    }
+
+    let mut configs = Vec::new();
+    for &market_count in &axes.market_count {
+        for &shocked_market_count in &axes.shocked_market_count {
+            if shocked_market_count > market_count {
+                continue;
+            }
+            for &batch_interval_ms in &axes.batch_interval_ms {
+                for &quote_half_spread_nanos in &axes.quote_half_spread_nanos {
+                    for &maker_reaction_ms in &axes.maker_reaction_ms {
+                        for &taker_reaction_ms in &axes.taker_reaction_ms {
+                            for &taker_edge_nanos in &axes.taker_edge_nanos {
+                                for &jump_nanos in &axes.jump_nanos {
+                                    for &mm_budget_fraction_ppm in &axes.mm_budget_fraction_ppm {
+                                        configs.push(BundleLifecycleConfig {
+                                            market_count,
+                                            shocked_market_count,
+                                            batch_interval_ms,
+                                            quote_half_spread_nanos,
+                                            maker_reaction_ms,
+                                            taker_reaction_ms,
+                                            taker_edge_nanos,
+                                            jump_nanos,
+                                            mm_budget_fraction_ppm,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let Some(limit) = max_configs {
+        configs.truncate(limit);
+    }
+    Ok(configs)
+}
+
+fn generate_bundle_lifecycle_tape(
+    seed: u64,
+    config: &BundleLifecycleConfig,
+) -> BundleLifecycleTape {
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let shock_window_end = (config.batch_interval_ms / 4).max(2);
+    let shock_at_ms = rng.random_range(1..shock_window_end);
+    let mut initial_fundamentals_nanos = Vec::with_capacity(config.market_count);
+    let mut final_fundamentals_nanos = Vec::with_capacity(config.market_count);
+    let mut trader_intents = Vec::with_capacity(config.shocked_market_count);
+
+    for market_index in 0..config.market_count {
+        let shocked = market_index < config.shocked_market_count;
+        let up = rng.random_bool(0.5);
+        let margin = config
+            .taker_edge_nanos
+            .saturating_add(config.quote_half_spread_nanos)
+            .saturating_add(10_000_000);
+        let (initial, final_value) = if shocked && up {
+            let upper = MAX_PRICE.saturating_sub(config.jump_nanos + margin);
+            let initial = rng.random_range(margin..=upper.max(margin));
+            (
+                initial,
+                clamp_price(initial.saturating_add(config.jump_nanos)),
+            )
+        } else if shocked {
+            let lower = config.jump_nanos.saturating_add(margin).min(MAX_PRICE);
+            let initial = rng.random_range(lower..=MAX_PRICE);
+            (
+                initial,
+                clamp_price(initial.saturating_sub(config.jump_nanos)),
+            )
+        } else {
+            let value = rng.random_range(200_000_000..=800_000_000);
+            (value, value)
+        };
+        initial_fundamentals_nanos.push(initial);
+        final_fundamentals_nanos.push(final_value);
+
+        if shocked {
+            let side = if up { Side::Buy } else { Side::Sell };
+            let natural_value_nanos = match side {
+                Side::Buy => clamp_price(final_value.saturating_add(config.taker_edge_nanos)),
+                Side::Sell => clamp_price(final_value.saturating_sub(config.taker_edge_nanos)),
+            };
+            let arrival = shock_at_ms
+                .saturating_add(config.taker_reaction_ms)
+                .saturating_add(market_index as u64);
+            let natural = !market_index.is_multiple_of(2);
+            let value_nanos = if natural {
+                natural_value_nanos
+            } else {
+                final_value
+            };
+            trader_intents.push(TraderIntent {
+                id: 10_000 + market_index as u64,
+                market_index,
+                kind: if natural {
+                    TraderKind::Natural
+                } else {
+                    TraderKind::Informed
+                },
+                side,
+                value_nanos,
+                limit_nanos: value_nanos,
+                quantity_units: shares_to_qty(MICRO_TRADER_SHARES).0,
+                venue_arrival_ms: arrival,
+                resting_until_ms: natural.then_some(config.batch_interval_ms.saturating_mul(2)),
+            });
+        }
+    }
+    trader_intents.sort_by_key(|intent| (intent.venue_arrival_ms, intent.id));
+
+    BundleLifecycleTape {
+        seed,
+        initial_fundamentals_nanos,
+        final_fundamentals_nanos,
+        shock_at_ms,
+        maker_action_arrival_ms: shock_at_ms.saturating_add(config.maker_reaction_ms),
+        batch_interval_ms: config.batch_interval_ms,
+        maker_quote_quantity_units: shares_to_qty(MICRO_MAKER_SHARES).0,
+        trader_intents,
+    }
+}
+
+fn run_bundle_lifecycle_fba(
+    tape: &BundleLifecycleTape,
+    spread: u64,
+    shared_budget_nanos: u64,
+    policy: BundleActionPolicy,
+) -> EngineOutcome {
+    let first_cutoff = tape.batch_interval_ms;
+    let action_wins = tape.maker_action_arrival_ms < first_cutoff;
+    let (first_quotes, first_has_maker) = match (policy, action_wins) {
+        (BundleActionPolicy::AtomicCancelBeforeCutoff, true) => {
+            (&tape.initial_fundamentals_nanos, false)
+        }
+        (BundleActionPolicy::AtomicReplaceBeforeCutoff, true) => {
+            (&tape.final_fundamentals_nanos, true)
+        }
+        _ => (&tape.initial_fundamentals_nanos, true),
+    };
+    let first_traders: Vec<_> = tape
+        .trader_intents
+        .iter()
+        .filter(|intent| intent.venue_arrival_ms <= first_cutoff)
+        .collect();
+    let mut observations = Vec::new();
+    let mut solver_evidence = Vec::new();
+    let mut status = "completed_zero_fill".to_string();
+    let mut price_error_nanos = None;
+
+    match solve_fba_batch(
+        1,
+        first_cutoff,
+        first_quotes,
+        &tape.final_fundamentals_nanos,
+        spread,
+        tape.maker_quote_quantity_units,
+        &first_traders,
+        first_has_maker,
+        Some(shared_budget_nanos),
+    ) {
+        Ok(mut batch) => {
+            update_run_status(&mut status, &batch);
+            price_error_nanos = batch.price_error_nanos;
+            observations.append(&mut batch.observations);
+            solver_evidence.push(batch.solver);
+        }
+        Err(message) => {
+            status = "panic".to_string();
+            solver_evidence.push(panic_solver_evidence(1, message));
+        }
+    }
+
+    let filled_by_intent = observations
+        .iter()
+        .fold(HashMap::new(), |mut filled, observation| {
+            if let Some(intent_id) = observation.meta.intent_id {
+                let quantity = filled.entry(intent_id).or_insert(0u64);
+                *quantity = quantity.saturating_add(observation.quantity_units);
+            }
+            filled
+        });
+    let carried: Vec<_> = tape
+        .trader_intents
+        .iter()
+        .filter(|intent| {
+            intent
+                .resting_until_ms
+                .is_some_and(|expiry| expiry > first_cutoff)
+                && filled_by_intent.get(&intent.id).copied().unwrap_or(0) < intent.quantity_units
+        })
+        .cloned()
+        .map(|mut intent| {
+            intent.quantity_units = intent
+                .quantity_units
+                .saturating_sub(filled_by_intent.get(&intent.id).copied().unwrap_or(0));
+            intent
+        })
+        .collect();
+    if !carried.is_empty() {
+        let carried_refs: Vec<_> = carried.iter().collect();
+        match solve_fba_batch(
+            2,
+            first_cutoff.saturating_mul(2),
+            &tape.final_fundamentals_nanos,
+            &tape.final_fundamentals_nanos,
+            spread,
+            tape.maker_quote_quantity_units,
+            &carried_refs,
+            true,
+            Some(shared_budget_nanos),
+        ) {
+            Ok(mut batch) => {
+                update_run_status(&mut status, &batch);
+                if batch.price_error_nanos.is_some() {
+                    price_error_nanos = batch.price_error_nanos;
+                }
+                observations.append(&mut batch.observations);
+                solver_evidence.push(batch.solver);
+            }
+            Err(message) => {
+                status = "panic".to_string();
+                solver_evidence.push(panic_solver_evidence(2, message));
+            }
+        }
+    }
+
+    let capital_consumed_nanos = maker_capital_consumed(&observations);
+    let reserve_by_market: Vec<_> = first_quotes
+        .iter()
+        .map(|&fundamental| {
+            two_sided_quote_reserve(fundamental, spread, tape.maker_quote_quantity_units)
+        })
+        .collect();
+    let single_exposure_by_market: Vec<_> = first_quotes
+        .iter()
+        .map(|&fundamental| {
+            let bid = clamp_price(fundamental.saturating_sub(spread));
+            let ask = clamp_price(fundamental.saturating_add(spread));
+            fill_capital(Side::Buy, bid, tape.maker_quote_quantity_units).max(fill_capital(
+                Side::Sell,
+                ask,
+                tape.maker_quote_quantity_units,
+            ))
+        })
+        .collect();
+    let coverage = if first_has_maker {
+        portfolio_coverage(
+            first_quotes.len(),
+            shared_budget_nanos,
+            &reserve_by_market,
+            &single_exposure_by_market,
+            true,
+        )
+    } else {
+        Coverage::default()
+    };
+    EngineOutcome {
+        status,
+        observations,
+        price_error_nanos,
+        solver_evidence,
+        coverage,
+        capital_reserved_nanos: shared_budget_nanos,
+        capital_consumed_nanos,
+    }
+}
+
+fn update_run_status(status: &mut String, batch: &SolvedBatch) {
+    if !batch.solver.verifier_valid {
+        *status = "verifier_invalid".to_string();
+    } else if is_solver_failure(&batch.solver.termination) {
+        *status = "solver_failure".to_string();
+    } else if !batch.observations.is_empty() && status == "completed_zero_fill" {
+        *status = "completed".to_string();
+    }
+}
+
+fn panic_solver_evidence(batch_index: u64, message: String) -> SolverEvidence {
+    SolverEvidence {
+        batch_index,
+        termination: "panic".to_string(),
+        message: Some(message),
+        wall_time_micros: 0,
+        verifier_valid: false,
+        violation_count: 0,
+        fills: 0,
+    }
+}
+
 fn generate_micro_tape(seed: u64, config: &MicroConfig) -> MicroTape {
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let shock_at_ms = rng.random_range(1..config.batch_interval_ms.max(2));
@@ -817,6 +1361,7 @@ fn run_micro_clob(tape: &MicroTape, spread: u64) -> EngineOutcome {
                         submitted_at_ms: 0,
                         quote_fundamental_nanos: Some(quote_fundamental),
                         market_index: 0,
+                        intent_id: None,
                     },
                     limit_nanos,
                     remaining_units: tape.maker_quote_quantity_units,
@@ -846,6 +1391,7 @@ fn run_micro_clob(tape: &MicroTape, spread: u64) -> EngineOutcome {
             submitted_at_ms: intent.venue_arrival_ms,
             quote_fundamental_nanos: None,
             market_index: 0,
+            intent_id: Some(intent.id),
         };
         let mut remaining = intent.quantity_units;
         while remaining > 0 {
@@ -955,6 +1501,7 @@ fn run_micro_fba(tape: &MicroTape, spread: u64, cancellable: bool) -> EngineOutc
             spread,
             tape.maker_quote_quantity_units,
             &eligible,
+            true,
             None,
         );
         match solved {
@@ -1022,6 +1569,7 @@ fn solve_fba_batch(
     spread: u64,
     maker_quantity_units: u64,
     traders: &[&TraderIntent],
+    include_maker: bool,
     shared_budget_nanos: Option<u64>,
 ) -> Result<SolvedBatch, String> {
     if quote_fundamentals.len() != mark_fundamentals.len() {
@@ -1038,10 +1586,12 @@ fn solve_fba_batch(
         .iter()
         .map(|&fundamental| two_sided_quote_reserve(fundamental, spread, maker_quantity_units))
         .fold(0u64, u64::saturating_add);
-    let mut mm = MmConstraint::new(
-        MmId::new(1),
-        Nanos(shared_budget_nanos.unwrap_or(unconstrained_reserve)),
-    );
+    let mut mm = include_maker.then(|| {
+        MmConstraint::new(
+            MmId::new(1),
+            Nanos(shared_budget_nanos.unwrap_or(unconstrained_reserve)),
+        )
+    });
     let mut next_order_id = batch_index * 1_000_000 + 1;
     for (market_index, ((&market, &quote_fundamental), &mark_fundamental)) in markets
         .iter()
@@ -1055,48 +1605,54 @@ fn solve_fba_batch(
         next_order_id += 1;
         let bid = clamp_price(quote_fundamental.saturating_sub(spread));
         let ask = clamp_price(quote_fundamental.saturating_add(spread));
-        problem.orders.push(outcome_buy(
-            &problem.markets,
-            bid_id,
-            market,
-            0,
-            bid,
-            maker_quantity_units,
-        ));
-        problem.orders.push(outcome_sell(
-            &problem.markets,
-            ask_id,
-            market,
-            0,
-            ask,
-            maker_quantity_units,
-        ));
-        mm.add_order(bid_id, MmSide::BuyYes);
-        mm.add_order(ask_id, MmSide::SellYes);
-        metadata.insert(
-            bid_id,
-            OrderMeta {
-                role: Role::Maker,
-                side: Side::Buy,
-                value_nanos: mark_fundamental,
-                submitted_at_ms: 0,
-                quote_fundamental_nanos: Some(quote_fundamental),
-                market_index,
-            },
-        );
-        metadata.insert(
-            ask_id,
-            OrderMeta {
-                role: Role::Maker,
-                side: Side::Sell,
-                value_nanos: mark_fundamental,
-                submitted_at_ms: 0,
-                quote_fundamental_nanos: Some(quote_fundamental),
-                market_index,
-            },
-        );
+        if let Some(mm) = &mut mm {
+            problem.orders.push(outcome_buy(
+                &problem.markets,
+                bid_id,
+                market,
+                0,
+                bid,
+                maker_quantity_units,
+            ));
+            problem.orders.push(outcome_sell(
+                &problem.markets,
+                ask_id,
+                market,
+                0,
+                ask,
+                maker_quantity_units,
+            ));
+            mm.add_order(bid_id, MmSide::BuyYes);
+            mm.add_order(ask_id, MmSide::SellYes);
+            metadata.insert(
+                bid_id,
+                OrderMeta {
+                    role: Role::Maker,
+                    side: Side::Buy,
+                    value_nanos: mark_fundamental,
+                    submitted_at_ms: 0,
+                    quote_fundamental_nanos: Some(quote_fundamental),
+                    market_index,
+                    intent_id: None,
+                },
+            );
+            metadata.insert(
+                ask_id,
+                OrderMeta {
+                    role: Role::Maker,
+                    side: Side::Sell,
+                    value_nanos: mark_fundamental,
+                    submitted_at_ms: 0,
+                    quote_fundamental_nanos: Some(quote_fundamental),
+                    market_index,
+                    intent_id: None,
+                },
+            );
+        }
     }
-    problem.mm_constraints.push(mm);
+    if let Some(mm) = mm {
+        problem.mm_constraints.push(mm);
+    }
     for intent in traders {
         let order_id = next_order_id;
         next_order_id += 1;
@@ -1129,6 +1685,7 @@ fn solve_fba_batch(
                 submitted_at_ms: intent.venue_arrival_ms,
                 quote_fundamental_nanos: None,
                 market_index: intent.market_index,
+                intent_id: Some(intent.id),
             },
         );
     }
@@ -1290,6 +1847,7 @@ fn run_portfolio_fba(
         PORTFOLIO_HALF_SPREAD_NANOS,
         shares_to_qty(PORTFOLIO_MAKER_SHARES).0,
         &trader_refs,
+        true,
         Some(budget),
     );
     let coverage = portfolio_coverage(
@@ -1424,6 +1982,7 @@ fn run_portfolio_clob(
                 submitted_at_ms: 0,
                 quote_fundamental_nanos: Some(fundamental),
                 market_index: intent.market_index,
+                intent_id: None,
             },
             quantity_units: quantity,
             price_nanos: price,
@@ -1437,6 +1996,7 @@ fn run_portfolio_clob(
                 submitted_at_ms: intent.venue_arrival_ms,
                 quote_fundamental_nanos: None,
                 market_index: intent.market_index,
+                intent_id: Some(intent.id),
             },
             quantity_units: quantity,
             price_nanos: price,
@@ -1756,6 +2316,21 @@ fn portfolio_case_id(config: &PortfolioConfig) -> String {
     )
 }
 
+fn bundle_lifecycle_case_id(config: &BundleLifecycleConfig) -> String {
+    format!(
+        "bundle-m{}-x{}-b{}-s{}-mr{}-tr{}-e{}-j{}-budget{}",
+        config.market_count,
+        config.shocked_market_count,
+        config.batch_interval_ms,
+        config.quote_half_spread_nanos,
+        config.maker_reaction_ms,
+        config.taker_reaction_ms,
+        config.taker_edge_nanos,
+        config.jump_nanos,
+        config.mm_budget_fraction_ppm,
+    )
+}
+
 fn write_record(
     output: &mut BufWriter<File>,
     record: RunRecord,
@@ -1778,6 +2353,20 @@ mod tests {
             taker_reaction_ms: 25,
             informed_trader_count: 4,
             jump_nanos: 300_000_000,
+        }
+    }
+
+    fn bundle_lifecycle_config(maker_reaction_ms: u64) -> BundleLifecycleConfig {
+        BundleLifecycleConfig {
+            market_count: 2,
+            shocked_market_count: 2,
+            batch_interval_ms: 500,
+            quote_half_spread_nanos: 20_000_000,
+            maker_reaction_ms,
+            taker_reaction_ms: 25,
+            taker_edge_nanos: 60_000_000,
+            jump_nanos: 300_000_000,
+            mm_budget_fraction_ppm: 250_000,
         }
     }
 
@@ -1825,6 +2414,91 @@ mod tests {
         )
         .maker_stale_quote_loss_nanos;
         assert!(current_stale >= counterfactual_stale);
+    }
+
+    #[test]
+    fn atomic_cancel_and_replace_expose_their_joint_tradeoffs() {
+        let config = bundle_lifecycle_config(1);
+        let tape = generate_bundle_lifecycle_tape(10_001, &config);
+        let total_reserve: u64 = tape
+            .initial_fundamentals_nanos
+            .iter()
+            .map(|&fundamental| {
+                two_sided_quote_reserve(
+                    fundamental,
+                    config.quote_half_spread_nanos,
+                    tape.maker_quote_quantity_units,
+                )
+            })
+            .sum();
+        let budget = mul_ppm(total_reserve, config.mm_budget_fraction_ppm);
+        let run = |policy| {
+            let outcome =
+                run_bundle_lifecycle_fba(&tape, config.quote_half_spread_nanos, budget, policy);
+            assert!(
+                outcome
+                    .solver_evidence
+                    .iter()
+                    .all(|attempt| attempt.verifier_valid),
+                "lifecycle solver output must remain verifier-valid"
+            );
+            build_metrics(
+                &outcome,
+                &tape.trader_intents,
+                &tape.final_fundamentals_nanos,
+            )
+        };
+        let current = run(BundleActionPolicy::CurrentNoncancellable);
+        let cancel = run(BundleActionPolicy::AtomicCancelBeforeCutoff);
+        let replace = run(BundleActionPolicy::AtomicReplaceBeforeCutoff);
+
+        assert!(
+            current.maker_stale_quote_loss_nanos > 0,
+            "current={current:?} cancel={cancel:?} replace={replace:?}"
+        );
+        assert_eq!(cancel.maker_stale_quote_loss_nanos, 0);
+        assert_eq!(replace.maker_stale_quote_loss_nanos, 0);
+        assert!(replace.fill_rate_ppm < current.fill_rate_ppm);
+        assert_eq!(cancel.fill_rate_ppm, replace.fill_rate_ppm);
+        assert!(cancel.execution_delay_ms > replace.execution_delay_ms);
+        assert_eq!(cancel.informed_trader_surplus_nanos, 0);
+        assert_eq!(replace.informed_trader_surplus_nanos, 0);
+    }
+
+    #[test]
+    fn bundle_action_at_or_after_cutoff_cannot_rewrite_the_batch() {
+        let config = bundle_lifecycle_config(600);
+        let tape = generate_bundle_lifecycle_tape(19, &config);
+        assert!(tape.maker_action_arrival_ms >= tape.batch_interval_ms);
+        let total_reserve: u64 = tape
+            .initial_fundamentals_nanos
+            .iter()
+            .map(|&fundamental| {
+                two_sided_quote_reserve(
+                    fundamental,
+                    config.quote_half_spread_nanos,
+                    tape.maker_quote_quantity_units,
+                )
+            })
+            .sum();
+        let budget = mul_ppm(total_reserve, config.mm_budget_fraction_ppm);
+        let current = run_bundle_lifecycle_fba(
+            &tape,
+            config.quote_half_spread_nanos,
+            budget,
+            BundleActionPolicy::CurrentNoncancellable,
+        );
+        for policy in [
+            BundleActionPolicy::AtomicCancelBeforeCutoff,
+            BundleActionPolicy::AtomicReplaceBeforeCutoff,
+        ] {
+            let candidate =
+                run_bundle_lifecycle_fba(&tape, config.quote_half_spread_nanos, budget, policy);
+            assert_eq!(
+                fingerprint(&candidate.observations).unwrap(),
+                fingerprint(&current.observations).unwrap(),
+            );
+        }
     }
 
     #[test]

@@ -37,6 +37,9 @@ ANALYSIS_AXES = (
     "market_count",
     "budget_fraction_ppm",
     "flow_concentration",
+    "shocked_market_count",
+    "taker_edge_nanos",
+    "mm_budget_fraction_ppm",
 )
 PROHIBITED_IDENTITY_KEYS = {
     "proxyWallet",
@@ -124,6 +127,8 @@ def expected_engines(row: dict[str, Any]) -> set[str]:
         return expected
     if row["suite"] == "shared-budget-portfolio":
         return {"clob-firm-reserve", "clob-shared-risk", TARGET_ENGINE}
+    if row["suite"] == "deferred-bundle-lifecycle":
+        return {TARGET_ENGINE, "fba-atomic-cancel", "fba-atomic-replace"}
     raise ValueError(f"unknown suite {row['suite']}")
 
 
@@ -195,6 +200,12 @@ def comparisons_for_row(row: dict[str, Any]) -> list[tuple[str, str]]:
         if row["regime"] == "jump":
             comparisons.append(("fba-cancellable-sensitivity", TARGET_ENGINE))
         return comparisons
+    if row["suite"] == "deferred-bundle-lifecycle":
+        return [
+            ("fba-atomic-cancel", TARGET_ENGINE),
+            ("fba-atomic-replace", TARGET_ENGINE),
+            ("fba-atomic-replace", "fba-atomic-cancel"),
+        ]
     return [
         (TARGET_ENGINE, "clob-firm-reserve"),
         (TARGET_ENGINE, "clob-shared-risk"),

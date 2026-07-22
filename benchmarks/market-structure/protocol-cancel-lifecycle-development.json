@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "protocol_id": "sybil-deferred-bundle-lifecycle-development-v1",
+  "status": "development-only-not-evidence",
+  "issue": "https://github.com/MetaB0y/sybil/issues/200",
+  "objective": "Compare explicit actor-cutoff semantics for the current non-cancellable deferred MM bundle, atomic cancellation, and atomic replacement before choosing production behavior.",
+  "candidate_semantics": [
+    {
+      "id": "current-noncancellable",
+      "rule": "Acknowledged deferred bundles remain eligible for their first batch even when a maker reaction reaches the venue before cutoff."
+    },
+    {
+      "id": "atomic-cancel-before-cutoff",
+      "rule": "A cancel processed by the sequencer actor strictly before it dequeues the block tick removes the entire bundle; no quote survives and an IOC trader is not carried."
+    },
+    {
+      "id": "atomic-replace-before-cutoff",
+      "rule": "A valid replacement processed strictly before the block tick swaps every quote and the one shared budget atomically; a rejected replacement leaves the old bundle unchanged."
+    }
+  ],
+  "timing_contract": {
+    "cutoff": "The sequencer actor's dequeue of the block-production message, not client wall-clock observation.",
+    "same_timestamp_priority": "The block tick wins; the benchmark therefore requires maker_action_arrival_ms < cutoff_ms.",
+    "after_cutoff": "Cancel and replace are too late for the in-flight clone and cannot rewrite that batch.",
+    "next_batch": "A normal fresh MM submission is available; natural GTD flow may wait, while informed IOC flow does not."
+  },
+  "paired_input_contract": [
+    "same independent seed",
+    "same initial and final fundamentals",
+    "same shocked markets and trader intents",
+    "same maker and taker venue arrival times",
+    "same ordered multi-market quote bundle and one shared integer MM budget",
+    "same production retained-cash solver and integer verifier",
+    "all policies retain failures, zero fills, and undefined conditional metrics"
+  ],
+  "episode_families": [
+    {
+      "id": "deferred-bundle-lifecycle",
+      "purpose": "Measure stale loss, fill rate, delay, trader surplus, and shared-budget behavior together for cancel/replace cutoff choices.",
+      "development_axes": {
+        "market_count": [2, 8],
+        "shocked_market_count": [2, 8],
+        "batch_interval_ms": [500, 1000],
+        "quote_half_spread_nanos": [10000000, 50000000],
+        "maker_reaction_ms": [25, 250, 750, 1500],
+        "taker_reaction_ms": [25, 250],
+        "taker_edge_nanos": [60000000, 150000000],
+        "jump_nanos": [100000000, 600000000],
+        "mm_budget_fraction_ppm": [250000, 1000000],
+        "bundle_action_policy": [
+          "current-noncancellable",
+          "atomic-cancel-before-cutoff",
+          "atomic-replace-before-cutoff"
+        ]
+      }
+    }
+  ],
+  "development_seeds": {
+    "range_inclusive": [20000, 20031]
+  },
+  "held_out_embargo": {
+    "range_inclusive": [30000, 30255]
+  },
+  "primary_metrics": [
+    "maker_stale_quote_loss_nanos",
+    "maker_markout_pnl_nanos",
+    "natural_trader_surplus_nanos",
+    "informed_trader_surplus_nanos",
+    "filled_trader_quantity_units",
+    "fill_rate_ppm",
+    "execution_delay_ms",
+    "capital_reserved_nanos",
+    "capital_consumed_nanos"
+  ],
+  "uncertainty": {
+    "unit": "independent paired episode seed",
+    "summaries": ["paired mean", "paired median", "interquartile range", "95% paired cluster bootstrap interval"],
+    "bootstrap_resamples": 10000
+  },
+  "materiality": {
+    "money_effect_nanos_per_share": 10000000,
+    "fill_or_coverage_effect_ppm": 50000,
+    "delay_effect_ms": 250,
+    "decision_rule": "Report maker, trader, fill, and delay effects separately. A reduction in stale loss cannot be called a free improvement when fill, surplus, or delay worsens."
+  },
+  "failure_policy": {
+    "retain": ["solver status", "solver message", "runtime", "invalid verifier result", "zero-fill episode", "cap or timeout"],
+    "headline_denominator": "all preregistered episodes",
+    "fallback": "none"
+  }
+}
