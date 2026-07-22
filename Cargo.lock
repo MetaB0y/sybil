@@ -1915,9 +1915,9 @@ dependencies = [
 
 [[package]]
 name = "commonware-macros"
-version = "2026.5.0"
+version = "2026.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5419e6eb2c4c9e56517cfc07062a984b882dabf573d53191a73b98358cd9782a"
+checksum = "39e37a17d5c99ec6711098c6614af1023fd32926aa0414ec0f0613f6bb940278"
 dependencies = [
  "commonware-macros-impl",
  "tokio",
@@ -1925,9 +1925,9 @@ dependencies = [
 
 [[package]]
 name = "commonware-macros-impl"
-version = "2026.5.0"
+version = "2026.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82dd7062336fc7d2107e9a63312ef1b9811d06bfe56dfd56f97e6ce5d4aa0565"
+checksum = "7d44bceee874226efca172f0e9ec9ec4eb486788ba6be1d98710f3f159b807af"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -1952,12 +1952,14 @@ dependencies = [
 
 [[package]]
 name = "commonware-parallel"
-version = "2026.5.0"
+version = "2026.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d6a412b4c868174963b38ff2dad6686c573ec56834d9b39d20b73437c6d9726"
+checksum = "7109817274c671f1fb0ba17cf8aecfbb70672d29379284feeac43fa1b1dc0201"
 dependencies = [
  "cfg-if",
  "commonware-macros",
+ "dashmap",
+ "futures",
  "rayon",
 ]
 
@@ -3222,7 +3224,7 @@ dependencies = [
  "libc",
  "log",
  "rustversion",
- "windows-link 0.1.3",
+ "windows-link 0.2.1",
  "windows-result 0.4.1",
 ]
 
