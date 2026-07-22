@@ -134,22 +134,26 @@ Real-value deployment explicitly selects `SYBIL_DEPLOYMENT_PROFILE=prod` and
 sets `SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS=0`. Full knob matrix and history-serving policy:
 `docs/architecture/Deployment Profiles.md`.
 
-## Prelaunch History Retention
+## Prelaunch Canonical and Proof-Job Retention
 
-The locked product overlay pins the history families already supported by bounded
-store pruning to seven days. At the inherited 10-second block interval this is
-60,480 full blocks plus paired DA artifact/manifest rows, 60,480 raw-price
-heights per market, and 604,800 seconds of each 1-minute, 5-minute, and 1-hour
-candle series. A pass runs every 60 blocks (ten minutes) and deletes at most
-10,000 rows. `just compose-smoke` checks these effective merged-Compose values
-without starting containers.
+The locked product overlay pins the canonical full-block archive and the
+acknowledged proof-job safety window to seven days. At the inherited 10-second
+block interval this is 60,480 heights. In a validity deployment, paired local
+DA artifact/manifest rows follow the canonical archive policy; acknowledged
+proof jobs become eligible only after the standalone prover has durably
+accepted their exact bytes. A pass runs every 60 blocks (ten minutes) and
+deletes at most 10,000 rows. `just compose-smoke` checks these effective
+merged-Compose values without starting containers.
 
-This is a prelaunch product-history budget, not a hard disk quota or an escape
-availability promise. Account events, fills, equity rows, canonical recovery
-state, and live account/order/market state are not pruned by this job. Bounded
-maintenance can lag, redb deletion need not immediately shrink the file, and
-DA needed for an accepted-root escape must be retained independently before a
-real-value escape SLO can be claimed. See
+This is not a product-history budget, hard disk quota, or escape-availability
+promise. The separate `sybil-history` store currently retains raw batches,
+prices, candles, account events, fills, and equity projections without pruning.
+Canonical recovery state and live account/order/market state are also not
+pruned by this job. Bounded maintenance can lag, redb deletion need not
+immediately shrink a file, and DA needed for an accepted-root escape must be
+retained independently before a real-value escape SLO can be claimed. Monitor
+the history volume and root filesystem as unbounded devnet storage until an
+explicit archive and retention policy is implemented. See
 `docs/architecture/03-sequencing/Historical Data Serving.md` and the open
 finding 5 in `design/dos-audit-2026-07-11.md`.
 
