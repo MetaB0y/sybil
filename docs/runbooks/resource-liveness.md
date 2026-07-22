@@ -68,6 +68,11 @@ Payload bytes are exact encoded value bytes, not total disk allocation. The
 root-filesystem ratio is the final capacity signal because redb pages,
 fragmentation, canonical qMDB/redb, the history projection, Docker logs, and
 other services share the host.
+Do not use a redb file's apparent length alone for a runway estimate. Redb can
+grow that sparse length geometrically while allocated filesystem blocks keep
+increasing at a much smaller steady rate. Measure file allocation with
+`du --block-size=1` or `stat` block count multiplied by block size, and
+correlate it with root-filesystem available bytes.
 
 The API's canonical sequencer store runs with a 128 MiB redb page-cache ceiling
 (`SYBIL_SEQUENCER_REDB_CACHE_BYTES=134217728`) inside its 1.25 GiB cgroup.
