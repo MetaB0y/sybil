@@ -28,8 +28,11 @@ tier, comparator, regime, and uncertainty.
 - `protocol-cancel-lifecycle-development.json` is the separate diagnostic
   design space for issue #200. It compares current, whole-bundle cancel, and
   whole-bundle replacement semantics at the actor cutoff; its embargoed seeds
-  must not be used until a pushed implementation revision and frozen protocol
-  declare a new range.
+  are not evidence.
+- `protocol-cancel-lifecycle-heldout-2026-07-22-v1.json` is frozen against
+  pushed implementation revision `2f1081c9ff700daa21d2cdd21327761853f61015`.
+  Its seeds 30000 through 30063 are reserved for one complete retained run and
+  must not be sampled or reused.
 - `protocol-heldout-2026-07-21-v1.json` is frozen against pushed implementation
   revision `29c4651c661cba312f6a1419d06ef9b747e56cc5`. It consumes untouched
   seeds 10000 through 10127 exactly once.
