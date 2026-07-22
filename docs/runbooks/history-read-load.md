@@ -16,6 +16,14 @@ market candles through the public API. It continues to issue a separately
 named `/v1/health` control request throughout the loaded phase. Health reads
 the sequencer's atomic chain-status snapshot, while the historical requests
 should authorize from the API read model and execute in `sybil-history`.
+Every response body is consumed before that virtual user begins its next
+request. This preserves HTTP connection reuse and makes the achieved request
+rate include complete bounded history-response transfer rather than measuring
+headers followed by canceled bodies and connection churn.
+Goose's built-in per-request latency ends when response headers arrive; the
+virtual-user cadence and achieved throughput include the full body read. The
+pass/fail latency budget intentionally applies only to the small `/v1/health`
+control response.
 
 The run fails when:
 

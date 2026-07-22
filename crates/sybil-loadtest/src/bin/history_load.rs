@@ -214,10 +214,25 @@ async fn named_get(user: &mut GooseUser, path: &str, name: &str) -> TransactionR
         .path(path)
         .name(name)
         .set_request_builder(request_builder)
-        .error_on_fail()
         .build();
-    user.request(request).await?;
-    Ok(())
+    let mut goose = user.request(request).await?;
+    match goose.response {
+        Ok(response) => match response.bytes().await {
+            Ok(_) if goose.request.success => Ok(()),
+            Ok(_) => Err(Box::new(TransactionError::RequestFailed {
+                raw_request: goose.request,
+            })),
+            Err(error) => user.set_failure(
+                &format!("response body read failed for {name}: {error}"),
+                &mut goose.request,
+                None,
+                None,
+            ),
+        },
+        Err(_) => Err(Box::new(TransactionError::RequestFailed {
+            raw_request: goose.request,
+        })),
+    }
 }
 
 fn evaluate(
