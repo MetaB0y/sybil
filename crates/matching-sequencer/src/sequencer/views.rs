@@ -35,6 +35,7 @@ impl BlockSequencer {
             next_order_id: self.next_order_id,
             pubkey_registry: &self.pubkey_registry,
             service_account_receipts: &self.service_account_receipts,
+            mm_lifecycle_receipts: &self.mm_lifecycle_receipts,
             public_accounts_allocated: self.public_accounts_allocated,
             analytics: self.analytics.snapshot(),
             resting_orders: self.order_book.snapshot(),
@@ -146,6 +147,11 @@ impl BlockSequencer {
             .iter()
             .filter(|submission| submission.account_id == account_id)
             .count()
+            + self
+                .pending_signed_mm_bundles
+                .iter()
+                .filter(|pending| pending.submission.account_id == account_id)
+                .count()
     }
 
     pub fn pending_non_mm_orders_for_account(&self, account_id: AccountId) -> usize {

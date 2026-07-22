@@ -95,7 +95,7 @@ It then requires exact header/root/genesis chaining, folds the verified block
 hashes and DA commitments in order, and reveals one epoch public-input hash for
 the claimed start/end range.
 
-Witness v13 retains ordinary order/cancel and atomic MM-bundle RawP256/WebAuthn envelopes and the
+Witness v14 retains ordinary order/cancel and atomic MM-bundle lifecycle RawP256/WebAuthn envelopes and the
 account leaf commits `last_trading_nonce`. Shared native/guest verification
 replays both against the actor-ordered active key set; see
 [[P256 Authentication]] and [[Threat Model]].

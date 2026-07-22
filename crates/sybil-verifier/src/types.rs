@@ -126,6 +126,26 @@ pub enum ClientActionWitness {
         nonce: u64,
         authorization: ClientActionAuth,
     },
+    /// Atomic replacement of one exact active MM-bundle revision.
+    MmBundleReplace {
+        account_id: u64,
+        bundle_id: [u8; 32],
+        expected_revision: u64,
+        new_revision: u64,
+        orders: Vec<Order>,
+        order_sides: Vec<MmSide>,
+        max_capital: Nanos,
+        nonce: u64,
+        authorization: ClientActionAuth,
+    },
+    /// Atomic cancellation of one exact active MM-bundle revision.
+    MmBundleCancel {
+        account_id: u64,
+        bundle_id: [u8; 32],
+        expected_revision: u64,
+        nonce: u64,
+        authorization: ClientActionAuth,
+    },
 }
 
 /// Reason an order was rejected (mirrors sequencer's `RejectionReason`).

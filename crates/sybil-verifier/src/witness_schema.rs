@@ -25,7 +25,7 @@ use crate::types::{
     WitnessOrder, WitnessRejection,
 };
 
-pub const WITNESS_FORMAT_VERSION: u8 = 13;
+pub const WITNESS_FORMAT_VERSION: u8 = 14;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum WitnessDecodeError {
@@ -601,6 +601,30 @@ impl<'a> WitnessReader<'a> {
                                 reader.read_mm_side()
                             })?,
                         max_capital: Nanos(self.read_u64()?),
+                        nonce: self.read_u64()?,
+                        authorization: self.read_key_op_auth()?,
+                    },
+                    3 => ClientActionWitness::MmBundleReplace {
+                        account_id: self.read_u64()?,
+                        bundle_id: self.read_hash32()?,
+                        expected_revision: self.read_u64()?,
+                        new_revision: self.read_u64()?,
+                        orders: self
+                            .read_vec("client_action.mm_bundle_replace.orders", |reader| {
+                                reader.read_order()
+                            })?,
+                        order_sides: self
+                            .read_vec("client_action.mm_bundle_replace.order_sides", |reader| {
+                                reader.read_mm_side()
+                            })?,
+                        max_capital: Nanos(self.read_u64()?),
+                        nonce: self.read_u64()?,
+                        authorization: self.read_key_op_auth()?,
+                    },
+                    4 => ClientActionWitness::MmBundleCancel {
+                        account_id: self.read_u64()?,
+                        bundle_id: self.read_hash32()?,
+                        expected_revision: self.read_u64()?,
                         nonce: self.read_u64()?,
                         authorization: self.read_key_op_auth()?,
                     },
@@ -1325,6 +1349,82 @@ mod tests {
             )) if *bundle_id == [0x55; 32]
                 && decoded_orders == &orders
                 && order_sides == &[MmSide::BuyYes, MmSide::SellNo]
+        ));
+    }
+
+    #[test]
+    fn decode_round_trips_mm_bundle_replace_and_cancel_actions() {
+        let mut witness = representative_witness();
+        let orders = vec![fixture_order(
+            72,
+            MarketId::new(3),
+            MarketId::new(9),
+            525_000_000,
+            Some(11),
+        )];
+        let authorization = KeyOpAuth::RawP256 {
+            signer_pubkey: {
+                let mut key = [0x77; 33];
+                key[0] = 0x02;
+                key
+            },
+            signature: [0x66; 64],
+        };
+        witness
+            .system_events
+            .push(SystemEventWitness::ClientActionAuthorized(
+                ClientActionWitness::MmBundleReplace {
+                    account_id: 1001,
+                    bundle_id: [0x56; 32],
+                    expected_revision: 3,
+                    new_revision: 4,
+                    orders: orders.clone(),
+                    order_sides: vec![MmSide::BuyYes],
+                    max_capital: Nanos(3_000_000_000),
+                    nonce: 20,
+                    authorization: authorization.clone(),
+                },
+            ));
+        witness
+            .system_events
+            .push(SystemEventWitness::ClientActionAuthorized(
+                ClientActionWitness::MmBundleCancel {
+                    account_id: 1002,
+                    bundle_id: [0x57; 32],
+                    expected_revision: 8,
+                    nonce: 21,
+                    authorization,
+                },
+            ));
+
+        let bytes = canonical_witness_bytes(&witness);
+        let decoded = decode_canonical_witness_bytes(&bytes).unwrap();
+        assert_eq!(canonical_witness_bytes(&decoded), bytes);
+        assert!(matches!(
+            &decoded.system_events[decoded.system_events.len() - 2],
+            SystemEventWitness::ClientActionAuthorized(
+                ClientActionWitness::MmBundleReplace {
+                    account_id: 1001,
+                    bundle_id,
+                    expected_revision: 3,
+                    new_revision: 4,
+                    orders: decoded_orders,
+                    nonce: 20,
+                    ..
+                }
+            ) if *bundle_id == [0x56; 32] && decoded_orders == &orders
+        ));
+        assert!(matches!(
+            decoded.system_events.last(),
+            Some(SystemEventWitness::ClientActionAuthorized(
+                ClientActionWitness::MmBundleCancel {
+                    account_id: 1002,
+                    bundle_id,
+                    expected_revision: 8,
+                    nonce: 21,
+                    ..
+                }
+            )) if *bundle_id == [0x57; 32]
         ));
     }
 

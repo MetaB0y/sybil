@@ -86,6 +86,10 @@ pub(super) const PUBKEY_META: TableDefinition<&[u8], &[u8]> = TableDefinition::n
 pub(super) const SERVICE_ACCOUNT_RECEIPTS: TableDefinition<&[u8], &[u8]> =
     TableDefinition::new("service_account_receipts");
 
+/// Latest public MM lifecycle idempotency receipt, keyed by account id.
+pub(super) const MM_LIFECYCLE_RECEIPTS: TableDefinition<u64, &[u8]> =
+    TableDefinition::new("mm_lifecycle_receipts");
+
 /// Last clearing prices: market_id (u32) → msgpack(Vec<Nanos>)
 pub(super) const CLEARING_PRICES: TableDefinition<u32, &[u8]> =
     TableDefinition::new("clearing_prices");
@@ -207,7 +211,7 @@ pub(super) const KEY_ACKNOWLEDGED_WRITE_FLOOR: &str = "acknowledged_write_floor"
 pub(super) const KEY_NEXT_ACKNOWLEDGED_WRITE_SEQ: &str = "next_acknowledged_write_seq";
 pub(super) const KEY_PUBLIC_ACCOUNTS_ALLOCATED: &str = "public_accounts_allocated";
 
-pub(super) const STORE_LAYOUT_VERSION: u64 = 5;
+pub(super) const STORE_LAYOUT_VERSION: u64 = 6;
 
 // TODO: Tier 2 tables (remaining)
 // const MM_STATE: TableDefinition<u32, &[u8]> = TableDefinition::new("mm_state");

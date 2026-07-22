@@ -98,6 +98,9 @@ Existing live-ordering disciplines remain explicit:
 - each signed MM bundle persists its bundle id, revision, exact ordered sides,
   shared integer budget, nonce, authorization envelope, and admitted orders in
   one row; recovery reconstructs the whole pending bundle and witness action;
+- each exact MM replacement or cancellation persists as one actor-ordered row;
+  replay either swaps the complete successor revision or removes the complete
+  active bundle, then reconstructs the latest bounded idempotency receipt;
 - a direct resting-order admit is applied live first, then durably appended;
   append failure rolls the admit back before returning an error;
 - no acknowledged write is allowed before the first committed block snapshot,

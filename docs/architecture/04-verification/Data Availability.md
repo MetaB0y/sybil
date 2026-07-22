@@ -53,7 +53,7 @@ provider_refs_hash =
   BLAKE3("sybil/da/provider-refs/v1" || ref_count_le_u64 || len/ref...)
 ```
 
-`canonical_witness_bytes` is the same canonical `BlockWitness` v13 byte string
+`canonical_witness_bytes` is the same canonical `BlockWitness` v14 byte string
 used by `witness_root`. It
 begins with the format-version byte and includes the pre- and post-state
 account sections, the pre- and post-state sidecars, and the deposit-accumulator
@@ -78,7 +78,7 @@ is actually retrievable.
 
 ```mermaid
 flowchart LR
-    WIT["canonical BlockWitness v13 bytes"] --> PR["payload_root<br/>BLAKE3(domain · len · bytes)"]
+    WIT["canonical BlockWitness v14 bytes"] --> PR["payload_root<br/>BLAKE3(domain · len · bytes)"]
     REFS["provider refs<br/>file · blob · archive"] --> PRH["provider_refs_hash"]
     PR --> DAC["da_commitment<br/>BLAKE3(height · state_root · witness_root<br/>· payload_root · len · provider_refs_hash)"]
     PRH --> DAC

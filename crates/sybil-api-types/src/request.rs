@@ -669,6 +669,50 @@ pub struct SubmitSignedMmBundleRequest {
     pub webauthn_assertion: Option<WebAuthnAssertion>,
 }
 
+/// Public signed atomic replacement of one active MM bundle revision.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
+pub struct ReplaceSignedMmBundleRequest {
+    pub account_id: u64,
+    pub bundle_id_hex: String,
+    pub expected_revision: u64,
+    pub new_revision: u64,
+    pub orders: Vec<OrderSpec>,
+    /// Exact next block this replacement targets.
+    pub expires_at_block: u64,
+    /// Integer nanodollars shared across every replacement quote.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
+    pub mm_budget_nanos: u64,
+    pub nonce: u64,
+    pub signer_pubkey_hex: String,
+    #[serde(default)]
+    pub auth_scheme: AuthScheme,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature_hex: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webauthn_assertion: Option<WebAuthnAssertion>,
+}
+
+/// Public signed cancellation of one active MM bundle revision.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
+pub struct CancelSignedMmBundleRequest {
+    pub account_id: u64,
+    pub bundle_id_hex: String,
+    pub expected_revision: u64,
+    pub nonce: u64,
+    pub signer_pubkey_hex: String,
+    #[serde(default)]
+    pub auth_scheme: AuthScheme,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature_hex: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webauthn_assertion: Option<WebAuthnAssertion>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CancelSignedOrderRequest {

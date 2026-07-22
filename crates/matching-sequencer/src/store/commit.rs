@@ -49,6 +49,7 @@ pub struct SequencerSnapshot<'a> {
     pub pubkey_registry: &'a HashMap<crate::crypto::PublicKey, crate::crypto::RegisteredPubkey>,
     pub service_account_receipts:
         &'a HashMap<[u8; 32], crate::sequencer::ServiceAccountProvisioningReceipt>,
+    pub mm_lifecycle_receipts: &'a HashMap<AccountId, crate::sequencer::MmBundleLifecycleReceipt>,
     pub public_accounts_allocated: u64,
     pub analytics: AnalyticsSnapshot<'a>,
     /// Owned because the snapshot clones the live book — cheap for bounded sizes.
@@ -71,6 +72,7 @@ struct RedbBlockCommit {
     proof_job_bytes: Option<Vec<u8>>,
     pubkey_rows: Vec<(Vec<u8>, crate::crypto::RegisteredPubkey)>,
     service_account_receipt_rows: Vec<([u8; 32], Vec<u8>)>,
+    mm_lifecycle_receipt_rows: Vec<(u64, Vec<u8>)>,
     clearing_price_rows: Vec<(u32, Vec<u8>)>,
     market_volume_rows: Vec<(u32, u64)>,
     resting_orders_bytes: Vec<u8>,
@@ -309,6 +311,12 @@ fn build_redb_block_commit(
         .map(|(key, receipt)| Ok((*key, rmp_serde::to_vec(receipt)?)))
         .collect::<Result<Vec<_>, StoreError>>()?;
     service_account_receipt_rows.sort_by_key(|(key, _)| *key);
+    let mut mm_lifecycle_receipt_rows = snapshot
+        .mm_lifecycle_receipts
+        .iter()
+        .map(|(account_id, receipt)| Ok((account_id.0, rmp_serde::to_vec(receipt)?)))
+        .collect::<Result<Vec<_>, StoreError>>()?;
+    mm_lifecycle_receipt_rows.sort_by_key(|(account_id, _)| *account_id);
 
     Ok(RedbBlockCommit {
         height: snapshot.header.height,
@@ -325,6 +333,7 @@ fn build_redb_block_commit(
         proof_job_bytes,
         pubkey_rows,
         service_account_receipt_rows,
+        mm_lifecycle_receipt_rows,
         clearing_price_rows,
         market_volume_rows,
         resting_orders_bytes: rmp_serde::to_vec(&snapshot.resting_orders)?,
@@ -398,6 +407,14 @@ where
         table.retain(|_, _| false)?;
         for (key, receipt) in &commit.service_account_receipt_rows {
             table.insert(key.as_slice(), receipt.as_slice())?;
+        }
+    }
+
+    {
+        let mut table = txn.open_table(MM_LIFECYCLE_RECEIPTS)?;
+        table.retain(|_, _| false)?;
+        for (account_id, receipt) in &commit.mm_lifecycle_receipt_rows {
+            table.insert(*account_id, receipt.as_slice())?;
         }
     }
 

@@ -8,7 +8,7 @@ last_verified: 2026-07-22
 
 # Block Witness Format
 
-`BlockWitness` v13 is the canonical private audit package for a Sybil block. The
+`BlockWitness` v14 is the canonical private audit package for a Sybil block. The
 sequencer persists the latest witness for recovery in every chain mode, native
 verification replays it, and the OpenVM epoch
 guest receives one witness per streamed `StateTransitionGuestInput`. Each
@@ -50,7 +50,10 @@ authenticated market-group snapshots. GitHub #174 moves the format to v13 by
 adding `ClientActionAuthorized(MmBundle)` with the signed bundle identity,
 revision, ordered orders and economic sides, shared integer budget, nonce, and
 authorization envelope. It also adds the validity-checked `AtomicBundle`
-rejection reason. See
+rejection reason. GitHub #200 moves the format to v14 by appending
+`ClientActionAuthorized(MmBundleReplace|MmBundleCancel)` with exact revision,
+bundle identity, nonce, and authorization; replacement additionally carries
+the complete successor bundle. See
 the historical `design/archive/implemented/witness-v6-keys-transition.md` and
 `docs/adr/0015-deposit-quarantine.md`.
 
@@ -80,11 +83,11 @@ Primitive encodings:
 
 ## Layout
 
-The first byte is the format version. For v13 it is `0x0d`.
+The first byte is the format version. For v14 it is `0x0e`.
 
 ```text
 canonical_witness_bytes =
-    version:u8 = 0x0d
+    version:u8 = 0x0e
  || header
  || previous_header_tag:u8                     // 0 = none, 1 = present
  || previous_header?                           // if tag == 1
@@ -154,11 +157,15 @@ that forward fold it cryptographically verifies each key or ordinary-action
 envelope over canonical bytes using `genesis_hash` and the running key set.
 System replay independently requires each client-action nonce to exceed the
 authenticated `last_trading_nonce`, and binding verification maps the exact
-order/cancel/MM-bundle event to its block or sidecar effect. MM-bundle action
-tag 2 encodes account id, 32-byte bundle id, revision, ordered full orders,
+order/cancel/MM-bundle lifecycle event to its block or sidecar effect.
+MM-bundle action tag 2 encodes account id, 32-byte bundle id, revision, ordered full orders,
 ordered economic sides, maximum capital, nonce, and authorization. Verification
 requires revision zero at initial admission, exact constraint coverage, and an
-all-accepted or all-`AtomicBundle`-rejected result.
+all-accepted or all-`AtomicBundle`-rejected result. Tag 3 encodes an exact
+replacement from `expected_revision` to `expected_revision + 1` plus the full
+successor bundle and requires that bundle's exact shared constraint/result.
+Tag 4 encodes cancellation of an exact revision and requires the account's MM
+constraint to be absent unless a later same-account bundle action supersedes it.
 
 `clearing_prices_section` is:
 
@@ -374,7 +381,7 @@ compute_state_root_with_sidecar(post_state, state_sidecar)
 
 ## Versioning And Compatibility
 
-The version byte is the first byte of `canonical_witness_bytes`. v13 is `0x0d`.
+The version byte is the first byte of `canonical_witness_bytes`. v14 is `0x0e`.
 Unknown versions must fail closed. This repo does not maintain dual witness
 decoders for devnet schema changes; ADR-0011 rejects compatibility wrappers
 before launch because they double validity-critical encoder surface.

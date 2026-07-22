@@ -186,6 +186,16 @@ shape/STP/budget checks, and the exact authenticated WAL append. Block-time
 state drift rejects every member together; the server never admits a subset or
 silently reduces the signed budget.
 
+`POST /v1/orders/mm-bundles/replace/signed` atomically replaces one exact
+active revision with `new_revision = expected_revision + 1`; its response
+contains the successor's sequencer order ids. `POST
+/v1/orders/mm-bundles/cancel/signed` removes one exact active revision and
+returns `cancelled`. Both routes are public signed writes, share the order rate
+limit, support RawP256 and WebAuthn over distinct canonical domains, and use
+stable 409 codes for absent, stale, or conflicting lifecycle requests. An
+exact latest retry is successful and returns the recorded result even after a
+restart or block-fence commit.
+
 Trusted `POST /v1/markets` callers may supply `creation_key` as a stable
 operator identity (at most 128 ASCII letters, digits, or `-_:./`). The first
 call durably creates the market and commits the key through its metadata

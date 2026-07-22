@@ -1,6 +1,7 @@
 use crate::crypto::{
-    AuthenticatedCancel, AuthenticatedMmBundle, AuthenticatedOrder, SignedCancel, SignedMmBundle,
-    SignedOrder,
+    AuthenticatedCancel, AuthenticatedMmBundle, AuthenticatedMmBundleCancel,
+    AuthenticatedMmBundleReplace, AuthenticatedOrder, SignedCancel, SignedMmBundle,
+    SignedMmBundleCancel, SignedMmBundleReplace, SignedOrder,
 };
 use crate::error::SequencerError;
 use crate::sequencer::OrderSubmission;
@@ -56,6 +57,38 @@ impl SequencerHandle {
         authenticated: AuthenticatedMmBundle,
     ) -> Result<Vec<u64>, SequencerError> {
         self.rpc(|reply| SequencerMsg::SubmitAuthenticatedMmBundle(authenticated, reply))
+            .await?
+    }
+
+    pub async fn replace_signed_mm_bundle(
+        &self,
+        signed: SignedMmBundleReplace,
+    ) -> Result<Vec<u64>, SequencerError> {
+        self.rpc(|reply| SequencerMsg::ReplaceSignedMmBundle(signed, reply))
+            .await?
+    }
+
+    pub async fn replace_authenticated_mm_bundle(
+        &self,
+        authenticated: AuthenticatedMmBundleReplace,
+    ) -> Result<Vec<u64>, SequencerError> {
+        self.rpc(|reply| SequencerMsg::ReplaceAuthenticatedMmBundle(authenticated, reply))
+            .await?
+    }
+
+    pub async fn cancel_signed_mm_bundle(
+        &self,
+        signed: SignedMmBundleCancel,
+    ) -> Result<crate::sequencer::MmBundleLifecycleResult, SequencerError> {
+        self.rpc(|reply| SequencerMsg::CancelSignedMmBundle(signed, reply))
+            .await?
+    }
+
+    pub async fn cancel_authenticated_mm_bundle(
+        &self,
+        authenticated: AuthenticatedMmBundleCancel,
+    ) -> Result<crate::sequencer::MmBundleLifecycleResult, SequencerError> {
+        self.rpc(|reply| SequencerMsg::CancelAuthenticatedMmBundle(authenticated, reply))
             .await?
     }
 

@@ -33,6 +33,7 @@ from .bridge_withdrawal_l1_event_response import BridgeWithdrawalL1EventResponse
 from .bridge_withdrawal_l1_status import BridgeWithdrawalL1Status
 from .bridge_withdrawal_response import BridgeWithdrawalResponse
 from .cancel_order_response import CancelOrderResponse
+from .cancel_signed_mm_bundle_request import CancelSignedMmBundleRequest
 from .cancel_signed_order_request import CancelSignedOrderRequest
 from .create_account_request import CreateAccountRequest
 from .create_api_key_request import CreateApiKeyRequest
@@ -108,6 +109,7 @@ from .registered_feed_response import RegisteredFeedResponse
 from .rejected_order_view_response import RejectedOrderViewResponse
 from .rejection_response import RejectionResponse
 from .removed_order_view_response import RemovedOrderViewResponse
+from .replace_signed_mm_bundle_request import ReplaceSignedMmBundleRequest
 from .reserved_position_release_response import ReservedPositionReleaseResponse
 from .resolution_response import ResolutionResponse
 from .resolve_market_request import ResolveMarketRequest
@@ -197,6 +199,7 @@ __all__ = (
     "BridgeWithdrawalL1Status",
     "BridgeWithdrawalResponse",
     "CancelOrderResponse",
+    "CancelSignedMmBundleRequest",
     "CancelSignedOrderRequest",
     "CreateAccountRequest",
     "CreateApiKeyRequest",
@@ -272,6 +275,7 @@ __all__ = (
     "RejectedOrderViewResponse",
     "RejectionResponse",
     "RemovedOrderViewResponse",
+    "ReplaceSignedMmBundleRequest",
     "ReservedPositionReleaseResponse",
     "ResolutionResponse",
     "ResolveMarketRequest",

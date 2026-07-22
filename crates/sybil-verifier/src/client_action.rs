@@ -3,7 +3,8 @@
 use matching_engine::{ConditionDir, MmSide, Nanos, Order};
 use sybil_signing::{
     ConditionDir as CanonicalConditionDir, MarketId as CanonicalMarketId,
-    MmBundle as CanonicalMmBundle, MmBundleOrder as CanonicalMmBundleOrder,
+    MmBundle as CanonicalMmBundle, MmBundleCancel as CanonicalMmBundleCancel,
+    MmBundleOrder as CanonicalMmBundleOrder, MmBundleReplace as CanonicalMmBundleReplace,
     MmSide as CanonicalMmSide, Order as CanonicalOrder, PriceCondition as CanonicalPriceCondition,
 };
 
@@ -117,6 +118,70 @@ pub fn canonical_mm_bundle_bytes(
         },
         genesis_hash,
     ))
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the verifier canonicalizer exposes the complete replacement protocol tuple"
+)]
+pub fn canonical_mm_bundle_replace_bytes(
+    account_id: u64,
+    bundle_id: [u8; 32],
+    expected_revision: u64,
+    new_revision: u64,
+    orders: &[Order],
+    order_sides: &[MmSide],
+    max_capital: Nanos,
+    nonce: u64,
+    genesis_hash: [u8; 32],
+) -> Result<Vec<u8>, String> {
+    if new_revision
+        != expected_revision
+            .checked_add(1)
+            .ok_or("MM bundle revision exhausted")?
+    {
+        return Err("replacement revision must be exactly expected revision plus one".to_string());
+    }
+    if orders.len() != order_sides.len() {
+        return Err("MM bundle orders and sides have different lengths".to_string());
+    }
+    let orders = orders
+        .iter()
+        .zip(order_sides)
+        .map(|(order, side)| to_canonical_mm_bundle_order(order, *side))
+        .collect();
+    Ok(sybil_signing::canonical_mm_bundle_replace_bytes(
+        &CanonicalMmBundleReplace {
+            expected_revision,
+            replacement: CanonicalMmBundle {
+                account_id,
+                bundle_id,
+                revision: new_revision,
+                orders,
+                max_capital: max_capital.0,
+                nonce,
+            },
+        },
+        genesis_hash,
+    ))
+}
+
+pub fn canonical_mm_bundle_cancel_bytes(
+    account_id: u64,
+    bundle_id: [u8; 32],
+    expected_revision: u64,
+    nonce: u64,
+    genesis_hash: [u8; 32],
+) -> Vec<u8> {
+    sybil_signing::canonical_mm_bundle_cancel_bytes(
+        &CanonicalMmBundleCancel {
+            account_id,
+            bundle_id,
+            expected_revision,
+            nonce,
+        },
+        genesis_hash,
+    )
 }
 
 /// Bind every authorization event to the order/cancel effect it authorized.
@@ -268,64 +333,77 @@ fn verify_bindings(witness: &BlockWitness) -> Result<(), String> {
                         "initial authorized MM bundle has nonzero revision {revision}"
                     ));
                 }
-                if orders.is_empty() || orders.len() != order_sides.len() {
-                    return Err("authorized MM bundle has empty or mismatched orders/sides".into());
-                }
-
-                let mut ids = BTreeSet::new();
-                for order in orders {
-                    if pre_resting.contains(&order.id) {
-                        return Err(format!(
-                            "authorized MM order {} already existed in authenticated pre-state",
-                            order.id
-                        ));
-                    }
-                    if !ids.insert(order.id)
-                        || authorized_orders
-                            .insert(order.id, (index, *account_id))
-                            .is_some()
-                    {
-                        return Err(format!(
-                            "MM order {} was authorized more than once",
-                            order.id
-                        ));
-                    }
-                    let has_result = order_results.get(&order.id).is_some_and(
-                        |(result_account, result_order)| {
-                            *result_account == *account_id && *result_order == order
-                        },
+                verify_mm_bundle_binding(
+                    witness,
+                    &pre_resting,
+                    &order_results,
+                    &accepted_mm,
+                    &rejected_ids,
+                    &mut authorized_orders,
+                    index,
+                    *account_id,
+                    orders,
+                    order_sides,
+                    *max_capital,
+                )?;
+            }
+            ClientActionWitness::MmBundleReplace {
+                account_id,
+                expected_revision,
+                new_revision,
+                orders,
+                order_sides,
+                max_capital,
+                ..
+            } => {
+                if *new_revision
+                    != expected_revision
+                        .checked_add(1)
+                        .ok_or("authorized MM replacement revision exhausted")?
+                {
+                    return Err(
+                        "authorized MM replacement revision is not exactly expected plus one"
+                            .into(),
                     );
-                    if !has_result {
-                        return Err(format!(
-                            "authorized MM order {} has no matching block result",
-                            order.id
-                        ));
-                    }
                 }
-
-                let accepted = ids.iter().filter(|id| accepted_mm.contains(id)).count();
-                let rejected = ids.iter().filter(|id| rejected_ids.contains(id)).count();
-                if accepted != ids.len() && rejected != ids.len() {
-                    return Err(format!(
-                        "authorized MM bundle was partially admitted: {accepted} accepted, {rejected} rejected"
-                    ));
-                }
-
-                let exact_constraint = witness.mm_constraints.iter().any(|constraint| {
-                    if constraint.mm_id.0 != *account_id
-                        || constraint.max_capital != *max_capital
-                        || constraint.order_ids.len() != orders.len()
-                        || constraint.order_sides.len() != orders.len()
-                    {
-                        return false;
-                    }
-                    orders.iter().zip(order_sides).all(|(order, side)| {
-                        constraint.order_ids.contains(&order.id)
-                            && constraint.order_sides.get(&order.id) == Some(side)
-                    })
+                verify_mm_bundle_binding(
+                    witness,
+                    &pre_resting,
+                    &order_results,
+                    &accepted_mm,
+                    &rejected_ids,
+                    &mut authorized_orders,
+                    index,
+                    *account_id,
+                    orders,
+                    order_sides,
+                    *max_capital,
+                )?;
+            }
+            ClientActionWitness::MmBundleCancel { account_id, .. } => {
+                let later_bundle = witness.system_events[index + 1..].iter().any(|event| {
+                    matches!(
+                        event,
+                        SystemEventWitness::ClientActionAuthorized(
+                            ClientActionWitness::MmBundle {
+                                account_id: later_account,
+                                ..
+                            } | ClientActionWitness::MmBundleReplace {
+                                account_id: later_account,
+                                ..
+                            }
+                        ) if later_account == account_id
+                    )
                 });
-                if !exact_constraint {
-                    return Err("authorized MM bundle has no exact shared-budget constraint".into());
+                if !later_bundle
+                    && witness
+                        .mm_constraints
+                        .iter()
+                        .any(|constraint| constraint.mm_id.0 == *account_id)
+                {
+                    return Err(format!(
+                        "authorized MM cancellation for account {account_id} retained a bundle constraint"
+                    ));
                 }
             }
         }
@@ -333,10 +411,86 @@ fn verify_bindings(witness: &BlockWitness) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the helper binds one signed bundle across each independent witness index"
+)]
+fn verify_mm_bundle_binding(
+    witness: &BlockWitness,
+    pre_resting: &std::collections::BTreeSet<u64>,
+    order_results: &std::collections::BTreeMap<u64, (u64, &Order)>,
+    accepted_mm: &std::collections::BTreeSet<u64>,
+    rejected_ids: &std::collections::BTreeSet<u64>,
+    authorized_orders: &mut std::collections::BTreeMap<u64, (usize, u64)>,
+    event_index: usize,
+    account_id: u64,
+    orders: &[Order],
+    order_sides: &[MmSide],
+    max_capital: Nanos,
+) -> Result<(), String> {
+    if orders.is_empty() || orders.len() != order_sides.len() {
+        return Err("authorized MM bundle has empty or mismatched orders/sides".into());
+    }
+    let mut ids = std::collections::BTreeSet::new();
+    for order in orders {
+        if pre_resting.contains(&order.id) {
+            return Err(format!(
+                "authorized MM order {} already existed in authenticated pre-state",
+                order.id
+            ));
+        }
+        if !ids.insert(order.id)
+            || authorized_orders
+                .insert(order.id, (event_index, account_id))
+                .is_some()
+        {
+            return Err(format!(
+                "MM order {} was authorized more than once",
+                order.id
+            ));
+        }
+        let has_result =
+            order_results
+                .get(&order.id)
+                .is_some_and(|(result_account, result_order)| {
+                    *result_account == account_id && *result_order == order
+                });
+        if !has_result {
+            return Err(format!(
+                "authorized MM order {} has no matching block result",
+                order.id
+            ));
+        }
+    }
+    let accepted = ids.iter().filter(|id| accepted_mm.contains(id)).count();
+    let rejected = ids.iter().filter(|id| rejected_ids.contains(id)).count();
+    if accepted != ids.len() && rejected != ids.len() {
+        return Err(format!(
+            "authorized MM bundle was partially admitted: {accepted} accepted, {rejected} rejected"
+        ));
+    }
+    let exact_constraint = witness.mm_constraints.iter().any(|constraint| {
+        constraint.mm_id.0 == account_id
+            && constraint.max_capital == max_capital
+            && constraint.order_ids.len() == orders.len()
+            && constraint.order_sides.len() == orders.len()
+            && orders.iter().zip(order_sides).all(|(order, side)| {
+                constraint.order_ids.contains(&order.id)
+                    && constraint.order_sides.get(&order.id) == Some(side)
+            })
+    });
+    if !exact_constraint {
+        return Err("authorized MM bundle has no exact shared-budget constraint".into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matching_engine::{MarketId, MarketSet, Nanos, OrderDirection, outcome_buy, shares_to_qty};
+    use matching_engine::{
+        MarketId, MarketSet, MmConstraint, MmId, Nanos, OrderDirection, outcome_buy, shares_to_qty,
+    };
 
     use crate::{
         ClientActionAuth, DepositAccumulatorWitness, RejectionReason, RestingOrderSnapshot,
@@ -415,6 +569,34 @@ mod tests {
             account_id,
             order_id,
             nonce: 1,
+            authorization: auth(),
+        })
+    }
+
+    fn authorized_mm_replace(
+        account_id: u64,
+        order: Order,
+        max_capital: Nanos,
+    ) -> SystemEventWitness {
+        SystemEventWitness::ClientActionAuthorized(ClientActionWitness::MmBundleReplace {
+            account_id,
+            bundle_id: [0x44; 32],
+            expected_revision: 7,
+            new_revision: 8,
+            orders: vec![order],
+            order_sides: vec![MmSide::BuyYes],
+            max_capital,
+            nonce: 9,
+            authorization: auth(),
+        })
+    }
+
+    fn authorized_mm_cancel(account_id: u64) -> SystemEventWitness {
+        SystemEventWitness::ClientActionAuthorized(ClientActionWitness::MmBundleCancel {
+            account_id,
+            bundle_id: [0x44; 32],
+            expected_revision: 8,
+            nonce: 10,
             authorization: auth(),
         })
     }
@@ -634,5 +816,63 @@ mod tests {
         earlier_effect.system_events.push(cancellation(11, 7));
         earlier_effect.system_events.push(authorized_cancel(11, 7));
         assert_mismatch(&earlier_effect, "has no later cancellation effect");
+    }
+
+    #[test]
+    fn authorized_mm_replace_requires_exact_atomic_result_and_shared_budget() {
+        let expected = order(7, MarketId(0));
+        let budget = Nanos(2_000_000_000);
+        let mut valid = witness();
+        valid.orders.push(WitnessOrder {
+            order: expected.clone(),
+            account_id: 11,
+            is_mm: true,
+        });
+        let mut constraint = MmConstraint::new(MmId(11), budget);
+        constraint.add_order(expected.id, MmSide::BuyYes);
+        valid.mm_constraints.push(constraint);
+        valid
+            .system_events
+            .push(authorized_mm_replace(11, expected.clone(), budget));
+        assert!(verify_client_action_bindings(&valid).valid);
+
+        let mut wrong_budget = valid.clone();
+        wrong_budget.mm_constraints[0].max_capital = Nanos(budget.0 + 1);
+        assert_mismatch(&wrong_budget, "no exact shared-budget constraint");
+
+        let mut partial_result = valid.clone();
+        partial_result.orders.clear();
+        assert_mismatch(&partial_result, "has no matching block result");
+
+        let mut skipped_revision = valid;
+        let SystemEventWitness::ClientActionAuthorized(ClientActionWitness::MmBundleReplace {
+            new_revision,
+            ..
+        }) = &mut skipped_revision.system_events[0]
+        else {
+            panic!("replacement authorization fixture");
+        };
+        *new_revision = 9;
+        assert_mismatch(&skipped_revision, "not exactly expected plus one");
+    }
+
+    #[test]
+    fn authorized_mm_cancel_requires_the_account_constraint_to_be_absent() {
+        let mut valid = witness();
+        valid.system_events.push(authorized_mm_cancel(11));
+        assert!(verify_client_action_bindings(&valid).valid);
+
+        let mut retained = valid;
+        retained
+            .mm_constraints
+            .push(MmConstraint::new(MmId(11), Nanos(1_000_000_000)));
+        assert_mismatch(&retained, "retained a bundle constraint");
+
+        let mut unrelated = witness();
+        unrelated
+            .mm_constraints
+            .push(MmConstraint::new(MmId(12), Nanos(1_000_000_000)));
+        unrelated.system_events.push(authorized_mm_cancel(11));
+        assert!(verify_client_action_bindings(&unrelated).valid);
     }
 }

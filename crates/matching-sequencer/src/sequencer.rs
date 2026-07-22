@@ -56,9 +56,11 @@ pub use self::config::{
     DEFAULT_MIN_RESTING_ORDER_NOTIONAL_NANOS, DEFAULT_ORDER_TTL_BLOCKS, SequencerConfig,
 };
 pub use self::restore::SequencerRestoreError;
+pub(crate) use self::types::PendingSignedMmBundle;
 pub use self::types::{
-    AdmitOutcome, BatchResult, LeaderboardBase, LeaderboardRow, OrderSubmission, PendingOrderInfo,
-    PreparedBlock, batch_result_from_block,
+    AdmitOutcome, BatchResult, LeaderboardBase, LeaderboardRow, MmBundleLifecycleReceipt,
+    MmBundleLifecycleResult, OrderSubmission, PendingOrderInfo, PreparedBlock,
+    batch_result_from_block,
 };
 
 fn current_timestamp_ms() -> u64 {
@@ -130,6 +132,12 @@ pub struct BlockSequencer {
     /// acknowledged-write WAL so restart cannot drop it or reorder it against
     /// another subsystem.
     pending_bundles: Vec<OrderSubmission>,
+    /// Actor-owned signed MM bundles. Kept separate from privileged/internal
+    /// deferred submissions so lifecycle ownership and one-active-per-account
+    /// checks cannot be bypassed by vector surgery.
+    pending_signed_mm_bundles: Vec<types::PendingSignedMmBundle>,
+    /// Latest idempotency result per public MM account. Operational state only.
+    mm_lifecycle_receipts: HashMap<AccountId, MmBundleLifecycleReceipt>,
     /// Runtime configuration for this sequencer and its surrounding actor.
     pub config: SequencerConfig,
 }
@@ -172,6 +180,12 @@ impl BlockSequencer {
             }
             | sybil_verifier::ClientActionWitness::MmBundle {
                 account_id, nonce, ..
+            }
+            | sybil_verifier::ClientActionWitness::MmBundleReplace {
+                account_id, nonce, ..
+            }
+            | sybil_verifier::ClientActionWitness::MmBundleCancel {
+                account_id, nonce, ..
             } => (AccountId(*account_id), *nonce),
         };
         self.capture_system_account_baseline(account_id);
@@ -182,6 +196,61 @@ impl BlockSequencer {
             .last_trading_nonce = nonce;
         self.record_system_event(SystemEvent::ClientActionAuthorized(action));
         Ok(())
+    }
+
+    /// Replace the coalesced public-MM lifecycle intent for an account, then
+    /// advance its nonce. Only the final pre-cutoff action has a block effect;
+    /// earlier acknowledged actions remain represented by the nonce jump and
+    /// operational WAL receipts.
+    pub(crate) fn apply_mm_lifecycle_action_authorized(
+        &mut self,
+        action: sybil_verifier::ClientActionWitness,
+    ) -> Result<(), SequencerError> {
+        let account_id = match &action {
+            sybil_verifier::ClientActionWitness::MmBundle { account_id, .. }
+            | sybil_verifier::ClientActionWitness::MmBundleReplace { account_id, .. }
+            | sybil_verifier::ClientActionWitness::MmBundleCancel { account_id, .. } => {
+                AccountId(*account_id)
+            }
+            _ => {
+                return Err(SequencerError::InvalidMmBundle(
+                    "non-MM action used at MM lifecycle boundary".to_string(),
+                ));
+            }
+        };
+        self.pending_system_events.retain(|event| {
+            !matches!(
+                event,
+                SystemEvent::ClientActionAuthorized(
+                    sybil_verifier::ClientActionWitness::MmBundle {
+                        account_id: existing,
+                        ..
+                    } | sybil_verifier::ClientActionWitness::MmBundleReplace {
+                        account_id: existing,
+                        ..
+                    } | sybil_verifier::ClientActionWitness::MmBundleCancel {
+                        account_id: existing,
+                        ..
+                    }
+                ) if *existing == account_id.0
+            )
+        });
+        self.apply_client_action_authorized(action)
+    }
+
+    pub(crate) fn mm_lifecycle_receipt(
+        &self,
+        account_id: AccountId,
+    ) -> Option<&MmBundleLifecycleReceipt> {
+        self.mm_lifecycle_receipts.get(&account_id)
+    }
+
+    pub(crate) fn record_mm_lifecycle_receipt(
+        &mut self,
+        account_id: AccountId,
+        receipt: MmBundleLifecycleReceipt,
+    ) {
+        self.mm_lifecycle_receipts.insert(account_id, receipt);
     }
 }
 

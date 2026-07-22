@@ -415,6 +415,13 @@ impl BlockSequencer {
                 }
             }
         }
+        for pending in &self.pending_signed_mm_bundles {
+            if pending.submission.account_id == account_id {
+                for order in &pending.submission.orders {
+                    stp.record(account_id, order);
+                }
+            }
+        }
     }
 
     /// Seed an STP tracker with every account's resting coverage. Used inside

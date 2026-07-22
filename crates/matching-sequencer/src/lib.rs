@@ -54,10 +54,11 @@ pub use bridge::{
 pub use crypto::{
     AccountAuthScheme, AuthenticatedApiKeyCreate, AuthenticatedApiKeyRevoke,
     AuthenticatedBridgeWithdrawal, AuthenticatedCancel, AuthenticatedKeyRegistration,
-    AuthenticatedKeyRevocation, AuthenticatedMmBundle, AuthenticatedOrder,
-    AuthenticatedProfileUpdate, KeyScope, PublicKey, RegisteredPubkey, SignedApiKeyCreate,
-    SignedApiKeyRevoke, SignedBridgeWithdrawal, SignedCancel, SignedKeyRegistration,
-    SignedKeyRevocation, SignedMmBundle, SignedOrder, SignedProfileUpdate, api_key_hash,
+    AuthenticatedKeyRevocation, AuthenticatedMmBundle, AuthenticatedMmBundleCancel,
+    AuthenticatedMmBundleReplace, AuthenticatedOrder, AuthenticatedProfileUpdate, KeyScope,
+    PublicKey, RegisteredPubkey, SignedApiKeyCreate, SignedApiKeyRevoke, SignedBridgeWithdrawal,
+    SignedCancel, SignedKeyRegistration, SignedKeyRevocation, SignedMmBundle, SignedMmBundleCancel,
+    SignedMmBundleReplace, SignedOrder, SignedProfileUpdate, api_key_hash,
 };
 pub use error::{Rejection, RejectionReason, SequencerError};
 pub use market_info::{
@@ -68,8 +69,8 @@ pub use portfolio::{PortfolioSummary, PositionValue};
 pub use sequencer::{
     BatchResult, BlockSequencer, DEFAULT_MIN_RESTING_ORDER_NOTIONAL_NANOS,
     DEFAULT_ORDER_TTL_BLOCKS, LeaderboardBase, LeaderboardRow, MAX_ACCOUNT_PROVISIONING_KEY_BYTES,
-    OrderSubmission, PendingOrderInfo, SequencerConfig, ServiceAccountProvisioningReceipt,
-    ServiceAccountProvisioningResult,
+    MmBundleLifecycleReceipt, MmBundleLifecycleResult, OrderSubmission, PendingOrderInfo,
+    SequencerConfig, ServiceAccountProvisioningReceipt, ServiceAccountProvisioningResult,
 };
 pub use store::{
     AcknowledgedProofJobPruneReport, AcknowledgedProofJobRetentionPolicy,

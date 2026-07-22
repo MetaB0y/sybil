@@ -256,6 +256,53 @@ pub fn system_event_leaf_value(event: &SystemEventWitness) -> Vec<u8> {
                     value.extend_from_slice(&nonce.to_le_bytes());
                     append_key_op_auth(&mut value, authorization);
                 }
+                ClientActionWitness::MmBundleReplace {
+                    account_id,
+                    bundle_id,
+                    expected_revision,
+                    new_revision,
+                    orders,
+                    order_sides,
+                    max_capital,
+                    nonce,
+                    authorization,
+                } => {
+                    value.push(3);
+                    value.extend_from_slice(&account_id.to_le_bytes());
+                    value.extend_from_slice(bundle_id);
+                    value.extend_from_slice(&expected_revision.to_le_bytes());
+                    value.extend_from_slice(&new_revision.to_le_bytes());
+                    value.extend_from_slice(&(orders.len() as u64).to_le_bytes());
+                    for order in orders {
+                        append_order(&mut value, order);
+                    }
+                    value.extend_from_slice(&(order_sides.len() as u64).to_le_bytes());
+                    for side in order_sides {
+                        value.push(match side {
+                            matching_engine::MmSide::SellYes => 0,
+                            matching_engine::MmSide::BuyYes => 1,
+                            matching_engine::MmSide::SellNo => 2,
+                            matching_engine::MmSide::BuyNo => 3,
+                        });
+                    }
+                    value.extend_from_slice(&max_capital.0.to_le_bytes());
+                    value.extend_from_slice(&nonce.to_le_bytes());
+                    append_key_op_auth(&mut value, authorization);
+                }
+                ClientActionWitness::MmBundleCancel {
+                    account_id,
+                    bundle_id,
+                    expected_revision,
+                    nonce,
+                    authorization,
+                } => {
+                    value.push(4);
+                    value.extend_from_slice(&account_id.to_le_bytes());
+                    value.extend_from_slice(bundle_id);
+                    value.extend_from_slice(&expected_revision.to_le_bytes());
+                    value.extend_from_slice(&nonce.to_le_bytes());
+                    append_key_op_auth(&mut value, authorization);
+                }
             }
         }
     }
@@ -376,7 +423,7 @@ fn append_rejection_reason(value: &mut Vec<u8>, reason: &RejectionReason) {
 mod tests {
     use super::*;
     use crate::types::SystemEventWitness;
-    use matching_engine::{MarketId, OrderDirection};
+    use matching_engine::{MarketId, Nanos, OrderDirection};
 
     #[test]
     fn event_leaf_values_encode_deposit() {
@@ -476,5 +523,39 @@ mod tests {
         assert_eq!(&leaf[28..36], &9u64.to_le_bytes());
         assert_eq!(&leaf[36..44], &11u64.to_le_bytes());
         assert_eq!(leaf[44], 0);
+    }
+
+    #[test]
+    fn mm_bundle_lifecycle_action_tags_are_append_only() {
+        let authorization = KeyOpAuth::RawP256 {
+            signer_pubkey: [2; 33],
+            signature: [3; 64],
+        };
+        let replace =
+            SystemEventWitness::ClientActionAuthorized(ClientActionWitness::MmBundleReplace {
+                account_id: 7,
+                bundle_id: [4; 32],
+                expected_revision: 1,
+                new_revision: 2,
+                orders: Vec::new(),
+                order_sides: Vec::new(),
+                max_capital: Nanos(5),
+                nonce: 11,
+                authorization: authorization.clone(),
+            });
+        let cancel =
+            SystemEventWitness::ClientActionAuthorized(ClientActionWitness::MmBundleCancel {
+                account_id: 7,
+                bundle_id: [4; 32],
+                expected_revision: 2,
+                nonce: 12,
+                authorization,
+            });
+        let replace_leaf = system_event_leaf_value(&replace);
+        let cancel_leaf = system_event_leaf_value(&cancel);
+        assert_eq!(replace_leaf[18], 14);
+        assert_eq!(replace_leaf[19], 3);
+        assert_eq!(cancel_leaf[18], 14);
+        assert_eq!(cancel_leaf[19], 4);
     }
 }

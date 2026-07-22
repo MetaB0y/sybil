@@ -1,10 +1,10 @@
 # Sybil system specification
 
-> **Executive summary:** Sybil is an off-chain prediction-market exchange built around frequent batch auctions, deterministic integer settlement, authenticated state, and validity proofs. A single-writer sequencer admits orders, clears each eligible batch with a welfare solver, commits the next state behind a redb/qMDB fence, and emits a canonical block plus `BlockWitness` v13. Native verification checks each transition; the OpenVM guest verifies and folds contiguous multi-block epochs. Ethereum holds collateral and accepted roots; canonical witness publication supports audit and recovery.
+> **Executive summary:** Sybil is an off-chain prediction-market exchange built around frequent batch auctions, deterministic integer settlement, authenticated state, and validity proofs. A single-writer sequencer admits orders, clears each eligible batch with a welfare solver, commits the next state behind a redb/qMDB fence, and emits a canonical block plus `BlockWitness` v14. Native verification checks each transition; the OpenVM guest verifies and folds contiguous multi-block epochs. Ethereum holds collateral and accepted roots; canonical witness publication supports audit and recovery.
 
 This is the connected implementation guide. Start with the [Architecture Guide](README.md) for intuition and [Sybil Architecture](architecture/Sybil%20Architecture.md) for the full map and reading paths. Per-concept notes and ADRs own detailed rationale. Code, canonical schemas, and tests are the final source of truth.
 
-Status snapshot: **2026-07-22**, through witness v13 signed atomic MM-bundle intent, canonical market-group creation identity, executable oracle lifecycle, the streamed epoch guest, transactional proof-job delivery, and the durable STARK-first prover daemon.
+Status snapshot: **2026-07-22**, through witness v14 signed atomic MM-bundle submit/replace/cancel intent, canonical market-group creation identity, executable oracle lifecycle, the streamed epoch guest, transactional proof-job delivery, and the durable STARK-first prover daemon.
 
 ---
 
@@ -15,7 +15,7 @@ Sybil rests on five commitments:
 1. **Frequent batch auctions.** Eligible orders clear together at one uniform price per market; arrival nanoseconds do not create queue priority.
 2. **Welfare maximization.** The allocation maximizes trader surplus net of minting, rather than maximizing raw volume.
 3. **Float search, integer truth.** Numerical solvers may search in `f64`; protocol fills, prices, settlement, commitments, and verification use deterministic integers.
-4. **Authenticated trading intent.** Key mutations, ordinary signed orders/cancels, and signed atomic MM bundles retain their RawP256/WebAuthn envelopes; verification replays the active key set, exact action, genesis domain, and committed trading nonce.
+4. **Authenticated trading intent.** Key mutations, ordinary signed orders/cancels, and signed atomic MM-bundle submissions, replacements, and cancellations retain their RawP256/WebAuthn envelopes; verification replays the active key set, exact action, genesis domain, and committed trading nonce.
 5. **Validity plus availability.** OpenVM proves correctness; L1 anchors collateral and accepted roots; witness/DA publication supplies the data required for audit and recovery.
 
 ```mermaid
@@ -26,7 +26,7 @@ flowchart LR
     SOLVE --> SETTLE["Integer settlement"]
     SETTLE --> STORE["qMDB + redb fence"]
     STORE --> BLOCK["SealedBlock"]
-    STORE --> WIT["BlockWitness v13"]
+    STORE --> WIT["BlockWitness v14"]
     WIT --> VERIFY["Native + OpenVM verification"]
     VERIFY --> PROVER["Proof / DA artifacts"]
     PROVER --> L1["SybilSettlement + SybilVault"]
@@ -98,7 +98,7 @@ The sequencer is a synchronous deterministic `BlockSequencer` inside a `ractor` 
 Admission has two durable paths:
 
 - **Direct admission:** supported simple non-MM orders validate, reserve capital, and enter the resting book immediately. The admit WAL is durable before acknowledgement.
-- **Deferred atomic admission:** MM-constrained, multi-order, or otherwise batch-local submissions persist in the deferred queue and revalidate at the next block. Public MM bundles sign their account, bundle identity/revision, exact ordered orders and sides, one shared integer budget, next-block expiry, and replay nonce. MM quotes are one-shot and never rest.
+- **Deferred atomic admission:** MM-constrained, multi-order, or otherwise batch-local submissions persist in the deferred queue and revalidate at the next block. Public MM bundles sign their account, bundle identity/revision, exact ordered orders and sides, one shared integer budget, next-block expiry, and replay nonce. Before the actor begins block preparation, the owner can atomically replace the exact active revision or cancel it; the lifecycle is one actor-owned, durable-before-live state machine. One account cannot hold concurrent public and privileged-service MM bundles. MM quotes are one-shot and never rest.
 
 Unsupported value-relevant order shapes are rejected rather than deferred into an incapable solver.
 
@@ -153,13 +153,13 @@ overhead that logical bytes exclude.
 
 Canonical witness import can initialize a fresh store at a verified height. This is the implemented disaster-recovery basis for operator replacement.
 
-## 6. Blocks, state, and witness v13
+## 6. Blocks, state, and witness v14
 
 `BlockHeader` commits height, parent hash, typed `state_root`, `events_root`, counts, and timestamp. Public transition inputs additionally bind witness/DA and bridge fields.
 
 `state_root` covers the committed state required to continue safely: accounts, balances, positions, deposited totals, event/key digests, per-account trading nonces, markets and last clearing prices, groups, resting orders/reservations, system counters, bridge deposit frontier/quarantine, and withdrawal/claim state. Analytics and display metadata are excluded.
 
-`BlockWitness` v13 contains the accepted/rejected instructions, system events, fills/prices/constraints, authenticated pre/post account state, pre/post sidecars, account-key universe, key operations, exact order/cancel/MM-bundle authorization envelopes, deposit dispositions, bridge state, canonical market-group creation identities, the two-state executable market lifecycle, and the signature-bound `genesis_hash`. Canonical witness bytes—not MessagePack/serde transport bytes—determine `witness_root` and DA binding.
+`BlockWitness` v14 contains the accepted/rejected instructions, system events, fills/prices/constraints, authenticated pre/post account state, pre/post sidecars, account-key universe, key operations, exact order/cancel/MM-bundle submit/replace/cancel authorization envelopes, deposit dispositions, bridge state, canonical market-group creation identities, the two-state executable market lifecycle, and the signature-bound `genesis_hash`. Canonical witness bytes—not MessagePack/serde transport bytes—determine `witness_root` and DA binding.
 
 Canonical encoding is owned by `sybil-verifier`; signing bytes are owned by `sybil-signing`. Native and guest implementations are pinned by golden vectors.
 
@@ -176,7 +176,7 @@ Canonical encoding is owned by `sybil-verifier`; signing bytes are owned by `syb
 | System/sidecar | Deposits, withdrawals, resolution, order book/reservations, market/bridge transition |
 | Keys/intent | Key universe/digests, register/revoke, uniqueness/last-key rules, RawP256/WebAuthn signatures |
 
-Every canonical signed action starts with its own versioned domain and binds the chain `genesis_hash`, preventing both cross-action substitution and replay after a fresh-genesis deployment. Key operations additionally bind current `keys_digest` and `events_digest`. Signed orders, cancels, and atomic MM bundles use a strictly increasing committed `last_trading_nonce`. Witness v13 carries both key-operation and trading envelopes in actor acknowledgement order, and shared native/guest verification checks scheme-matching active-key membership, exact RawP256/WebAuthn signatures, action/effect binding, nonce replay, and all-or-none MM-bundle admission. WebAuthn additionally pins RP/origin/challenge, rejects cross-origin assertions, and requires user presence/verification.
+Every canonical signed action starts with its own versioned domain and binds the chain `genesis_hash`, preventing both cross-action substitution and replay after a fresh-genesis deployment. Key operations additionally bind current `keys_digest` and `events_digest`. Signed orders, cancels, and atomic MM-bundle lifecycle actions use a strictly increasing committed `last_trading_nonce`. Witness v14 carries both key-operation and trading envelopes in actor acknowledgement order, and shared native/guest verification checks scheme-matching active-key membership, exact RawP256/WebAuthn signatures, action/effect binding, nonce replay, all-or-none MM-bundle admission/replacement, and absence of a cancelled bundle constraint. WebAuthn additionally pins RP/origin/challenge, rejects cross-origin assertions, and requires user presence/verification.
 
 ## 8. ZK, DA, L1, and escape
 

@@ -250,6 +250,54 @@ impl Store {
         .map(|_| ())
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the WAL append keeps every signed replacement field explicit"
+    )]
+    pub async fn append_authenticated_mm_bundle_replace(
+        &self,
+        submission: &crate::sequencer::OrderSubmission,
+        bundle_id: [u8; 32],
+        expected_revision: u64,
+        new_revision: u64,
+        order_sides: &[matching_engine::MmSide],
+        max_capital: matching_engine::Nanos,
+        nonce: u64,
+        authorization: &sybil_verifier::ClientActionAuth,
+    ) -> Result<(), StoreError> {
+        self.append_acknowledged_write(AcknowledgedWrite::AuthenticatedMmBundleReplace {
+            submission: submission.clone(),
+            bundle_id,
+            expected_revision,
+            new_revision,
+            order_sides: order_sides.to_vec(),
+            max_capital,
+            nonce,
+            authorization: authorization.clone(),
+        })
+        .await
+        .map(|_| ())
+    }
+
+    pub async fn append_authenticated_mm_bundle_cancel(
+        &self,
+        account_id: AccountId,
+        bundle_id: [u8; 32],
+        expected_revision: u64,
+        nonce: u64,
+        authorization: &sybil_verifier::ClientActionAuth,
+    ) -> Result<(), StoreError> {
+        self.append_acknowledged_write(AcknowledgedWrite::AuthenticatedMmBundleCancel {
+            account_id,
+            bundle_id,
+            expected_revision,
+            nonce,
+            authorization: authorization.clone(),
+        })
+        .await
+        .map(|_| ())
+    }
+
     pub async fn append_authenticated_cancel(
         &self,
         account_id: AccountId,
@@ -360,6 +408,23 @@ pub enum AcknowledgedWrite {
         authorization: sybil_verifier::ClientActionAuth,
         timestamp_ms: u64,
     },
+    AuthenticatedMmBundleReplace {
+        submission: crate::sequencer::OrderSubmission,
+        bundle_id: [u8; 32],
+        expected_revision: u64,
+        new_revision: u64,
+        order_sides: Vec<matching_engine::MmSide>,
+        max_capital: matching_engine::Nanos,
+        nonce: u64,
+        authorization: sybil_verifier::ClientActionAuth,
+    },
+    AuthenticatedMmBundleCancel {
+        account_id: AccountId,
+        bundle_id: [u8; 32],
+        expected_revision: u64,
+        nonce: u64,
+        authorization: sybil_verifier::ClientActionAuth,
+    },
 }
 
 impl AcknowledgedWrite {
@@ -371,6 +436,8 @@ impl AcknowledgedWrite {
             Self::AuthenticatedDeferredBundle { .. } => "authenticated_deferred_bundle",
             Self::AuthenticatedMmBundle { .. } => "authenticated_mm_bundle",
             Self::AuthenticatedCancel { .. } => "authenticated_cancel",
+            Self::AuthenticatedMmBundleReplace { .. } => "authenticated_mm_bundle_replace",
+            Self::AuthenticatedMmBundleCancel { .. } => "authenticated_mm_bundle_cancel",
             Self::ControlPlane(_) => "control_plane",
             Self::L1Deposit(_) => "l1_deposit",
             Self::BridgeWithdrawal(_) => "bridge_withdrawal",

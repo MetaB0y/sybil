@@ -91,6 +91,7 @@ Authoritative state needed to resume the exchange after a crash:
 | `redb` | `block_headers` | canonical block header by height |
 | `redb` | `pubkey_registry` | compressed pubkey to account id |
 | `redb` | `service_account_receipts` | genesis-bound operator provisioning key/request digest to account id |
+| `redb` | `mm_lifecycle_receipts` | latest exact signed MM submit/replace/cancel nonce, canonical digest, and durable result per account |
 | `redb` | `clearing_prices` | last clearing price vector per market |
 | `redb` | `market_volumes` | cumulative traded volume per market |
 | `redb` | `counters` | next IDs, independent public-allocation stock, store layout version, and the authoritative account-state fence |
@@ -204,6 +205,12 @@ Store layout v5 adds exact authenticated MM-bundle rows to acknowledged-write
 replay and rejects every earlier store at open. The WAL envelope is v2 because
 the MessagePack enum layout changed. There is no compatibility decoder: start a
 fresh genesis or use the coordinated canonical-witness import path.
+
+Store layout v6 adds actor-owned signed MM replacement/cancellation rows and
+the committed `mm_lifecycle_receipts` table. The receipt survives both
+pre-block WAL replay and the block fence so an exact latest retry returns the
+same result after restart. Earlier layouts are rejected; no pending bundle or
+revision is inferred.
 
 ## Tier 3: Derived Views
 

@@ -22,7 +22,8 @@ use matching_engine::{MarketSet, MmSide, Nanos, Qty, outcome_buy};
 use matching_sequencer::SequencerConfig;
 use matching_sequencer::SequencerHandle;
 use matching_sequencer::crypto::{
-    canonical_cancel_bytes, canonical_mm_bundle_bytes, canonical_order_bytes,
+    canonical_cancel_bytes, canonical_mm_bundle_bytes, canonical_mm_bundle_cancel_bytes,
+    canonical_mm_bundle_replace_bytes, canonical_order_bytes,
 };
 use std::time::Duration;
 use sybil_api::app::create_router;
@@ -450,6 +451,94 @@ fn signed_mm_bundle_payload(
         ],
         "expires_at_block": expires_at_block,
         "mm_budget_nanos": "2000000000",
+        "nonce": nonce,
+        "signer_pubkey_hex": to_hex(key.verifying_key().to_sec1_point(true).as_bytes()),
+        "signature_hex": to_hex(signature.to_bytes().as_slice())
+    })
+}
+
+fn signed_mm_bundle_replace_payload(
+    account_id: u64,
+    expires_at_block: u64,
+    expected_revision: u64,
+    new_revision: u64,
+    nonce: u64,
+    genesis_hash: [u8; 32],
+    key: &SigningKey,
+) -> Value {
+    let mut markets = MarketSet::new();
+    let first = markets.add_binary("First");
+    let second = markets.add_binary("Second");
+    let mut orders = vec![
+        outcome_buy(&markets, 0, first, 0, 520_000_000, 2_000),
+        outcome_buy(&markets, 0, second, 1, 480_000_000, 2_000),
+    ];
+    for order in &mut orders {
+        order.expires_at_block = Some(expires_at_block);
+    }
+    let bundle_id = [0x42; 32];
+    let sides = [MmSide::BuyYes, MmSide::BuyNo];
+    let budget = Nanos(3_000_000_000);
+    let signature: Signature = key.sign(
+        &canonical_mm_bundle_replace_bytes(
+            matching_sequencer::AccountId(account_id),
+            bundle_id,
+            expected_revision,
+            new_revision,
+            &orders,
+            &sides,
+            budget,
+            nonce,
+            genesis_hash,
+        )
+        .expect("valid replacement canonical bytes"),
+    );
+    json!({
+        "account_id": account_id,
+        "bundle_id_hex": to_hex(&bundle_id),
+        "expected_revision": expected_revision,
+        "new_revision": new_revision,
+        "orders": [
+            {
+                "type": "BuyYes",
+                "market_id": first.0,
+                "limit_price_nanos": "520000000",
+                "quantity": 2_000
+            },
+            {
+                "type": "BuyNo",
+                "market_id": second.0,
+                "limit_price_nanos": "480000000",
+                "quantity": 2_000
+            }
+        ],
+        "expires_at_block": expires_at_block,
+        "mm_budget_nanos": "3000000000",
+        "nonce": nonce,
+        "signer_pubkey_hex": to_hex(key.verifying_key().to_sec1_point(true).as_bytes()),
+        "signature_hex": to_hex(signature.to_bytes().as_slice())
+    })
+}
+
+fn signed_mm_bundle_cancel_payload(
+    account_id: u64,
+    expected_revision: u64,
+    nonce: u64,
+    genesis_hash: [u8; 32],
+    key: &SigningKey,
+) -> Value {
+    let bundle_id = [0x42; 32];
+    let signature: Signature = key.sign(&canonical_mm_bundle_cancel_bytes(
+        matching_sequencer::AccountId(account_id),
+        bundle_id,
+        expected_revision,
+        nonce,
+        genesis_hash,
+    ));
+    json!({
+        "account_id": account_id,
+        "bundle_id_hex": to_hex(&bundle_id),
+        "expected_revision": expected_revision,
         "nonce": nonce,
         "signer_pubkey_hex": to_hex(key.verifying_key().to_sec1_point(true).as_bytes()),
         "signature_hex": to_hex(signature.to_bytes().as_slice())
@@ -1982,7 +2071,7 @@ async fn signed_order_replay_returns_409_and_cancel_replay_returns_404() {
 }
 
 #[tokio::test]
-async fn public_signed_mm_bundle_is_atomic_and_replay_protected() {
+async fn public_signed_mm_bundle_is_atomic_and_exact_retry_is_idempotent() {
     let (app, handle) = test_app(true).await;
     let (_, body) = post_json(
         app.clone(),
@@ -2021,15 +2110,97 @@ async fn public_signed_mm_bundle_is_atomic_and_replay_protected() {
     assert_eq!(accepted["order_ids"].as_array().unwrap().len(), 2);
 
     let (status, body) = post_json(app.clone(), "/v1/orders/mm-bundles/signed", payload).await;
-    assert_eq!(status, StatusCode::CONFLICT);
-    assert_eq!(
-        parse_json(&body)["code"].as_str(),
-        Some("REPLAY_NONCE_STALE")
-    );
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(parse_json(&body)["order_ids"], accepted["order_ids"]);
 
     let block = handle.produce_block().await.unwrap();
     assert_eq!(block.canonical.header.order_count, 2);
     assert_eq!(block.canonical.rejections.len(), 0);
+}
+
+#[tokio::test]
+async fn public_signed_mm_bundle_replace_and_cancel_are_exact_and_idempotent() {
+    let (app, handle) = test_app(true).await;
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 100_000_000_000u64 }),
+    )
+    .await;
+    let account_id = parse_json(&body)["account_id"].as_u64().unwrap();
+    for name in ["First", "Second"] {
+        let (status, _) = post_json(app.clone(), "/v1/markets", json!({ "name": name })).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let key = new_signing_key();
+    let (status, _) = post_json(
+        app.clone(),
+        &format!("/v1/accounts/{account_id}/keys"),
+        json!({
+            "public_key_hex": to_hex(key.verifying_key().to_sec1_point(true).as_bytes())
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let genesis_hash = ensure_genesis_hash(&handle).await;
+
+    let submit = signed_mm_bundle_payload(account_id, 2, 1, genesis_hash, &key);
+    let (status, body) = post_json(app.clone(), "/v1/orders/mm-bundles/signed", submit).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+
+    let replacement = signed_mm_bundle_replace_payload(account_id, 2, 0, 1, 2, genesis_hash, &key);
+    let (status, body) = post_json(
+        app.clone(),
+        "/v1/orders/mm-bundles/replace/signed",
+        replacement.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let replacement_ids = parse_json(&body)["order_ids"].clone();
+    let (status, body) = post_json(
+        app.clone(),
+        "/v1/orders/mm-bundles/replace/signed",
+        replacement,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(parse_json(&body)["order_ids"], replacement_ids);
+
+    let stale = signed_mm_bundle_replace_payload(account_id, 2, 0, 1, 3, genesis_hash, &key);
+    let (status, body) =
+        post_json(app.clone(), "/v1/orders/mm-bundles/replace/signed", stale).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(parse_json(&body)["code"], json!("MM_BUNDLE_REVISION_STALE"));
+
+    let cancel = signed_mm_bundle_cancel_payload(account_id, 1, 3, genesis_hash, &key);
+    for payload in [cancel.clone(), cancel] {
+        let (status, body) =
+            post_json(app.clone(), "/v1/orders/mm-bundles/cancel/signed", payload).await;
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+        assert_eq!(parse_json(&body)["cancelled"], json!(true));
+    }
+
+    let absent = signed_mm_bundle_cancel_payload(account_id, 1, 4, genesis_hash, &key);
+    let (status, body) =
+        post_json(app.clone(), "/v1/orders/mm-bundles/cancel/signed", absent).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(parse_json(&body)["code"], json!("MM_BUNDLE_NOT_PENDING"));
+
+    let block = handle.produce_block().await.unwrap();
+    assert_eq!(block.canonical.header.order_count, 0);
+    assert!(block.canonical.rejections.is_empty());
+    assert!(block.canonical.system_events.iter().any(|event| matches!(
+        event,
+        matching_sequencer::SystemEvent::ClientActionAuthorized(
+            sybil_verifier::ClientActionWitness::MmBundleCancel {
+                account_id: witnessed_account,
+                bundle_id,
+                expected_revision: 1,
+                nonce: 3,
+                ..
+            }
+        ) if *witnessed_account == account_id && *bundle_id == [0x42; 32]
+    )));
 }
 
 #[tokio::test]

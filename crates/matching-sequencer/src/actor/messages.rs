@@ -69,6 +69,22 @@ pub enum SequencerMsg {
         AuthenticatedMmBundle,
         RpcReplyPort<Result<Vec<u64>, SequencerError>>,
     ),
+    ReplaceSignedMmBundle(
+        SignedMmBundleReplace,
+        RpcReplyPort<Result<Vec<u64>, SequencerError>>,
+    ),
+    ReplaceAuthenticatedMmBundle(
+        AuthenticatedMmBundleReplace,
+        RpcReplyPort<Result<Vec<u64>, SequencerError>>,
+    ),
+    CancelSignedMmBundle(
+        SignedMmBundleCancel,
+        RpcReplyPort<Result<crate::sequencer::MmBundleLifecycleResult, SequencerError>>,
+    ),
+    CancelAuthenticatedMmBundle(
+        AuthenticatedMmBundleCancel,
+        RpcReplyPort<Result<crate::sequencer::MmBundleLifecycleResult, SequencerError>>,
+    ),
     CancelSignedOrder(SignedCancel, RpcReplyPort<Result<(), SequencerError>>),
     CancelAuthenticatedOrder(
         AuthenticatedCancel,

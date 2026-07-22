@@ -8,6 +8,8 @@ pub type GenesisHash = [u8; 32];
 pub const ORDER_DOMAIN: &[u8] = b"sybil/signing/order/v1";
 pub const CANCEL_DOMAIN: &[u8] = b"sybil/signing/cancel/v1";
 pub const MM_BUNDLE_DOMAIN: &[u8] = b"sybil/signing/mm-bundle/v1";
+pub const MM_BUNDLE_REPLACE_DOMAIN: &[u8] = b"sybil/signing/mm-bundle-replace/v1";
+pub const MM_BUNDLE_CANCEL_DOMAIN: &[u8] = b"sybil/signing/mm-bundle-cancel/v1";
 pub const PROFILE_UPDATE_DOMAIN: &[u8] = b"sybil/signing/profile-update/v1";
 pub const API_KEY_CREATE_DOMAIN: &[u8] = b"sybil/signing/read-api-key-create/v1";
 pub const API_KEY_REVOKE_DOMAIN: &[u8] = b"sybil/signing/read-api-key-revoke/v1";
@@ -94,6 +96,22 @@ pub struct MmBundle {
     pub nonce: u64,
 }
 
+/// Signed atomic replacement of one exact active bundle revision.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct MmBundleReplace {
+    pub expected_revision: u64,
+    pub replacement: MmBundle,
+}
+
+/// Signed withdrawal of one exact active bundle revision.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct MmBundleCancel {
+    pub account_id: u64,
+    pub bundle_id: [u8; 32],
+    pub expected_revision: u64,
+    pub nonce: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 struct OrderRequest {
     genesis_hash: GenesisHash,
@@ -104,6 +122,18 @@ struct OrderRequest {
 struct MmBundleRequest {
     genesis_hash: GenesisHash,
     bundle: MmBundle,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+struct MmBundleReplaceRequest {
+    genesis_hash: GenesisHash,
+    replacement: MmBundleReplace,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+struct MmBundleCancelRequest {
+    genesis_hash: GenesisHash,
+    cancel: MmBundleCancel,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
@@ -212,6 +242,32 @@ pub fn canonical_mm_bundle_bytes(bundle: &MmBundle, genesis_hash: GenesisHash) -
         &MmBundleRequest {
             genesis_hash,
             bundle: bundle.clone(),
+        },
+    )
+}
+
+pub fn canonical_mm_bundle_replace_bytes(
+    replacement: &MmBundleReplace,
+    genesis_hash: GenesisHash,
+) -> Vec<u8> {
+    domain_separated_bytes(
+        MM_BUNDLE_REPLACE_DOMAIN,
+        &MmBundleReplaceRequest {
+            genesis_hash,
+            replacement: replacement.clone(),
+        },
+    )
+}
+
+pub fn canonical_mm_bundle_cancel_bytes(
+    cancel: &MmBundleCancel,
+    genesis_hash: GenesisHash,
+) -> Vec<u8> {
+    domain_separated_bytes(
+        MM_BUNDLE_CANCEL_DOMAIN,
+        &MmBundleCancelRequest {
+            genesis_hash,
+            cancel: cancel.clone(),
         },
     )
 }
@@ -417,6 +473,63 @@ mod tests {
         insta::assert_snapshot!(
             "atomic_mm_bundle",
             hex::encode(canonical_mm_bundle_bytes(&bundle, GENESIS_HASH))
+        );
+    }
+
+    #[test]
+    fn atomic_mm_bundle_replace_snapshot() {
+        let replacement = MmBundleReplace {
+            expected_revision: 4,
+            replacement: MmBundle {
+                account_id: 42,
+                bundle_id: [0x22; 32],
+                revision: 5,
+                orders: vec![MmBundleOrder {
+                    markets: [
+                        MarketId(7),
+                        MarketId::NONE,
+                        MarketId::NONE,
+                        MarketId::NONE,
+                        MarketId::NONE,
+                    ],
+                    num_markets: 1,
+                    payoffs: {
+                        let mut payoffs = [0; MAX_STATES];
+                        payoffs[0] = 1;
+                        payoffs
+                    },
+                    num_states: 2,
+                    limit_price: 525_000_000,
+                    max_fill: 3_000,
+                    condition: None,
+                    expires_at_block: Some(10),
+                    side: MmSide::BuyYes,
+                }],
+                max_capital: 4_000_000_000,
+                nonce: 18,
+            },
+        };
+
+        insta::assert_snapshot!(
+            "atomic_mm_bundle_replace",
+            hex::encode(canonical_mm_bundle_replace_bytes(
+                &replacement,
+                GENESIS_HASH
+            ))
+        );
+    }
+
+    #[test]
+    fn atomic_mm_bundle_cancel_snapshot() {
+        let cancel = MmBundleCancel {
+            account_id: 42,
+            bundle_id: [0x33; 32],
+            expected_revision: 6,
+            nonce: 19,
+        };
+        insta::assert_snapshot!(
+            "atomic_mm_bundle_cancel",
+            hex::encode(canonical_mm_bundle_cancel_bytes(&cancel, GENESIS_HASH))
         );
     }
 

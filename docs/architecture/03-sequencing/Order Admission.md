@@ -22,13 +22,27 @@ exact ordering against nonce/key/bridge actions. Multi-market/custom payoff
 execution is rejected at API, admission, solver, and verifier boundaries.
 
 The public `POST /v1/orders/mm-bundles/signed` boundary admits revision-zero
-bundles only. Its canonical signature binds `genesis_hash`, account,
+bundles only. The companion `/replace/signed` and `/cancel/signed` routes name
+the exact active bundle revision and are serialized through the same actor.
+Their canonical signatures bind `genesis_hash`, account,
 32-byte bundle id, revision, ordered orders and their economic MM sides, one
 integer maximum-capital budget, and the trading nonce. Every order must expire
 at the actor's exact next block. Shape, market activity, payoff-derived side,
 group self-trade prevention, total budget, account balance, signature, active
 key, and nonce are checked before the acknowledged-write append. The append is
-durable before the bundle becomes live or the API acknowledges it.
+durable before the bundle becomes live or the API acknowledges it. There is at
+most one active MM bundle per account across public signed and privileged
+service admission; replay rejects a persisted history that violates the same
+identity boundary. Replacement validates the complete successor on a clone,
+appends one WAL row, and swaps it atomically; cancellation does the same removal
+without decomposing the bundle into order cancellations.
+
+The actor message order is the cutoff. A replace/cancel processed before block
+preparation selects the candidate; one queued after preparation receives the
+terminal `MM_BUNDLE_NOT_PENDING` result and cannot rewrite the isolated block.
+The latest exact lifecycle retry returns its durable receipt across restart and
+the block commit fence. Reusing that nonce for different canonical bytes is a
+conflict, while stale revisions are rejected without mutating live state.
 
 At block construction the entire bundle is revalidated against the then-current
 state. Either all orders and the exact shared constraint enter the solver, or
@@ -87,7 +101,7 @@ graph TB
 - MM quotes are one-shot — never carried over to the next batch
 - Admission backpressure is generous by default and only affects abnormal load
 - Durable resting-order growth is backed by positive order notional
-- Orders arrive from [[REST API]] endpoints `POST /v1/orders`, `POST /v1/orders/signed`, and `POST /v1/orders/mm-bundles/signed`
+- Orders arrive from [[REST API]] endpoints `POST /v1/orders`, `POST /v1/orders/signed`, and the signed MM-bundle submit/replace/cancel routes
 
 ## Where This Lives
 > `crates/matching-sequencer/src/actor.rs` — admission limits and deferred-buffer routing

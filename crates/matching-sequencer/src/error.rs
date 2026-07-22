@@ -177,6 +177,14 @@ pub enum SequencerError {
     /// A signed MM bundle violates its all-or-nothing shape or identity rules.
     #[error("invalid MM bundle: {0}")]
     InvalidMmBundle(String),
+    #[error("account {} already has an active MM bundle", .account_id.0)]
+    MmBundleAlreadyPending { account_id: AccountId },
+    #[error("MM bundle is not pending for account {}", .account_id.0)]
+    MmBundleNotPending { account_id: AccountId },
+    #[error("stale MM bundle revision: expected {expected}, active revision is {active}")]
+    MmBundleRevisionStale { expected: u64, active: u64 },
+    #[error("MM bundle lifecycle nonce was already used for different action bytes")]
+    MmBundleRetryConflict,
     /// All handles dropped; the actor has shut down.
     #[error("sequencer actor shut down")]
     ActorGone,

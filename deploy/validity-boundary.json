@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fingerprint": "sha256:3486d94dace41ef31ebe2bc8ccd70d48ac04a7c1a4250f1c4a43ca8b15c4a5b2",
+  "fingerprint": "sha256:8279a477cc0d02112e7c4708afbc518407ead4e178f13bdb421c30b671137e16",
   "inputs": {
     "commonware_packages": [
       {
@@ -70,35 +70,35 @@
         "checksum": "dfad44dd2c8e97d55dbe271802740e919d2ce8839277ea53d958381caab92a44"
       }
     ],
-    "golden_vectors_sha256": "9570a106f29ac28835399d5cda1163a718633625adba9e5946b698ceb47330be",
+    "golden_vectors_sha256": "c6b5b31510fdc2ce843ddc92dd7e27147bbc51010c8c6620e56195b2ee37b61f",
     "guests": {
       "state_transition": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "73371bb657c0c07f40e97a1e623bb015f771d07e780677f6f75be61416af18b1",
-        "app_exe_commit": "0x003b701ac6da570efa91be160499dd26c7b6cd88182fdf17b16e043f3a98b973",
+        "source_sha256": "7272dd5848fc7d1a4b13c23348b48d01fbb2d74b6c71a9cbb9d14993c699ddbb",
+        "app_exe_commit": "0x0091d73b3aa304c08feb00091fd9cb47e8dab963c9d5725809b58e5171aef12c",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       },
       "escape_claim": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "58df060ea6ff61803267857543f5fb43c5329baf64c370eb191112936139d72d",
-        "app_exe_commit": "0x00690871523a5e7c63c2bbe796aa312347b34a1427293b7b7e1c0f5c152f013f",
+        "source_sha256": "5ed4d92e21eaa6c4b2de87583b7cf33ae15c7fff15ef4f22589085867faac2b2",
+        "app_exe_commit": "0x0042bd996a1b16e62053164e0f5080e8be33aadba10ebac862def073d2fdee6f",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       }
     },
     "desired_validity_pins": {
       "state_transition": {
-        "app_exe_commit": "0x003b701ac6da570efa91be160499dd26c7b6cd88182fdf17b16e043f3a98b973",
+        "app_exe_commit": "0x0091d73b3aa304c08feb00091fd9cb47e8dab963c9d5725809b58e5171aef12c",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       },
       "escape_claim": {
-        "app_exe_commit": "0x00690871523a5e7c63c2bbe796aa312347b34a1427293b7b7e1c0f5c152f013f",
+        "app_exe_commit": "0x0042bd996a1b16e62053164e0f5080e8be33aadba10ebac862def073d2fdee6f",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       }
     }
   },
   "decision": {
     "action": "fresh_genesis",
-    "reason": "Witness v13 adds signed atomic MM-bundle authorization and AtomicBundle rejection semantics; WAL envelope v2 and store layout v5 intentionally reject prior state.",
+    "reason": "Witness v14 adds authenticated atomic MM bundle replacement and cancellation; store layout v6 rejects prior state and requires coordinated repinning.",
     "reference": "docs/runbooks/fresh-genesis-redeploy.md"
   }
 }

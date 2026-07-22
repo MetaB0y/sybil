@@ -2,6 +2,59 @@ use super::super::*;
 use super::current_timestamp_ms;
 
 impl SequencerActorState {
+    fn verify_authenticated_mm_action(
+        &self,
+        account_id: AccountId,
+        authorization: &sybil_verifier::ClientActionAuth,
+        canonical: &[u8],
+    ) -> Result<(), SequencerError> {
+        let signer = PublicKey::from_compressed_bytes(authorization.signer_pubkey())
+            .ok_or(SequencerError::UnknownSigner)?;
+        let registered = self
+            .sequencer
+            .lookup_registered_pubkey(&signer)
+            .ok_or(SequencerError::UnknownSigner)?;
+        let expected_scheme = match authorization.signer_auth_scheme() {
+            0 => AccountAuthScheme::RawP256,
+            1 => AccountAuthScheme::WebAuthn,
+            _ => return Err(SequencerError::UnknownSigner),
+        };
+        if registered.auth_scheme != expected_scheme {
+            return Err(SequencerError::UnknownSigner);
+        }
+        if registered.account_id != account_id {
+            return Err(SequencerError::SignerAccountMismatch);
+        }
+        let signer_record = sybil_verifier::KeyRecord {
+            auth_scheme: registered.auth_scheme.canonical_byte(),
+            pubkey_sec1: signer
+                .compressed_bytes()
+                .try_into()
+                .expect("compressed P-256 key is 33 bytes"),
+            capability_mask: sybil_verifier::KeyRecord::FULL_CAPABILITY_MASK,
+        };
+        sybil_verifier::verify_keyop_auth(authorization, [&signer_record], canonical)
+            .map_err(|_| SequencerError::InvalidSignature)
+    }
+
+    fn mm_lifecycle_retry(
+        &self,
+        account_id: AccountId,
+        nonce: u64,
+        operation_digest: [u8; 32],
+    ) -> Result<Option<crate::sequencer::MmBundleLifecycleResult>, SequencerError> {
+        let Some(receipt) = self.sequencer.mm_lifecycle_receipt(account_id) else {
+            return Ok(None);
+        };
+        if receipt.nonce != nonce {
+            return Ok(None);
+        }
+        if receipt.operation_digest != operation_digest {
+            return Err(SequencerError::MmBundleRetryConflict);
+        }
+        Ok(Some(receipt.result.clone()))
+    }
+
     pub(super) fn record_submission_metrics(
         &self,
         source: &'static str,
@@ -31,6 +84,29 @@ impl SequencerActorState {
         };
         metrics::counter!("sybil_order_cancels_total", "source" => source, "result" => outcome)
             .increment(1);
+    }
+
+    pub(super) fn record_mm_lifecycle_metrics(
+        &self,
+        operation: &'static str,
+        order_count: usize,
+        accepted: bool,
+    ) {
+        let result = if accepted { "accepted" } else { "rejected" };
+        metrics::counter!(
+            "sybil_mm_bundle_lifecycle_total",
+            "operation" => operation,
+            "result" => result
+        )
+        .increment(1);
+        if order_count > 0 {
+            metrics::counter!(
+                "sybil_orders_received_total",
+                "source" => operation,
+                "result" => result
+            )
+            .increment(order_count as u64);
+        }
     }
 
     pub(super) async fn handle_signed_order(
@@ -142,23 +218,6 @@ impl SequencerActorState {
                 limit: order_limit,
             });
         }
-        let signer = PublicKey::from_compressed_bytes(authenticated.authorization.signer_pubkey())
-            .ok_or(SequencerError::UnknownSigner)?;
-        let registered = self
-            .sequencer
-            .lookup_registered_pubkey(&signer)
-            .ok_or(SequencerError::UnknownSigner)?;
-        let expected_scheme = match authenticated.authorization.signer_auth_scheme() {
-            0 => AccountAuthScheme::RawP256,
-            1 => AccountAuthScheme::WebAuthn,
-            _ => return Err(SequencerError::UnknownSigner),
-        };
-        if registered.auth_scheme != expected_scheme {
-            return Err(SequencerError::UnknownSigner);
-        }
-        if registered.account_id != authenticated.account_id {
-            return Err(SequencerError::SignerAccountMismatch);
-        }
         if authenticated.revision != 0 {
             return Err(SequencerError::InvalidMmBundle(
                 "initial submission revision must be zero".to_string(),
@@ -196,20 +255,34 @@ impl SequencerActorState {
             authenticated.nonce,
             genesis_hash,
         )?;
-        let signer_record = sybil_verifier::KeyRecord {
-            auth_scheme: registered.auth_scheme.canonical_byte(),
-            pubkey_sec1: signer
-                .compressed_bytes()
-                .try_into()
-                .expect("compressed P-256 key is 33 bytes"),
-            capability_mask: sybil_verifier::KeyRecord::FULL_CAPABILITY_MASK,
-        };
-        sybil_verifier::verify_keyop_auth(
+        self.verify_authenticated_mm_action(
+            authenticated.account_id,
             &authenticated.authorization,
-            [&signer_record],
             &canonical,
-        )
-        .map_err(|_| SequencerError::InvalidSignature)?;
+        )?;
+        let operation_digest = *blake3::hash(&canonical).as_bytes();
+        if let Some(result) = self.mm_lifecycle_retry(
+            authenticated.account_id,
+            authenticated.nonce,
+            operation_digest,
+        )? {
+            return match result {
+                crate::sequencer::MmBundleLifecycleResult::Active { order_ids, .. } => {
+                    Ok(order_ids)
+                }
+                crate::sequencer::MmBundleLifecycleResult::Cancelled { .. } => {
+                    Err(SequencerError::MmBundleRetryConflict)
+                }
+            };
+        }
+        if self
+            .sequencer
+            .has_active_mm_bundle(authenticated.account_id)
+        {
+            return Err(SequencerError::MmBundleAlreadyPending {
+                account_id: authenticated.account_id,
+            });
+        }
         self.sequencer
             .validate_replay_nonce(authenticated.account_id, authenticated.nonce)?;
 
@@ -226,8 +299,10 @@ impl SequencerActorState {
             mm_constraint: Some(constraint),
         };
         self.check_account_submission_limits(&submission)?;
+        self.check_deferred_submission_limits(&submission)?;
         let now_ms = current_timestamp_ms();
-        let (order_ids, submission) = match self.sequencer.try_admit_ioc(submission, now_ms) {
+        let mut candidate = self.sequencer.clone();
+        let (order_ids, submission) = match candidate.try_admit_ioc(submission, now_ms) {
             crate::sequencer::AdmitOutcome::Deferred {
                 order_ids,
                 submission,
@@ -239,7 +314,34 @@ impl SequencerActorState {
                 ));
             }
         };
-        self.check_deferred_submission_limits(&submission)?;
+        let action = sybil_verifier::ClientActionWitness::MmBundle {
+            account_id: authenticated.account_id.0,
+            bundle_id: authenticated.bundle_id,
+            revision: authenticated.revision,
+            orders: submission.orders.clone(),
+            order_sides: authenticated.order_sides.clone(),
+            max_capital: authenticated.max_capital,
+            nonce: authenticated.nonce,
+            authorization: authenticated.authorization.clone(),
+        };
+        candidate.push_pending_signed_mm_bundle(crate::sequencer::PendingSignedMmBundle {
+            submission: submission.clone(),
+            bundle_id: authenticated.bundle_id,
+            revision: authenticated.revision,
+        });
+        candidate.apply_mm_lifecycle_action_authorized(action)?;
+        candidate.record_mm_lifecycle_receipt(
+            authenticated.account_id,
+            crate::sequencer::MmBundleLifecycleReceipt {
+                nonce: authenticated.nonce,
+                operation_digest,
+                result: crate::sequencer::MmBundleLifecycleResult::Active {
+                    bundle_id: authenticated.bundle_id,
+                    revision: authenticated.revision,
+                    order_ids: order_ids.clone(),
+                },
+            },
+        );
         if let Some(store) = &self.store {
             store
                 .append_authenticated_mm_bundle(
@@ -254,21 +356,305 @@ impl SequencerActorState {
                 .await
                 .map_err(|err| SequencerError::Persistence(err.to_string()))?;
         }
-        let action = sybil_verifier::ClientActionWitness::MmBundle {
+        self.sequencer = candidate;
+        Ok(order_ids)
+    }
+
+    pub(super) async fn handle_signed_mm_bundle_replace(
+        &mut self,
+        signed: SignedMmBundleReplace,
+    ) -> Result<Vec<u64>, SequencerError> {
+        let authorization = raw_client_action_authorization(&signed.signer, &signed.signature);
+        self.handle_authenticated_mm_bundle_replace(AuthenticatedMmBundleReplace {
+            account_id: signed.account_id,
+            bundle_id: signed.bundle_id,
+            expected_revision: signed.expected_revision,
+            new_revision: signed.new_revision,
+            orders: signed.orders,
+            order_sides: signed.order_sides,
+            max_capital: signed.max_capital,
+            nonce: signed.nonce,
+            authorization,
+        })
+        .await
+    }
+
+    pub(super) async fn handle_authenticated_mm_bundle_replace(
+        &mut self,
+        authenticated: AuthenticatedMmBundleReplace,
+    ) -> Result<Vec<u64>, SequencerError> {
+        let order_count = authenticated.orders.len();
+        let order_limit = self.sequencer.config.max_orders_per_submission;
+        if order_count > order_limit {
+            return Err(SequencerError::TooManyOrdersInSubmission {
+                count: order_count,
+                limit: order_limit,
+            });
+        }
+        if authenticated.orders.is_empty()
+            || authenticated.orders.len() != authenticated.order_sides.len()
+        {
+            return Err(SequencerError::InvalidMmBundle(
+                "orders and sides must be non-empty and have equal lengths".to_string(),
+            ));
+        }
+        if authenticated.new_revision
+            != authenticated
+                .expected_revision
+                .checked_add(1)
+                .ok_or_else(|| {
+                    SequencerError::InvalidMmBundle("bundle revision exhausted".to_string())
+                })?
+        {
+            return Err(SequencerError::InvalidMmBundle(
+                "replacement revision must be exactly expected revision plus one".to_string(),
+            ));
+        }
+        let genesis_hash = self
+            .sequencer
+            .genesis_hash()
+            .ok_or(SequencerError::GenesisHashUnavailable)?;
+        let canonical = canonical_mm_bundle_replace_bytes(
+            authenticated.account_id,
+            authenticated.bundle_id,
+            authenticated.expected_revision,
+            authenticated.new_revision,
+            &authenticated.orders,
+            &authenticated.order_sides,
+            authenticated.max_capital,
+            authenticated.nonce,
+            genesis_hash,
+        )?;
+        self.verify_authenticated_mm_action(
+            authenticated.account_id,
+            &authenticated.authorization,
+            &canonical,
+        )?;
+        let operation_digest = *blake3::hash(&canonical).as_bytes();
+        if let Some(result) = self.mm_lifecycle_retry(
+            authenticated.account_id,
+            authenticated.nonce,
+            operation_digest,
+        )? {
+            return match result {
+                crate::sequencer::MmBundleLifecycleResult::Active { order_ids, .. } => {
+                    Ok(order_ids)
+                }
+                crate::sequencer::MmBundleLifecycleResult::Cancelled { .. } => {
+                    Err(SequencerError::MmBundleRetryConflict)
+                }
+            };
+        }
+        let active = self
+            .sequencer
+            .active_signed_mm_bundle(authenticated.account_id)
+            .ok_or(SequencerError::MmBundleNotPending {
+                account_id: authenticated.account_id,
+            })?;
+        if active.bundle_id != authenticated.bundle_id {
+            return Err(SequencerError::MmBundleNotPending {
+                account_id: authenticated.account_id,
+            });
+        }
+        if active.revision != authenticated.expected_revision {
+            return Err(SequencerError::MmBundleRevisionStale {
+                expected: authenticated.expected_revision,
+                active: active.revision,
+            });
+        }
+        self.sequencer
+            .validate_replay_nonce(authenticated.account_id, authenticated.nonce)?;
+        let target_block = self.sequencer.height().saturating_add(1);
+        if authenticated
+            .orders
+            .iter()
+            .any(|order| order.expires_at_block != Some(target_block))
+        {
+            return Err(SequencerError::InvalidMmBundle(format!(
+                "IOC replacement must target next block {target_block}"
+            )));
+        }
+
+        let mut constraint = matching_engine::MmConstraint::new(
+            matching_engine::MmId(authenticated.account_id.0),
+            authenticated.max_capital,
+        );
+        for (index, side) in authenticated.order_sides.iter().copied().enumerate() {
+            constraint.add_order(index as u64, side);
+        }
+        let submission = OrderSubmission {
+            account_id: authenticated.account_id,
+            orders: authenticated.orders,
+            mm_constraint: Some(constraint),
+        };
+        self.check_account_submission_limits(&submission)?;
+        let mut candidate = self.sequencer.clone();
+        candidate
+            .remove_active_signed_mm_bundle(authenticated.account_id)
+            .expect("active replacement target was validated");
+        let (order_ids, submission) =
+            match candidate.try_admit_ioc(submission, current_timestamp_ms()) {
+                crate::sequencer::AdmitOutcome::Deferred {
+                    order_ids,
+                    submission,
+                } => (order_ids, submission),
+                crate::sequencer::AdmitOutcome::Rejected(error) => return Err(error),
+                crate::sequencer::AdmitOutcome::Admitted { .. } => {
+                    return Err(SequencerError::InvalidMmBundle(
+                        "MM replacement unexpectedly entered the resting book".to_string(),
+                    ));
+                }
+            };
+        let action = sybil_verifier::ClientActionWitness::MmBundleReplace {
             account_id: authenticated.account_id.0,
             bundle_id: authenticated.bundle_id,
-            revision: authenticated.revision,
+            expected_revision: authenticated.expected_revision,
+            new_revision: authenticated.new_revision,
             orders: submission.orders.clone(),
-            order_sides: authenticated.order_sides,
+            order_sides: authenticated.order_sides.clone(),
             max_capital: authenticated.max_capital,
             nonce: authenticated.nonce,
-            authorization: authenticated.authorization,
+            authorization: authenticated.authorization.clone(),
         };
-        self.sequencer.push_pending_bundle(submission);
-        self.sequencer
-            .apply_client_action_authorized(action)
-            .expect("authenticated MM bundle nonce was validated in the actor turn");
+        candidate.push_pending_signed_mm_bundle(crate::sequencer::PendingSignedMmBundle {
+            submission: submission.clone(),
+            bundle_id: authenticated.bundle_id,
+            revision: authenticated.new_revision,
+        });
+        candidate.apply_mm_lifecycle_action_authorized(action)?;
+        candidate.record_mm_lifecycle_receipt(
+            authenticated.account_id,
+            crate::sequencer::MmBundleLifecycleReceipt {
+                nonce: authenticated.nonce,
+                operation_digest,
+                result: crate::sequencer::MmBundleLifecycleResult::Active {
+                    bundle_id: authenticated.bundle_id,
+                    revision: authenticated.new_revision,
+                    order_ids: order_ids.clone(),
+                },
+            },
+        );
+        if let Some(store) = &self.store {
+            store
+                .append_authenticated_mm_bundle_replace(
+                    &submission,
+                    authenticated.bundle_id,
+                    authenticated.expected_revision,
+                    authenticated.new_revision,
+                    &authenticated.order_sides,
+                    authenticated.max_capital,
+                    authenticated.nonce,
+                    &authenticated.authorization,
+                )
+                .await
+                .map_err(|err| SequencerError::Persistence(err.to_string()))?;
+        }
+        self.sequencer = candidate;
         Ok(order_ids)
+    }
+
+    pub(super) async fn handle_signed_mm_bundle_cancel(
+        &mut self,
+        signed: SignedMmBundleCancel,
+    ) -> Result<crate::sequencer::MmBundleLifecycleResult, SequencerError> {
+        let authorization = raw_client_action_authorization(&signed.signer, &signed.signature);
+        self.handle_authenticated_mm_bundle_cancel(AuthenticatedMmBundleCancel {
+            account_id: signed.account_id,
+            bundle_id: signed.bundle_id,
+            expected_revision: signed.expected_revision,
+            nonce: signed.nonce,
+            authorization,
+        })
+        .await
+    }
+
+    pub(super) async fn handle_authenticated_mm_bundle_cancel(
+        &mut self,
+        authenticated: AuthenticatedMmBundleCancel,
+    ) -> Result<crate::sequencer::MmBundleLifecycleResult, SequencerError> {
+        let genesis_hash = self
+            .sequencer
+            .genesis_hash()
+            .ok_or(SequencerError::GenesisHashUnavailable)?;
+        let canonical = canonical_mm_bundle_cancel_bytes(
+            authenticated.account_id,
+            authenticated.bundle_id,
+            authenticated.expected_revision,
+            authenticated.nonce,
+            genesis_hash,
+        );
+        self.verify_authenticated_mm_action(
+            authenticated.account_id,
+            &authenticated.authorization,
+            &canonical,
+        )?;
+        let operation_digest = *blake3::hash(&canonical).as_bytes();
+        if let Some(result) = self.mm_lifecycle_retry(
+            authenticated.account_id,
+            authenticated.nonce,
+            operation_digest,
+        )? {
+            return Ok(result);
+        }
+        let active = self
+            .sequencer
+            .active_signed_mm_bundle(authenticated.account_id)
+            .ok_or(SequencerError::MmBundleNotPending {
+                account_id: authenticated.account_id,
+            })?;
+        if active.bundle_id != authenticated.bundle_id {
+            return Err(SequencerError::MmBundleNotPending {
+                account_id: authenticated.account_id,
+            });
+        }
+        if active.revision != authenticated.expected_revision {
+            return Err(SequencerError::MmBundleRevisionStale {
+                expected: authenticated.expected_revision,
+                active: active.revision,
+            });
+        }
+        self.sequencer
+            .validate_replay_nonce(authenticated.account_id, authenticated.nonce)?;
+
+        let result = crate::sequencer::MmBundleLifecycleResult::Cancelled {
+            bundle_id: authenticated.bundle_id,
+            revision: authenticated.expected_revision,
+        };
+        let mut candidate = self.sequencer.clone();
+        candidate
+            .remove_active_signed_mm_bundle(authenticated.account_id)
+            .expect("active cancellation target was validated");
+        candidate.apply_mm_lifecycle_action_authorized(
+            sybil_verifier::ClientActionWitness::MmBundleCancel {
+                account_id: authenticated.account_id.0,
+                bundle_id: authenticated.bundle_id,
+                expected_revision: authenticated.expected_revision,
+                nonce: authenticated.nonce,
+                authorization: authenticated.authorization.clone(),
+            },
+        )?;
+        candidate.record_mm_lifecycle_receipt(
+            authenticated.account_id,
+            crate::sequencer::MmBundleLifecycleReceipt {
+                nonce: authenticated.nonce,
+                operation_digest,
+                result: result.clone(),
+            },
+        );
+        if let Some(store) = &self.store {
+            store
+                .append_authenticated_mm_bundle_cancel(
+                    authenticated.account_id,
+                    authenticated.bundle_id,
+                    authenticated.expected_revision,
+                    authenticated.nonce,
+                    &authenticated.authorization,
+                )
+                .await
+                .map_err(|err| SequencerError::Persistence(err.to_string()))?;
+        }
+        self.sequencer = candidate;
+        Ok(result)
     }
 
     pub(super) async fn handle_signed_cancel(
@@ -397,6 +783,13 @@ impl SequencerActorState {
         authorization: Option<(u64, sybil_verifier::ClientActionAuth)>,
     ) -> Result<Vec<u64>, SequencerError> {
         self.check_account_submission_limits(&submission)?;
+        if submission.mm_constraint.is_some()
+            && self.sequencer.has_active_mm_bundle(submission.account_id)
+        {
+            return Err(SequencerError::MmBundleAlreadyPending {
+                account_id: submission.account_id,
+            });
+        }
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()

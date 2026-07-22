@@ -139,6 +139,7 @@ pub(super) fn coherent_header_and_witness(
 pub(super) struct TestEnv {
     empty_pk: HashMap<crate::crypto::PublicKey, crate::crypto::RegisteredPubkey>,
     empty_service_receipts: HashMap<[u8; 32], crate::sequencer::ServiceAccountProvisioningReceipt>,
+    empty_mm_receipts: HashMap<AccountId, crate::sequencer::MmBundleLifecycleReceipt>,
     empty_prices: HashMap<MarketId, Vec<Nanos>>,
     empty_volumes: HashMap<MarketId, u64>,
     pub(super) bridge_state: BridgeState,
@@ -150,6 +151,7 @@ impl TestEnv {
         Self {
             empty_pk: HashMap::new(),
             empty_service_receipts: HashMap::new(),
+            empty_mm_receipts: HashMap::new(),
             empty_prices: HashMap::new(),
             empty_volumes: HashMap::new(),
             bridge_state: BridgeState::default(),
@@ -181,6 +183,7 @@ impl TestEnv {
             next_order_id,
             pubkey_registry: &self.empty_pk,
             service_account_receipts: &self.empty_service_receipts,
+            mm_lifecycle_receipts: &self.empty_mm_receipts,
             public_accounts_allocated: 0,
             analytics: AnalyticsSnapshot {
                 last_clearing_prices: &self.empty_prices,
@@ -224,6 +227,7 @@ impl TestEnv {
             next_order_id: 1,
             pubkey_registry: &self.empty_pk,
             service_account_receipts: &self.empty_service_receipts,
+            mm_lifecycle_receipts: &self.empty_mm_receipts,
             public_accounts_allocated: 0,
             analytics: AnalyticsSnapshot {
                 last_clearing_prices: &self.empty_prices,

@@ -533,6 +533,40 @@ impl SybilClient {
         Ok(result.order_ids)
     }
 
+    /// Atomically replace one exact active revision of a signed MM bundle.
+    pub async fn replace_signed_mm_bundle(
+        &self,
+        req: &ReplaceSignedMmBundleRequest,
+    ) -> Result<Vec<u64>, Error> {
+        let resp = self
+            .with_service_auth(
+                self.http
+                    .post(self.url("/v1/orders/mm-bundles/replace/signed")),
+            )
+            .json(req)
+            .send()
+            .await?;
+        let result: OrderAcceptedResponse = self.decode(resp).await?;
+        Ok(result.order_ids)
+    }
+
+    /// Cancel one exact active revision of a signed MM bundle.
+    pub async fn cancel_signed_mm_bundle(
+        &self,
+        req: &CancelSignedMmBundleRequest,
+    ) -> Result<bool, Error> {
+        let resp = self
+            .with_service_auth(
+                self.http
+                    .post(self.url("/v1/orders/mm-bundles/cancel/signed")),
+            )
+            .json(req)
+            .send()
+            .await?;
+        let result: CancelOrderResponse = self.decode(resp).await?;
+        Ok(result.cancelled)
+    }
+
     /// Cancel a resting order with a signed payload. The caller must supply
     /// and sign a strictly increasing per-account nonce.
     pub async fn cancel_signed_order(&self, req: &CancelSignedOrderRequest) -> Result<bool, Error> {

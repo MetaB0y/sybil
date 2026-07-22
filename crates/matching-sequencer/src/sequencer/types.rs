@@ -7,6 +7,37 @@ pub struct OrderSubmission {
     pub mm_constraint: Option<MmConstraint>,
 }
 
+/// One actor-owned public MM bundle waiting for its exact next block.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub(crate) struct PendingSignedMmBundle {
+    pub(crate) submission: OrderSubmission,
+    pub(crate) bundle_id: [u8; 32],
+    pub(crate) revision: u64,
+}
+
+/// Durable outcome returned by an exact retry of the latest MM lifecycle action.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum MmBundleLifecycleResult {
+    Active {
+        bundle_id: [u8; 32],
+        revision: u64,
+        order_ids: Vec<u64>,
+    },
+    Cancelled {
+        bundle_id: [u8; 32],
+        revision: u64,
+    },
+}
+
+/// One bounded, per-account idempotency receipt. This is persisted operational
+/// state and is not part of settlement or validity state roots.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MmBundleLifecycleReceipt {
+    pub nonce: u64,
+    pub operation_digest: [u8; 32],
+    pub result: MmBundleLifecycleResult,
+}
+
 /// Result of [`BlockSequencer::try_admit_direct`].
 ///
 /// A submission that targets a single market with a single non-MM order can

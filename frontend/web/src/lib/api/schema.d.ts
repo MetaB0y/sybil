@@ -1119,6 +1119,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/orders/mm-bundles/cancel/signed": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** POST /v1/orders/mm-bundles/cancel/signed */
+    post: operations["cancel_signed_mm_bundle"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/orders/mm-bundles/replace/signed": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** POST /v1/orders/mm-bundles/replace/signed */
+    post: operations["replace_signed_mm_bundle"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/orders/mm-bundles/signed": {
     parameters: {
       query?: never;
@@ -1837,6 +1871,20 @@ export interface components {
     };
     CancelOrderResponse: {
       cancelled: boolean;
+    };
+    /** @description Public signed cancellation of one active MM bundle revision. */
+    CancelSignedMmBundleRequest: {
+      /** Format: int64 */
+      account_id: number;
+      auth_scheme?: components["schemas"]["AuthScheme"];
+      bundle_id_hex: string;
+      /** Format: int64 */
+      expected_revision: number;
+      /** Format: int64 */
+      nonce: number;
+      signature_hex?: string | null;
+      signer_pubkey_hex: string;
+      webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
     };
     CancelSignedOrderRequest: {
       /**
@@ -3232,6 +3280,30 @@ export interface components {
       /** @description Released reserved cash. Integer nanodollars; 1_000_000_000 = $1. */
       reserved_balance_released_nanos: string;
       reserved_positions_released?: components["schemas"]["ReservedPositionReleaseResponse"][];
+    };
+    /** @description Public signed atomic replacement of one active MM bundle revision. */
+    ReplaceSignedMmBundleRequest: {
+      /** Format: int64 */
+      account_id: number;
+      auth_scheme?: components["schemas"]["AuthScheme"];
+      bundle_id_hex: string;
+      /** Format: int64 */
+      expected_revision: number;
+      /**
+       * Format: int64
+       * @description Exact next block this replacement targets.
+       */
+      expires_at_block: number;
+      /** @description Integer nanodollars shared across every replacement quote. */
+      mm_budget_nanos: string;
+      /** Format: int64 */
+      new_revision: number;
+      /** Format: int64 */
+      nonce: number;
+      orders: components["schemas"]["OrderSpec"][];
+      signature_hex?: string | null;
+      signer_pubkey_hex: string;
+      webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
     };
     ReservedPositionReleaseResponse: {
       /** Format: int32 */
@@ -6232,6 +6304,126 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  cancel_signed_mm_bundle: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CancelSignedMmBundleRequest"];
+      };
+    };
+    responses: {
+      /** @description Signed atomic MM bundle cancelled */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CancelOrderResponse"];
+        };
+      };
+      /** @description Invalid cancellation or signature */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
+      };
+      /** @description Signer or account mismatch */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
+      };
+      /** @description Unknown signer or account */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
+      };
+      /** @description Bundle is absent, stale, or already advanced */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
+      };
+    };
+  };
+  replace_signed_mm_bundle: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ReplaceSignedMmBundleRequest"];
+      };
+    };
+    responses: {
+      /** @description Signed atomic MM bundle replaced */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OrderAcceptedResponse"];
+        };
+      };
+      /** @description Invalid replacement or signature */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
+      };
+      /** @description Signer or account mismatch */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
+      };
+      /** @description Unknown signer, account, or market */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
+      };
+      /** @description Bundle is absent, stale, or already advanced */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
     };
   };

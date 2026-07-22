@@ -76,6 +76,8 @@ impl BlockSequencer {
             pending_system_events: Vec::new(),
             pending_system_account_baselines: HashMap::new(),
             pending_bundles: Vec::new(),
+            pending_signed_mm_bundles: Vec::new(),
+            mm_lifecycle_receipts: HashMap::new(),
             config,
         }
     }
@@ -200,6 +202,8 @@ impl BlockSequencer {
             pending_system_events: Vec::new(),
             pending_system_account_baselines: HashMap::new(),
             pending_bundles: Vec::new(),
+            pending_signed_mm_bundles: Vec::new(),
+            mm_lifecycle_receipts: state.mm_lifecycle_receipts,
             config,
         };
         for entry in acknowledged_writes {
@@ -242,6 +246,13 @@ impl BlockSequencer {
                 Ok(())
             }
             AcknowledgedWrite::DeferredBundle(submission) => {
+                if submission.mm_constraint.is_some()
+                    && self.has_active_mm_bundle(submission.account_id)
+                {
+                    return Err(SequencerError::Persistence(
+                        "replayed service MM submit found an active bundle".to_string(),
+                    ));
+                }
                 for order in &submission.orders {
                     self.next_order_id = self.next_order_id.max(order.id.saturating_add(1));
                 }
@@ -269,6 +280,14 @@ impl BlockSequencer {
                 nonce,
                 authorization,
             } => {
+                if submission.mm_constraint.is_some()
+                    && self.has_active_mm_bundle(submission.account_id)
+                {
+                    return Err(SequencerError::Persistence(
+                        "replayed authenticated service MM submit found an active bundle"
+                            .to_string(),
+                    ));
+                }
                 for order in &submission.orders {
                     self.next_order_id = self.next_order_id.max(order.id.saturating_add(1));
                 }
@@ -295,22 +314,176 @@ impl BlockSequencer {
                 nonce,
                 authorization,
             } => {
+                let account_id = submission.account_id;
+                if self.has_active_mm_bundle(account_id) {
+                    return Err(SequencerError::Persistence(
+                        "replayed MM submit found an active bundle".to_string(),
+                    ));
+                }
                 for order in &submission.orders {
                     self.next_order_id = self.next_order_id.max(order.id.saturating_add(1));
                 }
-                let account_id = submission.account_id;
                 let orders = submission.orders.clone();
-                self.pending_bundles.push(submission);
-                self.apply_client_action_authorized(sybil_verifier::ClientActionWitness::MmBundle {
-                    account_id: account_id.0,
+                let canonical = crate::crypto::canonical_mm_bundle_bytes(
+                    account_id,
                     bundle_id,
                     revision,
-                    orders,
-                    order_sides,
+                    &orders,
+                    &order_sides,
                     max_capital,
                     nonce,
-                    authorization,
-                })
+                    self.genesis_hash.expect("restored genesis hash"),
+                )?;
+                let order_ids = orders.iter().map(|order| order.id).collect();
+                self.push_pending_signed_mm_bundle(crate::sequencer::PendingSignedMmBundle {
+                    submission,
+                    bundle_id,
+                    revision,
+                });
+                self.apply_mm_lifecycle_action_authorized(
+                    sybil_verifier::ClientActionWitness::MmBundle {
+                        account_id: account_id.0,
+                        bundle_id,
+                        revision,
+                        orders,
+                        order_sides,
+                        max_capital,
+                        nonce,
+                        authorization,
+                    },
+                )?;
+                self.record_mm_lifecycle_receipt(
+                    account_id,
+                    crate::sequencer::MmBundleLifecycleReceipt {
+                        nonce,
+                        operation_digest: *blake3::hash(&canonical).as_bytes(),
+                        result: crate::sequencer::MmBundleLifecycleResult::Active {
+                            bundle_id,
+                            revision,
+                            order_ids,
+                        },
+                    },
+                );
+                Ok(())
+            }
+            AcknowledgedWrite::AuthenticatedMmBundleReplace {
+                submission,
+                bundle_id,
+                expected_revision,
+                new_revision,
+                order_sides,
+                max_capital,
+                nonce,
+                authorization,
+            } => {
+                let account_id = submission.account_id;
+                let active = self
+                    .remove_active_signed_mm_bundle(account_id)
+                    .ok_or_else(|| {
+                        SequencerError::Persistence(
+                            "replayed MM replacement has no active bundle".to_string(),
+                        )
+                    })?;
+                if active.bundle_id != bundle_id || active.revision != expected_revision {
+                    return Err(SequencerError::Persistence(
+                        "replayed MM replacement target diverged".to_string(),
+                    ));
+                }
+                for order in &submission.orders {
+                    self.next_order_id = self.next_order_id.max(order.id.saturating_add(1));
+                }
+                let orders = submission.orders.clone();
+                let canonical = crate::crypto::canonical_mm_bundle_replace_bytes(
+                    account_id,
+                    bundle_id,
+                    expected_revision,
+                    new_revision,
+                    &orders,
+                    &order_sides,
+                    max_capital,
+                    nonce,
+                    self.genesis_hash.expect("restored genesis hash"),
+                )?;
+                let order_ids = orders.iter().map(|order| order.id).collect();
+                self.push_pending_signed_mm_bundle(crate::sequencer::PendingSignedMmBundle {
+                    submission,
+                    bundle_id,
+                    revision: new_revision,
+                });
+                self.apply_mm_lifecycle_action_authorized(
+                    sybil_verifier::ClientActionWitness::MmBundleReplace {
+                        account_id: account_id.0,
+                        bundle_id,
+                        expected_revision,
+                        new_revision,
+                        orders,
+                        order_sides,
+                        max_capital,
+                        nonce,
+                        authorization,
+                    },
+                )?;
+                self.record_mm_lifecycle_receipt(
+                    account_id,
+                    crate::sequencer::MmBundleLifecycleReceipt {
+                        nonce,
+                        operation_digest: *blake3::hash(&canonical).as_bytes(),
+                        result: crate::sequencer::MmBundleLifecycleResult::Active {
+                            bundle_id,
+                            revision: new_revision,
+                            order_ids,
+                        },
+                    },
+                );
+                Ok(())
+            }
+            AcknowledgedWrite::AuthenticatedMmBundleCancel {
+                account_id,
+                bundle_id,
+                expected_revision,
+                nonce,
+                authorization,
+            } => {
+                let active = self
+                    .remove_active_signed_mm_bundle(account_id)
+                    .ok_or_else(|| {
+                        SequencerError::Persistence(
+                            "replayed MM cancellation has no active bundle".to_string(),
+                        )
+                    })?;
+                if active.bundle_id != bundle_id || active.revision != expected_revision {
+                    return Err(SequencerError::Persistence(
+                        "replayed MM cancellation target diverged".to_string(),
+                    ));
+                }
+                let canonical = crate::crypto::canonical_mm_bundle_cancel_bytes(
+                    account_id,
+                    bundle_id,
+                    expected_revision,
+                    nonce,
+                    self.genesis_hash.expect("restored genesis hash"),
+                );
+                self.apply_mm_lifecycle_action_authorized(
+                    sybil_verifier::ClientActionWitness::MmBundleCancel {
+                        account_id: account_id.0,
+                        bundle_id,
+                        expected_revision,
+                        nonce,
+                        authorization,
+                    },
+                )?;
+                self.record_mm_lifecycle_receipt(
+                    account_id,
+                    crate::sequencer::MmBundleLifecycleReceipt {
+                        nonce,
+                        operation_digest: *blake3::hash(&canonical).as_bytes(),
+                        result: crate::sequencer::MmBundleLifecycleResult::Cancelled {
+                            bundle_id,
+                            revision: expected_revision,
+                        },
+                    },
+                );
+                Ok(())
             }
             AcknowledgedWrite::AuthenticatedCancel {
                 account_id,

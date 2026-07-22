@@ -76,8 +76,15 @@ impl BlockSequencer {
         timestamp_ms: u64,
     ) -> Result<PreparedBlock, SequencerError> {
         let mut next_sequencer = self.clone();
-        let preassigned_submission_count = next_sequencer.pending_bundles.len();
         let mut all_submissions = std::mem::take(&mut next_sequencer.pending_bundles);
+        all_submissions.extend(
+            std::mem::take(&mut next_sequencer.pending_signed_mm_bundles)
+                .into_iter()
+                .map(|pending| pending.submission),
+        );
+        all_submissions
+            .sort_by_key(|submission| submission.orders.first().map_or(u64::MAX, |order| order.id));
+        let preassigned_submission_count = all_submissions.len();
         all_submissions.extend(submissions);
         let production = next_sequencer.produce_block_in_place(
             all_submissions,
@@ -104,7 +111,40 @@ impl BlockSequencer {
     }
 
     pub fn pending_bundles_len(&self) -> usize {
-        self.pending_bundles.len()
+        self.pending_bundles.len() + self.pending_signed_mm_bundles.len()
+    }
+
+    pub(crate) fn push_pending_signed_mm_bundle(
+        &mut self,
+        pending: super::types::PendingSignedMmBundle,
+    ) {
+        self.pending_signed_mm_bundles.push(pending);
+    }
+
+    pub(crate) fn active_signed_mm_bundle(
+        &self,
+        account_id: AccountId,
+    ) -> Option<&super::types::PendingSignedMmBundle> {
+        self.pending_signed_mm_bundles
+            .iter()
+            .find(|pending| pending.submission.account_id == account_id)
+    }
+
+    pub(crate) fn has_active_mm_bundle(&self, account_id: AccountId) -> bool {
+        self.pending_bundles.iter().any(|submission| {
+            submission.account_id == account_id && submission.mm_constraint.is_some()
+        }) || self.active_signed_mm_bundle(account_id).is_some()
+    }
+
+    pub(crate) fn remove_active_signed_mm_bundle(
+        &mut self,
+        account_id: AccountId,
+    ) -> Option<super::types::PendingSignedMmBundle> {
+        let index = self
+            .pending_signed_mm_bundles
+            .iter()
+            .position(|pending| pending.submission.account_id == account_id)?;
+        Some(self.pending_signed_mm_bundles.remove(index))
     }
 
     #[cfg(test)]

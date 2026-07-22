@@ -273,6 +273,30 @@ pub struct SignedMmBundle {
     pub signature: Signature,
 }
 
+/// Atomic replacement of one exact active MM-bundle revision.
+pub struct SignedMmBundleReplace {
+    pub account_id: crate::account::AccountId,
+    pub bundle_id: [u8; 32],
+    pub expected_revision: u64,
+    pub new_revision: u64,
+    pub orders: Vec<Order>,
+    pub order_sides: Vec<MmSide>,
+    pub max_capital: Nanos,
+    pub nonce: u64,
+    pub signer: PublicKey,
+    pub signature: Signature,
+}
+
+/// Atomic cancellation of one exact active MM-bundle revision.
+pub struct SignedMmBundleCancel {
+    pub account_id: crate::account::AccountId,
+    pub bundle_id: [u8; 32],
+    pub expected_revision: u64,
+    pub nonce: u64,
+    pub signer: PublicKey,
+    pub signature: Signature,
+}
+
 /// A resting-order cancellation authenticated by a P256 signature.
 pub struct SignedCancel {
     pub account_id: crate::account::AccountId,
@@ -310,6 +334,28 @@ pub struct AuthenticatedMmBundle {
     pub orders: Vec<Order>,
     pub order_sides: Vec<MmSide>,
     pub max_capital: Nanos,
+    pub nonce: u64,
+    pub authorization: sybil_verifier::ClientActionAuth,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct AuthenticatedMmBundleReplace {
+    pub account_id: crate::account::AccountId,
+    pub bundle_id: [u8; 32],
+    pub expected_revision: u64,
+    pub new_revision: u64,
+    pub orders: Vec<Order>,
+    pub order_sides: Vec<MmSide>,
+    pub max_capital: Nanos,
+    pub nonce: u64,
+    pub authorization: sybil_verifier::ClientActionAuth,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct AuthenticatedMmBundleCancel {
+    pub account_id: crate::account::AccountId,
+    pub bundle_id: [u8; 32],
+    pub expected_revision: u64,
     pub nonce: u64,
     pub authorization: sybil_verifier::ClientActionAuth,
 }
@@ -377,6 +423,51 @@ pub fn canonical_mm_bundle_bytes(
         genesis_hash,
     )
     .map_err(SequencerError::InvalidMmBundle)
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the signed replacement tuple stays explicit at this trust boundary"
+)]
+pub fn canonical_mm_bundle_replace_bytes(
+    account_id: crate::account::AccountId,
+    bundle_id: [u8; 32],
+    expected_revision: u64,
+    new_revision: u64,
+    orders: &[Order],
+    order_sides: &[MmSide],
+    max_capital: Nanos,
+    nonce: u64,
+    genesis_hash: [u8; 32],
+) -> Result<Vec<u8>, SequencerError> {
+    sybil_verifier::client_action::canonical_mm_bundle_replace_bytes(
+        account_id.0,
+        bundle_id,
+        expected_revision,
+        new_revision,
+        orders,
+        order_sides,
+        max_capital,
+        nonce,
+        genesis_hash,
+    )
+    .map_err(SequencerError::InvalidMmBundle)
+}
+
+pub fn canonical_mm_bundle_cancel_bytes(
+    account_id: crate::account::AccountId,
+    bundle_id: [u8; 32],
+    expected_revision: u64,
+    nonce: u64,
+    genesis_hash: [u8; 32],
+) -> Vec<u8> {
+    sybil_verifier::client_action::canonical_mm_bundle_cancel_bytes(
+        account_id.0,
+        bundle_id,
+        expected_revision,
+        nonce,
+        genesis_hash,
+    )
 }
 
 /// Deterministic canonical byte encoding of a cancel request for signing.
@@ -729,6 +820,74 @@ pub fn sign_mm_bundle(
         signer: PublicKey(*key.verifying_key()),
         signature,
     })
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the signing helper mirrors every field in the replacement protocol tuple"
+)]
+pub fn sign_mm_bundle_replace(
+    account_id: crate::account::AccountId,
+    bundle_id: [u8; 32],
+    expected_revision: u64,
+    new_revision: u64,
+    orders: &[Order],
+    order_sides: &[MmSide],
+    max_capital: Nanos,
+    nonce: u64,
+    genesis_hash: [u8; 32],
+    key: &SigningKey,
+) -> Result<SignedMmBundleReplace, SequencerError> {
+    let msg = canonical_mm_bundle_replace_bytes(
+        account_id,
+        bundle_id,
+        expected_revision,
+        new_revision,
+        orders,
+        order_sides,
+        max_capital,
+        nonce,
+        genesis_hash,
+    )?;
+    let signature: Signature = key.sign(&msg);
+    Ok(SignedMmBundleReplace {
+        account_id,
+        bundle_id,
+        expected_revision,
+        new_revision,
+        orders: orders.to_vec(),
+        order_sides: order_sides.to_vec(),
+        max_capital,
+        nonce,
+        signer: PublicKey(*key.verifying_key()),
+        signature,
+    })
+}
+
+pub fn sign_mm_bundle_cancel(
+    account_id: crate::account::AccountId,
+    bundle_id: [u8; 32],
+    expected_revision: u64,
+    nonce: u64,
+    genesis_hash: [u8; 32],
+    key: &SigningKey,
+) -> SignedMmBundleCancel {
+    let msg = canonical_mm_bundle_cancel_bytes(
+        account_id,
+        bundle_id,
+        expected_revision,
+        nonce,
+        genesis_hash,
+    );
+    let signature: Signature = key.sign(&msg);
+    SignedMmBundleCancel {
+        account_id,
+        bundle_id,
+        expected_revision,
+        nonce,
+        signer: PublicKey(*key.verifying_key()),
+        signature,
+    }
 }
 
 fn to_canonical_attestation(att: &ResolutionAttestation) -> CanonicalAttestation {

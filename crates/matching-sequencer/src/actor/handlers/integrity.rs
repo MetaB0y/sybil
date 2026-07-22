@@ -33,10 +33,17 @@ impl SequencerActorState {
                 None
             }
             SequencerMsg::SubmitSignedMmBundle(_, reply)
-            | SequencerMsg::SubmitAuthenticatedMmBundle(_, reply) => {
-                let result = Err(SequencerError::IntegrityHalted);
-                self.record_submission_metrics("signed_mm_bundle", 0, &result);
+            | SequencerMsg::SubmitAuthenticatedMmBundle(_, reply)
+            | SequencerMsg::ReplaceSignedMmBundle(_, reply)
+            | SequencerMsg::ReplaceAuthenticatedMmBundle(_, reply) => {
+                self.record_mm_lifecycle_metrics("write", 0, false);
                 self.reject_integrity_halted("mm_bundle", reply);
+                None
+            }
+            SequencerMsg::CancelSignedMmBundle(_, reply)
+            | SequencerMsg::CancelAuthenticatedMmBundle(_, reply) => {
+                self.record_mm_lifecycle_metrics("cancel", 0, false);
+                self.reject_integrity_halted("mm_bundle_cancel", reply);
                 None
             }
             SequencerMsg::CancelSignedOrder(_, reply) => {

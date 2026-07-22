@@ -32,6 +32,7 @@ pub struct RestoredState {
     pub pubkey_registry: HashMap<crate::crypto::PublicKey, crate::crypto::RegisteredPubkey>,
     pub service_account_receipts:
         HashMap<[u8; 32], crate::sequencer::ServiceAccountProvisioningReceipt>,
+    pub mm_lifecycle_receipts: HashMap<AccountId, crate::sequencer::MmBundleLifecycleReceipt>,
     pub public_accounts_allocated: u64,
     pub resting_orders: Vec<RestingOrder>,
     /// All registered data feeds.
@@ -282,6 +283,19 @@ impl Store {
             receipts
         };
 
+        let mm_lifecycle_receipts = {
+            let table = txn.open_table(MM_LIFECYCLE_RECEIPTS)?;
+            let mut receipts = HashMap::new();
+            for entry in table.iter()? {
+                let (account_id, value) = entry?;
+                receipts.insert(
+                    AccountId(account_id.value()),
+                    rmp_serde::from_slice(value.value())?,
+                );
+            }
+            receipts
+        };
+
         let public_accounts_allocated = {
             let counters = txn.open_table(COUNTERS)?;
             required_counter(&counters, KEY_PUBLIC_ACCOUNTS_ALLOCATED)?
@@ -509,6 +523,7 @@ impl Store {
             next_order_id: recovery_metadata.next_order_id,
             pubkey_registry,
             service_account_receipts,
+            mm_lifecycle_receipts,
             public_accounts_allocated,
             resting_orders,
             data_feeds,

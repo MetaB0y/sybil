@@ -363,16 +363,15 @@ async fn unsigned_orders_are_service_gated_while_signed_orders_remain_public() {
     assert_ne!(status, StatusCode::UNAUTHORIZED);
     assert_ne!(status, StatusCode::FORBIDDEN);
 
-    let (status, _) = request_json(
-        app,
-        Method::POST,
+    for path in [
         "/v1/orders/mm-bundles/signed",
-        None,
-        json!({}),
-    )
-    .await;
-    assert_ne!(status, StatusCode::UNAUTHORIZED);
-    assert_ne!(status, StatusCode::FORBIDDEN);
+        "/v1/orders/mm-bundles/replace/signed",
+        "/v1/orders/mm-bundles/cancel/signed",
+    ] {
+        let (status, _) = request_json(app.clone(), Method::POST, path, None, json!({})).await;
+        assert_ne!(status, StatusCode::UNAUTHORIZED);
+        assert_ne!(status, StatusCode::FORBIDDEN);
+    }
 }
 
 #[tokio::test]

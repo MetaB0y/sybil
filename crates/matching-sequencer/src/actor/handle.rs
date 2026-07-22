@@ -1054,7 +1054,9 @@ mod tests {
     use crate::sequencer::SequencerConfig;
     use crate::store::AcknowledgedWrite;
     use crate::system_event::SystemEvent;
-    use matching_engine::{MarketSet, MmSide, NANOS_PER_DOLLAR, Nanos, outcome_buy, outcome_sell};
+    use matching_engine::{
+        MarketSet, MmConstraint, MmId, MmSide, NANOS_PER_DOLLAR, Nanos, outcome_buy, outcome_sell,
+    };
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -2843,6 +2845,654 @@ mod tests {
         partial.orders.pop();
         assert!(!sybil_verifier::verify_full(&partial, false).valid);
         assert!(restored_handle.stop_and_wait(TEST_ACTOR_TIMEOUT).await);
+    }
+
+    #[tokio::test]
+    async fn mm_bundle_uniqueness_spans_signed_and_service_admission() {
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(3_600),
+            ..SequencerConfig::default()
+        };
+        let signing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+
+        let (mut seq, aid) = make_test_sequencer_with_config(config.clone());
+        seq.register_pubkey(aid, PublicKey(*signing_key.verifying_key()))
+            .unwrap();
+        let service_first = SequencerHandle::spawn(seq);
+        service_first.produce_block().await.unwrap();
+        let mut markets = MarketSet::new();
+        let market = markets.add_binary("Test");
+        let mut service_constraint = MmConstraint::new(MmId(aid.0), Nanos(NANOS_PER_DOLLAR));
+        service_constraint.add_order(0, MmSide::BuyYes);
+        service_first
+            .submit_ioc_order(OrderSubmission {
+                account_id: aid,
+                orders: vec![outcome_buy(&markets, 0, market, 0, 500_000_000, 1_000)],
+                mm_constraint: Some(service_constraint),
+            })
+            .await
+            .unwrap();
+
+        let mut signed_order = outcome_buy(&markets, 0, market, 0, 510_000_000, 1_000);
+        signed_order.expires_at_block = Some(2);
+        let signed = crate::crypto::sign_mm_bundle(
+            aid,
+            [0x49; 32],
+            0,
+            &[signed_order],
+            &[MmSide::BuyYes],
+            Nanos(NANOS_PER_DOLLAR),
+            1,
+            service_first.get_genesis_hash().await.unwrap().unwrap(),
+            &signing_key,
+        )
+        .unwrap();
+        assert!(matches!(
+            service_first.submit_signed_mm_bundle(signed).await,
+            Err(SequencerError::MmBundleAlreadyPending { account_id }) if account_id == aid
+        ));
+        assert!(service_first.stop_and_wait(TEST_ACTOR_TIMEOUT).await);
+
+        let (mut seq, aid) = make_test_sequencer_with_config(config);
+        seq.register_pubkey(aid, PublicKey(*signing_key.verifying_key()))
+            .unwrap();
+        let signed_first = SequencerHandle::spawn(seq);
+        signed_first.produce_block().await.unwrap();
+        let mut signed_order = outcome_buy(&markets, 0, market, 0, 510_000_000, 1_000);
+        signed_order.expires_at_block = Some(2);
+        let signed = crate::crypto::sign_mm_bundle(
+            aid,
+            [0x4a; 32],
+            0,
+            &[signed_order],
+            &[MmSide::BuyYes],
+            Nanos(NANOS_PER_DOLLAR),
+            1,
+            signed_first.get_genesis_hash().await.unwrap().unwrap(),
+            &signing_key,
+        )
+        .unwrap();
+        signed_first.submit_signed_mm_bundle(signed).await.unwrap();
+
+        let mut service_constraint = MmConstraint::new(MmId(aid.0), Nanos(NANOS_PER_DOLLAR));
+        service_constraint.add_order(0, MmSide::BuyYes);
+        assert!(matches!(
+            signed_first
+                .submit_ioc_order(OrderSubmission {
+                    account_id: aid,
+                    orders: vec![outcome_buy(
+                        &markets,
+                        0,
+                        market,
+                        0,
+                        500_000_000,
+                        1_000,
+                    )],
+                    mm_constraint: Some(service_constraint),
+                })
+                .await,
+            Err(SequencerError::MmBundleAlreadyPending { account_id }) if account_id == aid
+        ));
+        assert!(signed_first.stop_and_wait(TEST_ACTOR_TIMEOUT).await);
+    }
+
+    #[tokio::test]
+    async fn signed_mm_bundle_cancel_is_idempotent_durable_and_validity_bound() {
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(3_600),
+            ..SequencerConfig::default()
+        };
+        let (mut seq, aid) = make_test_sequencer_with_config(config.clone());
+        let signing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        seq.register_pubkey(aid, PublicKey(*signing_key.verifying_key()))
+            .unwrap();
+
+        let path = temp_store_path("signed-mm-bundle-cancel");
+        let store = Arc::new(crate::store::Store::open(&path).unwrap());
+        let handle = SequencerHandle::spawn_with_store_arc(seq, Some(store.clone()));
+        handle.produce_block().await.unwrap();
+        let genesis_hash = handle.get_genesis_hash().await.unwrap().unwrap();
+
+        let mut markets = MarketSet::new();
+        let market = markets.add_binary("Test");
+        let mut buy = outcome_buy(&markets, 0, market, 0, 510_000_000, 1_000);
+        let mut sell = outcome_sell(&markets, 0, market, 1, 490_000_000, 1_000);
+        buy.expires_at_block = Some(2);
+        sell.expires_at_block = Some(2);
+        let bundle_id = [0x45; 32];
+        let submit = crate::crypto::sign_mm_bundle(
+            aid,
+            bundle_id,
+            0,
+            &[buy, sell],
+            &[MmSide::BuyYes, MmSide::SellNo],
+            Nanos(2 * NANOS_PER_DOLLAR),
+            1,
+            genesis_hash,
+            &signing_key,
+        )
+        .unwrap();
+        handle.submit_signed_mm_bundle(submit).await.unwrap();
+
+        let cancel =
+            crate::crypto::sign_mm_bundle_cancel(aid, bundle_id, 0, 2, genesis_hash, &signing_key);
+        let expected = crate::sequencer::MmBundleLifecycleResult::Cancelled {
+            bundle_id,
+            revision: 0,
+        };
+        assert_eq!(
+            handle.cancel_signed_mm_bundle(cancel).await.unwrap(),
+            expected
+        );
+        let duplicate =
+            crate::crypto::sign_mm_bundle_cancel(aid, bundle_id, 0, 2, genesis_hash, &signing_key);
+        assert_eq!(
+            handle.cancel_signed_mm_bundle(duplicate).await.unwrap(),
+            expected,
+            "an exact retry must return the durable terminal result"
+        );
+
+        let pending = store.load_state().await.unwrap().unwrap();
+        assert!(matches!(
+            pending.acknowledged_writes.as_slice(),
+            [
+                crate::store::SequencedAcknowledgedWrite {
+                    write: AcknowledgedWrite::AuthenticatedMmBundle { .. },
+                    ..
+                },
+                crate::store::SequencedAcknowledgedWrite {
+                    write: AcknowledgedWrite::AuthenticatedMmBundleCancel {
+                        bundle_id: durable_bundle_id,
+                        expected_revision: 0,
+                        nonce: 2,
+                        ..
+                    },
+                    ..
+                }
+            ] if *durable_bundle_id == bundle_id
+        ));
+        assert!(handle.stop_and_wait(TEST_ACTOR_TIMEOUT).await);
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        let restored_seq = BlockSequencer::restore(restored, config.clone());
+        let restored_handle =
+            SequencerHandle::spawn_with_store_arc(restored_seq, Some(store.clone()));
+        let retry_after_restart =
+            crate::crypto::sign_mm_bundle_cancel(aid, bundle_id, 0, 2, genesis_hash, &signing_key);
+        assert_eq!(
+            restored_handle
+                .cancel_signed_mm_bundle(retry_after_restart)
+                .await
+                .unwrap(),
+            expected
+        );
+
+        let block = restored_handle.produce_block().await.unwrap();
+        let witness = store
+            .block_witness(block.canonical.header.height)
+            .unwrap()
+            .expect("persisted signed MM cancellation witness");
+        assert!(witness.orders.is_empty());
+        assert!(witness.mm_constraints.is_empty());
+        assert_eq!(
+            witness
+                .system_events
+                .iter()
+                .filter(|event| matches!(
+                    event,
+                    SystemEventWitness::ClientActionAuthorized(
+                        sybil_verifier::ClientActionWitness::MmBundleCancel {
+                            account_id,
+                            bundle_id: witnessed_bundle_id,
+                            expected_revision: 0,
+                            nonce: 2,
+                            ..
+                        }
+                    ) if *account_id == aid.0 && *witnessed_bundle_id == bundle_id
+                ))
+                .count(),
+            1
+        );
+        assert!(!witness.system_events.iter().any(|event| matches!(
+            event,
+            SystemEventWitness::ClientActionAuthorized(
+                sybil_verifier::ClientActionWitness::MmBundle { account_id, .. }
+            ) if *account_id == aid.0
+        )));
+        let verification = sybil_verifier::verify_full(&witness, false);
+        assert!(
+            verification.valid,
+            "violations: {:?}",
+            verification.violations
+        );
+        let mut forged = witness.clone();
+        let authorization = forged
+            .system_events
+            .iter_mut()
+            .find_map(|event| match event {
+                SystemEventWitness::ClientActionAuthorized(
+                    sybil_verifier::ClientActionWitness::MmBundleCancel { authorization, .. },
+                ) => Some(authorization),
+                _ => None,
+            })
+            .expect("MM cancellation authorization");
+        if let sybil_verifier::ClientActionAuth::RawP256 { signature, .. } = authorization {
+            signature[0] ^= 1;
+        } else {
+            panic!("raw signed MM cancellation produced non-raw authorization");
+        }
+        assert!(!sybil_verifier::verify_full(&forged, false).valid);
+        assert!(restored_handle.stop_and_wait(TEST_ACTOR_TIMEOUT).await);
+
+        let committed = store.load_state().await.unwrap().unwrap();
+        assert!(committed.acknowledged_writes.is_empty());
+        let committed_seq = BlockSequencer::restore(committed, config);
+        let committed_handle =
+            SequencerHandle::spawn_with_store_arc(committed_seq, Some(store.clone()));
+        let retry_after_commit =
+            crate::crypto::sign_mm_bundle_cancel(aid, bundle_id, 0, 2, genesis_hash, &signing_key);
+        assert_eq!(
+            committed_handle
+                .cancel_signed_mm_bundle(retry_after_commit)
+                .await
+                .unwrap(),
+            expected,
+            "the receipt must survive the WAL-to-snapshot commit fence"
+        );
+        assert!(committed_handle.stop_and_wait(TEST_ACTOR_TIMEOUT).await);
+    }
+
+    #[tokio::test]
+    async fn signed_mm_bundle_replace_is_atomic_across_grouped_markets_and_restart() {
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(3_600),
+            ..SequencerConfig::default()
+        };
+        let mut accounts = AccountStore::new();
+        let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let mut markets = MarketSet::new();
+        let market_a = markets.add_binary("A");
+        let market_b = markets.add_binary("B");
+        let mut group = matching_engine::MarketGroup::new("Event");
+        group.add_market(market_a);
+        group.add_market(market_b);
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![group],
+            config.clone(),
+        );
+        let signing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        seq.register_pubkey(aid, PublicKey(*signing_key.verifying_key()))
+            .unwrap();
+
+        let path = temp_store_path("signed-mm-bundle-replace");
+        let store = Arc::new(crate::store::Store::open(&path).unwrap());
+        let handle = SequencerHandle::spawn_with_store_arc(seq, Some(store.clone()));
+        handle.produce_block().await.unwrap();
+        let genesis_hash = handle.get_genesis_hash().await.unwrap().unwrap();
+        let bundle_id = [0x46; 32];
+
+        let mut initial_a = outcome_buy(&markets, 0, market_a, 0, 450_000_000, 1_000);
+        let mut initial_b = outcome_buy(&markets, 0, market_b, 0, 450_000_000, 1_000);
+        initial_a.expires_at_block = Some(2);
+        initial_b.expires_at_block = Some(2);
+        let submit = crate::crypto::sign_mm_bundle(
+            aid,
+            bundle_id,
+            0,
+            &[initial_a, initial_b],
+            &[MmSide::BuyYes, MmSide::BuyYes],
+            Nanos(3 * NANOS_PER_DOLLAR),
+            1,
+            genesis_hash,
+            &signing_key,
+        )
+        .unwrap();
+        handle.submit_signed_mm_bundle(submit).await.unwrap();
+
+        let mut replacement_a = outcome_buy(&markets, 0, market_a, 0, 480_000_000, 2_000);
+        let mut replacement_b = outcome_buy(&markets, 0, market_b, 0, 470_000_000, 2_000);
+        replacement_a.expires_at_block = Some(2);
+        replacement_b.expires_at_block = Some(2);
+        let replacement_orders = [replacement_a, replacement_b];
+        let replacement_sides = [MmSide::BuyYes, MmSide::BuyYes];
+        let replacement_budget = Nanos(4 * NANOS_PER_DOLLAR);
+        let replacement = crate::crypto::sign_mm_bundle_replace(
+            aid,
+            bundle_id,
+            0,
+            1,
+            &replacement_orders,
+            &replacement_sides,
+            replacement_budget,
+            2,
+            genesis_hash,
+            &signing_key,
+        )
+        .unwrap();
+        let replacement_ids = handle.replace_signed_mm_bundle(replacement).await.unwrap();
+        assert_eq!(replacement_ids.len(), 2);
+
+        let duplicate = crate::crypto::sign_mm_bundle_replace(
+            aid,
+            bundle_id,
+            0,
+            1,
+            &replacement_orders,
+            &replacement_sides,
+            replacement_budget,
+            2,
+            genesis_hash,
+            &signing_key,
+        )
+        .unwrap();
+        assert_eq!(
+            handle.replace_signed_mm_bundle(duplicate).await.unwrap(),
+            replacement_ids
+        );
+        let conflicting_retry = crate::crypto::sign_mm_bundle_replace(
+            aid,
+            bundle_id,
+            0,
+            1,
+            &replacement_orders,
+            &replacement_sides,
+            Nanos(5 * NANOS_PER_DOLLAR),
+            2,
+            genesis_hash,
+            &signing_key,
+        )
+        .unwrap();
+        assert!(matches!(
+            handle.replace_signed_mm_bundle(conflicting_retry).await,
+            Err(SequencerError::MmBundleRetryConflict)
+        ));
+        let stale = crate::crypto::sign_mm_bundle_replace(
+            aid,
+            bundle_id,
+            0,
+            1,
+            &replacement_orders,
+            &replacement_sides,
+            replacement_budget,
+            3,
+            genesis_hash,
+            &signing_key,
+        )
+        .unwrap();
+        assert!(matches!(
+            handle.replace_signed_mm_bundle(stale).await,
+            Err(SequencerError::MmBundleRevisionStale {
+                expected: 0,
+                active: 1
+            })
+        ));
+        assert!(handle.stop_and_wait(TEST_ACTOR_TIMEOUT).await);
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        let restored_seq = BlockSequencer::restore(restored, config);
+        let restored_handle =
+            SequencerHandle::spawn_with_store_arc(restored_seq, Some(store.clone()));
+        let retry_after_restart = crate::crypto::sign_mm_bundle_replace(
+            aid,
+            bundle_id,
+            0,
+            1,
+            &replacement_orders,
+            &replacement_sides,
+            replacement_budget,
+            2,
+            genesis_hash,
+            &signing_key,
+        )
+        .unwrap();
+        assert_eq!(
+            restored_handle
+                .replace_signed_mm_bundle(retry_after_restart)
+                .await
+                .unwrap(),
+            replacement_ids
+        );
+
+        let block = restored_handle.produce_block().await.unwrap();
+        let witness = store
+            .block_witness(block.canonical.header.height)
+            .unwrap()
+            .expect("persisted signed MM replacement witness");
+        assert_eq!(witness.market_groups.len(), 1);
+        assert_eq!(witness.mm_constraints.len(), 1);
+        assert_eq!(witness.mm_constraints[0].max_capital, replacement_budget);
+        assert_eq!(witness.mm_constraints[0].order_ids, replacement_ids);
+        assert_eq!(
+            witness
+                .system_events
+                .iter()
+                .filter(|event| matches!(
+                    event,
+                    SystemEventWitness::ClientActionAuthorized(
+                        sybil_verifier::ClientActionWitness::MmBundleReplace {
+                            account_id,
+                            bundle_id: witnessed_bundle_id,
+                            expected_revision: 0,
+                            new_revision: 1,
+                            nonce: 2,
+                            orders,
+                            ..
+                        }
+                    ) if *account_id == aid.0
+                        && *witnessed_bundle_id == bundle_id
+                        && orders.len() == 2
+                ))
+                .count(),
+            1
+        );
+        assert!(!witness.system_events.iter().any(|event| matches!(
+            event,
+            SystemEventWitness::ClientActionAuthorized(
+                sybil_verifier::ClientActionWitness::MmBundle { account_id, .. }
+            ) if *account_id == aid.0
+        )));
+        let verification = sybil_verifier::verify_full(&witness, false);
+        assert!(
+            verification.valid,
+            "violations: {:?}",
+            verification.violations
+        );
+        let mut forged = witness;
+        let authorization = forged
+            .system_events
+            .iter_mut()
+            .find_map(|event| match event {
+                SystemEventWitness::ClientActionAuthorized(
+                    sybil_verifier::ClientActionWitness::MmBundleReplace { authorization, .. },
+                ) => Some(authorization),
+                _ => None,
+            })
+            .expect("MM replacement authorization");
+        if let sybil_verifier::ClientActionAuth::RawP256 { signature, .. } = authorization {
+            signature[0] ^= 1;
+        } else {
+            panic!("raw signed MM replacement produced non-raw authorization");
+        }
+        assert!(!sybil_verifier::verify_full(&forged, false).valid);
+        assert!(restored_handle.stop_and_wait(TEST_ACTOR_TIMEOUT).await);
+    }
+
+    #[tokio::test]
+    async fn signed_mm_bundle_cancel_loses_cleanly_after_block_prepare_cutoff() {
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(3_600),
+            ..SequencerConfig::default()
+        };
+        let (mut seq, aid) = make_test_sequencer_with_config(config);
+        let signing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        seq.register_pubkey(aid, PublicKey(*signing_key.verifying_key()))
+            .unwrap();
+        let handle = SequencerHandle::spawn(seq);
+        handle.produce_block().await.unwrap();
+        let genesis_hash = handle.get_genesis_hash().await.unwrap().unwrap();
+        let mut markets = MarketSet::new();
+        let market = markets.add_binary("Test");
+        let mut order = outcome_buy(&markets, 0, market, 0, 500_000_000, 1_000);
+        order.expires_at_block = Some(2);
+        let bundle_id = [0x47; 32];
+        let submit = crate::crypto::sign_mm_bundle(
+            aid,
+            bundle_id,
+            0,
+            &[order],
+            &[MmSide::BuyYes],
+            Nanos(NANOS_PER_DOLLAR),
+            1,
+            genesis_hash,
+            &signing_key,
+        )
+        .unwrap();
+        handle.submit_signed_mm_bundle(submit).await.unwrap();
+
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        handle
+            .hold_next_tick_for_test(SequencerTestTickHold {
+                started: started_tx,
+                release: release_rx,
+            })
+            .await
+            .unwrap();
+        handle.send_tick_for_test().await.unwrap();
+        started_rx.await.unwrap();
+        let cancel_task = tokio::spawn({
+            let handle = handle.clone();
+            let cancel = crate::crypto::sign_mm_bundle_cancel(
+                aid,
+                bundle_id,
+                0,
+                2,
+                genesis_hash,
+                &signing_key,
+            );
+            async move { handle.cancel_signed_mm_bundle(cancel).await }
+        });
+        while handle.inner.mailbox_monitor.depth() < 1 {
+            tokio::task::yield_now().await;
+        }
+        release_tx.send(()).unwrap();
+        assert!(matches!(
+            cancel_task.await.unwrap(),
+            Err(SequencerError::MmBundleNotPending { account_id }) if account_id == aid
+        ));
+        assert_eq!(
+            handle
+                .get_latest_block()
+                .await
+                .unwrap()
+                .unwrap()
+                .canonical
+                .header
+                .height,
+            2
+        );
+        assert!(handle.stop_and_wait(TEST_ACTOR_TIMEOUT).await);
+    }
+
+    #[tokio::test]
+    async fn signed_mm_bundle_replace_loses_cleanly_after_block_prepare_cutoff() {
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(3_600),
+            ..SequencerConfig::default()
+        };
+        let (mut seq, aid) = make_test_sequencer_with_config(config);
+        let signing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        seq.register_pubkey(aid, PublicKey(*signing_key.verifying_key()))
+            .unwrap();
+        let handle = SequencerHandle::spawn(seq);
+        handle.produce_block().await.unwrap();
+        let genesis_hash = handle.get_genesis_hash().await.unwrap().unwrap();
+        let mut markets = MarketSet::new();
+        let market = markets.add_binary("Test");
+        let mut initial = outcome_buy(&markets, 0, market, 0, 500_000_000, 1_000);
+        initial.expires_at_block = Some(2);
+        let bundle_id = [0x48; 32];
+        let submit = crate::crypto::sign_mm_bundle(
+            aid,
+            bundle_id,
+            0,
+            &[initial],
+            &[MmSide::BuyYes],
+            Nanos(NANOS_PER_DOLLAR),
+            1,
+            genesis_hash,
+            &signing_key,
+        )
+        .unwrap();
+        handle.submit_signed_mm_bundle(submit).await.unwrap();
+        let mut replacement = outcome_buy(&markets, 0, market, 0, 510_000_000, 1_000);
+        replacement.expires_at_block = Some(2);
+
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        handle
+            .hold_next_tick_for_test(SequencerTestTickHold {
+                started: started_tx,
+                release: release_rx,
+            })
+            .await
+            .unwrap();
+        handle.send_tick_for_test().await.unwrap();
+        started_rx.await.unwrap();
+        let replace_task = tokio::spawn({
+            let handle = handle.clone();
+            let replacement = crate::crypto::sign_mm_bundle_replace(
+                aid,
+                bundle_id,
+                0,
+                1,
+                &[replacement],
+                &[MmSide::BuyYes],
+                Nanos(NANOS_PER_DOLLAR),
+                2,
+                genesis_hash,
+                &signing_key,
+            )
+            .unwrap();
+            async move { handle.replace_signed_mm_bundle(replacement).await }
+        });
+        while handle.inner.mailbox_monitor.depth() < 1 {
+            tokio::task::yield_now().await;
+        }
+        release_tx.send(()).unwrap();
+        assert!(matches!(
+            replace_task.await.unwrap(),
+            Err(SequencerError::MmBundleNotPending { account_id }) if account_id == aid
+        ));
+        assert_eq!(
+            handle
+                .get_latest_block()
+                .await
+                .unwrap()
+                .unwrap()
+                .canonical
+                .header
+                .height,
+            2
+        );
+        assert!(handle.stop_and_wait(TEST_ACTOR_TIMEOUT).await);
     }
 
     #[tokio::test]

@@ -500,6 +500,66 @@ class SybilClient:
         )
         return [int(order_id) for order_id in data["order_ids"]]
 
+    async def replace_signed_mm_bundle(
+        self,
+        *,
+        account_id: int,
+        bundle_id_hex: str,
+        expected_revision: int,
+        new_revision: int,
+        orders: list[OrderSpec],
+        expires_at_block: int,
+        mm_budget_nanos: int,
+        nonce: int,
+        signer_pubkey_hex: str,
+        signature_hex: str,
+    ) -> list[int]:
+        """Atomically replace one exact raw-P256 signed MM bundle revision."""
+        data = await self._request(
+            "POST",
+            "/v1/orders/mm-bundles/replace/signed",
+            json={
+                "account_id": account_id,
+                "bundle_id_hex": bundle_id_hex,
+                "expected_revision": expected_revision,
+                "new_revision": new_revision,
+                "orders": [self._order_to_json(order) for order in orders],
+                "expires_at_block": expires_at_block,
+                "mm_budget_nanos": str(mm_budget_nanos),
+                "nonce": nonce,
+                "signer_pubkey_hex": signer_pubkey_hex,
+                "auth_scheme": "raw_p256",
+                "signature_hex": signature_hex,
+            },
+        )
+        return [int(order_id) for order_id in data["order_ids"]]
+
+    async def cancel_signed_mm_bundle(
+        self,
+        *,
+        account_id: int,
+        bundle_id_hex: str,
+        expected_revision: int,
+        nonce: int,
+        signer_pubkey_hex: str,
+        signature_hex: str,
+    ) -> bool:
+        """Cancel one exact raw-P256 signed MM bundle revision."""
+        data = await self._request(
+            "POST",
+            "/v1/orders/mm-bundles/cancel/signed",
+            json={
+                "account_id": account_id,
+                "bundle_id_hex": bundle_id_hex,
+                "expected_revision": expected_revision,
+                "nonce": nonce,
+                "signer_pubkey_hex": signer_pubkey_hex,
+                "auth_scheme": "raw_p256",
+                "signature_hex": signature_hex,
+            },
+        )
+        return bool(data["cancelled"])
+
     async def buy_yes(
         self, account_id: int, market_id: int, price: float, quantity: int | float
     ) -> bool:

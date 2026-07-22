@@ -11,7 +11,7 @@ last_verified: 2026-07-22
 > [!summary] In one paragraph
 > Accounts have a committed set of P256 signing keys. Raw agent keys sign
 > canonical action bytes directly; passkeys sign a WebAuthn assertion whose
-> challenge is the hash of those same bytes. Witness v13 carries key mutations
+> challenge is the hash of those same bytes. Witness v14 carries key mutations
 > and ordinary order/cancel plus atomic MM-bundle authorization envelopes in actor order. Native and
 > guest-safe verification replay the active key set, RawP256/WebAuthn signature,
 > exact action, genesis domain, and committed trading nonce. The deployed guest
@@ -69,7 +69,7 @@ WAL record before acknowledgement. Recovery reconstructs the same
 `ClientActionAuthorized` event.
 
 The account leaf commits a dedicated `last_trading_nonce`. Native and guest-safe
-verification require each witnessed order/cancel/MM-bundle nonce to be strictly greater
+verification require each witnessed order/cancel/MM-bundle lifecycle nonce to be strictly greater
 than the authenticated prior value; gaps are allowed. Key mutations and client
 actions share actor acknowledgement order, so an action must be authorized by a
 scheme-matching key active at that exact point. The action event is then bound
@@ -86,6 +86,13 @@ does not recompute or clamp signed intent: a side inconsistent with the order's
 payoff, a nonzero initial revision, a non-next-block expiry, or a budget above
 the account balance is rejected before WAL append. Raw P256 and WebAuthn use
 the same canonical bytes and witness-verification path.
+
+Atomic replacement uses `sybil/signing/mm-bundle-replace/v1` and binds the
+exact active revision plus the complete successor at revision plus one.
+Cancellation uses `sybil/signing/mm-bundle-cancel/v1` and binds account,
+bundle id, exact active revision, and nonce. The sequencer accepts either only
+before the actor's block-preparation cutoff; neither route can partially edit
+the ordered quote set or its shared integer budget.
 
 Unsigned `POST /v1/orders` is a service route: in production it requires the
 service token; dev mode skips that service bearer for local workflows. It is not

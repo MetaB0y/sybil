@@ -24,8 +24,8 @@ const OPENAPI_EXEMPT_PATHS: &[&str] = &[
     "/metrics",
 ];
 
-const EXPECTED_UNIT_FIELD_DESCRIPTIONS: usize = 138;
-const EXPECTED_NANOS_WIRE_FIELDS: usize = 110;
+const EXPECTED_UNIT_FIELD_DESCRIPTIONS: usize = 139;
+const EXPECTED_NANOS_WIRE_FIELDS: usize = 111;
 const EXPECTED_NANOS_WIRE_PARAMETERS: usize = 3;
 
 /// Registered method/path pairs, minus the non-API exemptions.

@@ -254,6 +254,26 @@ impl From<matching_sequencer::SequencerError> for AppError {
             matching_sequencer::SequencerError::InvalidMmBundle(message) => {
                 AppError::bad_request(format!("Invalid MM bundle: {message}"))
             }
+            matching_sequencer::SequencerError::MmBundleAlreadyPending { .. } => AppError::new(
+                StatusCode::CONFLICT,
+                format!("{err}"),
+                "MM_BUNDLE_ALREADY_PENDING",
+            ),
+            matching_sequencer::SequencerError::MmBundleNotPending { .. } => AppError::new(
+                StatusCode::CONFLICT,
+                format!("{err}"),
+                "MM_BUNDLE_NOT_PENDING",
+            ),
+            matching_sequencer::SequencerError::MmBundleRevisionStale { .. } => AppError::new(
+                StatusCode::CONFLICT,
+                format!("{err}"),
+                "MM_BUNDLE_REVISION_STALE",
+            ),
+            matching_sequencer::SequencerError::MmBundleRetryConflict => AppError::new(
+                StatusCode::CONFLICT,
+                format!("{err}"),
+                "MM_BUNDLE_RETRY_CONFLICT",
+            ),
             matching_sequencer::SequencerError::ActorGone => {
                 AppError::sequencer_unavailable("Sequencer actor is unavailable")
             }

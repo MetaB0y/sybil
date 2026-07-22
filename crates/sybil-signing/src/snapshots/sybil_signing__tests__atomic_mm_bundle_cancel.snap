@@ -1,0 +1,6 @@
+---
+source: crates/sybil-signing/src/lib.rs
+assertion_line: 530
+expression: "hex::encode(canonical_mm_bundle_cancel_bytes(&cancel, GENESIS_HASH))"
+---
+737962696c2f7369676e696e672f6d6d2d62756e646c652d63616e63656c2f7631abababababababababababababababababababababababababababababababab2a00000000000000333333333333333333333333333333333333333333333333333333333333333306000000000000001300000000000000

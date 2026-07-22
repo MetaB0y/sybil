@@ -234,6 +234,57 @@ def test_submit_signed_mm_bundle_preserves_signed_integer_fields(monkeypatch):
     assert captured["json"]["orders"][1]["quantity"] == 4_000
 
 
+def test_replace_and_cancel_signed_mm_bundle_preserve_lifecycle_identity(monkeypatch):
+    import asyncio
+
+    from sybil_client import SybilClient
+
+    calls = []
+    client = SybilClient("http://example.invalid")
+
+    async def fake_request(method, path, **kwargs):
+        calls.append((method, path, kwargs["json"]))
+        if path.endswith("/replace/signed"):
+            return {"accepted": True, "order_ids": [93]}
+        return {"cancelled": True}
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    order_ids = asyncio.run(
+        client.replace_signed_mm_bundle(
+            account_id=42,
+            bundle_id_hex="11" * 32,
+            expected_revision=7,
+            new_revision=8,
+            orders=[BuyYes.at_price(market_id=7, price=0.52, quantity=3)],
+            expires_at_block=13,
+            mm_budget_nanos=4_000_000_000,
+            nonce=18,
+            signer_pubkey_hex="02" + "22" * 32,
+            signature_hex="33" * 64,
+        )
+    )
+    cancelled = asyncio.run(
+        client.cancel_signed_mm_bundle(
+            account_id=42,
+            bundle_id_hex="11" * 32,
+            expected_revision=8,
+            nonce=19,
+            signer_pubkey_hex="02" + "22" * 32,
+            signature_hex="44" * 64,
+        )
+    )
+
+    assert order_ids == [93]
+    assert cancelled is True
+    assert calls[0][0:2] == ("POST", "/v1/orders/mm-bundles/replace/signed")
+    assert calls[0][2]["expected_revision"] == 7
+    assert calls[0][2]["new_revision"] == 8
+    assert calls[0][2]["mm_budget_nanos"] == "4000000000"
+    assert calls[1][0:2] == ("POST", "/v1/orders/mm-bundles/cancel/signed")
+    assert calls[1][2]["expected_revision"] == 8
+    assert "orders" not in calls[1][2]
+
+
 def test_fill_cursor_gap_requires_reconciliation(monkeypatch):
     import asyncio
     import pytest

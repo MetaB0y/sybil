@@ -54,6 +54,8 @@ use crate::util::now_ms;
         SubmitOrderRequest,
         SubmitSignedOrderRequest,
         SubmitSignedMmBundleRequest,
+        ReplaceSignedMmBundleRequest,
+        CancelSignedMmBundleRequest,
         CancelSignedOrderRequest,
         AuthScheme,
         BridgeWithdrawalL1Status,
@@ -411,6 +413,8 @@ fn is_order_write_path(path: &str) -> bool {
         "/v1/orders"
             | "/v1/orders/signed"
             | "/v1/orders/mm-bundles/signed"
+            | "/v1/orders/mm-bundles/replace/signed"
+            | "/v1/orders/mm-bundles/cancel/signed"
             | "/v1/orders/cancel/signed"
     )
 }
@@ -562,6 +566,8 @@ declare_route_registry! {
         "GET" "/v1/feeds" => routes::feeds::list_feeds;
         "POST" "/v1/orders/signed" => routes::orders::submit_signed_order;
         "POST" "/v1/orders/mm-bundles/signed" => routes::orders::submit_signed_mm_bundle;
+        "POST" "/v1/orders/mm-bundles/replace/signed" => routes::orders::replace_signed_mm_bundle;
+        "POST" "/v1/orders/mm-bundles/cancel/signed" => routes::orders::cancel_signed_mm_bundle;
         "POST" "/v1/orders/cancel/signed" => routes::orders::cancel_signed_order;
         "GET" "/v1/blocks" => routes::blocks::get_recent_blocks;
         "GET" "/v1/blocks/latest" => routes::blocks::get_latest_block;

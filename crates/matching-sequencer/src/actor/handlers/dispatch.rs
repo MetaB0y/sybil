@@ -198,7 +198,7 @@ impl Actor for SequencerActor {
                     Ok(()) => state.handle_signed_mm_bundle(signed).await,
                     Err(err) => Err(err),
                 };
-                state.record_submission_metrics("signed_mm_bundle", order_count, &result);
+                state.record_mm_lifecycle_metrics("submit", order_count, result.is_ok());
                 let _ = reply.send(result);
             }
             SequencerMsg::SubmitAuthenticatedMmBundle(authenticated, reply) => {
@@ -207,7 +207,49 @@ impl Actor for SequencerActor {
                     Ok(()) => state.handle_authenticated_mm_bundle(authenticated).await,
                     Err(err) => Err(err),
                 };
-                state.record_submission_metrics("signed_mm_bundle", order_count, &result);
+                state.record_mm_lifecycle_metrics("submit", order_count, result.is_ok());
+                let _ = reply.send(result);
+            }
+            SequencerMsg::ReplaceSignedMmBundle(signed, reply) => {
+                let order_count = signed.orders.len();
+                let result = match state.check_global_submission_rate() {
+                    Ok(()) => state.handle_signed_mm_bundle_replace(signed).await,
+                    Err(err) => Err(err),
+                };
+                state.record_mm_lifecycle_metrics("replace", order_count, result.is_ok());
+                let _ = reply.send(result);
+            }
+            SequencerMsg::ReplaceAuthenticatedMmBundle(authenticated, reply) => {
+                let order_count = authenticated.orders.len();
+                let result = match state.check_global_submission_rate() {
+                    Ok(()) => {
+                        state
+                            .handle_authenticated_mm_bundle_replace(authenticated)
+                            .await
+                    }
+                    Err(err) => Err(err),
+                };
+                state.record_mm_lifecycle_metrics("replace", order_count, result.is_ok());
+                let _ = reply.send(result);
+            }
+            SequencerMsg::CancelSignedMmBundle(signed, reply) => {
+                let result = match state.check_global_submission_rate() {
+                    Ok(()) => state.handle_signed_mm_bundle_cancel(signed).await,
+                    Err(err) => Err(err),
+                };
+                state.record_mm_lifecycle_metrics("cancel", 0, result.is_ok());
+                let _ = reply.send(result);
+            }
+            SequencerMsg::CancelAuthenticatedMmBundle(authenticated, reply) => {
+                let result = match state.check_global_submission_rate() {
+                    Ok(()) => {
+                        state
+                            .handle_authenticated_mm_bundle_cancel(authenticated)
+                            .await
+                    }
+                    Err(err) => Err(err),
+                };
+                state.record_mm_lifecycle_metrics("cancel", 0, result.is_ok());
                 let _ = reply.send(result);
             }
             SequencerMsg::CancelSignedOrder(signed, reply) => {
