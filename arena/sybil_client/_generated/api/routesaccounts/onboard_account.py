@@ -9,6 +9,7 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.account_response import AccountResponse
+from ...models.api_error_response import ApiErrorResponse
 from ...models.onboard_account_request import OnboardAccountRequest
 from typing import cast
 
@@ -40,7 +41,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> AccountResponse | Any | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> AccountResponse | Any | ApiErrorResponse | None:
     if response.status_code == 200:
         response_200 = AccountResponse.from_dict(response.json())
 
@@ -49,7 +50,10 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return response_200
 
     if response.status_code == 400:
-        response_400 = cast(Any, None)
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
         return response_400
 
     if response.status_code == 409:
@@ -66,7 +70,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[AccountResponse | Any]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[AccountResponse | Any | ApiErrorResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -80,7 +84,7 @@ def sync_detailed(
     client: AuthenticatedClient | Client,
     body: OnboardAccountRequest,
 
-) -> Response[AccountResponse | Any]:
+) -> Response[AccountResponse | Any | ApiErrorResponse]:
     """ POST /v1/onboarding/accounts — allocate one capped public account.
 
      The server supplies the fixed grant. The sequencer owns the durable stock
@@ -98,7 +102,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[AccountResponse | Any]
+        Response[AccountResponse | Any | ApiErrorResponse]
      """
 
 
@@ -118,7 +122,7 @@ def sync(
     client: AuthenticatedClient | Client,
     body: OnboardAccountRequest,
 
-) -> AccountResponse | Any | None:
+) -> AccountResponse | Any | ApiErrorResponse | None:
     """ POST /v1/onboarding/accounts — allocate one capped public account.
 
      The server supplies the fixed grant. The sequencer owns the durable stock
@@ -136,7 +140,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        AccountResponse | Any
+        AccountResponse | Any | ApiErrorResponse
      """
 
 
@@ -151,7 +155,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient | Client,
     body: OnboardAccountRequest,
 
-) -> Response[AccountResponse | Any]:
+) -> Response[AccountResponse | Any | ApiErrorResponse]:
     """ POST /v1/onboarding/accounts — allocate one capped public account.
 
      The server supplies the fixed grant. The sequencer owns the durable stock
@@ -169,7 +173,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[AccountResponse | Any]
+        Response[AccountResponse | Any | ApiErrorResponse]
      """
 
 
@@ -189,7 +193,7 @@ async def asyncio(
     client: AuthenticatedClient | Client,
     body: OnboardAccountRequest,
 
-) -> AccountResponse | Any | None:
+) -> AccountResponse | Any | ApiErrorResponse | None:
     """ POST /v1/onboarding/accounts — allocate one capped public account.
 
      The server supplies the fixed grant. The sequencer owns the durable stock
@@ -207,7 +211,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        AccountResponse | Any
+        AccountResponse | Any | ApiErrorResponse
      """
 
 

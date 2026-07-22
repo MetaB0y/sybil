@@ -8,7 +8,7 @@ mod common;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
-use common::test_app_with_config;
+use common::{encode_nanos_strings, test_app_with_config};
 use http_body_util::BodyExt;
 use matching_sequencer::crypto::PublicKey;
 use p256::ecdsa::SigningKey;
@@ -50,6 +50,7 @@ async fn request(
             ))
         });
     }
+    encode_nanos_strings(&mut body);
     let mut builder = Request::builder()
         .method(method)
         .uri(path)
@@ -107,7 +108,7 @@ async fn public_onboarding_uses_the_server_grant_and_rejects_funding_fields() {
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

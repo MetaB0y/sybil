@@ -37,8 +37,24 @@ impl AppError {
         Self::new(StatusCode::BAD_REQUEST, error, "BAD_REQUEST")
     }
 
+    pub(crate) fn invalid_request(source: &str, error: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            format!("Invalid request {source}: {}", error.into()),
+            "INVALID_REQUEST",
+        )
+    }
+
     pub fn not_found(error: impl Into<String>) -> Self {
         Self::new(StatusCode::NOT_FOUND, error, "NOT_FOUND")
+    }
+
+    pub fn account_not_found(account_id: u64) -> Self {
+        Self::new(
+            StatusCode::NOT_FOUND,
+            format!("Account {account_id} not found"),
+            "ACCOUNT_NOT_FOUND",
+        )
     }
 
     pub fn market_not_found(market_id: u32) -> Self {
@@ -201,9 +217,13 @@ impl IntoResponse for AppError {
 impl From<matching_sequencer::SequencerError> for AppError {
     fn from(err: matching_sequencer::SequencerError) -> Self {
         match &err {
-            matching_sequencer::SequencerError::Rejected(r) => {
-                AppError::bad_request(format!("{}", err)).with_details(format!("{:?}", r.reason))
-            }
+            matching_sequencer::SequencerError::Rejected(r) => match &r.reason {
+                matching_sequencer::RejectionReason::AccountNotFound => {
+                    AppError::account_not_found(r.account_id.0)
+                }
+                _ => AppError::bad_request(format!("{}", err))
+                    .with_details(format!("{:?}", r.reason)),
+            },
             matching_sequencer::SequencerError::InvalidSignature => {
                 AppError::bad_request("Invalid P256 signature")
             }
@@ -436,6 +456,20 @@ mod tests {
         assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(error.body.code, "HISTORY_INCOMPLETE");
         assert_eq!(error.body.error, "window predates history");
+    }
+
+    #[test]
+    fn rejected_missing_account_is_a_resource_precondition() {
+        let error = AppError::from(matching_sequencer::SequencerError::Rejected(
+            matching_sequencer::Rejection {
+                order_id: 0,
+                account_id: matching_sequencer::AccountId(17),
+                reason: matching_sequencer::RejectionReason::AccountNotFound,
+            },
+        ));
+        assert_eq!(error.status, StatusCode::NOT_FOUND);
+        assert_eq!(error.body.code, "ACCOUNT_NOT_FOUND");
+        assert_eq!(error.body.error, "Account 17 not found");
     }
 
     #[test]

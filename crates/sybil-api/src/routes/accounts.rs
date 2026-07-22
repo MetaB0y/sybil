@@ -1,5 +1,4 @@
-use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::HeaderMap;
 
 use matching_sequencer::crypto::{
@@ -15,6 +14,8 @@ use matching_sequencer::{
 };
 use p256::Sec1Point;
 use p256::ecdsa::{Signature, VerifyingKey};
+
+use crate::extract::{Json, Path};
 
 use crate::convert::{
     account_balance_breakdown, account_positions_to_response, account_to_response,
@@ -303,8 +304,12 @@ fn parse_new_key(
     auth_scheme: AuthScheme,
     webauthn_registration: Option<&crate::types::request::WebAuthnRegistration>,
 ) -> Result<PublicKey, AppError> {
-    let key_bytes =
-        hex::decode(public_key_hex).map_err(|_| AppError::bad_request("Invalid hex encoding"))?;
+    let key_bytes = hex::decode(
+        public_key_hex
+            .trim_start_matches("0x")
+            .trim_start_matches("0X"),
+    )
+    .map_err(|_| AppError::bad_request("Invalid hex encoding"))?;
     let sec1_point = Sec1Point::from_bytes(&key_bytes)
         .map_err(|_| AppError::bad_request("Invalid P256 encoded point"))?;
     let verifying_key = VerifyingKey::from_sec1_point(&sec1_point)

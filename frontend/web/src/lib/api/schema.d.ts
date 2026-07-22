@@ -1357,25 +1357,18 @@ export interface components {
       /** @description The supplied forward cursor may have skipped pruned fills. */
       cursor_gap: boolean;
       fills: components["schemas"]["AccountFillResponse"][];
-      /** Format: int64 */
       history_complete_from_height?: number | null;
       history_scope: string;
       /** @description True means rows older than the retention boundary are unavailable. */
       history_truncated: boolean;
-      /** Format: int64 */
       indexed_through_height?: number | null;
       /** @description Cursor to continue forward pagination, when this was a forward page. */
       next_after?: string | null;
-      /**
-       * Format: int64
-       * @description Highest block from which this account had a fill row removed.
-       */
+      /** @description Highest block from which this account had a fill row removed. */
       pruned_through_height?: number | null;
-      /** Format: int64 */
       retention_min_timestamp_ms?: number | null;
     };
     AccountFillResponse: {
-      /** Format: int64 */
       block_height: number;
       /**
        * @description Stable cursor for forward pagination (`GET .../fills?after=<cursor>`).
@@ -1387,37 +1380,26 @@ export interface components {
        *     Prices are per-share probabilities in [0, 1e9].
        */
       fill_price_nanos: string;
-      /**
-       * Format: int64
-       * @description Fill quantity. Integer share-units; 1000 units = 1 share.
-       */
+      /** @description Fill quantity. Integer share-units; 1000 units = 1 share. */
       fill_qty: number;
-      /** Format: int64 */
       order_id: number;
       position_deltas: components["schemas"]["PositionDeltaResponse"][];
-      /** Format: int64 */
       timestamp_ms: number;
     };
     AccountHistoryPageResponse: {
       events: components["schemas"]["HistoryEventResponse"][];
-      /** Format: int64 */
       history_complete_from_height?: number | null;
       history_scope: string;
       history_truncated: boolean;
-      /** Format: int64 */
       indexed_through_height?: number | null;
       next_before?: string | null;
-      /** Format: int64 */
       retention_min_timestamp_ms?: number | null;
     };
     /** @description A registered signing key with SYB-60 management metadata. */
     AccountKeyResponse: {
       /** @description Authentication scheme: `raw_p256` or `webauthn`. */
       auth_scheme: string;
-      /**
-       * Format: int64
-       * @description Registration time in Unix milliseconds (0 for keys predating SYB-60).
-       */
+      /** @description Registration time in Unix milliseconds (0 for keys predating SYB-60). */
       created_at_ms: number;
       /** @description Optional human label. */
       label?: string | null;
@@ -1427,7 +1409,6 @@ export interface components {
       scope: string;
     };
     AccountResponse: {
-      /** Format: int64 */
       account_id: number;
       /**
        * @description Spendable account balance after live-order reservations. Integer
@@ -1463,18 +1444,12 @@ export interface components {
       last_24h: components["schemas"]["OverviewBucketResponse"];
     };
     AdmitTimingViewResponse: {
-      /** Format: int64 */
       account_id: number;
-      /** Format: int64 */
       admit_height: number;
-      /**
-       * Format: int64
-       * @description Admission timestamp in Unix epoch milliseconds.
-       */
+      /** @description Admission timestamp in Unix epoch milliseconds. */
       admit_timestamp_ms: number;
       is_mm: boolean;
       is_new: boolean;
-      /** Format: int64 */
       order_id: number;
     };
     /** @description Stable machine-readable context attached to an API error. */
@@ -1492,18 +1467,11 @@ export interface components {
     };
     /** @description A read-scoped bearer API key's metadata (never the token or its hash). */
     ApiKeyResponse: {
-      /** Format: int64 */
       created_at_ms: number;
-      /**
-       * Format: int64
-       * @description Stable id used to reference this key for revocation.
-       */
+      /** @description Stable id used to reference this key for revocation. */
       id: number;
       label?: string | null;
-      /**
-       * Format: int64
-       * @description Revocation time in Unix milliseconds, if revoked.
-       */
+      /** @description Revocation time in Unix milliseconds, if revoked. */
       revoked_at_ms?: number | null;
     };
     /**
@@ -1618,7 +1586,6 @@ export interface components {
       /** Format: int32 */
       fill_count: number;
       fills?: components["schemas"]["FillResponse"][];
-      /** Format: int64 */
       height: number;
       /** Format: int32 */
       order_count: number;
@@ -1628,7 +1595,6 @@ export interface components {
       /** @description Post-block state root. Hex-encoded 32-byte qMDB root. */
       state_root: string;
       system_events?: components["schemas"]["SystemEventResponse"][];
-      /** Format: int64 */
       timestamp_ms: number;
       /**
        * @description Total traded notional in the block. Integer nanodollars;
@@ -1765,42 +1731,32 @@ export interface components {
       trader_name: string;
     };
     BridgeAccountKeyResponse: {
-      /** Format: int64 */
       account_id: number;
       sybil_account_key_hex: string;
     };
     BridgeBlockResponse: {
       consumed_deposits?: components["schemas"]["BridgeDepositEventResponse"][];
-      /** Format: int64 */
       deposit_count: number;
       deposit_root_hex: string;
       withdrawal_leaves?: components["schemas"]["BridgeWithdrawalResponse"][];
     };
     BridgeDepositEventResponse: {
-      /** Format: int64 */
       account_id?: number | null;
-      /**
-       * Format: int64
-       * @description Token base units accepted by the vault, e.g. USDC's 6-decimal units.
-       */
+      /** @description Token base units accepted by the vault, e.g. USDC's 6-decimal units. */
       amount_token_units: number;
-      /** Format: int64 */
       deposit_id: number;
       deposit_root_hex: string;
     };
     BridgeDepositResponse: {
-      /** Format: int64 */
       account_id?: number | null;
       /** @description Account balance after the deposit. Integer nanodollars; 1_000_000_000 = $1. */
       balance_nanos?: string | null;
-      /** Format: int64 */
       deposit_id: number;
       deposit_root_hex: string;
       /** @description `credited` or `quarantined`. */
       disposition: string;
     };
     BridgeDomainResponse: {
-      /** Format: int64 */
       chain_id: number;
       token_address_hex: string;
       vault_address_hex: string;
@@ -1808,13 +1764,10 @@ export interface components {
     BridgeStatusResponse: {
       cancelled_withdrawal_count?: number;
       configured_domain?: null | components["schemas"]["BridgeDomainResponse"];
-      /** Format: int64 */
       deposit_cursor: number;
       deposit_root_hex: string;
       finalized_withdrawal_count?: number;
-      /** Format: int64 */
       next_withdrawal_id: number;
-      /** Format: int64 */
       observed_l1_height: number;
       quarantine_ledger_size?: number;
       queued_withdrawal_count?: number;
@@ -1835,36 +1788,25 @@ export interface components {
     BridgeWithdrawalL1Status:
       "not_requested" | "queued" | "finalized" | "cancelled" | "refunded";
     BridgeWithdrawalResponse: {
-      /** Format: int64 */
       account_id: number;
       /**
        * @description Off-chain balance amount burned for the withdrawal. Integer nanodollars;
        *     1_000_000_000 = $1.
        */
       amount_nanos: string;
-      /**
-       * Format: int64
-       * @description Token base units released by the vault.
-       */
+      /** @description Token base units released by the vault. */
       amount_token_units: number;
-      /** Format: int64 */
       created_at_height: number;
-      /** Format: int64 */
       expiry_height: number;
-      /** Format: int64 */
       l1_cancelled_at_unix?: number | null;
-      /** Format: int64 */
       l1_executable_at_unix?: number | null;
-      /** Format: int64 */
       l1_finalized_at_unix?: number | null;
-      /** Format: int64 */
       l1_requested_at_unix?: number | null;
       l1_status?: components["schemas"]["BridgeWithdrawalL1Status"];
       l1_tx_hash_hex?: string | null;
       nullifier_hex: string;
       recipient_hex: string;
       token_hex: string;
-      /** Format: int64 */
       withdrawal_id: number;
       withdrawal_leaf_digest_hex: string;
       withdrawal_leaf_hex: string;
@@ -1874,35 +1816,23 @@ export interface components {
     };
     /** @description Public signed cancellation of one active MM bundle revision. */
     CancelSignedMmBundleRequest: {
-      /** Format: int64 */
       account_id: number;
       auth_scheme?: components["schemas"]["AuthScheme"];
       bundle_id_hex: string;
-      /** Format: int64 */
       expected_revision: number;
-      /** Format: int64 */
       nonce: number;
       signature_hex?: string | null;
       signer_pubkey_hex: string;
       webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
     };
     CancelSignedOrderRequest: {
-      /**
-       * Format: int64
-       * @description Account ID claiming ownership of the order being cancelled.
-       */
+      /** @description Account ID claiming ownership of the order being cancelled. */
       account_id: number;
       /** @description Authentication scheme for this signer. Defaults to raw P256 for SDKs and bots. */
       auth_scheme?: components["schemas"]["AuthScheme"];
-      /**
-       * Format: int64
-       * @description Per-account replay nonce covered by the P256 signature.
-       */
+      /** @description Per-account replay nonce covered by the P256 signature. */
       nonce: number;
-      /**
-       * Format: int64
-       * @description The pending order to cancel.
-       */
+      /** @description The pending order to cancel. */
       order_id: number;
       /**
        * @description Hex-encoded raw P256 ECDSA signature over the canonical cancel payload.
@@ -1936,7 +1866,6 @@ export interface components {
       auth_scheme?: components["schemas"]["AuthScheme"];
       /** @description Optional human label, e.g. "grafana". */
       label?: string | null;
-      /** Format: int64 */
       nonce: number;
       signature_hex?: string | null;
       /**
@@ -1952,9 +1881,7 @@ export interface components {
      *     exactly once here and is not recoverable afterwards.
      */
     CreateApiKeyResponse: {
-      /** Format: int64 */
       created_at_ms: number;
-      /** Format: int64 */
       id: number;
       label?: string | null;
       /**
@@ -1967,30 +1894,15 @@ export interface components {
       token: string;
     };
     CreateBridgeWithdrawalRequest: {
-      /**
-       * Format: int64
-       * @description Sybil account whose available balance is burned.
-       */
+      /** @description Sybil account whose available balance is burned. */
       account_id: number;
-      /**
-       * Format: int64
-       * @description Token base units released by the vault.
-       */
+      /** @description Token base units released by the vault. */
       amount_token_units: number;
-      /**
-       * Format: int64
-       * @description Destination chain id.
-       */
+      /** @description Destination chain id. */
       chain_id: number;
-      /**
-       * Format: int64
-       * @description Last L1 block height at which this withdrawal leaf is valid.
-       */
+      /** @description Last L1 block height at which this withdrawal leaf is valid. */
       expiry_height?: number | null;
-      /**
-       * Format: int64
-       * @description Per-account replay nonce. Required for signed bridge withdrawals.
-       */
+      /** @description Per-account replay nonce. Required for signed bridge withdrawals. */
       nonce?: number | null;
       /** @description Hex-encoded L1 recipient address (20 bytes). */
       recipient_hex: string;
@@ -2023,10 +1935,7 @@ export interface components {
       creation_key?: string | null;
       /** @description Optional description of the market. */
       description?: string | null;
-      /**
-       * Format: int64
-       * @description Optional expiry timestamp in ms (0 = no expiry).
-       */
+      /** @description Optional expiry timestamp in ms (0 = no expiry). */
       expiry_timestamp_ms?: number | null;
       /**
        * @description Name of the binary market.
@@ -2075,11 +1984,9 @@ export interface components {
        *     Hex-encoded 32-byte digest.
        */
       da_commitment: string;
-      /** Format: int64 */
       height: number;
       payload_encoding: string;
       payload_kind: string;
-      /** Format: int64 */
       payload_len: number;
       /**
        * @description Payload root = BLAKE3("sybil/da/witness-payload/v1" || len || bytes).
@@ -2104,7 +2011,6 @@ export interface components {
       bytes: string;
       encoding: string;
       kind: string;
-      /** Format: int64 */
       payload_len?: number | null;
       /**
        * @description Payload root repeated when the provider ref is content-addressed.
@@ -2140,28 +2046,22 @@ export interface components {
     EquityPointResponse: {
       /** @description Deposited amount at this point. Integer nanodollars; 1_000_000_000 = $1. */
       deposited_nanos: string;
-      /** Format: int64 */
       height: number;
       /** @description Portfolio value at this point. Integer nanodollars; 1_000_000_000 = $1. */
       portfolio_value_nanos: string;
-      /** Format: int64 */
       timestamp_ms: number;
     };
     EquitySeriesResponse: {
-      /** Format: int64 */
       account_id: number;
       downsampled: boolean;
-      /** Format: int64 */
       history_complete_from_height?: number | null;
       /** @description `durable` for redb-backed history, `memory` for bounded dev fallback. */
       history_scope: string;
       /** @description True when the requested range begins before the retained boundary. */
       history_truncated: boolean;
-      /** Format: int64 */
       indexed_through_height?: number | null;
       points: components["schemas"]["EquityPointResponse"][];
       /**
-       * Format: int64
        * @description Oldest timestamp for which durable history is guaranteed complete.
        *     `None` means retention is disabled.
        */
@@ -2182,25 +2082,13 @@ export interface components {
      *     its corresponding denominator.
      */
     ExecutionQualityResponse: {
-      /**
-       * Format: int64
-       * @description Worked MM quote orders that received at least one positive fill.
-       */
+      /** @description Worked MM quote orders that received at least one positive fill. */
       maker_quotes_hit?: number;
-      /**
-       * Format: int64
-       * @description One-block operator MM quote orders worked.
-       */
+      /** @description One-block operator MM quote orders worked. */
       maker_quotes_worked?: number;
-      /**
-       * Format: int64
-       * @description Fresh non-MM orders admitted once each.
-       */
+      /** @description Fresh non-MM orders admitted once each. */
       trader_orders_admitted?: number;
-      /**
-       * Format: int64
-       * @description Admitted trader orders that received at least one positive fill.
-       */
+      /** @description Admitted trader orders that received at least one positive fill. */
       trader_orders_first_filled?: number;
     };
     ExtendMarketGroupRequest: {
@@ -2211,19 +2099,14 @@ export interface components {
       market_id: number;
     };
     FillResponse: {
-      /** Format: int64 */
       account_id?: number;
       /**
        * @description Fill price. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
       fill_price_nanos: string;
-      /**
-       * Format: int64
-       * @description Fill quantity. Integer share-units; 1000 units = 1 share.
-       */
+      /** @description Fill quantity. Integer share-units; 1000 units = 1 share. */
       fill_qty: number;
-      /** Format: int64 */
       order_id: number;
     };
     FundAccountRequest: {
@@ -2236,7 +2119,6 @@ export interface components {
     HealthResponse: {
       /** @description Hash of the height-1 block header. Hex-encoded 32-byte chain instance id. */
       genesis_hash?: string | null;
-      /** Format: int64 */
       height?: number | null;
       status: string;
     };
@@ -2246,13 +2128,11 @@ export interface components {
       amount_nanos?: string | null;
       /** @description Rejected-order available amount. Integer nanodollars; 1_000_000_000 = $1. */
       available_nanos?: string | null;
-      /** Format: int64 */
       block_height: number;
       category: string;
       id: string;
       /** Format: int32 */
       market_id?: number | null;
-      /** Format: int64 */
       order_id?: number | null;
       outcome?: string | null;
       payout_outcome?: string | null;
@@ -2261,10 +2141,7 @@ export interface components {
        *     Prices are per-share probabilities in [0, 1e9].
        */
       price_nanos?: string | null;
-      /**
-       * Format: int64
-       * @description Event quantity. Integer share-units; 1000 units = 1 share.
-       */
+      /** @description Event quantity. Integer share-units; 1000 units = 1 share. */
       qty?: number | null;
       /** @description Event realized PnL. Integer nanodollars; 1_000_000_000 = $1. */
       realized_pnl_nanos?: string | null;
@@ -2276,13 +2153,11 @@ export interface components {
       /** @description Rejected-order required amount. Integer nanodollars; 1_000_000_000 = $1. */
       required_nanos?: string | null;
       side?: string | null;
-      /** Format: int64 */
       timestamp_ms: number;
       type: string;
     };
     /** @description Public, non-secret state needed to construct a one-shot key operation. */
     KeyOpStateResponse: {
-      /** Format: int64 */
       account_id: number;
       events_digest_hex: string;
       keys_digest_hex: string;
@@ -2294,7 +2169,6 @@ export interface components {
     KeyScope: "primary" | "agent" | "custom";
     LeaderboardEntryResponse: {
       /**
-       * Format: int64
        * @description Account identifier. Clients render this anonymously as `Trader #<id>`;
        *     display-name opt-in awaits profiles (SYB-60).
        */
@@ -2333,7 +2207,6 @@ export interface components {
     };
     MarketGroupResponse: {
       creation_key?: string | null;
-      /** Format: int64 */
       group_id: number;
       market_ids: number[];
       name: string;
@@ -2373,13 +2246,9 @@ export interface components {
        *     filters closed markets out of the listing.
        */
       closed?: boolean | null;
-      /** Format: int64 */
       created_at_ms?: number | null;
       description?: string | null;
-      /**
-       * Format: int64
-       * @description Event-level expected end date (epoch ms). Display only.
-       */
+      /** @description Event-level expected end date (epoch ms). Display only. */
       event_end_date_ms?: number | null;
       /** @description Event-level icon URL (secondary image fallback). */
       event_icon_url?: string | null;
@@ -2387,14 +2256,10 @@ export interface components {
       event_id?: string | null;
       /** @description Event-level image URL. */
       event_image_url?: string | null;
-      /**
-       * Format: int64
-       * @description Parent event start date (epoch ms) from Polymarket. Display/sort only.
-       */
+      /** @description Parent event start date (epoch ms) from Polymarket. Display/sort only. */
       event_start_date_ms?: number | null;
       /** @description Polymarket parent event title. */
       event_title?: string | null;
-      /** Format: int64 */
       expiry_timestamp_ms?: number | null;
       /** @description External URL (e.g., Polymarket link). */
       external_url?: string | null;
@@ -2417,10 +2282,7 @@ export interface components {
        *     recorded yet.
        */
       liquidity_band_nanos?: string;
-      /**
-       * Format: int64
-       * @description Per-market expected end date (epoch ms). Display only.
-       */
+      /** @description Per-market expected end date (epoch ms). Display only. */
       market_end_date_ms?: number | null;
       /** @description Per-market icon URL (secondary image fallback). */
       market_icon_url?: string | null;
@@ -2428,10 +2290,7 @@ export interface components {
       market_id: number;
       /** @description Per-market image URL. */
       market_image_url?: string | null;
-      /**
-       * Format: int64
-       * @description Per-market start date (epoch ms) from Polymarket. Display/sort only.
-       */
+      /** @description Per-market start date (epoch ms) from Polymarket. Display/sort only. */
       market_start_date_ms?: number | null;
       name: string;
       /**
@@ -2446,20 +2305,17 @@ export interface components {
        */
       no_price_nanos?: string | null;
       /**
-       * Format: int64
        * @description All-time admissions that received at least one fill (B5's
        *     `has_been_matched` true at removal time). Cancels are NOT counted.
        */
       orders_matched_total?: number;
       /**
-       * Format: int64
        * @description All-time non-MM admissions counted against this market. Multi-market
        *     orders credit every active market; sum-of-per-market over-counts vs.
        *     the platform total — that's the documented attribution rule.
        */
       orders_placed_total?: number;
       /**
-       * Format: int64
        * @description All-time admissions that exited the book without any fill. Cancels
        *     are tracked separately and do not count here.
        */
@@ -2475,7 +2331,6 @@ export interface components {
        */
       polymarket_condition_id?: string | null;
       /**
-       * Format: int64
        * @description Server-side expiry of `reference_price_nanos`, as Unix milliseconds.
        *     The price is omitted once this boundary has passed.
        */
@@ -2577,19 +2432,11 @@ export interface components {
        *     Prices are per-share probabilities in [0, 1e9].
        */
       no_price_nanos?: string | null;
-      /** Format: int64 */
       orders_matched_total?: number;
-      /**
-       * Format: int64
-       * @description All-time placed/matched/unmatched (mirrors `MarketResponse`).
-       */
+      /** @description All-time placed/matched/unmatched (mirrors `MarketResponse`). */
       orders_placed_total?: number;
-      /** Format: int64 */
       orders_unmatched_total?: number;
-      /**
-       * Format: int64
-       * @description Server-side expiry of `reference_price_nanos`, as Unix milliseconds.
-       */
+      /** @description Server-side expiry of `reference_price_nanos`, as Unix milliseconds. */
       reference_price_expires_at_ms?: number | null;
       /**
        * @description Reference price from external system (e.g., Polymarket), display only.
@@ -2623,14 +2470,10 @@ export interface components {
       yes_price_nanos?: string | null;
     };
     ObserveL1HeightRequest: {
-      /**
-       * Format: int64
-       * @description Highest fully scanned and confirmed L1 block.
-       */
+      /** @description Highest fully scanned and confirmed L1 block. */
       l1_block_height: number;
     };
     ObserveL1HeightResponse: {
-      /** Format: int64 */
       observed_l1_height: number;
       refunded_withdrawal_ids: number[];
     };
@@ -2648,20 +2491,13 @@ export interface components {
     /** @description Public self-service onboarding stock and server-assigned demo grant. */
     OnboardingPolicyResponse: {
       /**
-       * Format: int64
        * @description Lifetime account-id ceiling for anonymous onboarding. Account ids are
        *     never reclaimed or reused.
        */
       account_capacity: number;
-      /**
-       * Format: int64
-       * @description Durable non-system account ids already allocated on this chain.
-       */
+      /** @description Durable non-system account ids already allocated on this chain. */
       accounts_allocated: number;
-      /**
-       * Format: int64
-       * @description Remaining anonymous allocations under the current deployment policy.
-       */
+      /** @description Remaining anonymous allocations under the current deployment policy. */
       accounts_remaining: number;
       /** @description Whether another anonymous account can currently be allocated. */
       enabled: boolean;
@@ -2676,7 +2512,6 @@ export interface components {
      *     `unique_placers`; indicative fields stub `None`/`0` until C2.
      */
     OpenBatchResponse: {
-      /** Format: int64 */
       indicative_computed_at_ms?: number;
       /**
        * @description Indicative NO price for the open batch. Integer nanodollars;
@@ -2708,10 +2543,7 @@ export interface components {
        *     Integer nanodollars; 1_000_000_000 = $1.
        */
       min_order_notional_nanos: string;
-      /**
-       * Format: int64
-       * @description Integer quantity units per user-facing share.
-       */
+      /** @description Integer quantity units per user-facing share. */
       share_scale: number;
     };
     /**
@@ -2809,36 +2641,27 @@ export interface components {
        *     once). Verified block welfare is non-negative.
        */
       total_welfare_nanos?: string;
-      /** Format: int64 */
       unique_traders?: number;
     };
     OverviewOrderStatsResponse: {
-      /** Format: int64 */
       matched?: number;
-      /** Format: int64 */
       placed?: number;
       /**
-       * Format: int64
        * @description Distinct orders admitted (counted once per order at intake), all-time
        *     or rolling 24h. `placed` above stays per-batch participation for
        *     back-compat: a resting order counts once here but once per batch there.
        */
       placed_distinct?: number;
-      /** Format: int64 */
       unmatched?: number;
     };
     PendingOrderResponse: {
-      /** Format: int64 */
       account_id: number;
-      /** Format: int64 */
       created_at_block: number;
       /**
-       * Format: int64
        * @description Wall-clock admit time, ms since epoch. `0` for orders admitted before
        *     this field shipped (#[serde(default)] forward compat).
        */
       created_at_ms?: number;
-      /** Format: int64 */
       expires_at_block: number;
       /**
        * @description Limit price. Integer nanodollars; 1_000_000_000 = $1.
@@ -2847,10 +2670,8 @@ export interface components {
       limit_price_nanos: string;
       /** Format: int32 */
       market_id: number;
-      /** Format: int64 */
       order_id: number;
       /**
-       * Format: int64
        * @description Original `max_fill` at admit time. Integer share-units; 1000 units = 1 share.
        *     Lets the FE render a partial-fill progress bar as
        *     `(original - remaining) / original`.
@@ -2858,15 +2679,11 @@ export interface components {
        *     compat).
        */
       original_quantity?: number;
-      /**
-       * Format: int64
-       * @description Remaining fill quantity. Integer share-units; 1000 units = 1 share.
-       */
+      /** @description Remaining fill quantity. Integer share-units; 1000 units = 1 share. */
       remaining_quantity: number;
       side: string;
     };
     PortfolioResponse: {
-      /** Format: int64 */
       account_id: number;
       /**
        * @description Spendable account balance after live-order reservations. Integer
@@ -2879,7 +2696,6 @@ export interface components {
        */
       balance_nanos: string;
       /**
-       * Format: int64
        * @description First-deposit timestamp in ms since epoch (B8). `0` for accounts
        *     with no recorded deposit history (FE renders as "—"). Same
        *     "since last restart" caveat as the other off-block aggregates
@@ -2906,7 +2722,6 @@ export interface components {
       /** @description Total account deposits. Integer nanodollars; 1_000_000_000 = $1. */
       total_deposited_nanos: string;
       /**
-       * Format: int64
        * @description All-time fill count (B8). The bounded fill window in
        *     `account_fills` may cap older trades; this counter never does,
        *     so FE shows the real number instead of "200+".
@@ -2969,9 +2784,7 @@ export interface components {
       value_nanos: string;
     };
     PriceCandleResponse: {
-      /** Format: int64 */
       bucket_end_ms: number;
-      /** Format: int64 */
       bucket_start_ms: number;
       /**
        * @description Bucket close NO price. Integer nanodollars; 1_000_000_000 = $1.
@@ -2983,7 +2796,6 @@ export interface components {
        *     Prices are per-share probabilities in [0, 1e9].
        */
       close_yes_price_nanos: string;
-      /** Format: int64 */
       first_height: number;
       /**
        * @description Bucket high NO price. Integer nanodollars; 1_000_000_000 = $1.
@@ -2995,7 +2807,6 @@ export interface components {
        *     Prices are per-share probabilities in [0, 1e9].
        */
       high_yes_price_nanos: string;
-      /** Format: int64 */
       last_height: number;
       /**
        * @description Bucket low NO price. Integer nanodollars; 1_000_000_000 = $1.
@@ -3017,54 +2828,39 @@ export interface components {
        *     Prices are per-share probabilities in [0, 1e9].
        */
       open_yes_price_nanos: string;
-      /** Format: int64 */
       point_count: number;
       /** @description Bucket traded notional. Integer nanodollars; 1_000_000_000 = $1. */
       volume_nanos: string;
     };
     PriceCandlesResponse: {
       candles: components["schemas"]["PriceCandleResponse"][];
-      /** Format: int64 */
       history_complete_from_height?: number | null;
-      /** Format: int64 */
       indexed_through_height?: number | null;
       /** Format: int32 */
       market_id: number;
-      /** Format: int64 */
       next_before_ms?: number | null;
       /** Format: int32 */
       resolution_secs: number;
-      /** Format: int64 */
       retention_min_bucket_ms?: number | null;
     };
     PriceHistoryResponse: {
-      /**
-       * Format: int64
-       * @description First source height represented after projection bootstrap/retention.
-       */
+      /** @description First source height represented after projection bootstrap/retention. */
       history_complete_from_height?: number | null;
-      /**
-       * Format: int64
-       * @description Highest source block durably projected by the private history service.
-       */
+      /** @description Highest source block durably projected by the private history service. */
       indexed_through_height?: number | null;
       /** Format: int32 */
       market_id: number;
-      /** Format: int64 */
       next_before_height?: number | null;
       points: components["schemas"]["PricePointResponse"][];
-      /** Format: int64 */
       retention_min_height?: number | null;
     };
     PricePointResponse: {
-      /** Format: int64 */
       height: number;
       /**
        * @description NO clearing price at this point. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
       no_price_nanos: string;
-      /** Format: int64 */
       timestamp_ms: number;
       /** @description Traded notional at this point. Integer nanodollars; 1_000_000_000 = $1. */
       volume_nanos: string;
@@ -3076,7 +2872,6 @@ export interface components {
     };
     /** @description Private account summary served behind owner-or-service read auth (SYB-60/237). */
     PrivateAccountSummaryResponse: {
-      /** Format: int64 */
       account_id: number;
       /**
        * @description Spendable account balance after live-order reservations. Integer
@@ -3108,7 +2903,6 @@ export interface components {
     };
     ProofJobAckResponse: {
       acknowledged: boolean;
-      /** Format: int64 */
       height: number;
       transport_digest: string;
     };
@@ -3138,7 +2932,6 @@ export interface components {
       events_root: string;
       /** Format: int32 */
       fill_count: number;
-      /** Format: int64 */
       height: number;
       /** Format: int32 */
       order_count: number;
@@ -3156,7 +2949,6 @@ export interface components {
       resolved_market_ids?: number[];
       /** @description Post-block state root. Hex-encoded 32-byte qMDB root. */
       state_root: string;
-      /** Format: int64 */
       timestamp_ms: number;
       /**
        * @description Total traded notional in the block. Integer nanodollars;
@@ -3176,7 +2968,6 @@ export interface components {
       unique_placers?: number;
     };
     PublicBridgeBlockResponse: {
-      /** Format: int64 */
       deposit_count: number;
       deposit_root_hex: string;
     };
@@ -3194,15 +2985,12 @@ export interface components {
     };
     QmdbStateOperationProofResponse: {
       activity_chunk_hex: string;
-      /** Format: int64 */
       location: number;
       range: components["schemas"]["QmdbStateRangeProofResponse"];
     };
     QmdbStateRangeProofResponse: {
       digests_hex: string[];
-      /** Format: int64 */
       inactive_peaks: number;
-      /** Format: int64 */
       leaves: number;
       ops_root_hex: string;
       partial_chunk_digest_hex?: string | null;
@@ -3246,34 +3034,26 @@ export interface components {
     };
     /** @description Registered data feed view, returned by GET/POST /v1/feeds. */
     RegisteredFeedResponse: {
-      /** Format: int64 */
       created_at_ms: number;
-      /** Format: int64 */
       feed_id: number;
       name: string;
       pubkey_hex: string;
     };
     RejectedOrderViewResponse: {
-      /** Format: int64 */
       account_id: number;
-      /** Format: int64 */
       order_id: number;
       reason: string;
     };
     RejectionResponse: {
-      /** Format: int64 */
       account_id: number;
-      /** Format: int64 */
       order_id: number;
       reason: string;
     };
     RemovedOrderViewResponse: {
-      /** Format: int64 */
       account_id: number;
       active_markets?: number[];
       exit_reason: string;
       has_been_matched: boolean;
-      /** Format: int64 */
       order_id: number;
       phase: string;
       rejection_reason?: string | null;
@@ -3283,22 +3063,15 @@ export interface components {
     };
     /** @description Public signed atomic replacement of one active MM bundle revision. */
     ReplaceSignedMmBundleRequest: {
-      /** Format: int64 */
       account_id: number;
       auth_scheme?: components["schemas"]["AuthScheme"];
       bundle_id_hex: string;
-      /** Format: int64 */
       expected_revision: number;
-      /**
-       * Format: int64
-       * @description Exact next block this replacement targets.
-       */
+      /** @description Exact next block this replacement targets. */
       expires_at_block: number;
       /** @description Integer nanodollars shared across every replacement quote. */
       mm_budget_nanos: string;
-      /** Format: int64 */
       new_revision: number;
-      /** Format: int64 */
       nonce: number;
       orders: components["schemas"]["OrderSpec"][];
       signature_hex?: string | null;
@@ -3328,9 +3101,7 @@ export interface components {
        *     1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
        */
       payout_nanos?: string | null;
-      /** Format: int64 */
       resolved_at_ms?: number | null;
-      /** Format: int64 */
       resolved_by_feed_id?: number | null;
       resolved_by_feed_name?: string | null;
       status: string;
@@ -3357,13 +3128,9 @@ export interface components {
     };
     /** @description Signed request to revoke a read-scoped bearer API key by id (SYB-60). */
     RevokeApiKeyRequest: {
-      /**
-       * Format: int64
-       * @description Id of the API key to revoke (from the API-key listing).
-       */
+      /** @description Id of the API key to revoke (from the API-key listing). */
       api_key_id: number;
       auth_scheme?: components["schemas"]["AuthScheme"];
-      /** Format: int64 */
       nonce: number;
       signature_hex?: string | null;
       signer_pubkey_hex: string;
@@ -3407,10 +3174,7 @@ export interface components {
        *     markets from the listing.
        */
       closed?: boolean | null;
-      /**
-       * Format: int64
-       * @description Event-level expected end date (epoch ms). Display only.
-       */
+      /** @description Event-level expected end date (epoch ms). Display only. */
       event_end_date_ms?: number | null;
       /** @description Event-level icon URL (secondary; frontend uses as `onError` fallback). */
       event_icon_url?: string | null;
@@ -3422,10 +3186,7 @@ export interface components {
       event_id?: string | null;
       /** @description Event-level image URL (primary). */
       event_image_url?: string | null;
-      /**
-       * Format: int64
-       * @description Parent event start date (epoch ms). Display/sort only.
-       */
+      /** @description Parent event start date (epoch ms). Display/sort only. */
       event_start_date_ms?: number | null;
       /** @description Polymarket parent event title — rendered as the MultiCard header. */
       event_title?: string | null;
@@ -3437,7 +3198,6 @@ export interface components {
        */
       group_item_title?: string | null;
       /**
-       * Format: int64
        * @description Per-market expected end date (epoch ms). Display only; matching engine
        *     does not enforce trading cutoffs at this time.
        */
@@ -3446,10 +3206,7 @@ export interface components {
       market_icon_url?: string | null;
       /** @description Per-market image URL (primary). */
       market_image_url?: string | null;
-      /**
-       * Format: int64
-       * @description Per-market start date (epoch ms). Display/sort only.
-       */
+      /** @description Per-market start date (epoch ms). Display/sort only. */
       market_start_date_ms?: number | null;
       /**
        * @description Polymarket on-chain condition id — the FE join key into the event JSON
@@ -3471,10 +3228,7 @@ export interface components {
        *     length (1-32) and charset at the API edge.
        */
       display_name?: string | null;
-      /**
-       * Format: int64
-       * @description Per-account replay nonce (strictly increasing).
-       */
+      /** @description Per-account replay nonce (strictly increasing). */
       nonce: number;
       /**
        * @description Hex-encoded raw P256 ECDSA signature over the canonical profile payload.
@@ -3497,10 +3251,7 @@ export interface components {
     };
     /** @description Wire form of a signed resolution attestation. */
     SignedAttestationDto: {
-      /**
-       * Format: int64
-       * @description Nonce the signer chose (typically `timestamp_ms`).
-       */
+      /** @description Nonce the signer chose (typically `timestamp_ms`). */
       nonce: number;
       /** @description Hex-encoded compressed SEC1 P256 public key (33 bytes). */
       pubkey_hex: string;
@@ -3573,7 +3324,6 @@ export interface components {
         null | components["schemas"]["WebAuthnRegistration"];
     };
     StateProofResponse: {
-      /** Format: int64 */
       block_height: number;
       exclusion_proof?:
         null | components["schemas"]["QmdbStateExclusionProofResponse"];
@@ -3594,25 +3344,13 @@ export interface components {
       state_root: string;
     };
     SubmitL1DepositRequest: {
-      /**
-       * Format: int64
-       * @description Sybil account receiving the credit. Must be absent when `quarantine` is true.
-       */
+      /** @description Sybil account receiving the credit. Must be absent when `quarantine` is true. */
       account_id?: number | null;
-      /**
-       * Format: int64
-       * @description Token base units accepted by the vault, e.g. USDC's 6-decimal units.
-       */
+      /** @description Token base units accepted by the vault, e.g. USDC's 6-decimal units. */
       amount_token_units: number;
-      /**
-       * Format: int64
-       * @description Source chain id.
-       */
+      /** @description Source chain id. */
       chain_id: number;
-      /**
-       * Format: int64
-       * @description Sequential L1 vault deposit id.
-       */
+      /** @description Sequential L1 vault deposit id. */
       deposit_id: number;
       /** @description Hex-encoded post-deposit L1 deposit tree root (32 bytes). */
       deposit_root_hex: string;
@@ -3628,38 +3366,26 @@ export interface components {
       vault_address_hex: string;
     };
     SubmitL1WithdrawalEventRequest: {
-      /**
-       * Format: int64
-       * @description Event timestamp from the vault event, in Unix seconds.
-       */
+      /** @description Event timestamp from the vault event, in Unix seconds. */
       event_at_unix: number;
-      /**
-       * Format: int64
-       * @description Finalization ETA emitted by the vault, in Unix seconds.
-       */
+      /** @description Finalization ETA emitted by the vault, in Unix seconds. */
       executable_at_unix?: number | null;
-      /**
-       * Format: int64
-       * @description Confirmed L1 block number carrying the event.
-       */
+      /** @description Confirmed L1 block number carrying the event. */
       l1_block_height: number;
       /** @description Withdrawal nullifier emitted by SybilVault. */
       nullifier_hex: string;
-      /** @description Queue state observed from the vault event. */
-      status: components["schemas"]["BridgeWithdrawalL1Status"];
+      /**
+       * @description Queue state observed from the vault event.
+       * @enum {string}
+       */
+      status: "not_requested" | "queued" | "finalized" | "cancelled";
       /** @description L1 transaction hash carrying the event, if indexed from logs. */
       tx_hash_hex?: string | null;
     };
     SubmitOrderRequest: {
-      /**
-       * Format: int64
-       * @description Account ID submitting the orders.
-       */
+      /** @description Account ID submitting the orders. */
       account_id: number;
-      /**
-       * Format: int64
-       * @description Last eligible block height for explicit-expiry orders.
-       */
+      /** @description Last eligible block height for explicit-expiry orders. */
       expires_at_block?: number | null;
       /**
        * @description If set, treat these orders as market maker orders with flash liquidity.
@@ -3676,33 +3402,21 @@ export interface components {
     };
     /** @description Public signed submission of one all-or-nothing MM quote bundle. */
     SubmitSignedMmBundleRequest: {
-      /**
-       * Format: int64
-       * @description Account that owns the bundle. It must match the signer's registration.
-       */
+      /** @description Account that owns the bundle. It must match the signer's registration. */
       account_id: number;
       /** @description Authentication scheme for this signer. */
       auth_scheme?: components["schemas"]["AuthScheme"];
       /** @description Client-chosen opaque 32-byte bundle identity, hex encoded. */
       bundle_id_hex: string;
-      /**
-       * Format: int64
-       * @description Exact next block this IOC bundle targets. The actor rejects any other height.
-       */
+      /** @description Exact next block this IOC bundle targets. The actor rejects any other height. */
       expires_at_block: number;
       /** @description Integer nanodollars: one flash-liquidity budget shared by every quote in the bundle. */
       mm_budget_nanos: string;
-      /**
-       * Format: int64
-       * @description Per-account replay nonce covered by the signature.
-       */
+      /** @description Per-account replay nonce covered by the signature. */
       nonce: number;
       /** @description Every quote in the atomic bundle. All quote fields and their order are signed. */
       orders: components["schemas"]["OrderSpec"][];
-      /**
-       * Format: int64
-       * @description Initial submissions use revision zero.
-       */
+      /** @description Initial submissions use revision zero. */
       revision: number;
       /** @description Hex-encoded raw P256 ECDSA signature over canonical bundle bytes. */
       signature_hex?: string | null;
@@ -3713,15 +3427,9 @@ export interface components {
     SubmitSignedOrderRequest: {
       /** @description Authentication scheme for this signer. Defaults to raw P256 for SDKs and bots. */
       auth_scheme?: components["schemas"]["AuthScheme"];
-      /**
-       * Format: int64
-       * @description Last eligible block height, covered by the P256 signature. Required for signed IOC/GTD.
-       */
+      /** @description Last eligible block height, covered by the P256 signature. Required for signed IOC/GTD. */
       expires_at_block?: number | null;
-      /**
-       * Format: int64
-       * @description Per-account replay nonce covered by the P256 signature.
-       */
+      /** @description Per-account replay nonce covered by the P256 signature. */
       nonce: number;
       /** @description The order to submit. */
       order: components["schemas"]["SignedOrderData"];
@@ -3738,7 +3446,6 @@ export interface components {
     };
     SystemEventResponse:
       | {
-          /** Format: int64 */
           account_id: number;
           /** @description Initial account balance. Integer nanodollars; 1_000_000_000 = $1. */
           initial_balance_nanos: string;
@@ -3746,7 +3453,6 @@ export interface components {
           type: "create_account";
         }
       | {
-          /** Format: int64 */
           account_id: number;
           /** @description Account credit amount. Integer nanodollars; 1_000_000_000 = $1. */
           amount_nanos: string;
@@ -3754,11 +3460,9 @@ export interface components {
           type: "deposit";
         }
       | {
-          /** Format: int64 */
           account_id: number;
           /** @description Account credit amount. Integer nanodollars; 1_000_000_000 = $1. */
           amount_nanos: string;
-          /** Format: int64 */
           deposit_id: number;
           deposit_root_hex: string;
           sybil_account_key_hex: string;
@@ -3766,39 +3470,32 @@ export interface components {
           type: "l1_deposit";
         }
       | {
-          /** Format: int64 */
           account_id: number;
           /** @description Account debit amount. Integer nanodollars; 1_000_000_000 = $1. */
           amount_nanos: string;
           nullifier_hex: string;
           /** @enum {string} */
           type: "withdrawal_created";
-          /** Format: int64 */
           withdrawal_id: number;
         }
       | {
-          /** Format: int64 */
           account_id: number;
           /** @description Refunded account credit. Integer nanodollars; 1_000_000_000 = $1. */
           amount_nanos: string;
           reason: string;
           /** @enum {string} */
           type: "withdrawal_refunded";
-          /** Format: int64 */
           withdrawal_id: number;
         }
       | {
-          /** Format: int64 */
           account_id: number;
           /** @description Finalized withdrawal amount. Integer nanodollars; 1_000_000_000 = $1. */
           amount_nanos: string;
           /** @enum {string} */
           type: "withdrawal_finalized";
-          /** Format: int64 */
           withdrawal_id: number;
         }
       | {
-          /** Format: int64 */
           height: number;
           /** @enum {string} */
           type: "l1_block_observed";
@@ -3816,13 +3513,10 @@ export interface components {
           type: "market_resolved";
         }
       | {
-          /** Format: int64 */
           account_id: number;
           market_ids: number[];
-          /** Format: int64 */
           order_id: number;
           /**
-           * Format: int64
            * @description Cancelled order's unfilled quantity. Integer share-units;
            *     1000 units = 1 share.
            */
@@ -3832,7 +3526,6 @@ export interface components {
           type: "order_cancelled";
         }
       | {
-          /** Format: int64 */
           group_id: number;
           /** Format: int32 */
           market_id: number;
@@ -3840,7 +3533,6 @@ export interface components {
           type: "market_group_extended";
         }
       | {
-          /** Format: int64 */
           account_id: number;
           /** Format: int32 */
           auth_scheme: number;
@@ -3851,7 +3543,6 @@ export interface components {
           type: "key_registered";
         }
       | {
-          /** Format: int64 */
           account_id: number;
           /** Format: int32 */
           auth_scheme: number;
@@ -3862,14 +3553,11 @@ export interface components {
           type: "key_revoked";
         }
       | {
-          /** Format: int64 */
           account_id: number;
           action: string;
           /** Format: int32 */
           auth_scheme: number;
-          /** Format: int64 */
           nonce: number;
-          /** Format: int64 */
           order_id: number;
           public_key_hex: string;
           /** @enum {string} */
@@ -3878,7 +3566,6 @@ export interface components {
       | {
           /** @description Amount parked in the system ledger. Integer nanodollars; 1_000_000_000 = $1. */
           amount_nanos: string;
-          /** Format: int64 */
           deposit_id: number;
           deposit_root_hex: string;
           sybil_account_key_hex: string;
@@ -3886,7 +3573,6 @@ export interface components {
           type: "deposit_quarantined";
         }
       | {
-          /** Format: int64 */
           account_id: number;
           /** @description Amount moved into the account. Integer nanodollars; 1_000_000_000 = $1. */
           amount_nanos: string;
@@ -3927,7 +3613,17 @@ export interface components {
       client_data_json_b64url: string;
     };
   };
-  responses: never;
+  responses: {
+    /** @description Malformed path, query, or JSON body. The public validation policy is HTTP 400 with an ApiErrorResponse JSON envelope. */
+    InvalidRequest: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["ApiErrorResponse"];
+      };
+    };
+  };
   parameters: never;
   requestBodies: never;
   headers: never;
@@ -3962,7 +3658,9 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
       /** @description Service token required */
       401: {
@@ -4001,6 +3699,7 @@ export interface operations {
           "application/json": components["schemas"]["AccountResponse"];
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description Missing/invalid bearer token */
       401: {
         headers: {
@@ -4045,6 +3744,7 @@ export interface operations {
           "application/json": components["schemas"]["ApiKeyResponse"][];
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description Missing/invalid bearer token */
       401: {
         headers: {
@@ -4091,7 +3791,9 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
       /** @description Signer/account mismatch */
       403: {
@@ -4144,7 +3846,9 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
       /** @description Signer/account mismatch */
       403: {
@@ -4190,6 +3894,7 @@ export interface operations {
           "application/json": components["schemas"]["BridgeAccountKeyResponse"];
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description Missing/invalid bearer token */
       401: {
         headers: {
@@ -4237,6 +3942,7 @@ export interface operations {
           "application/json": components["schemas"]["EquitySeriesResponse"];
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description Missing/invalid bearer token */
       401: {
         headers: {
@@ -4293,7 +3999,9 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
       /** @description Missing/invalid bearer token */
       401: {
@@ -4351,7 +4059,9 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
       /** @description Missing/invalid bearer token */
       401: {
@@ -4401,6 +4111,7 @@ export interface operations {
           "application/json": components["schemas"]["AccountResponse"];
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description Dev mode required */
       403: {
         headers: {
@@ -4438,6 +4149,7 @@ export interface operations {
           "application/json": components["schemas"]["KeyOpStateResponse"];
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description Account not found */
       404: {
         headers: {
@@ -4468,6 +4180,7 @@ export interface operations {
           "application/json": components["schemas"]["AccountKeyResponse"][];
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description Missing/invalid bearer token */
       401: {
         headers: {
@@ -4512,7 +4225,9 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
       /** @description Account not found */
       404: {
@@ -4558,7 +4273,9 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
       /** @description Signer/account mismatch */
       403: {
@@ -4611,7 +4328,9 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
       /** @description Signer/account mismatch */
       403: {
@@ -4657,6 +4376,7 @@ export interface operations {
           "application/json": components["schemas"]["PendingOrderResponse"][];
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description Missing/invalid bearer token */
       401: {
         headers: {
@@ -4694,6 +4414,7 @@ export interface operations {
           "application/json": components["schemas"]["PortfolioResponse"];
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description Missing/invalid bearer token */
       401: {
         headers: {
@@ -4738,6 +4459,7 @@ export interface operations {
           "application/json": components["schemas"]["PrivateAccountSummaryResponse"];
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description Missing/invalid bearer token */
       401: {
         headers: {
@@ -4791,7 +4513,9 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
       /** @description Signer/account mismatch */
       403: {
@@ -4837,6 +4561,7 @@ export interface operations {
           "application/json": components["schemas"]["BridgeWithdrawalResponse"][];
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description Missing/invalid bearer token */
       401: {
         headers: {
@@ -4916,6 +4641,7 @@ export interface operations {
           "application/json": components["schemas"]["PublicBlockResponse"][];
         };
       };
+      400: components["responses"]["InvalidRequest"];
     };
   };
   get_latest_block: {
@@ -4964,6 +4690,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components["responses"]["InvalidRequest"];
     };
   };
   get_block_by_height: {
@@ -4987,6 +4714,7 @@ export interface operations {
           "application/json": components["schemas"]["PublicBlockResponse"];
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description Block not found */
       404: {
         headers: {
@@ -5008,7 +4736,7 @@ export interface operations {
   get_bot_decisions: {
     parameters: {
       query?: {
-        /** @description Maximum returned decisions, clamped to 1..=500 (default 50) */
+        /** @description Maximum returned decisions (default 50); zero is normalized to one and values above 500 are rejected */
         limit?: number;
         /** @description Filter decisions to a single trader name */
         trader?: string;
@@ -5032,6 +4760,7 @@ export interface operations {
           "application/json": components["schemas"]["BotDecisionFeedResponse"];
         };
       };
+      400: components["responses"]["InvalidRequest"];
     };
   };
   get_bot_equity_series: {
@@ -5041,7 +4770,7 @@ export interface operations {
         trader?: string;
         /** @description ISO-8601 lower-bound timestamp filter (`portfolio_snapshots.timestamp >= since`) */
         since?: string;
-        /** @description Maximum returned sampled points, clamped to 1..=1000 (default 200). Dense rows are downsampled by a naive stride. */
+        /** @description Maximum returned sampled points (default 200); zero is normalized to one and values above 1000 are rejected. Dense rows are downsampled by a naive stride. */
         limit?: number;
       };
       header?: never;
@@ -5059,6 +4788,7 @@ export interface operations {
           "application/json": components["schemas"]["BotEquitySeriesResponse"];
         };
       };
+      400: components["responses"]["InvalidRequest"];
     };
   };
   account_by_key: {
@@ -5082,6 +4812,7 @@ export interface operations {
           "application/json": components["schemas"]["BridgeAccountKeyResponse"];
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description Bridge key not found */
       404: {
         headers: {
@@ -5113,12 +4844,22 @@ export interface operations {
           "application/json": components["schemas"]["BridgeDepositResponse"];
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description Dev mode required */
       403: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Bridge domain or sequencer unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
     };
   };
@@ -5142,6 +4883,16 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ObserveL1HeightResponse"];
+        };
+      };
+      400: components["responses"]["InvalidRequest"];
+      /** @description Bridge or sequencer unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
         };
       };
     };
@@ -5188,12 +4939,22 @@ export interface operations {
           "application/json": components["schemas"]["BridgeWithdrawalResponse"];
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description Dev mode required */
       403: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Bridge domain or sequencer unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
     };
   };
@@ -5224,7 +4985,9 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
       /** @description Withdrawal not found */
       404: {
@@ -5232,6 +4995,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Bridge or sequencer unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
     };
   };
@@ -5289,7 +5061,9 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
       /** @description Signer/account mismatch */
       403: {
@@ -5311,6 +5085,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Bridge domain or sequencer unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
     };
   };
@@ -5335,6 +5118,7 @@ export interface operations {
           "application/json": components["schemas"]["DaManifestResponse"];
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description DA artifact not retained or unavailable for this height */
       404: {
         headers: {
@@ -5372,6 +5156,7 @@ export interface operations {
           "application/octet-stream": unknown;
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description DA artifact not retained or unavailable for this height */
       404: {
         headers: {
@@ -5414,7 +5199,9 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
       /** @description Snapshot not found or snapshots disabled */
       404: {
@@ -5456,7 +5243,9 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
       /** @description Missing service bearer token */
       401: {
@@ -5502,6 +5291,7 @@ export interface operations {
           "application/json": components["schemas"]["EventTradersResponse"];
         };
       };
+      400: components["responses"]["InvalidRequest"];
     };
   };
   list_feeds: {
@@ -5546,6 +5336,7 @@ export interface operations {
           "application/json": components["schemas"]["RegisteredFeedResponse"];
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description Dev mode required */
       403: {
         headers: {
@@ -5607,6 +5398,7 @@ export interface operations {
           "application/json": components["schemas"]["LeaderboardResponse"];
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description History service unavailable or incomplete for windowed ranking */
       503: {
         headers: {
@@ -5727,6 +5519,7 @@ export interface operations {
           "application/json": components["schemas"]["MarketGroupResponse"];
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description Dev mode required */
       403: {
         headers: {
@@ -5761,6 +5554,7 @@ export interface operations {
           "application/json": components["schemas"]["MarketGroupResponse"];
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description Market group or market not found */
       404: {
         headers: {
@@ -5817,6 +5611,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components["responses"]["InvalidRequest"];
     };
   };
   search_markets: {
@@ -5858,6 +5653,7 @@ export interface operations {
           "application/json": components["schemas"]["MarketResponse"][];
         };
       };
+      400: components["responses"]["InvalidRequest"];
     };
   };
   list_markets_summary: {
@@ -5901,6 +5697,7 @@ export interface operations {
           "application/json": components["schemas"]["MarketResponse"];
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description Market not found */
       404: {
         headers: {
@@ -5933,6 +5730,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components["responses"]["InvalidRequest"];
     };
   };
   get_open_batch: {
@@ -5956,6 +5754,7 @@ export interface operations {
           "application/json": components["schemas"]["OpenBatchResponse"];
         };
       };
+      400: components["responses"]["InvalidRequest"];
     };
   };
   get_market_orderbook: {
@@ -5979,12 +5778,13 @@ export interface operations {
           "application/json": components["schemas"]["PendingOrderResponse"][];
         };
       };
+      400: components["responses"]["InvalidRequest"];
     };
   };
   get_price_candles: {
     parameters: {
       query: {
-        /** @description Candle resolution: seconds or one of 1m, 5m, 1h */
+        /** @description Candle resolution: positive seconds or a positive minute/hour duration such as 1m, 5m, or 1h */
         resolution: string;
         /** @description Start bucket timestamp filter */
         from_ms?: number;
@@ -5992,7 +5792,7 @@ export interface operations {
         to_ms?: number;
         /** @description Return candles with bucket_start_ms strictly below this cursor */
         before_ms?: number;
-        /** @description Maximum returned candles, clamped server-side */
+        /** @description Maximum returned candles; values above 5000 are rejected */
         limit?: number;
       };
       header?: never;
@@ -6013,6 +5813,7 @@ export interface operations {
           "application/json": components["schemas"]["PriceCandlesResponse"];
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description History service unavailable */
       503: {
         headers: {
@@ -6031,7 +5832,7 @@ export interface operations {
         to_ms?: number;
         /** @description Return points with height strictly below this cursor */
         before_height?: number;
-        /** @description Maximum returned points, newest matching points first by cap, clamped server-side */
+        /** @description Maximum returned points, newest matching points first; values above 5000 are rejected */
         limit?: number;
       };
       header?: never;
@@ -6052,6 +5853,7 @@ export interface operations {
           "application/json": components["schemas"]["PriceHistoryResponse"];
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description History service unavailable */
       503: {
         headers: {
@@ -6082,6 +5884,7 @@ export interface operations {
           "application/json": components["schemas"]["ResolutionResponse"];
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description Market not found */
       404: {
         headers: {
@@ -6116,6 +5919,7 @@ export interface operations {
           "application/json": components["schemas"]["ResolveMarketResponse"];
         };
       };
+      400: components["responses"]["InvalidRequest"];
       /** @description Dev mode required */
       403: {
         headers: {
@@ -6186,7 +5990,9 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
       /** @description Key conflict or public account capacity exhausted */
       409: {
@@ -6282,7 +6088,9 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
       /** @description Signer or owner mismatch */
       403: {
@@ -6554,7 +6362,9 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
       /** @description Unknown signer */
       404: {
@@ -6598,7 +6408,9 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
       /** @description No committed block yet */
       404: {
@@ -6631,7 +6443,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/octet-stream": number[];
+          "application/msgpack": number[];
         };
       };
       /** @description No unacknowledged proof job */
@@ -6680,7 +6492,9 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
       /** @description Persistent proof-job outbox unavailable */
       503: {
@@ -6784,6 +6598,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components["responses"]["InvalidRequest"];
     };
   };
 }

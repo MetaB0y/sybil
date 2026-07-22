@@ -127,6 +127,7 @@ from .state_proof_response import StateProofResponse
 from .state_root_response import StateRootResponse
 from .submit_l1_deposit_request import SubmitL1DepositRequest
 from .submit_l1_withdrawal_event_request import SubmitL1WithdrawalEventRequest
+from .submit_l1_withdrawal_event_request_status import SubmitL1WithdrawalEventRequestStatus
 from .submit_order_request import SubmitOrderRequest
 from .submit_signed_mm_bundle_request import SubmitSignedMmBundleRequest
 from .submit_signed_order_request import SubmitSignedOrderRequest
@@ -293,6 +294,7 @@ __all__ = (
     "StateRootResponse",
     "SubmitL1DepositRequest",
     "SubmitL1WithdrawalEventRequest",
+    "SubmitL1WithdrawalEventRequestStatus",
     "SubmitOrderRequest",
     "SubmitSignedMmBundleRequest",
     "SubmitSignedOrderRequest",

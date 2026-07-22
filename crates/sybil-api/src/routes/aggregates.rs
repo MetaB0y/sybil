@@ -7,10 +7,10 @@
 //!   light up in C2.
 //! - `GET /v1/events/{event_id}/traders` — per-event union of placers.
 
-use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use matching_engine::MarketId;
 
+use crate::extract::{Json, Path};
 use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::response::*;
@@ -114,7 +114,7 @@ pub async fn get_open_batch(
     tag = "routesaggregates",
     get,
     path = "/v1/events/{event_id}/traders",
-    params(("event_id" = String, Path, description = "Polymarket event id")),
+    params(("event_id" = String, Path, pattern = r"^[A-Za-z0-9_-]+$", max_length = 128, description = "Polymarket event id")),
     responses(
         (status = 200, description = "Unique placers across the event's markets", body = EventTradersResponse)
     )
@@ -124,6 +124,14 @@ pub async fn get_event_traders(
     State(state): State<AppState>,
     Path(event_id): Path<String>,
 ) -> Result<Json<EventTradersResponse>, AppError> {
+    if event_id.is_empty()
+        || event_id.len() > 128
+        || !event_id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
+    {
+        return Err(AppError::bad_request("invalid event_id"));
+    }
     // Resolve event_id → market_ids via the mirror metadata. If no markets
     // are mirrored under this event_id, return zero (the FE renders "—").
     let market_ids: Vec<MarketId> = {

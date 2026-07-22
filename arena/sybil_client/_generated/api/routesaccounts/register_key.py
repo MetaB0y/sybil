@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.register_key_request import RegisterKeyRequest
 from typing import cast
 
@@ -40,18 +41,25 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | ApiErrorResponse | None:
     if response.status_code == 200:
-        return None
+        response_200 = cast(Any, None)
+        return response_200
 
     if response.status_code == 400:
-        return None
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
 
     if response.status_code == 404:
-        return None
+        response_404 = cast(Any, None)
+        return response_404
 
     if response.status_code == 409:
-        return None
+        response_409 = cast(Any, None)
+        return response_409
 
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
@@ -59,7 +67,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | ApiErrorResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -74,7 +82,7 @@ def sync_detailed(
     client: AuthenticatedClient | Client,
     body: RegisterKeyRequest,
 
-) -> Response[Any]:
+) -> Response[Any | ApiErrorResponse]:
     """ POST /v1/accounts/{id}/keys — bootstrap the FIRST signing key (service tier).
 
      SYB-229: public unsigned key registration is a critical auth hole — anyone
@@ -93,7 +101,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any]
+        Response[Any | ApiErrorResponse]
      """
 
 
@@ -109,14 +117,13 @@ body=body,
 
     return _build_response(client=client, response=response)
 
-
-async def asyncio_detailed(
+def sync(
     id: int,
     *,
     client: AuthenticatedClient | Client,
     body: RegisterKeyRequest,
 
-) -> Response[Any]:
+) -> Any | ApiErrorResponse | None:
     """ POST /v1/accounts/{id}/keys — bootstrap the FIRST signing key (service tier).
 
      SYB-229: public unsigned key registration is a critical auth hole — anyone
@@ -135,7 +142,43 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any]
+        Any | ApiErrorResponse
+     """
+
+
+    return sync_detailed(
+        id=id,
+client=client,
+body=body,
+
+    ).parsed
+
+async def asyncio_detailed(
+    id: int,
+    *,
+    client: AuthenticatedClient | Client,
+    body: RegisterKeyRequest,
+
+) -> Response[Any | ApiErrorResponse]:
+    """ POST /v1/accounts/{id}/keys — bootstrap the FIRST signing key (service tier).
+
+     SYB-229: public unsigned key registration is a critical auth hole — anyone
+    could attach their own key to any account and then sign as it. This endpoint
+    is service-token gated (like account creation) and accepts an UNSIGNED
+    registration ONLY when the account has zero registered keys. Once an account
+    has a key, every subsequent key must be added via the SIGNED path
+    (`POST /v1/accounts/{id}/keys/register`), authorized by an existing key.
+
+    Args:
+        id (int):
+        body (RegisterKeyRequest):
+
+    Raises:
+        errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
+        httpx.TimeoutException: If the request takes longer than Client.timeout.
+
+    Returns:
+        Response[Any | ApiErrorResponse]
      """
 
 
@@ -151,3 +194,38 @@ body=body,
 
     return _build_response(client=client, response=response)
 
+async def asyncio(
+    id: int,
+    *,
+    client: AuthenticatedClient | Client,
+    body: RegisterKeyRequest,
+
+) -> Any | ApiErrorResponse | None:
+    """ POST /v1/accounts/{id}/keys — bootstrap the FIRST signing key (service tier).
+
+     SYB-229: public unsigned key registration is a critical auth hole — anyone
+    could attach their own key to any account and then sign as it. This endpoint
+    is service-token gated (like account creation) and accepts an UNSIGNED
+    registration ONLY when the account has zero registered keys. Once an account
+    has a key, every subsequent key must be added via the SIGNED path
+    (`POST /v1/accounts/{id}/keys/register`), authorized by an existing key.
+
+    Args:
+        id (int):
+        body (RegisterKeyRequest):
+
+    Raises:
+        errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
+        httpx.TimeoutException: If the request takes longer than Client.timeout.
+
+    Returns:
+        Any | ApiErrorResponse
+     """
+
+
+    return (await asyncio_detailed(
+        id=id,
+client=client,
+body=body,
+
+    )).parsed

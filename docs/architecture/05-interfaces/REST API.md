@@ -21,12 +21,28 @@ Money and every `*_nanos` field use integer nanodollars
 
 All `*_nanos` values cross REST and WebSocket JSON as exact base-10 strings,
 including values nested in `clearing_prices_nanos` arrays. Rust DTOs retain
-`u64`/`i64` internally. The API accepts legacy integer tokens on input during
-migration but always emits strings, and OpenAPI advertises the string contract.
+`u64`/`i64` internally. JSON number tokens are rejected on input; the API emits
+strings, and OpenAPI advertises the exact string contract.
 Clients must parse these values with integer/big-integer arithmetic rather than
 floating point.
 
 The endpoint groups are: **System** (`/v1/health`, `/v1/state-root`), **Proofs** (`/v1/proofs/state/{leaf_key_hex}`), **Data Availability** (`/v1/da/{height}/manifest`, `/v1/da/{height}/payload`), **Accounts** (create, query balance/positions, fund, register keys), **Markets** (list, create, query details/prices/groups, resolve), **Orders** (public construction policy, ordinary unsigned/signed submission, and signed atomic MM bundles), **Bridge** (status, account bridge keys, L1 deposits, signed/unsigned withdrawal leaves), and **Blocks** (latest, by height, and the privacy-preserving [[WebSocket Block Stream|public WebSocket stream]] at `/v2/blocks/ws?from_block=N`). `/v1/health` reads committed height and genesis hash in one actor snapshot; snapshot failure returns 503 rather than reporting a partial chain identity as healthy. Operator/service writes, the state-proof and DA-payload custody surfaces, authenticated canonical v1 block stream, and bridge operations require `Authorization: Bearer $SYBIL_SERVICE_TOKEN`; an unset token fails closed. Dev mode skips that service bearer check for local workflows and additionally mounts simulation pause/resume, diagnostic all-pending/orderbook listings, and the explicit unverified [[Attestation|attestation shape stub]].
+
+Axum path, query, and JSON body extraction failures share one public transport
+contract: HTTP 400, `application/json`, and `ApiErrorResponse` with code
+`INVALID_REQUEST`. Existing domain-level 400 responses retain their stable
+business error codes. The generated OpenAPI document attaches the JSON 400
+response to every operation with extractor input and carries executable bounds
+for decimal strings, fixed-width hex, cursors, labels, and local collection
+limits.
+
+`just api-contract-check` boots a disposable dev API and runs deterministic
+positive and negative fuzzing with pinned Schemathesis 4.23.0. Operations that
+need a real WebSocket upgrade or pre-existing signed/stateful identities live in
+`scripts/api-contract-allowlist.json`; every entry names an owner, durable
+reason, applicable phase, and expiry date. The validator rejects stale entries
+and operation ids that disappear from OpenAPI, so the allowlist cannot silently
+become a permanent bypass.
 
 When `SYBIL_EVENT_SNAPSHOT_DIR` is configured, startup requires that directory
 to be usable. Raw event PUTs publish through a unique same-directory temporary

@@ -1480,7 +1480,7 @@ async fn market_reads_expire_each_reference_token_and_restart_empty() {
         json!({ "prices": {first_id.to_string(): "400000000"} }),
     )
     .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 
     let (status, _) = post_json(
         app.clone(),
@@ -2706,8 +2706,9 @@ async fn recent_blocks_returns_newest_first() {
         b1.canonical.header.height
     );
 
-    // asking for more than exist returns genesis plus the three test blocks
-    let (status, body) = get(app.clone(), "/v1/blocks?limit=1000").await;
+    // Asking for more than exist, within the public cap, returns genesis plus
+    // the three test blocks.
+    let (status, body) = get(app.clone(), "/v1/blocks?limit=500").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(parse_json(&body).as_array().unwrap().len(), 4);
 
@@ -2723,7 +2724,9 @@ async fn blocks_endpoint_pages_canonical_archive_beyond_recent_cache() {
         true,
         SequencerConfig {
             recent_block_cache_capacity: 1,
-            block_interval: Duration::from_secs(60),
+            // Keep the background producer from racing this assertion even
+            // when a heavily loaded test host stalls the actor for a minute.
+            block_interval: Duration::from_secs(60 * 60),
             ..SequencerConfig::default()
         },
     )

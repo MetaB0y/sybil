@@ -1,9 +1,10 @@
-use axum::Json;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::extract::{Json, Query};
 use crate::state::AppState;
+use crate::types::error::AppError;
 
 const DEFAULT_BOT_DECISION_LIMIT: usize = 50;
 const MAX_BOT_DECISION_LIMIT: usize = 500;
@@ -20,7 +21,7 @@ const MAX_BOT_EQUITY_LIMIT: usize = 1_000;
     get,
     path = "/v1/bots/decisions",
     params(
-        ("limit" = Option<usize>, Query, description = "Maximum returned decisions, clamped to 1..=500 (default 50)"),
+        ("limit" = Option<usize>, Query, maximum = 500, description = "Maximum returned decisions (default 50); zero is normalized to one and values above 500 are rejected"),
         ("trader" = Option<String>, Query, description = "Filter decisions to a single trader name"),
         ("market_id" = Option<u32>, Query, description = "Filter decisions to one market ID. Combine with `trader` for FV-drift history."),
         ("since" = Option<String>, Query, description = "ISO-8601 lower-bound timestamp filter (`decisions.timestamp >= since`) for historical reads."),
@@ -32,23 +33,23 @@ const MAX_BOT_EQUITY_LIMIT: usize = 1_000;
 pub async fn get_bot_decisions(
     State(state): State<AppState>,
     Query(params): Query<BotDecisionParams>,
-) -> Json<BotDecisionFeedResponse> {
+) -> Result<Json<BotDecisionFeedResponse>, AppError> {
     let query = ArenaDecisionQuery {
-        limit: bot_decision_query_limit(params.limit),
+        limit: bot_decision_query_limit(params.limit)?,
         trader: clean_query_text(params.trader),
         market_id: params.market_id,
         since: clean_query_text(params.since),
     };
     let Some(client) = &state.arena else {
-        return Json(unavailable("Arena read service is not configured"));
+        return Ok(Json(unavailable("Arena read service is not configured")));
     };
-    match client.decisions(&query).await {
+    Ok(match client.decisions(&query).await {
         Ok(response) => Json(response),
         Err(error) => {
             tracing::warn!(%error, "Arena decision read failed");
             Json(unavailable("Arena read service is unavailable"))
         }
-    }
+    })
 }
 
 /// GET /v1/bots/equity-series
@@ -62,7 +63,7 @@ pub async fn get_bot_decisions(
     params(
         ("trader" = Option<String>, Query, description = "Filter portfolio snapshots to a single trader name"),
         ("since" = Option<String>, Query, description = "ISO-8601 lower-bound timestamp filter (`portfolio_snapshots.timestamp >= since`)"),
-        ("limit" = Option<usize>, Query, description = "Maximum returned sampled points, clamped to 1..=1000 (default 200). Dense rows are downsampled by a naive stride."),
+        ("limit" = Option<usize>, Query, maximum = 1000, description = "Maximum returned sampled points (default 200); zero is normalized to one and values above 1000 are rejected. Dense rows are downsampled by a naive stride."),
     ),
     responses(
         (status = 200, description = "Bot portfolio-value time series", body = BotEquitySeriesResponse)
@@ -71,19 +72,19 @@ pub async fn get_bot_decisions(
 pub async fn get_bot_equity_series(
     State(state): State<AppState>,
     Query(params): Query<BotEquitySeriesParams>,
-) -> Json<BotEquitySeriesResponse> {
+) -> Result<Json<BotEquitySeriesResponse>, AppError> {
     let query = ArenaEquityQuery {
         trader: clean_query_text(params.trader),
         since: clean_query_text(params.since),
-        limit: bot_equity_query_limit(params.limit),
+        limit: bot_equity_query_limit(params.limit)?,
     };
     let Some(client) = &state.arena else {
-        return Json(unavailable_equity(
+        return Ok(Json(unavailable_equity(
             &query,
             "Arena read service is not configured",
-        ));
+        )));
     };
-    match client.equity_series(&query).await {
+    Ok(match client.equity_series(&query).await {
         Ok(response) => Json(response),
         Err(error) => {
             tracing::warn!(%error, "Arena equity read failed");
@@ -92,7 +93,7 @@ pub async fn get_bot_equity_series(
                 "Arena read service is unavailable",
             ))
         }
-    }
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -275,16 +276,22 @@ fn clean_query_text(value: Option<String>) -> Option<String> {
     })
 }
 
-fn bot_decision_query_limit(limit: Option<usize>) -> usize {
-    limit
-        .unwrap_or(DEFAULT_BOT_DECISION_LIMIT)
-        .clamp(1, MAX_BOT_DECISION_LIMIT)
+fn bot_decision_query_limit(limit: Option<usize>) -> Result<usize, AppError> {
+    if limit.is_some_and(|limit| limit > MAX_BOT_DECISION_LIMIT) {
+        return Err(AppError::bad_request(format!(
+            "limit must be at most {MAX_BOT_DECISION_LIMIT}"
+        )));
+    }
+    Ok(limit.unwrap_or(DEFAULT_BOT_DECISION_LIMIT).max(1))
 }
 
-fn bot_equity_query_limit(limit: Option<usize>) -> usize {
-    limit
-        .unwrap_or(DEFAULT_BOT_EQUITY_LIMIT)
-        .clamp(1, MAX_BOT_EQUITY_LIMIT)
+fn bot_equity_query_limit(limit: Option<usize>) -> Result<usize, AppError> {
+    if limit.is_some_and(|limit| limit > MAX_BOT_EQUITY_LIMIT) {
+        return Err(AppError::bad_request(format!(
+            "limit must be at most {MAX_BOT_EQUITY_LIMIT}"
+        )));
+    }
+    Ok(limit.unwrap_or(DEFAULT_BOT_EQUITY_LIMIT).max(1))
 }
 
 #[cfg(test)]
@@ -293,12 +300,12 @@ mod tests {
 
     #[test]
     fn limits_default_and_clamp_at_public_boundary() {
-        assert_eq!(bot_decision_query_limit(None), 50);
-        assert_eq!(bot_decision_query_limit(Some(0)), 1);
-        assert_eq!(bot_decision_query_limit(Some(501)), 500);
-        assert_eq!(bot_equity_query_limit(None), 200);
-        assert_eq!(bot_equity_query_limit(Some(0)), 1);
-        assert_eq!(bot_equity_query_limit(Some(1_001)), 1_000);
+        assert_eq!(bot_decision_query_limit(None).unwrap(), 50);
+        assert_eq!(bot_decision_query_limit(Some(0)).unwrap(), 1);
+        assert!(bot_decision_query_limit(Some(501)).is_err());
+        assert_eq!(bot_equity_query_limit(None).unwrap(), 200);
+        assert_eq!(bot_equity_query_limit(Some(0)).unwrap(), 1);
+        assert!(bot_equity_query_limit(Some(1_001)).is_err());
     }
 
     #[test]

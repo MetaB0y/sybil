@@ -165,6 +165,10 @@ jobs:
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          version: "0.11.28"
+
       # `just smoke` — build sybil-api, boot it in --dev-mode, and drive the full
       # account -> market -> order -> fill -> resolution lifecycle over HTTP. The
       # script (scripts/smoke-test.sh) builds the release binary itself, is
@@ -173,6 +177,11 @@ jobs:
       # the fills/resolution waits (<=10s each) are comfortably in budget.
       - name: E2E smoke test # just smoke
         run: ./scripts/smoke-test.sh
+
+      - name: OpenAPI positive and negative contract check # just api-contract-check
+        env:
+          SYBIL_CONTRACT_BINARY: target/release/sybil-api
+        run: ./scripts/api-contract-check.sh
 
   compose-profile-smoke:
     name: Compose Profile Smoke

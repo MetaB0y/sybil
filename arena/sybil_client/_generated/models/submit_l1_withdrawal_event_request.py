@@ -8,7 +8,7 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.bridge_withdrawal_l1_status import BridgeWithdrawalL1Status
+from ..models.submit_l1_withdrawal_event_request_status import SubmitL1WithdrawalEventRequestStatus
 from ..types import UNSET, Unset
 from typing import cast
 
@@ -28,7 +28,7 @@ class SubmitL1WithdrawalEventRequest:
             event_at_unix (int): Event timestamp from the vault event, in Unix seconds.
             l1_block_height (int): Confirmed L1 block number carrying the event.
             nullifier_hex (str): Withdrawal nullifier emitted by SybilVault.
-            status (BridgeWithdrawalL1Status):
+            status (SubmitL1WithdrawalEventRequestStatus): Queue state observed from the vault event.
             executable_at_unix (int | None | Unset): Finalization ETA emitted by the vault, in Unix seconds.
             tx_hash_hex (None | str | Unset): L1 transaction hash carrying the event, if indexed from logs.
      """
@@ -36,7 +36,7 @@ class SubmitL1WithdrawalEventRequest:
     event_at_unix: int
     l1_block_height: int
     nullifier_hex: str
-    status: BridgeWithdrawalL1Status
+    status: SubmitL1WithdrawalEventRequestStatus
     executable_at_unix: int | None | Unset = UNSET
     tx_hash_hex: None | str | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
@@ -93,7 +93,7 @@ class SubmitL1WithdrawalEventRequest:
 
         nullifier_hex = d.pop("nullifier_hex")
 
-        status = BridgeWithdrawalL1Status(d.pop("status"))
+        status = SubmitL1WithdrawalEventRequestStatus(d.pop("status"))
 
 
 

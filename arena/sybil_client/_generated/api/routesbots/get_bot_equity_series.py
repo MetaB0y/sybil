@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.bot_equity_series_response import BotEquitySeriesResponse
 from ...types import UNSET, Unset
 from typing import cast
@@ -48,7 +49,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> BotEquitySeriesResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> ApiErrorResponse | BotEquitySeriesResponse | None:
     if response.status_code == 200:
         response_200 = BotEquitySeriesResponse.from_dict(response.json())
 
@@ -56,13 +57,20 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
         return response_200
 
+    if response.status_code == 400:
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
+
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
     else:
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[BotEquitySeriesResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[ApiErrorResponse | BotEquitySeriesResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -78,7 +86,7 @@ def sync_detailed(
     since: str | Unset = UNSET,
     limit: int | Unset = UNSET,
 
-) -> Response[BotEquitySeriesResponse]:
+) -> Response[ApiErrorResponse | BotEquitySeriesResponse]:
     """ GET /v1/bots/equity-series
 
      Public per-bot portfolio-value series proxied from Arena's private typed
@@ -94,7 +102,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BotEquitySeriesResponse]
+        Response[ApiErrorResponse | BotEquitySeriesResponse]
      """
 
 
@@ -118,7 +126,7 @@ def sync(
     since: str | Unset = UNSET,
     limit: int | Unset = UNSET,
 
-) -> BotEquitySeriesResponse | None:
+) -> ApiErrorResponse | BotEquitySeriesResponse | None:
     """ GET /v1/bots/equity-series
 
      Public per-bot portfolio-value series proxied from Arena's private typed
@@ -134,7 +142,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BotEquitySeriesResponse
+        ApiErrorResponse | BotEquitySeriesResponse
      """
 
 
@@ -153,7 +161,7 @@ async def asyncio_detailed(
     since: str | Unset = UNSET,
     limit: int | Unset = UNSET,
 
-) -> Response[BotEquitySeriesResponse]:
+) -> Response[ApiErrorResponse | BotEquitySeriesResponse]:
     """ GET /v1/bots/equity-series
 
      Public per-bot portfolio-value series proxied from Arena's private typed
@@ -169,7 +177,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BotEquitySeriesResponse]
+        Response[ApiErrorResponse | BotEquitySeriesResponse]
      """
 
 
@@ -193,7 +201,7 @@ async def asyncio(
     since: str | Unset = UNSET,
     limit: int | Unset = UNSET,
 
-) -> BotEquitySeriesResponse | None:
+) -> ApiErrorResponse | BotEquitySeriesResponse | None:
     """ GET /v1/bots/equity-series
 
      Public per-bot portfolio-value series proxied from Arena's private typed
@@ -209,7 +217,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BotEquitySeriesResponse
+        ApiErrorResponse | BotEquitySeriesResponse
      """
 
 

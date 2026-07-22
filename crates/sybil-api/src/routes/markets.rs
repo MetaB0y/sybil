@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
-use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::State;
 
 use matching_engine::{MarketId, NANOS_PER_DOLLAR, Nanos};
 use matching_sequencer::aggregates::OrderStats;
@@ -13,6 +12,7 @@ use sybil_history_types::{PriceCandleQuery, PriceHistoryQuery};
 use sybil_oracle::{FeedPubkey, ResolutionAttestation, SignedAttestation};
 
 use crate::convert::prices_to_response;
+use crate::extract::{Json, Path, Query};
 use crate::state::{AppState, MarketRefData, save_market_ref_data};
 use crate::types::error::AppError;
 use crate::types::request::{
@@ -680,7 +680,7 @@ pub async fn resolve_market(
         ("from_ms" = Option<u64>, Query, description = "Start timestamp filter"),
         ("to_ms" = Option<u64>, Query, description = "End timestamp filter"),
         ("before_height" = Option<u64>, Query, description = "Return points with height strictly below this cursor"),
-        ("limit" = Option<usize>, Query, description = "Maximum returned points, newest matching points first by cap, clamped server-side"),
+        ("limit" = Option<usize>, Query, maximum = 5000, description = "Maximum returned points, newest matching points first; values above 5000 are rejected"),
     ),
     responses(
         (status = 200, description = "Price history", body = PriceHistoryResponse),
@@ -693,6 +693,14 @@ pub async fn get_price_history(
     Query(params): Query<PriceHistoryParams>,
 ) -> Result<Json<PriceHistoryResponse>, AppError> {
     let mid = MarketId::new(id);
+    if params
+        .limit
+        .is_some_and(|limit| limit > MAX_PRICE_HISTORY_QUERY_POINTS)
+    {
+        return Err(AppError::bad_request(format!(
+            "limit must be at most {MAX_PRICE_HISTORY_QUERY_POINTS}"
+        )));
+    }
     let limit = params
         .limit
         .unwrap_or(DEFAULT_PRICE_HISTORY_QUERY_POINTS)
@@ -743,11 +751,11 @@ pub async fn get_price_history(
     path = "/v1/markets/{id}/prices/candles",
     params(
         ("id" = u32, Path, description = "Market ID"),
-        ("resolution" = String, Query, description = "Candle resolution: seconds or one of 1m, 5m, 1h"),
+        ("resolution" = String, Query, pattern = r"^(?:[1-9][0-9]*|[1-9][0-9]*[mh])$", max_length = 7, description = "Candle resolution: positive seconds or a positive minute/hour duration such as 1m, 5m, or 1h"),
         ("from_ms" = Option<u64>, Query, description = "Start bucket timestamp filter"),
         ("to_ms" = Option<u64>, Query, description = "End bucket timestamp filter"),
         ("before_ms" = Option<u64>, Query, description = "Return candles with bucket_start_ms strictly below this cursor"),
-        ("limit" = Option<usize>, Query, description = "Maximum returned candles, clamped server-side"),
+        ("limit" = Option<usize>, Query, maximum = 5000, description = "Maximum returned candles; values above 5000 are rejected"),
     ),
     responses(
         (status = 200, description = "Price candles", body = PriceCandlesResponse),
@@ -761,6 +769,14 @@ pub async fn get_price_candles(
 ) -> Result<Json<PriceCandlesResponse>, AppError> {
     let mid = MarketId::new(id);
     let resolution_secs = parse_candle_resolution(&params.resolution)?;
+    if params
+        .limit
+        .is_some_and(|limit| limit > MAX_PRICE_HISTORY_QUERY_POINTS)
+    {
+        return Err(AppError::bad_request(format!(
+            "limit must be at most {MAX_PRICE_HISTORY_QUERY_POINTS}"
+        )));
+    }
     let limit = params
         .limit
         .unwrap_or(DEFAULT_PRICE_HISTORY_QUERY_POINTS)
@@ -882,8 +898,8 @@ fn parse_candle_resolution(input: &str) -> Result<u32, AppError> {
         ("max_yes_price_nanos" = Option<String>, Query, description = "Maximum YES price. Integer nanodollars; per-share probabilities in [0, 1e9]"),
         ("min_volume_nanos" = Option<String>, Query, description = "Minimum cumulative traded notional. Integer nanodollars"),
         ("sort" = Option<String>, Query, description = "Sort field"),
-        ("limit" = Option<usize>, Query, description = "Result limit"),
-        ("offset" = Option<usize>, Query, description = "Result offset"),
+        ("limit" = Option<usize>, Query, maximum = 500, description = "Result limit"),
+        ("offset" = Option<usize>, Query, maximum = 1000000, description = "Result offset"),
     ),
     responses(
         (status = 200, description = "Search results", body = Vec<MarketResponse>)
@@ -894,6 +910,13 @@ pub async fn search_markets(
     Query(params): Query<MarketSearchParams>,
 ) -> Result<Json<Vec<MarketResponse>>, AppError> {
     use matching_sequencer::{MarketSearchQuery, MarketSortField};
+
+    if params.limit.is_some_and(|limit| limit > 500) {
+        return Err(AppError::bad_request("limit must be at most 500"));
+    }
+    if params.offset.is_some_and(|offset| offset > 1_000_000) {
+        return Err(AppError::bad_request("offset must be at most 1000000"));
+    }
 
     let sort_by = params.sort.as_deref().map(|s| match s {
         "volume" => MarketSortField::Volume,
@@ -917,7 +940,7 @@ pub async fn search_markets(
         max_yes_price: params.max_yes_price_nanos.map(Nanos),
         min_volume: params.min_volume_nanos,
         sort_by,
-        limit: params.limit,
+        limit: params.limit.map(|limit| limit.min(500)),
         offset: params.offset,
     };
 

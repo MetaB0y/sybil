@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.bridge_withdrawal_response import BridgeWithdrawalResponse
 from typing import cast
 
@@ -33,7 +34,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | list[BridgeWithdrawalResponse] | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | ApiErrorResponse | list[BridgeWithdrawalResponse] | None:
     if response.status_code == 200:
         response_200 = []
         _response_200 = response.json()
@@ -45,6 +46,13 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
             response_200.append(response_200_item)
 
         return response_200
+
+    if response.status_code == 400:
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
 
     if response.status_code == 401:
         response_401 = cast(Any, None)
@@ -60,7 +68,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | list[BridgeWithdrawalResponse]]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | ApiErrorResponse | list[BridgeWithdrawalResponse]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -74,7 +82,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Any | list[BridgeWithdrawalResponse]]:
+) -> Response[Any | ApiErrorResponse | list[BridgeWithdrawalResponse]]:
     """ GET /v1/accounts/{id}/withdrawals
 
      Returns the account's currently active withdrawal leaves. Terminal leaves
@@ -90,7 +98,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | list[BridgeWithdrawalResponse]]
+        Response[Any | ApiErrorResponse | list[BridgeWithdrawalResponse]]
      """
 
 
@@ -110,7 +118,7 @@ def sync(
     *,
     client: AuthenticatedClient,
 
-) -> Any | list[BridgeWithdrawalResponse] | None:
+) -> Any | ApiErrorResponse | list[BridgeWithdrawalResponse] | None:
     """ GET /v1/accounts/{id}/withdrawals
 
      Returns the account's currently active withdrawal leaves. Terminal leaves
@@ -126,7 +134,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | list[BridgeWithdrawalResponse]
+        Any | ApiErrorResponse | list[BridgeWithdrawalResponse]
      """
 
 
@@ -141,7 +149,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Any | list[BridgeWithdrawalResponse]]:
+) -> Response[Any | ApiErrorResponse | list[BridgeWithdrawalResponse]]:
     """ GET /v1/accounts/{id}/withdrawals
 
      Returns the account's currently active withdrawal leaves. Terminal leaves
@@ -157,7 +165,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | list[BridgeWithdrawalResponse]]
+        Response[Any | ApiErrorResponse | list[BridgeWithdrawalResponse]]
      """
 
 
@@ -177,7 +185,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
 
-) -> Any | list[BridgeWithdrawalResponse] | None:
+) -> Any | ApiErrorResponse | list[BridgeWithdrawalResponse] | None:
     """ GET /v1/accounts/{id}/withdrawals
 
      Returns the account's currently active withdrawal leaves. Terminal leaves
@@ -193,7 +201,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | list[BridgeWithdrawalResponse]
+        Any | ApiErrorResponse | list[BridgeWithdrawalResponse]
      """
 
 

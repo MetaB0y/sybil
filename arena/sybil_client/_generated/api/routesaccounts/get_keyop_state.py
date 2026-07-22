@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.key_op_state_response import KeyOpStateResponse
 from typing import cast
 
@@ -33,13 +34,20 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | KeyOpStateResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | ApiErrorResponse | KeyOpStateResponse | None:
     if response.status_code == 200:
         response_200 = KeyOpStateResponse.from_dict(response.json())
 
 
 
         return response_200
+
+    if response.status_code == 400:
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
 
     if response.status_code == 404:
         response_404 = cast(Any, None)
@@ -51,7 +59,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | KeyOpStateResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | ApiErrorResponse | KeyOpStateResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -65,7 +73,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
 
-) -> Response[Any | KeyOpStateResponse]:
+) -> Response[Any | ApiErrorResponse | KeyOpStateResponse]:
     """ GET /v1/accounts/{id}/keyop-state — public signing state for key operations.
 
      These digests are already committed validity state and reveal no key or
@@ -80,7 +88,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | KeyOpStateResponse]
+        Response[Any | ApiErrorResponse | KeyOpStateResponse]
      """
 
 
@@ -100,7 +108,7 @@ def sync(
     *,
     client: AuthenticatedClient | Client,
 
-) -> Any | KeyOpStateResponse | None:
+) -> Any | ApiErrorResponse | KeyOpStateResponse | None:
     """ GET /v1/accounts/{id}/keyop-state — public signing state for key operations.
 
      These digests are already committed validity state and reveal no key or
@@ -115,7 +123,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | KeyOpStateResponse
+        Any | ApiErrorResponse | KeyOpStateResponse
      """
 
 
@@ -130,7 +138,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
 
-) -> Response[Any | KeyOpStateResponse]:
+) -> Response[Any | ApiErrorResponse | KeyOpStateResponse]:
     """ GET /v1/accounts/{id}/keyop-state — public signing state for key operations.
 
      These digests are already committed validity state and reveal no key or
@@ -145,7 +153,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | KeyOpStateResponse]
+        Response[Any | ApiErrorResponse | KeyOpStateResponse]
      """
 
 
@@ -165,7 +173,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient | Client,
 
-) -> Any | KeyOpStateResponse | None:
+) -> Any | ApiErrorResponse | KeyOpStateResponse | None:
     """ GET /v1/accounts/{id}/keyop-state — public signing state for key operations.
 
      These digests are already committed validity state and reveal no key or
@@ -180,7 +188,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | KeyOpStateResponse
+        Any | ApiErrorResponse | KeyOpStateResponse
      """
 
 

@@ -1,12 +1,12 @@
-use axum::Json;
+use axum::extract::State;
 use axum::extract::ws::WebSocketUpgrade;
-use axum::extract::{Path, Query, State};
 use axum::response::Response;
 use tokio::sync::OwnedSemaphorePermit;
 
 use matching_sequencer::MAX_BLOCK_REPLAY_QUERY_BLOCKS;
 
 use crate::convert::public_block_to_response;
+use crate::extract::{Json, Path, Query};
 use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::response::{ApiErrorResponse, PublicBlockResponse};
@@ -70,7 +70,7 @@ pub struct RecentBlocksQuery {
     get,
     path = "/v1/blocks",
     params(
-        ("limit" = Option<usize>, Query, description = "Recent blocks, newest-first; default 20, cap 500"),
+        ("limit" = Option<usize>, Query, maximum = 500, description = "Recent blocks, newest-first; default 20, cap 500"),
         ("before_height" = Option<u64>, Query, description = "Return blocks with height strictly below this cursor")
     ),
     responses((status = 200, description = "Public block market tape, newest-first", body = [PublicBlockResponse]))
@@ -79,6 +79,13 @@ pub async fn get_recent_blocks(
     State(state): State<AppState>,
     Query(q): Query<RecentBlocksQuery>,
 ) -> Result<Json<Vec<PublicBlockResponse>>, AppError> {
+    if q.limit
+        .is_some_and(|limit| limit > MAX_BLOCK_REPLAY_QUERY_BLOCKS)
+    {
+        return Err(AppError::bad_request(format!(
+            "limit must be at most {MAX_BLOCK_REPLAY_QUERY_BLOCKS}"
+        )));
+    }
     let limit = q
         .limit
         .unwrap_or(DEFAULT_BLOCK_REPLAY_QUERY_BLOCKS)

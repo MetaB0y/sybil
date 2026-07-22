@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.market_response import MarketResponse
 from ...types import UNSET, Unset
 from typing import cast
@@ -69,7 +70,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> list[MarketResponse] | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> ApiErrorResponse | list[MarketResponse] | None:
     if response.status_code == 200:
         response_200 = []
         _response_200 = response.json()
@@ -82,13 +83,20 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
         return response_200
 
+    if response.status_code == 400:
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
+
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
     else:
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[list[MarketResponse]]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[ApiErrorResponse | list[MarketResponse]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -111,7 +119,7 @@ def sync_detailed(
     limit: int | Unset = UNSET,
     offset: int | Unset = UNSET,
 
-) -> Response[list[MarketResponse]]:
+) -> Response[ApiErrorResponse | list[MarketResponse]]:
     """ GET /v1/markets/search
 
     Args:
@@ -131,7 +139,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[list[MarketResponse]]
+        Response[ApiErrorResponse | list[MarketResponse]]
      """
 
 
@@ -169,7 +177,7 @@ def sync(
     limit: int | Unset = UNSET,
     offset: int | Unset = UNSET,
 
-) -> list[MarketResponse] | None:
+) -> ApiErrorResponse | list[MarketResponse] | None:
     """ GET /v1/markets/search
 
     Args:
@@ -189,7 +197,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        list[MarketResponse]
+        ApiErrorResponse | list[MarketResponse]
      """
 
 
@@ -222,7 +230,7 @@ async def asyncio_detailed(
     limit: int | Unset = UNSET,
     offset: int | Unset = UNSET,
 
-) -> Response[list[MarketResponse]]:
+) -> Response[ApiErrorResponse | list[MarketResponse]]:
     """ GET /v1/markets/search
 
     Args:
@@ -242,7 +250,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[list[MarketResponse]]
+        Response[ApiErrorResponse | list[MarketResponse]]
      """
 
 
@@ -280,7 +288,7 @@ async def asyncio(
     limit: int | Unset = UNSET,
     offset: int | Unset = UNSET,
 
-) -> list[MarketResponse] | None:
+) -> ApiErrorResponse | list[MarketResponse] | None:
     """ GET /v1/markets/search
 
     Args:
@@ -300,7 +308,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        list[MarketResponse]
+        ApiErrorResponse | list[MarketResponse]
      """
 
 

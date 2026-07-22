@@ -1,10 +1,10 @@
-use axum::Json;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use std::collections::HashMap;
 
 use matching_sequencer::LeaderboardRow;
 use sybil_history_types::{EquityBaselinesQuery, ProjectionStatus};
 
+use crate::extract::{Json, Query};
 use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::response::{LeaderboardEntryResponse, LeaderboardResponse};
@@ -70,7 +70,7 @@ pub struct LeaderboardParams {
     path = "/v1/leaderboard",
     params(
         ("window" = Option<String>, Query, description = "Ranking window: 7d | 30d | all (default all)"),
-        ("limit" = Option<usize>, Query, description = "Result limit (default 50, cap 100)"),
+        ("limit" = Option<usize>, Query, maximum = 100, description = "Result limit (default 50, cap 100)"),
     ),
     responses(
         (status = 200, description = "Ranked trader leaderboard, best PnL first", body = LeaderboardResponse),
@@ -81,6 +81,14 @@ pub async fn get_leaderboard(
     State(state): State<AppState>,
     Query(params): Query<LeaderboardParams>,
 ) -> Result<Json<LeaderboardResponse>, AppError> {
+    if params
+        .limit
+        .is_some_and(|limit| limit > MAX_LEADERBOARD_LIMIT)
+    {
+        return Err(AppError::bad_request(format!(
+            "limit must be at most {MAX_LEADERBOARD_LIMIT}"
+        )));
+    }
     let limit = leaderboard_limit(params.limit);
     let window = normalize_window(params.window.as_deref());
     let since_ms = window_since_ms(window, now_ms());
@@ -172,7 +180,7 @@ mod tests {
         assert_eq!(leaderboard_limit(Some(0)), 0);
         assert_eq!(leaderboard_limit(Some(25)), 25);
         assert_eq!(
-            leaderboard_limit(Some(MAX_LEADERBOARD_LIMIT + 1)),
+            leaderboard_limit(Some(MAX_LEADERBOARD_LIMIT)),
             MAX_LEADERBOARD_LIMIT
         );
     }

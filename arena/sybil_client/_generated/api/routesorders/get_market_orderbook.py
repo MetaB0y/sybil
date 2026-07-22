@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.pending_order_response import PendingOrderResponse
 from typing import cast
 
@@ -33,7 +34,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> list[PendingOrderResponse] | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> ApiErrorResponse | list[PendingOrderResponse] | None:
     if response.status_code == 200:
         response_200 = []
         _response_200 = response.json()
@@ -46,13 +47,20 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
         return response_200
 
+    if response.status_code == 400:
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
+
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
     else:
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[list[PendingOrderResponse]]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[ApiErrorResponse | list[PendingOrderResponse]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -66,7 +74,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
 
-) -> Response[list[PendingOrderResponse]]:
+) -> Response[ApiErrorResponse | list[PendingOrderResponse]]:
     """ GET /v1/markets/{id}/orderbook — all pending orders for a market (dev mode)
 
     Args:
@@ -77,7 +85,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[list[PendingOrderResponse]]
+        Response[ApiErrorResponse | list[PendingOrderResponse]]
      """
 
 
@@ -97,7 +105,7 @@ def sync(
     *,
     client: AuthenticatedClient | Client,
 
-) -> list[PendingOrderResponse] | None:
+) -> ApiErrorResponse | list[PendingOrderResponse] | None:
     """ GET /v1/markets/{id}/orderbook — all pending orders for a market (dev mode)
 
     Args:
@@ -108,7 +116,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        list[PendingOrderResponse]
+        ApiErrorResponse | list[PendingOrderResponse]
      """
 
 
@@ -123,7 +131,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
 
-) -> Response[list[PendingOrderResponse]]:
+) -> Response[ApiErrorResponse | list[PendingOrderResponse]]:
     """ GET /v1/markets/{id}/orderbook — all pending orders for a market (dev mode)
 
     Args:
@@ -134,7 +142,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[list[PendingOrderResponse]]
+        Response[ApiErrorResponse | list[PendingOrderResponse]]
      """
 
 
@@ -154,7 +162,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient | Client,
 
-) -> list[PendingOrderResponse] | None:
+) -> ApiErrorResponse | list[PendingOrderResponse] | None:
     """ GET /v1/markets/{id}/orderbook — all pending orders for a market (dev mode)
 
     Args:
@@ -165,7 +173,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        list[PendingOrderResponse]
+        ApiErrorResponse | list[PendingOrderResponse]
      """
 
 

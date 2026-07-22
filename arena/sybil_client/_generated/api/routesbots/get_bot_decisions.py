@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.bot_decision_feed_response import BotDecisionFeedResponse
 from ...types import UNSET, Unset
 from typing import cast
@@ -51,7 +52,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> BotDecisionFeedResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> ApiErrorResponse | BotDecisionFeedResponse | None:
     if response.status_code == 200:
         response_200 = BotDecisionFeedResponse.from_dict(response.json())
 
@@ -59,13 +60,20 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
         return response_200
 
+    if response.status_code == 400:
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
+
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
     else:
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[BotDecisionFeedResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[ApiErrorResponse | BotDecisionFeedResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -82,7 +90,7 @@ def sync_detailed(
     market_id: int | Unset = UNSET,
     since: str | Unset = UNSET,
 
-) -> Response[BotDecisionFeedResponse]:
+) -> Response[ApiErrorResponse | BotDecisionFeedResponse]:
     """ GET /v1/bots/decisions
 
      Public bot analytics backed by Arena's private typed read service. The Rust
@@ -100,7 +108,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BotDecisionFeedResponse]
+        Response[ApiErrorResponse | BotDecisionFeedResponse]
      """
 
 
@@ -126,7 +134,7 @@ def sync(
     market_id: int | Unset = UNSET,
     since: str | Unset = UNSET,
 
-) -> BotDecisionFeedResponse | None:
+) -> ApiErrorResponse | BotDecisionFeedResponse | None:
     """ GET /v1/bots/decisions
 
      Public bot analytics backed by Arena's private typed read service. The Rust
@@ -144,7 +152,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BotDecisionFeedResponse
+        ApiErrorResponse | BotDecisionFeedResponse
      """
 
 
@@ -165,7 +173,7 @@ async def asyncio_detailed(
     market_id: int | Unset = UNSET,
     since: str | Unset = UNSET,
 
-) -> Response[BotDecisionFeedResponse]:
+) -> Response[ApiErrorResponse | BotDecisionFeedResponse]:
     """ GET /v1/bots/decisions
 
      Public bot analytics backed by Arena's private typed read service. The Rust
@@ -183,7 +191,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BotDecisionFeedResponse]
+        Response[ApiErrorResponse | BotDecisionFeedResponse]
      """
 
 
@@ -209,7 +217,7 @@ async def asyncio(
     market_id: int | Unset = UNSET,
     since: str | Unset = UNSET,
 
-) -> BotDecisionFeedResponse | None:
+) -> ApiErrorResponse | BotDecisionFeedResponse | None:
     """ GET /v1/bots/decisions
 
      Public bot analytics backed by Arena's private typed read service. The Rust
@@ -227,7 +235,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BotDecisionFeedResponse
+        ApiErrorResponse | BotDecisionFeedResponse
      """
 
 

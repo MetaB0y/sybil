@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.bridge_deposit_response import BridgeDepositResponse
 from ...models.submit_l1_deposit_request import SubmitL1DepositRequest
 from typing import cast
@@ -40,7 +41,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | BridgeDepositResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | ApiErrorResponse | BridgeDepositResponse | None:
     if response.status_code == 200:
         response_200 = BridgeDepositResponse.from_dict(response.json())
 
@@ -48,9 +49,23 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
         return response_200
 
+    if response.status_code == 400:
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
+
     if response.status_code == 403:
         response_403 = cast(Any, None)
         return response_403
+
+    if response.status_code == 503:
+        response_503 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_503
 
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
@@ -58,7 +73,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | BridgeDepositResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | ApiErrorResponse | BridgeDepositResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -72,7 +87,7 @@ def sync_detailed(
     client: AuthenticatedClient | Client,
     body: SubmitL1DepositRequest,
 
-) -> Response[Any | BridgeDepositResponse]:
+) -> Response[Any | ApiErrorResponse | BridgeDepositResponse]:
     """ POST /v1/bridge/deposits
 
     Args:
@@ -83,7 +98,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | BridgeDepositResponse]
+        Response[Any | ApiErrorResponse | BridgeDepositResponse]
      """
 
 
@@ -103,7 +118,7 @@ def sync(
     client: AuthenticatedClient | Client,
     body: SubmitL1DepositRequest,
 
-) -> Any | BridgeDepositResponse | None:
+) -> Any | ApiErrorResponse | BridgeDepositResponse | None:
     """ POST /v1/bridge/deposits
 
     Args:
@@ -114,7 +129,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | BridgeDepositResponse
+        Any | ApiErrorResponse | BridgeDepositResponse
      """
 
 
@@ -129,7 +144,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient | Client,
     body: SubmitL1DepositRequest,
 
-) -> Response[Any | BridgeDepositResponse]:
+) -> Response[Any | ApiErrorResponse | BridgeDepositResponse]:
     """ POST /v1/bridge/deposits
 
     Args:
@@ -140,7 +155,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | BridgeDepositResponse]
+        Response[Any | ApiErrorResponse | BridgeDepositResponse]
      """
 
 
@@ -160,7 +175,7 @@ async def asyncio(
     client: AuthenticatedClient | Client,
     body: SubmitL1DepositRequest,
 
-) -> Any | BridgeDepositResponse | None:
+) -> Any | ApiErrorResponse | BridgeDepositResponse | None:
     """ POST /v1/bridge/deposits
 
     Args:
@@ -171,7 +186,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | BridgeDepositResponse
+        Any | ApiErrorResponse | BridgeDepositResponse
      """
 
 

@@ -1,5 +1,4 @@
-use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::HeaderMap;
 
 use matching_sequencer::crypto::{
@@ -15,6 +14,7 @@ use p256::Sec1Point;
 use p256::ecdsa::{Signature, VerifyingKey};
 
 use crate::convert::bridge_withdrawal_to_response;
+use crate::extract::{Json, Path};
 use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::request::{
@@ -23,8 +23,9 @@ use crate::types::request::{
     SubmitL1DepositRequest, SubmitL1WithdrawalEventRequest,
 };
 use crate::types::response::{
-    BridgeAccountKeyResponse, BridgeDepositResponse, BridgeDomainResponse, BridgeStatusResponse,
-    BridgeWithdrawalL1EventResponse, BridgeWithdrawalResponse, ObserveL1HeightResponse,
+    ApiErrorResponse, BridgeAccountKeyResponse, BridgeDepositResponse, BridgeDomainResponse,
+    BridgeStatusResponse, BridgeWithdrawalL1EventResponse, BridgeWithdrawalResponse,
+    ObserveL1HeightResponse,
 };
 use crate::webauthn;
 
@@ -321,7 +322,8 @@ pub async fn account_by_key(
     request_body = SubmitL1DepositRequest,
     responses(
         (status = 200, description = "L1 deposit accepted", body = BridgeDepositResponse),
-        (status = 403, description = "Dev mode required")
+        (status = 403, description = "Dev mode required"),
+        (status = 503, description = "Bridge domain or sequencer unavailable", body = ApiErrorResponse)
     )
 )]
 pub async fn submit_l1_deposit(
@@ -396,7 +398,8 @@ pub async fn submit_l1_deposit(
     request_body = CreateBridgeWithdrawalRequest,
     responses(
         (status = 200, description = "Withdrawal leaf created", body = BridgeWithdrawalResponse),
-        (status = 403, description = "Dev mode required")
+        (status = 403, description = "Dev mode required"),
+        (status = 503, description = "Bridge domain or sequencer unavailable", body = ApiErrorResponse)
     )
 )]
 pub async fn create_withdrawal(
@@ -437,7 +440,8 @@ pub async fn create_withdrawal(
         (status = 400, description = "Invalid withdrawal or signature"),
         (status = 403, description = "Signer/account mismatch"),
         (status = 409, description = "Replay nonce is stale or duplicate"),
-        (status = 404, description = "Unknown signer")
+        (status = 404, description = "Unknown signer"),
+        (status = 503, description = "Bridge domain or sequencer unavailable", body = ApiErrorResponse)
     )
 )]
 pub async fn create_signed_withdrawal(
@@ -513,7 +517,8 @@ pub async fn create_signed_withdrawal(
     responses(
         (status = 200, description = "L1 withdrawal queue status applied or idempotently ignored", body = BridgeWithdrawalL1EventResponse),
         (status = 400, description = "Invalid L1 withdrawal event"),
-        (status = 404, description = "Withdrawal not found")
+        (status = 404, description = "Withdrawal not found"),
+        (status = 503, description = "Bridge or sequencer unavailable", body = ApiErrorResponse)
     )
 )]
 pub async fn submit_l1_withdrawal_event(
@@ -553,7 +558,10 @@ pub async fn submit_l1_withdrawal_event(
     post,
     path = "/v1/bridge/l1-height",
     request_body = ObserveL1HeightRequest,
-    responses((status = 200, description = "Confirmed L1 height applied", body = ObserveL1HeightResponse))
+    responses(
+        (status = 200, description = "Confirmed L1 height applied", body = ObserveL1HeightResponse),
+        (status = 503, description = "Bridge or sequencer unavailable", body = ApiErrorResponse)
+    )
 )]
 pub async fn observe_l1_height(
     State(state): State<AppState>,

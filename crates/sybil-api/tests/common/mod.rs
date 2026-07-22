@@ -56,6 +56,49 @@ fn add_test_provisioning_key(uri: &str, body: &mut serde_json::Value) {
     dead_code,
     reason = "each integration-test crate consumes a different subset of shared helpers"
 )]
+pub fn encode_nanos_strings(value: &mut serde_json::Value) {
+    fn encode_numeric_leaves(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Number(number) => {
+                *value = serde_json::Value::String(number.to_string());
+            }
+            serde_json::Value::Array(values) => {
+                for value in values {
+                    encode_numeric_leaves(value);
+                }
+            }
+            serde_json::Value::Object(values) => {
+                for value in values.values_mut() {
+                    encode_numeric_leaves(value);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    match value {
+        serde_json::Value::Array(values) => {
+            for value in values {
+                encode_nanos_strings(value);
+            }
+        }
+        serde_json::Value::Object(values) => {
+            for (name, value) in values {
+                if name.ends_with("_nanos") {
+                    encode_numeric_leaves(value);
+                } else {
+                    encode_nanos_strings(value);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+#[allow(
+    dead_code,
+    reason = "each integration-test crate consumes a different subset of shared helpers"
+)]
 pub fn nanos_i64(value: &serde_json::Value) -> i64 {
     value
         .as_str()
@@ -406,6 +449,7 @@ pub async fn post_json(
     mut body: serde_json::Value,
 ) -> (StatusCode, Vec<u8>) {
     add_test_provisioning_key(uri, &mut body);
+    encode_nanos_strings(&mut body);
     let req = Request::builder()
         .method(Method::POST)
         .uri(uri)
@@ -429,7 +473,12 @@ pub async fn post_json(
     dead_code,
     reason = "each integration-test crate consumes a different subset of shared helpers"
 )]
-pub async fn put_json(app: Router, uri: &str, body: serde_json::Value) -> (StatusCode, Vec<u8>) {
+pub async fn put_json(
+    app: Router,
+    uri: &str,
+    mut body: serde_json::Value,
+) -> (StatusCode, Vec<u8>) {
+    encode_nanos_strings(&mut body);
     let req = Request::builder()
         .method(Method::PUT)
         .uri(uri)
@@ -459,6 +508,7 @@ pub async fn post_json_with_headers(
     mut body: serde_json::Value,
 ) -> (StatusCode, HeaderMap, Vec<u8>) {
     add_test_provisioning_key(uri, &mut body);
+    encode_nanos_strings(&mut body);
     let req = Request::builder()
         .method(Method::POST)
         .uri(uri)

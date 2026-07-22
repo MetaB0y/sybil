@@ -3,17 +3,18 @@ use std::path::{Path as FsPath, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use axum::Json;
 use axum::body::Bytes;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::response::{IntoResponse, Response};
 
+use crate::extract::{Json, Path};
 use crate::state::AppState;
 use crate::types::error::AppError;
 
 /// Resolve `{dir}/{event_id}.json`, rejecting ids that could escape the dir.
 fn snapshot_path(dir: &FsPath, event_id: &str) -> Option<PathBuf> {
     let safe = !event_id.is_empty()
+        && event_id.len() <= 128
         && event_id
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
@@ -90,7 +91,7 @@ fn sync_parent_directory(_parent: &FsPath) -> std::io::Result<()> {
     tag = "routesevents",
     put,
     path = "/v1/events/{event_id}/raw",
-    params(("event_id" = String, Path, description = "Event identifier (alphanumeric, '_' or '-')")),
+    params(("event_id" = String, Path, pattern = r"^[A-Za-z0-9_-]+$", max_length = 128, description = "Event identifier (alphanumeric, '_' or '-')")),
     request_body(content = serde_json::Value, description = "Raw event JSON snapshot", content_type = "application/json"),
     responses(
         (status = 200, description = "Snapshot stored", body = serde_json::Value),
@@ -126,7 +127,7 @@ pub async fn put_event_raw(
     tag = "routesevents",
     get,
     path = "/v1/events/{event_id}/raw",
-    params(("event_id" = String, Path, description = "Event identifier (alphanumeric, '_' or '-')")),
+    params(("event_id" = String, Path, pattern = r"^[A-Za-z0-9_-]+$", max_length = 128, description = "Event identifier (alphanumeric, '_' or '-')")),
     responses(
         (status = 200, description = "Stored raw event JSON", body = serde_json::Value),
         (status = 400, description = "Invalid event_id"),

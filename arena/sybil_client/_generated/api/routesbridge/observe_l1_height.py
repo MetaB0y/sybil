@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.observe_l1_height_request import ObserveL1HeightRequest
 from ...models.observe_l1_height_response import ObserveL1HeightResponse
 from typing import cast
@@ -40,7 +41,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> ObserveL1HeightResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> ApiErrorResponse | ObserveL1HeightResponse | None:
     if response.status_code == 200:
         response_200 = ObserveL1HeightResponse.from_dict(response.json())
 
@@ -48,13 +49,27 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
         return response_200
 
+    if response.status_code == 400:
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
+
+    if response.status_code == 503:
+        response_503 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_503
+
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
     else:
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[ObserveL1HeightResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[ApiErrorResponse | ObserveL1HeightResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -68,7 +83,7 @@ def sync_detailed(
     client: AuthenticatedClient | Client,
     body: ObserveL1HeightRequest,
 
-) -> Response[ObserveL1HeightResponse]:
+) -> Response[ApiErrorResponse | ObserveL1HeightResponse]:
     """ POST /v1/bridge/l1-height
 
     Args:
@@ -79,7 +94,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[ObserveL1HeightResponse]
+        Response[ApiErrorResponse | ObserveL1HeightResponse]
      """
 
 
@@ -99,7 +114,7 @@ def sync(
     client: AuthenticatedClient | Client,
     body: ObserveL1HeightRequest,
 
-) -> ObserveL1HeightResponse | None:
+) -> ApiErrorResponse | ObserveL1HeightResponse | None:
     """ POST /v1/bridge/l1-height
 
     Args:
@@ -110,7 +125,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        ObserveL1HeightResponse
+        ApiErrorResponse | ObserveL1HeightResponse
      """
 
 
@@ -125,7 +140,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient | Client,
     body: ObserveL1HeightRequest,
 
-) -> Response[ObserveL1HeightResponse]:
+) -> Response[ApiErrorResponse | ObserveL1HeightResponse]:
     """ POST /v1/bridge/l1-height
 
     Args:
@@ -136,7 +151,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[ObserveL1HeightResponse]
+        Response[ApiErrorResponse | ObserveL1HeightResponse]
      """
 
 
@@ -156,7 +171,7 @@ async def asyncio(
     client: AuthenticatedClient | Client,
     body: ObserveL1HeightRequest,
 
-) -> ObserveL1HeightResponse | None:
+) -> ApiErrorResponse | ObserveL1HeightResponse | None:
     """ POST /v1/bridge/l1-height
 
     Args:
@@ -167,7 +182,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        ObserveL1HeightResponse
+        ApiErrorResponse | ObserveL1HeightResponse
      """
 
 

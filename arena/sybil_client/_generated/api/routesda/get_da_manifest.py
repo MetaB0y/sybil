@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.da_manifest_response import DaManifestResponse
 from typing import cast
 
@@ -33,13 +34,20 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | DaManifestResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | ApiErrorResponse | DaManifestResponse | None:
     if response.status_code == 200:
         response_200 = DaManifestResponse.from_dict(response.json())
 
 
 
         return response_200
+
+    if response.status_code == 400:
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
 
     if response.status_code == 404:
         response_404 = cast(Any, None)
@@ -55,7 +63,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | DaManifestResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | ApiErrorResponse | DaManifestResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -69,7 +77,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
 
-) -> Response[Any | DaManifestResponse]:
+) -> Response[Any | ApiErrorResponse | DaManifestResponse]:
     """ GET /v1/da/{height}/manifest
 
      Typed DA manifest for a retained canonical witness payload. Retention follows the store-backed
@@ -86,7 +94,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | DaManifestResponse]
+        Response[Any | ApiErrorResponse | DaManifestResponse]
      """
 
 
@@ -106,7 +114,7 @@ def sync(
     *,
     client: AuthenticatedClient | Client,
 
-) -> Any | DaManifestResponse | None:
+) -> Any | ApiErrorResponse | DaManifestResponse | None:
     """ GET /v1/da/{height}/manifest
 
      Typed DA manifest for a retained canonical witness payload. Retention follows the store-backed
@@ -123,7 +131,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | DaManifestResponse
+        Any | ApiErrorResponse | DaManifestResponse
      """
 
 
@@ -138,7 +146,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
 
-) -> Response[Any | DaManifestResponse]:
+) -> Response[Any | ApiErrorResponse | DaManifestResponse]:
     """ GET /v1/da/{height}/manifest
 
      Typed DA manifest for a retained canonical witness payload. Retention follows the store-backed
@@ -155,7 +163,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | DaManifestResponse]
+        Response[Any | ApiErrorResponse | DaManifestResponse]
      """
 
 
@@ -175,7 +183,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient | Client,
 
-) -> Any | DaManifestResponse | None:
+) -> Any | ApiErrorResponse | DaManifestResponse | None:
     """ GET /v1/da/{height}/manifest
 
      Typed DA manifest for a retained canonical witness payload. Retention follows the store-backed
@@ -192,7 +200,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | DaManifestResponse
+        Any | ApiErrorResponse | DaManifestResponse
      """
 
 

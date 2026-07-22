@@ -12,7 +12,11 @@ pub struct CreateAccountRequest {
     #[serde(with = "crate::wire_integer")]
     #[cfg_attr(
         feature = "openapi",
-        schema(value_type = String, example = "100000000000")
+        schema(
+            value_type = String,
+            pattern = r"^[0-9]+$",
+            example = "100000000000"
+        )
     )]
     pub initial_balance_nanos: u64,
     /// First signing key to register in the same account-creation operation.
@@ -44,7 +48,7 @@ pub struct FundAccountRequest {
     #[serde(with = "crate::wire_integer")]
     #[cfg_attr(
         feature = "openapi",
-        schema(value_type = String, example = "50000000000")
+        schema(value_type = String, pattern = r"^[0-9]+$", example = "50000000000")
     )]
     pub amount_nanos: u64,
 }
@@ -448,7 +452,11 @@ pub struct ResolveMarketRequest {
     #[serde(with = "crate::wire_integer")]
     #[cfg_attr(
         feature = "openapi",
-        schema(value_type = String, example = "1000000000")
+        schema(
+            value_type = String,
+            pattern = r"^0*(?:[0-9]{1,9}|1000000000)$",
+            example = "1000000000"
+        )
     )]
     pub payout_nanos: u64,
     /// Optional signed attestation. When provided, the market's resolution
@@ -486,6 +494,7 @@ pub struct SubmitOrderRequest {
     /// Account ID submitting the orders.
     pub account_id: u64,
     /// Orders to submit.
+    #[cfg_attr(feature = "openapi", schema(min_items = 1))]
     pub orders: Vec<OrderSpec>,
     /// Time-in-force policy applied to all orders in this submission.
     #[serde(default)]
@@ -528,9 +537,13 @@ pub enum OrderSpec {
         /// Limit price. Integer nanodollars; 1_000_000_000 = $1.
         /// Prices are per-share probabilities in [0, 1e9].
         #[serde(with = "crate::wire_integer")]
-        #[cfg_attr(feature = "openapi", schema(value_type = String))]
+        #[cfg_attr(
+            feature = "openapi",
+            schema(value_type = String, pattern = r"^0*(?:[1-9][0-9]{0,8}|1000000000)$")
+        )]
         limit_price_nanos: u64,
         /// Order quantity. Integer share-units; 1000 units = 1 share.
+        #[cfg_attr(feature = "openapi", schema(minimum = 1))]
         quantity: u64,
     },
     /// Buy NO share-units on a single market (`1000` units = 1 share).
@@ -539,9 +552,13 @@ pub enum OrderSpec {
         /// Limit price. Integer nanodollars; 1_000_000_000 = $1.
         /// Prices are per-share probabilities in [0, 1e9].
         #[serde(with = "crate::wire_integer")]
-        #[cfg_attr(feature = "openapi", schema(value_type = String))]
+        #[cfg_attr(
+            feature = "openapi",
+            schema(value_type = String, pattern = r"^0*(?:[1-9][0-9]{0,8}|1000000000)$")
+        )]
         limit_price_nanos: u64,
         /// Order quantity. Integer share-units; 1000 units = 1 share.
+        #[cfg_attr(feature = "openapi", schema(minimum = 1))]
         quantity: u64,
     },
     /// Sell YES share-units on a single market (`1000` units = 1 share).
@@ -550,9 +567,13 @@ pub enum OrderSpec {
         /// Limit price. Integer nanodollars; 1_000_000_000 = $1.
         /// Prices are per-share probabilities in [0, 1e9].
         #[serde(with = "crate::wire_integer")]
-        #[cfg_attr(feature = "openapi", schema(value_type = String))]
+        #[cfg_attr(
+            feature = "openapi",
+            schema(value_type = String, pattern = r"^0*(?:[1-9][0-9]{0,8}|1000000000)$")
+        )]
         limit_price_nanos: u64,
         /// Order quantity. Integer share-units; 1000 units = 1 share.
+        #[cfg_attr(feature = "openapi", schema(minimum = 1))]
         quantity: u64,
     },
     /// Sell NO share-units on a single market (`1000` units = 1 share).
@@ -561,9 +582,13 @@ pub enum OrderSpec {
         /// Limit price. Integer nanodollars; 1_000_000_000 = $1.
         /// Prices are per-share probabilities in [0, 1e9].
         #[serde(with = "crate::wire_integer")]
-        #[cfg_attr(feature = "openapi", schema(value_type = String))]
+        #[cfg_attr(
+            feature = "openapi",
+            schema(value_type = String, pattern = r"^0*(?:[1-9][0-9]{0,8}|1000000000)$")
+        )]
         limit_price_nanos: u64,
         /// Order quantity. Integer share-units; 1000 units = 1 share.
+        #[cfg_attr(feature = "openapi", schema(minimum = 1))]
         quantity: u64,
     },
 }
@@ -647,12 +672,13 @@ pub struct SubmitSignedMmBundleRequest {
     /// Initial submissions use revision zero.
     pub revision: u64,
     /// Every quote in the atomic bundle. All quote fields and their order are signed.
+    #[cfg_attr(feature = "openapi", schema(min_items = 1))]
     pub orders: Vec<OrderSpec>,
     /// Exact next block this IOC bundle targets. The actor rejects any other height.
     pub expires_at_block: u64,
     /// Integer nanodollars: one flash-liquidity budget shared by every quote in the bundle.
     #[serde(with = "crate::wire_integer")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String))]
+    #[cfg_attr(feature = "openapi", schema(value_type = String, pattern = r"^[0-9]+$"))]
     pub mm_budget_nanos: u64,
     /// Per-account replay nonce covered by the signature.
     pub nonce: u64,
@@ -678,12 +704,13 @@ pub struct ReplaceSignedMmBundleRequest {
     pub bundle_id_hex: String,
     pub expected_revision: u64,
     pub new_revision: u64,
+    #[cfg_attr(feature = "openapi", schema(min_items = 1))]
     pub orders: Vec<OrderSpec>,
     /// Exact next block this replacement targets.
     pub expires_at_block: u64,
     /// Integer nanodollars shared across every replacement quote.
     #[serde(with = "crate::wire_integer")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String))]
+    #[cfg_attr(feature = "openapi", schema(value_type = String, pattern = r"^[0-9]+$"))]
     pub mm_budget_nanos: u64,
     pub nonce: u64,
     pub signer_pubkey_hex: String,
@@ -740,15 +767,21 @@ pub struct CancelSignedOrderRequest {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SignedOrderData {
     /// Market IDs this order spans.
+    #[cfg_attr(feature = "openapi", schema(min_items = 1, max_items = 1))]
     pub market_ids: Vec<u32>,
     /// Payoff vector.
+    #[cfg_attr(feature = "openapi", schema(min_items = 2, max_items = 2))]
     pub payoffs: Vec<i8>,
     /// Limit price. Integer nanodollars; 1_000_000_000 = $1.
     /// Prices are per-share probabilities in [0, 1e9].
     #[serde(with = "crate::wire_integer")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String))]
+    #[cfg_attr(
+        feature = "openapi",
+        schema(value_type = String, pattern = r"^0*(?:[1-9][0-9]{0,8}|1000000000)$")
+    )]
     pub limit_price_nanos: u64,
     /// Maximum fill quantity. Integer share-units; 1000 units = 1 share.
+    #[cfg_attr(feature = "openapi", schema(minimum = 1))]
     pub max_fill: u64,
 }
 

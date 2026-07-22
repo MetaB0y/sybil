@@ -1,6 +1,5 @@
-use axum::Json;
 use axum::body::Body;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::{StatusCode, header};
 use axum::response::Response;
 
@@ -8,6 +7,7 @@ use matching_sequencer::{
     DaArtifact, DaArtifactLookup, DaArtifactManifest, DaManifestLookup, DaProviderRef,
 };
 
+use crate::extract::{Json, Path};
 use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::response::{DaManifestResponse, DaProviderRefResponse};

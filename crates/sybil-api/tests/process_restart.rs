@@ -27,6 +27,10 @@ use common::process::{
 // service. Running the drills concurrently creates artificial CPU/memory and
 // socket-timeout failures that obscure the restart contract under test.
 static PROCESS_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+// Debug API children can be descheduled while the complete workspace gate is
+// linking or cleaning up other large test binaries. Keep individual requests
+// bounded without treating ordinary loaded-host latency as a restart failure.
+const PROCESS_HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 
 fn to_hex(bytes: &[u8]) -> String {
     hex::encode(bytes)
@@ -108,7 +112,7 @@ async fn cold_start_wal_rejection_stays_scrapeable_in_recovery_only_mode() {
     let _process_test_guard = PROCESS_TEST_LOCK.lock().await;
     let root = ProcessTestRoot::new("restore-failure-metrics");
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(3))
+        .timeout(PROCESS_HTTP_TIMEOUT)
         .build()
         .unwrap();
 
@@ -173,7 +177,7 @@ async fn admin_feed_key_is_created_once_and_reused_after_process_restart() {
         "test starts without an admin feed key"
     );
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(3))
+        .timeout(PROCESS_HTTP_TIMEOUT)
         .build()
         .unwrap();
 
@@ -265,7 +269,7 @@ fn signed_buy_yes_payload(
     order.payoffs[1] = 0;
 
     let signature: Signature = key.sign(&canonical_order_bytes(&order, nonce, genesis_hash));
-    json!({
+    let mut payload = json!({
         "signer_pubkey_hex": to_hex(key.verifying_key().to_sec1_point(true).as_bytes()),
         "order": {
             "market_ids": [market_id],
@@ -275,7 +279,9 @@ fn signed_buy_yes_payload(
         },
         "nonce": nonce,
         "signature_hex": to_hex(signature.to_bytes().as_slice())
-    })
+    });
+    common::encode_nanos_strings(&mut payload);
+    payload
 }
 
 fn signed_cancel_payload(
@@ -386,7 +392,7 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
     // minimum-notional admission has focused API/sequencer coverage.
     let test_admission_env = [("SYBIL_MIN_RESTING_ORDER_NOTIONAL_NANOS", "0")];
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(3))
+        .timeout(PROCESS_HTTP_TIMEOUT)
         .build()
         .unwrap();
 
@@ -703,7 +709,7 @@ async fn extracted_history_survives_process_restart_and_canonical_block_pruning(
         ("SYBIL_CANONICAL_ARCHIVE_MAX_ROWS_PER_PASS", "100"),
     ];
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(3))
+        .timeout(PROCESS_HTTP_TIMEOUT)
         .build()
         .unwrap();
 
@@ -838,7 +844,7 @@ async fn deferred_bundle_revalidates_against_replayed_admit_after_process_restar
     let _process_test_guard = PROCESS_TEST_LOCK.lock().await;
     let root = ProcessTestRoot::new("process-restart-deferred");
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(3))
+        .timeout(PROCESS_HTTP_TIMEOUT)
         .build()
         .unwrap();
 

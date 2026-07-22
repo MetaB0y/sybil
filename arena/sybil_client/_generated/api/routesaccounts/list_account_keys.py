@@ -9,6 +9,7 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.account_key_response import AccountKeyResponse
+from ...models.api_error_response import ApiErrorResponse
 from typing import cast
 
 
@@ -33,7 +34,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | list[AccountKeyResponse] | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | ApiErrorResponse | list[AccountKeyResponse] | None:
     if response.status_code == 200:
         response_200 = []
         _response_200 = response.json()
@@ -45,6 +46,13 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
             response_200.append(response_200_item)
 
         return response_200
+
+    if response.status_code == 400:
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
 
     if response.status_code == 401:
         response_401 = cast(Any, None)
@@ -60,7 +68,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | list[AccountKeyResponse]]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | ApiErrorResponse | list[AccountKeyResponse]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -74,7 +82,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Any | list[AccountKeyResponse]]:
+) -> Response[Any | ApiErrorResponse | list[AccountKeyResponse]]:
     """ GET /v1/accounts/{id}/keys — list registered signing keys with metadata
 
     Args:
@@ -85,7 +93,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | list[AccountKeyResponse]]
+        Response[Any | ApiErrorResponse | list[AccountKeyResponse]]
      """
 
 
@@ -105,7 +113,7 @@ def sync(
     *,
     client: AuthenticatedClient,
 
-) -> Any | list[AccountKeyResponse] | None:
+) -> Any | ApiErrorResponse | list[AccountKeyResponse] | None:
     """ GET /v1/accounts/{id}/keys — list registered signing keys with metadata
 
     Args:
@@ -116,7 +124,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | list[AccountKeyResponse]
+        Any | ApiErrorResponse | list[AccountKeyResponse]
      """
 
 
@@ -131,7 +139,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Any | list[AccountKeyResponse]]:
+) -> Response[Any | ApiErrorResponse | list[AccountKeyResponse]]:
     """ GET /v1/accounts/{id}/keys — list registered signing keys with metadata
 
     Args:
@@ -142,7 +150,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | list[AccountKeyResponse]]
+        Response[Any | ApiErrorResponse | list[AccountKeyResponse]]
      """
 
 
@@ -162,7 +170,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
 
-) -> Any | list[AccountKeyResponse] | None:
+) -> Any | ApiErrorResponse | list[AccountKeyResponse] | None:
     """ GET /v1/accounts/{id}/keys — list registered signing keys with metadata
 
     Args:
@@ -173,7 +181,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | list[AccountKeyResponse]
+        Any | ApiErrorResponse | list[AccountKeyResponse]
      """
 
 

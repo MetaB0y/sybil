@@ -9,6 +9,7 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.account_response import AccountResponse
+from ...models.api_error_response import ApiErrorResponse
 from typing import cast
 
 
@@ -33,13 +34,20 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> AccountResponse | Any | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> AccountResponse | Any | ApiErrorResponse | None:
     if response.status_code == 200:
         response_200 = AccountResponse.from_dict(response.json())
 
 
 
         return response_200
+
+    if response.status_code == 400:
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
 
     if response.status_code == 401:
         response_401 = cast(Any, None)
@@ -59,7 +67,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[AccountResponse | Any]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[AccountResponse | Any | ApiErrorResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -73,7 +81,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[AccountResponse | Any]:
+) -> Response[AccountResponse | Any | ApiErrorResponse]:
     """ GET /v1/accounts/{id}
 
     Args:
@@ -84,7 +92,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[AccountResponse | Any]
+        Response[AccountResponse | Any | ApiErrorResponse]
      """
 
 
@@ -104,7 +112,7 @@ def sync(
     *,
     client: AuthenticatedClient,
 
-) -> AccountResponse | Any | None:
+) -> AccountResponse | Any | ApiErrorResponse | None:
     """ GET /v1/accounts/{id}
 
     Args:
@@ -115,7 +123,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        AccountResponse | Any
+        AccountResponse | Any | ApiErrorResponse
      """
 
 
@@ -130,7 +138,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[AccountResponse | Any]:
+) -> Response[AccountResponse | Any | ApiErrorResponse]:
     """ GET /v1/accounts/{id}
 
     Args:
@@ -141,7 +149,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[AccountResponse | Any]
+        Response[AccountResponse | Any | ApiErrorResponse]
      """
 
 
@@ -161,7 +169,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
 
-) -> AccountResponse | Any | None:
+) -> AccountResponse | Any | ApiErrorResponse | None:
     """ GET /v1/accounts/{id}
 
     Args:
@@ -172,7 +180,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        AccountResponse | Any
+        AccountResponse | Any | ApiErrorResponse
      """
 
 

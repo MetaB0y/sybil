@@ -2,8 +2,8 @@
 //!
 //! JavaScript cannot represent every Rust `u64` or `i64` as a JSON number.
 //! API DTOs therefore keep integers internally while using these serde
-//! adapters to emit exact decimal strings. Deserialization also accepts legacy
-//! integer tokens so non-JavaScript clients can migrate without a flag day.
+//! adapters to emit and accept exact decimal strings. JSON number tokens are
+//! rejected so runtime validation matches the generated OpenAPI schema.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -24,23 +24,19 @@ where
 
 pub fn deserialize<'de, T, D>(deserializer: D) -> Result<T, D::Error>
 where
-    T: FromStr + TryFrom<i64> + TryFrom<u64>,
+    T: FromStr,
     T::Err: fmt::Display,
-    <T as TryFrom<i64>>::Error: fmt::Display,
-    <T as TryFrom<u64>>::Error: fmt::Display,
     D: Deserializer<'de>,
 {
-    deserializer.deserialize_any(DecimalIntegerVisitor(PhantomData))
+    deserializer.deserialize_str(DecimalIntegerVisitor(PhantomData))
 }
 
 struct DecimalIntegerVisitor<T>(PhantomData<T>);
 
 impl<'de, T> Visitor<'de> for DecimalIntegerVisitor<T>
 where
-    T: FromStr + TryFrom<i64> + TryFrom<u64>,
+    T: FromStr,
     T::Err: fmt::Display,
-    <T as TryFrom<i64>>::Error: fmt::Display,
-    <T as TryFrom<u64>>::Error: fmt::Display,
 {
     type Value = T;
 
@@ -61,20 +57,6 @@ where
     {
         self.visit_str(&value)
     }
-
-    fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        T::try_from(value).map_err(E::custom)
-    }
-
-    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        T::try_from(value).map_err(E::custom)
-    }
 }
 
 pub mod option {
@@ -93,10 +75,8 @@ pub mod option {
 
     pub fn deserialize<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
     where
-        T: FromStr + TryFrom<i64> + TryFrom<u64>,
+        T: FromStr,
         T::Err: fmt::Display,
-        <T as TryFrom<i64>>::Error: fmt::Display,
-        <T as TryFrom<u64>>::Error: fmt::Display,
         D: Deserializer<'de>,
     {
         deserializer.deserialize_option(DecimalOptionVisitor(PhantomData))
@@ -106,10 +86,8 @@ pub mod option {
 
     impl<'de, T> Visitor<'de> for DecimalOptionVisitor<T>
     where
-        T: FromStr + TryFrom<i64> + TryFrom<u64>,
+        T: FromStr,
         T::Err: fmt::Display,
-        <T as TryFrom<i64>>::Error: fmt::Display,
-        <T as TryFrom<u64>>::Error: fmt::Display,
     {
         type Value = Option<T>;
 
@@ -210,11 +188,21 @@ pub mod map_u32_u64 {
     where
         D: Deserializer<'de>,
     {
-        let values = HashMap::<u32, DecimalU64>::deserialize(deserializer)?;
-        Ok(values
+        let values = HashMap::<String, DecimalU64>::deserialize(deserializer)?;
+        values
             .into_iter()
-            .map(|(key, value)| (key, value.0))
-            .collect())
+            .map(|(key, value)| {
+                if key != "0"
+                    && (key.starts_with('0') || !key.bytes().all(|byte| byte.is_ascii_digit()))
+                {
+                    return Err(de::Error::custom(format!(
+                        "map key {key:?} is not a canonical unsigned decimal integer"
+                    )));
+                }
+                let key = key.parse::<u32>().map_err(de::Error::custom)?;
+                Ok((key, value.0))
+            })
+            .collect()
     }
 
     struct DecimalU64(u64);
@@ -278,20 +266,15 @@ mod tests {
     }
 
     #[test]
-    fn accepts_legacy_integer_tokens_without_accepting_floats() {
-        let legacy = json!({
+    fn rejects_json_number_tokens() {
+        let numeric = json!({
             "unsigned_nanos": 42,
             "signed_nanos": -7,
             "optional_nanos": null,
             "prices_nanos": {"market": [1, 2]},
             "reference_prices_nanos": {"7": 3}
         });
-        let value = serde_json::from_value::<WireValues>(legacy).expect("legacy integers");
-        assert_eq!(value.unsigned_nanos, 42);
-        assert_eq!(value.signed_nanos, -7);
-        assert_eq!(value.optional_nanos, None);
-        assert_eq!(value.prices_nanos["market"], [1, 2]);
-        assert_eq!(value.reference_prices_nanos[&7], 3);
+        assert!(serde_json::from_value::<WireValues>(numeric).is_err());
 
         let floating = r#"{
             "unsigned_nanos": 1.5,
@@ -301,5 +284,24 @@ mod tests {
             "reference_prices_nanos": {}
         }"#;
         assert!(serde_json::from_str::<WireValues>(floating).is_err());
+    }
+
+    #[test]
+    fn rejects_noncanonical_or_out_of_range_u32_map_keys() {
+        for key in ["01", "4294967296", "market"] {
+            let payload = format!(
+                r#"{{
+                    "unsigned_nanos": "1",
+                    "signed_nanos": "-1",
+                    "optional_nanos": null,
+                    "prices_nanos": {{}},
+                    "reference_prices_nanos": {{"{key}": "1"}}
+                }}"#
+            );
+            assert!(
+                serde_json::from_str::<WireValues>(&payload).is_err(),
+                "map key {key:?} must be rejected"
+            );
+        }
     }
 }

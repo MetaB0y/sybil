@@ -250,7 +250,7 @@ fn route_tiers_are_disjoint() {
 /// Every PUBLIC route must be reachable with NO service token — it must never
 /// return the service-gate 401. This is the direct, table-driven guard for the
 /// onboarding regression: had the public command been service-gated, this sweep
-/// would flag it as 401-without-a-token. (Domain 400/404/422 are fine; only the
+/// would flag it as 401-without-a-token. (Domain 4xx responses are fine; only the
 /// service-gate 401 is forbidden. Bearer-gated reads are excluded — see below.)
 #[tokio::test]
 async fn every_public_route_is_reachable_without_service_token() {

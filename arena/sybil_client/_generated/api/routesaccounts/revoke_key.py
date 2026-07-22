@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.revoke_key_request import RevokeKeyRequest
 from typing import cast
 
@@ -40,21 +41,29 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | ApiErrorResponse | None:
     if response.status_code == 200:
-        return None
+        response_200 = cast(Any, None)
+        return response_200
 
     if response.status_code == 400:
-        return None
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
 
     if response.status_code == 403:
-        return None
+        response_403 = cast(Any, None)
+        return response_403
 
     if response.status_code == 404:
-        return None
+        response_404 = cast(Any, None)
+        return response_404
 
     if response.status_code == 409:
-        return None
+        response_409 = cast(Any, None)
+        return response_409
 
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
@@ -62,7 +71,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | ApiErrorResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -77,7 +86,7 @@ def sync_detailed(
     client: AuthenticatedClient | Client,
     body: RevokeKeyRequest,
 
-) -> Response[Any]:
+) -> Response[Any | ApiErrorResponse]:
     """ POST /v1/accounts/{id}/keys/revoke — revoke a signing key (signed) (SYB-60)
 
     Args:
@@ -89,7 +98,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any]
+        Response[Any | ApiErrorResponse]
      """
 
 
@@ -105,14 +114,13 @@ body=body,
 
     return _build_response(client=client, response=response)
 
-
-async def asyncio_detailed(
+def sync(
     id: int,
     *,
     client: AuthenticatedClient | Client,
     body: RevokeKeyRequest,
 
-) -> Response[Any]:
+) -> Any | ApiErrorResponse | None:
     """ POST /v1/accounts/{id}/keys/revoke — revoke a signing key (signed) (SYB-60)
 
     Args:
@@ -124,7 +132,36 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any]
+        Any | ApiErrorResponse
+     """
+
+
+    return sync_detailed(
+        id=id,
+client=client,
+body=body,
+
+    ).parsed
+
+async def asyncio_detailed(
+    id: int,
+    *,
+    client: AuthenticatedClient | Client,
+    body: RevokeKeyRequest,
+
+) -> Response[Any | ApiErrorResponse]:
+    """ POST /v1/accounts/{id}/keys/revoke — revoke a signing key (signed) (SYB-60)
+
+    Args:
+        id (int):
+        body (RevokeKeyRequest): Signed request to revoke a registered signing key (SYB-60).
+
+    Raises:
+        errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
+        httpx.TimeoutException: If the request takes longer than Client.timeout.
+
+    Returns:
+        Response[Any | ApiErrorResponse]
      """
 
 
@@ -140,3 +177,31 @@ body=body,
 
     return _build_response(client=client, response=response)
 
+async def asyncio(
+    id: int,
+    *,
+    client: AuthenticatedClient | Client,
+    body: RevokeKeyRequest,
+
+) -> Any | ApiErrorResponse | None:
+    """ POST /v1/accounts/{id}/keys/revoke — revoke a signing key (signed) (SYB-60)
+
+    Args:
+        id (int):
+        body (RevokeKeyRequest): Signed request to revoke a registered signing key (SYB-60).
+
+    Raises:
+        errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
+        httpx.TimeoutException: If the request takes longer than Client.timeout.
+
+    Returns:
+        Any | ApiErrorResponse
+     """
+
+
+    return (await asyncio_detailed(
+        id=id,
+client=client,
+body=body,
+
+    )).parsed

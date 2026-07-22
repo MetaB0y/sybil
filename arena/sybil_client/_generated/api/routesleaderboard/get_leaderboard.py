@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.leaderboard_response import LeaderboardResponse
 from ...types import UNSET, Unset
 from typing import cast
@@ -45,13 +46,20 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | LeaderboardResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | ApiErrorResponse | LeaderboardResponse | None:
     if response.status_code == 200:
         response_200 = LeaderboardResponse.from_dict(response.json())
 
 
 
         return response_200
+
+    if response.status_code == 400:
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
 
     if response.status_code == 503:
         response_503 = cast(Any, None)
@@ -63,7 +71,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | LeaderboardResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | ApiErrorResponse | LeaderboardResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -78,7 +86,7 @@ def sync_detailed(
     window: str | Unset = UNSET,
     limit: int | Unset = UNSET,
 
-) -> Response[Any | LeaderboardResponse]:
+) -> Response[Any | ApiErrorResponse | LeaderboardResponse]:
     """ GET /v1/leaderboard?window&limit
 
     Args:
@@ -90,7 +98,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | LeaderboardResponse]
+        Response[Any | ApiErrorResponse | LeaderboardResponse]
      """
 
 
@@ -112,7 +120,7 @@ def sync(
     window: str | Unset = UNSET,
     limit: int | Unset = UNSET,
 
-) -> Any | LeaderboardResponse | None:
+) -> Any | ApiErrorResponse | LeaderboardResponse | None:
     """ GET /v1/leaderboard?window&limit
 
     Args:
@@ -124,7 +132,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | LeaderboardResponse
+        Any | ApiErrorResponse | LeaderboardResponse
      """
 
 
@@ -141,7 +149,7 @@ async def asyncio_detailed(
     window: str | Unset = UNSET,
     limit: int | Unset = UNSET,
 
-) -> Response[Any | LeaderboardResponse]:
+) -> Response[Any | ApiErrorResponse | LeaderboardResponse]:
     """ GET /v1/leaderboard?window&limit
 
     Args:
@@ -153,7 +161,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | LeaderboardResponse]
+        Response[Any | ApiErrorResponse | LeaderboardResponse]
      """
 
 
@@ -175,7 +183,7 @@ async def asyncio(
     window: str | Unset = UNSET,
     limit: int | Unset = UNSET,
 
-) -> Any | LeaderboardResponse | None:
+) -> Any | ApiErrorResponse | LeaderboardResponse | None:
     """ GET /v1/leaderboard?window&limit
 
     Args:
@@ -187,7 +195,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | LeaderboardResponse
+        Any | ApiErrorResponse | LeaderboardResponse
      """
 
 

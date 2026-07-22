@@ -1,5 +1,4 @@
-use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 
 use matching_sequencer::{
     AccountSnapshotSlot, QMDB_STATE_MAX_KEY_BYTES, QmdbStateExclusionProofParts,
@@ -7,6 +6,7 @@ use matching_sequencer::{
     SequencerStateProof, SequencerStateProofKind,
 };
 
+use crate::extract::{Json, Path};
 use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::response::*;

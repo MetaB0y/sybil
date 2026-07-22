@@ -1,10 +1,10 @@
-use axum::Json;
 use axum::body::Body;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::{HeaderName, HeaderValue, Response, StatusCode, header};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::extract::{Json, Path};
 use crate::state::AppState;
 use crate::types::error::AppError;
 
@@ -30,7 +30,7 @@ pub struct ProofJobAckResponse {
     get,
     path = "/v1/prover/jobs/next",
     responses(
-        (status = 200, description = "Oldest unacknowledged MessagePack proof job", body = Vec<u8>),
+        (status = 200, description = "Oldest unacknowledged MessagePack proof job", body = Vec<u8>, content_type = "application/msgpack"),
         (status = 204, description = "No unacknowledged proof job"),
         (status = 503, description = "Persistent proof-job outbox unavailable")
     )

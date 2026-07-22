@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.bridge_account_key_response import BridgeAccountKeyResponse
 from typing import cast
 
@@ -33,13 +34,20 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | BridgeAccountKeyResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | ApiErrorResponse | BridgeAccountKeyResponse | None:
     if response.status_code == 200:
         response_200 = BridgeAccountKeyResponse.from_dict(response.json())
 
 
 
         return response_200
+
+    if response.status_code == 400:
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
 
     if response.status_code == 404:
         response_404 = cast(Any, None)
@@ -51,7 +59,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | BridgeAccountKeyResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | ApiErrorResponse | BridgeAccountKeyResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -65,7 +73,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
 
-) -> Response[Any | BridgeAccountKeyResponse]:
+) -> Response[Any | ApiErrorResponse | BridgeAccountKeyResponse]:
     """ GET /v1/bridge/accounts/by-key/{key_hex}
 
     Args:
@@ -76,7 +84,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | BridgeAccountKeyResponse]
+        Response[Any | ApiErrorResponse | BridgeAccountKeyResponse]
      """
 
 
@@ -96,7 +104,7 @@ def sync(
     *,
     client: AuthenticatedClient | Client,
 
-) -> Any | BridgeAccountKeyResponse | None:
+) -> Any | ApiErrorResponse | BridgeAccountKeyResponse | None:
     """ GET /v1/bridge/accounts/by-key/{key_hex}
 
     Args:
@@ -107,7 +115,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | BridgeAccountKeyResponse
+        Any | ApiErrorResponse | BridgeAccountKeyResponse
      """
 
 
@@ -122,7 +130,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
 
-) -> Response[Any | BridgeAccountKeyResponse]:
+) -> Response[Any | ApiErrorResponse | BridgeAccountKeyResponse]:
     """ GET /v1/bridge/accounts/by-key/{key_hex}
 
     Args:
@@ -133,7 +141,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | BridgeAccountKeyResponse]
+        Response[Any | ApiErrorResponse | BridgeAccountKeyResponse]
      """
 
 
@@ -153,7 +161,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient | Client,
 
-) -> Any | BridgeAccountKeyResponse | None:
+) -> Any | ApiErrorResponse | BridgeAccountKeyResponse | None:
     """ GET /v1/bridge/accounts/by-key/{key_hex}
 
     Args:
@@ -164,7 +172,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | BridgeAccountKeyResponse
+        Any | ApiErrorResponse | BridgeAccountKeyResponse
      """
 
 

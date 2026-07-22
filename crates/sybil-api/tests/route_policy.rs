@@ -19,7 +19,7 @@ use sybil_api::app::{DEV_ROUTE_TABLE, OWNER_ROUTE_TABLE, PUBLIC_ROUTE_TABLE, SER
 use sybil_api::config::ApiConfig;
 use tower::ServiceExt;
 
-use common::test_app_with_config;
+use common::{encode_nanos_strings, test_app_with_config};
 
 const TOKEN: &str = "route-policy-token";
 static NEXT_PROVISIONING_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -132,6 +132,7 @@ async fn request_json(
             ))
         });
     }
+    encode_nanos_strings(&mut body);
     let mut builder = Request::builder()
         .method(method)
         .uri(uri)
@@ -448,7 +449,7 @@ async fn onboarding_is_public_and_caller_funding_is_service_only() {
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

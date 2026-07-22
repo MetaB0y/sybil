@@ -438,7 +438,7 @@ store-tools-check:
     bash -n scripts/store-backup.sh scripts/store-restore-drill.sh scripts/test-store-restore-drill.sh
 
 # Complete local/CI-equivalent gate, including every standalone Rust workspace.
-check-all: check-fast check-features test standalone-check check-consensus docs-check store-tools-check arena-check frontend-check monitoring-check contracts-fmt-check contracts-build contracts-test contracts-coverage
+check-all: check-fast check-features test standalone-check check-consensus docs-check store-tools-check arena-check frontend-check api-contract-check monitoring-check contracts-fmt-check contracts-build contracts-test contracts-coverage
     @echo "All checks passed!"
 
 # Run benchmarks if any
@@ -598,6 +598,10 @@ pre-commit: contracts-fmt-check
 # E2E smoke test (starts server, exercises API, tears down)
 smoke:
     ./scripts/smoke-test.sh
+
+# Run deterministic positive/negative OpenAPI fuzzing against a disposable API.
+api-contract-check:
+    ./scripts/api-contract-check.sh
 
 # ── Docker ─────────────────────────────────────────────────────────────────
 

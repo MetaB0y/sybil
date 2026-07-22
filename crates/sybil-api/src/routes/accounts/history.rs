@@ -1,5 +1,4 @@
-use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::State;
 use axum::http::HeaderMap;
 
 use matching_engine::MarketId;
@@ -7,6 +6,8 @@ use matching_sequencer::AccountId;
 use sybil_history_types::{
     AccountEventQuery, EquityQuery, FillCursor, FillQuery, ProjectionStatus,
 };
+
+use crate::extract::{Json, Path, Query};
 
 use crate::convert::account_balance_breakdown;
 use crate::state::AppState;
@@ -89,7 +90,7 @@ pub async fn get_portfolio(
         ("id" = u64, Path, description = "Account ID"),
         ("market_id" = Option<u32>, Query, description = "Filter by market ID"),
         ("after" = Option<String>, Query, description = "Stable cursor returned as `cursor` on each fill. When present, returns fills strictly after this cursor in ascending order. Use `0.0` to start from the beginning."),
-        ("limit" = Option<usize>, Query, description = "Result limit (default 100, cap 500)"),
+        ("limit" = Option<usize>, Query, maximum = 500, description = "Result limit (default 100, cap 500)"),
     ),
     responses(
         (status = 200, description = "Retained account fill history", body = AccountFillPageResponse),
@@ -107,6 +108,14 @@ pub async fn get_account_fills(
     Query(params): Query<AccountFillParams>,
 ) -> Result<Json<AccountFillPageResponse>, AppError> {
     authorize_account_read(&state, &headers, AccountId(id)).await?;
+    if params
+        .limit
+        .is_some_and(|limit| limit > MAX_ACCOUNT_FILL_QUERY_LIMIT)
+    {
+        return Err(AppError::bad_request(format!(
+            "limit must be at most {MAX_ACCOUNT_FILL_QUERY_LIMIT}"
+        )));
+    }
     let market_id = params.market_id.map(MarketId::new);
     let limit = account_fill_query_limit(params.limit);
     let request_limit = limit.saturating_add(1);
@@ -225,7 +234,7 @@ fn parse_cursor(s: &str) -> Option<(u64, u64)> {
     path = "/v1/accounts/{id}/events",
     params(
         ("id" = u64, Path, description = "Account ID"),
-        ("limit" = Option<usize>, Query, description = "Max events (default 50, cap 500)"),
+        ("limit" = Option<usize>, Query, maximum = 500, description = "Max events (default 50, cap 500)"),
         ("before" = Option<String>, Query, description = "Cursor \"<block>.<seq>\"; returns events strictly before it"),
         ("category" = Option<String>, Query, description = "trades | funding | settlement"),
     ),
@@ -245,6 +254,9 @@ pub async fn get_account_history(
     Query(params): Query<HistoryParams>,
 ) -> Result<Json<AccountHistoryPageResponse>, AppError> {
     authorize_account_read(&state, &headers, AccountId(id)).await?;
+    if params.limit.is_some_and(|limit| limit > 500) {
+        return Err(AppError::bad_request("limit must be at most 500"));
+    }
     let limit = params.limit.unwrap_or(50).min(500);
     let before = params
         .before

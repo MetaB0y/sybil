@@ -199,7 +199,7 @@ pub async fn wait_for_health(client: &reqwest::Client, base_url: &str) -> Value 
     // linker/test cleanup for several seconds even though the same process test
     // starts immediately in isolation. Keep the assertion bounded, but allow
     // enough headroom for the workspace gate on loaded CI and dev hosts.
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + Duration::from_secs(60);
 
     loop {
         let last_error = match client.get(format!("{base_url}/v1/health")).send().await {
@@ -289,6 +289,7 @@ pub async fn post_json(
             ))
         });
     }
+    super::encode_nanos_strings(&mut body);
     let resp = client
         .post(format!("{base_url}{path}"))
         .json(&body)

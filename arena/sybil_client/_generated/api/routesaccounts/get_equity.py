@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.equity_series_response import EquitySeriesResponse
 from ...types import UNSET, Unset
 from typing import cast
@@ -43,13 +44,20 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | EquitySeriesResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | ApiErrorResponse | EquitySeriesResponse | None:
     if response.status_code == 200:
         response_200 = EquitySeriesResponse.from_dict(response.json())
 
 
 
         return response_200
+
+    if response.status_code == 400:
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
 
     if response.status_code == 401:
         response_401 = cast(Any, None)
@@ -69,7 +77,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | EquitySeriesResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | ApiErrorResponse | EquitySeriesResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -84,7 +92,7 @@ def sync_detailed(
     client: AuthenticatedClient,
     range_: str | Unset = UNSET,
 
-) -> Response[Any | EquitySeriesResponse]:
+) -> Response[Any | ApiErrorResponse | EquitySeriesResponse]:
     """ GET /v1/accounts/{id}/equity?range=
 
     Args:
@@ -96,7 +104,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | EquitySeriesResponse]
+        Response[Any | ApiErrorResponse | EquitySeriesResponse]
      """
 
 
@@ -118,7 +126,7 @@ def sync(
     client: AuthenticatedClient,
     range_: str | Unset = UNSET,
 
-) -> Any | EquitySeriesResponse | None:
+) -> Any | ApiErrorResponse | EquitySeriesResponse | None:
     """ GET /v1/accounts/{id}/equity?range=
 
     Args:
@@ -130,7 +138,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | EquitySeriesResponse
+        Any | ApiErrorResponse | EquitySeriesResponse
      """
 
 
@@ -147,7 +155,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient,
     range_: str | Unset = UNSET,
 
-) -> Response[Any | EquitySeriesResponse]:
+) -> Response[Any | ApiErrorResponse | EquitySeriesResponse]:
     """ GET /v1/accounts/{id}/equity?range=
 
     Args:
@@ -159,7 +167,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | EquitySeriesResponse]
+        Response[Any | ApiErrorResponse | EquitySeriesResponse]
      """
 
 
@@ -181,7 +189,7 @@ async def asyncio(
     client: AuthenticatedClient,
     range_: str | Unset = UNSET,
 
-) -> Any | EquitySeriesResponse | None:
+) -> Any | ApiErrorResponse | EquitySeriesResponse | None:
     """ GET /v1/accounts/{id}/equity?range=
 
     Args:
@@ -193,7 +201,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | EquitySeriesResponse
+        Any | ApiErrorResponse | EquitySeriesResponse
      """
 
 

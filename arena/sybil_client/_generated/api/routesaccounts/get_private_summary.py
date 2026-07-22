@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.private_account_summary_response import PrivateAccountSummaryResponse
 from typing import cast
 
@@ -33,13 +34,20 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | PrivateAccountSummaryResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | ApiErrorResponse | PrivateAccountSummaryResponse | None:
     if response.status_code == 200:
         response_200 = PrivateAccountSummaryResponse.from_dict(response.json())
 
 
 
         return response_200
+
+    if response.status_code == 400:
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
 
     if response.status_code == 401:
         response_401 = cast(Any, None)
@@ -59,7 +67,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | PrivateAccountSummaryResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | ApiErrorResponse | PrivateAccountSummaryResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -73,7 +81,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Any | PrivateAccountSummaryResponse]:
+) -> Response[Any | ApiErrorResponse | PrivateAccountSummaryResponse]:
     """ GET /v1/accounts/{id}/private-summary — bearer-gated private read (SYB-60)
 
      Template endpoint demonstrating `Authorization: Bearer` gating. It returns
@@ -88,7 +96,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | PrivateAccountSummaryResponse]
+        Response[Any | ApiErrorResponse | PrivateAccountSummaryResponse]
      """
 
 
@@ -108,7 +116,7 @@ def sync(
     *,
     client: AuthenticatedClient,
 
-) -> Any | PrivateAccountSummaryResponse | None:
+) -> Any | ApiErrorResponse | PrivateAccountSummaryResponse | None:
     """ GET /v1/accounts/{id}/private-summary — bearer-gated private read (SYB-60)
 
      Template endpoint demonstrating `Authorization: Bearer` gating. It returns
@@ -123,7 +131,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | PrivateAccountSummaryResponse
+        Any | ApiErrorResponse | PrivateAccountSummaryResponse
      """
 
 
@@ -138,7 +146,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Any | PrivateAccountSummaryResponse]:
+) -> Response[Any | ApiErrorResponse | PrivateAccountSummaryResponse]:
     """ GET /v1/accounts/{id}/private-summary — bearer-gated private read (SYB-60)
 
      Template endpoint demonstrating `Authorization: Bearer` gating. It returns
@@ -153,7 +161,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | PrivateAccountSummaryResponse]
+        Response[Any | ApiErrorResponse | PrivateAccountSummaryResponse]
      """
 
 
@@ -173,7 +181,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
 
-) -> Any | PrivateAccountSummaryResponse | None:
+) -> Any | ApiErrorResponse | PrivateAccountSummaryResponse | None:
     """ GET /v1/accounts/{id}/private-summary — bearer-gated private read (SYB-60)
 
      Template endpoint demonstrating `Authorization: Bearer` gating. It returns
@@ -188,7 +196,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | PrivateAccountSummaryResponse
+        Any | ApiErrorResponse | PrivateAccountSummaryResponse
      """
 
 

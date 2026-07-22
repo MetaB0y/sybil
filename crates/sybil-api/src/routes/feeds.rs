@@ -1,8 +1,8 @@
-use axum::Json;
 use axum::extract::State;
 
 use sybil_oracle::FeedPubkey;
 
+use crate::extract::Json;
 use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::request::RegisterFeedRequest;

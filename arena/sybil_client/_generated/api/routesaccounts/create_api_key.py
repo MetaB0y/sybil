@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.create_api_key_request import CreateApiKeyRequest
 from ...models.create_api_key_response import CreateApiKeyResponse
 from typing import cast
@@ -41,7 +42,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | CreateApiKeyResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | ApiErrorResponse | CreateApiKeyResponse | None:
     if response.status_code == 200:
         response_200 = CreateApiKeyResponse.from_dict(response.json())
 
@@ -50,7 +51,10 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return response_200
 
     if response.status_code == 400:
-        response_400 = cast(Any, None)
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
         return response_400
 
     if response.status_code == 403:
@@ -71,7 +75,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | CreateApiKeyResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | ApiErrorResponse | CreateApiKeyResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -86,7 +90,7 @@ def sync_detailed(
     client: AuthenticatedClient | Client,
     body: CreateApiKeyRequest,
 
-) -> Response[Any | CreateApiKeyResponse]:
+) -> Response[Any | ApiErrorResponse | CreateApiKeyResponse]:
     """ POST /v1/accounts/{id}/api-keys — create a read API key (signed) (SYB-60)
 
      The bearer token is returned exactly once; only its blake3 hash is stored.
@@ -104,7 +108,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | CreateApiKeyResponse]
+        Response[Any | ApiErrorResponse | CreateApiKeyResponse]
      """
 
 
@@ -126,7 +130,7 @@ def sync(
     client: AuthenticatedClient | Client,
     body: CreateApiKeyRequest,
 
-) -> Any | CreateApiKeyResponse | None:
+) -> Any | ApiErrorResponse | CreateApiKeyResponse | None:
     """ POST /v1/accounts/{id}/api-keys — create a read API key (signed) (SYB-60)
 
      The bearer token is returned exactly once; only its blake3 hash is stored.
@@ -144,7 +148,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | CreateApiKeyResponse
+        Any | ApiErrorResponse | CreateApiKeyResponse
      """
 
 
@@ -161,7 +165,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient | Client,
     body: CreateApiKeyRequest,
 
-) -> Response[Any | CreateApiKeyResponse]:
+) -> Response[Any | ApiErrorResponse | CreateApiKeyResponse]:
     """ POST /v1/accounts/{id}/api-keys — create a read API key (signed) (SYB-60)
 
      The bearer token is returned exactly once; only its blake3 hash is stored.
@@ -179,7 +183,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | CreateApiKeyResponse]
+        Response[Any | ApiErrorResponse | CreateApiKeyResponse]
      """
 
 
@@ -201,7 +205,7 @@ async def asyncio(
     client: AuthenticatedClient | Client,
     body: CreateApiKeyRequest,
 
-) -> Any | CreateApiKeyResponse | None:
+) -> Any | ApiErrorResponse | CreateApiKeyResponse | None:
     """ POST /v1/accounts/{id}/api-keys — create a read API key (signed) (SYB-60)
 
      The bearer token is returned exactly once; only its blake3 hash is stored.
@@ -219,7 +223,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | CreateApiKeyResponse
+        Any | ApiErrorResponse | CreateApiKeyResponse
      """
 
 

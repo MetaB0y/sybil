@@ -171,7 +171,15 @@ fn check_schema_unit_descriptions(
 
 fn nanos_schema_is_exact_decimal_string(schema: &serde_json::Value) -> bool {
     match schema.get("type") {
-        Some(serde_json::Value::String(kind)) if kind == "string" => true,
+        Some(serde_json::Value::String(kind)) if kind == "string" => matches!(
+            schema.get("pattern").and_then(serde_json::Value::as_str),
+            Some(
+                "^[0-9]+$"
+                    | "^-?[0-9]+$"
+                    | "^0*(?:[0-9]{1,9}|1000000000)$"
+                    | "^0*(?:[1-9][0-9]{0,8}|1000000000)$"
+            )
+        ),
         Some(serde_json::Value::String(kind)) if kind == "array" => schema
             .get("items")
             .is_some_and(nanos_schema_is_exact_decimal_string),
@@ -181,6 +189,15 @@ fn nanos_schema_is_exact_decimal_string(schema: &serde_json::Value) -> bool {
         Some(serde_json::Value::Array(kinds)) => {
             kinds.iter().any(|kind| kind == "string")
                 && kinds.iter().all(|kind| kind == "string" || kind == "null")
+                && matches!(
+                    schema.get("pattern").and_then(serde_json::Value::as_str),
+                    Some(
+                        "^[0-9]+$"
+                            | "^-?[0-9]+$"
+                            | "^0*(?:[0-9]{1,9}|1000000000)$"
+                            | "^0*(?:[1-9][0-9]{0,8}|1000000000)$"
+                    )
+                )
         }
         _ => false,
     }
@@ -412,6 +429,165 @@ fn openapi_nanos_fields_are_decimal_strings() {
     assert_eq!(
         covered_parameters, EXPECTED_NANOS_WIRE_PARAMETERS,
         "OpenAPI *_nanos parameter count changed; keep the decimal-string contract and update the pin"
+    );
+}
+
+#[test]
+fn extractor_inputs_document_json_bad_requests() {
+    let spec = openapi_json();
+    let common = spec
+        .pointer("/components/responses/InvalidRequest")
+        .expect("shared invalid-request response");
+    assert_eq!(
+        common.pointer("/content/application~1json/schema/$ref"),
+        Some(&serde_json::Value::String(
+            "#/components/schemas/ApiErrorResponse".to_string()
+        ))
+    );
+
+    let mut covered = 0;
+    let mut invalid = Vec::new();
+    for (path, item) in spec["paths"].as_object().expect("OpenAPI paths") {
+        let path_parameters = item
+            .get("parameters")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|parameters| !parameters.is_empty());
+        for (method, operation) in item.as_object().expect("OpenAPI path item") {
+            if !matches!(
+                method.as_str(),
+                "get" | "post" | "put" | "patch" | "delete" | "options" | "head" | "trace"
+            ) {
+                continue;
+            }
+            let operation_parameters = operation
+                .get("parameters")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|parameters| {
+                    parameters.iter().any(|parameter| {
+                        matches!(
+                            parameter.get("in").and_then(serde_json::Value::as_str),
+                            Some("path" | "query")
+                        )
+                    })
+                });
+            if !path_parameters && !operation_parameters && operation.get("requestBody").is_none() {
+                continue;
+            }
+            covered += 1;
+            let Some(response) = operation.pointer("/responses/400") else {
+                invalid.push(format!("{method} {path}: missing 400 response"));
+                continue;
+            };
+            let is_shared = response.get("$ref").and_then(serde_json::Value::as_str)
+                == Some("#/components/responses/InvalidRequest");
+            let is_inline_json = response
+                .pointer("/content/application~1json/schema/$ref")
+                .and_then(serde_json::Value::as_str)
+                == Some("#/components/schemas/ApiErrorResponse");
+            if !is_shared && !is_inline_json {
+                invalid.push(format!("{method} {path}: invalid 400 response {response}"));
+            }
+        }
+    }
+
+    assert!(covered > 0, "expected extractor-bearing operations");
+    assert!(
+        invalid.is_empty(),
+        "path/query/body operations must document the JSON 400 contract:\n{}",
+        invalid.join("\n")
+    );
+}
+
+#[test]
+fn openapi_tightens_local_string_constraints() {
+    let spec = openapi_json();
+    let cases = [
+        (
+            "/components/schemas/RegisterKeyRequest/properties/public_key_hex/pattern",
+            "^(?:0x)?(?:02|03)[0-9a-fA-F]{64}$",
+        ),
+        (
+            "/components/schemas/SubmitSignedMmBundleRequest/properties/bundle_id_hex/pattern",
+            "^(?:0x)?[0-9a-fA-F]{64}$",
+        ),
+        (
+            "/components/schemas/SubmitL1DepositRequest/properties/vault_address_hex/pattern",
+            "^(?:0x)?[0-9a-fA-F]{40}$",
+        ),
+        (
+            "/paths/~1v1~1accounts~1{id}~1fills/get/parameters/2/schema/pattern",
+            "^[0-9]+\\.[0-9]+$",
+        ),
+    ];
+    for (pointer, expected) in cases {
+        assert_eq!(
+            spec.pointer(pointer).and_then(serde_json::Value::as_str),
+            Some(expected),
+            "missing executable constraint at {pointer}"
+        );
+    }
+    assert_eq!(
+        spec.pointer("/components/schemas/RegisterKeyRequest/properties/label/maxLength")
+            .and_then(serde_json::Value::as_u64),
+        Some(128)
+    );
+    assert_eq!(
+        spec.pointer(
+            "/components/schemas/CreateAccountRequest/properties/provisioning_key/minLength"
+        )
+        .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        spec.pointer(
+            "/components/schemas/SetReferencePricesRequest/properties/prices_nanos/propertyNames/type"
+        )
+        .and_then(serde_json::Value::as_str),
+        Some("string")
+    );
+    assert_eq!(
+        spec.pointer(
+            "/components/schemas/SetReferencePricesRequest/properties/prices_nanos/additionalProperties/pattern"
+        )
+        .and_then(serde_json::Value::as_str),
+        Some("^0*(?:[0-9]{1,9}|1000000000)$")
+    );
+    assert_eq!(
+        spec.pointer(
+            "/paths/~1v1~1markets~1{id}~1prices~1candles/get/parameters/1/schema/maxLength"
+        )
+        .and_then(serde_json::Value::as_u64),
+        Some(7)
+    );
+    assert!(
+        spec.pointer(
+            "/paths/~1v1~1prover~1jobs~1next/get/responses/200/content/application~1msgpack"
+        )
+        .is_some(),
+        "proof-job response must document its runtime MessagePack content type"
+    );
+    assert_eq!(
+        spec.pointer("/components/schemas/SubmitL1WithdrawalEventRequest/properties/status/enum"),
+        Some(&serde_json::json!([
+            "not_requested",
+            "queued",
+            "finalized",
+            "cancelled"
+        ]))
+    );
+    assert_eq!(
+        spec.pointer(
+            "/components/schemas/SubmitL1WithdrawalEventRequest/properties/l1_block_height/maximum"
+        )
+        .and_then(serde_json::Value::as_u64),
+        Some(u64::MAX)
+    );
+    assert!(
+        spec.pointer(
+            "/components/schemas/SubmitL1WithdrawalEventRequest/properties/l1_block_height/format"
+        )
+        .is_none(),
+        "a full-range u64 must not claim the signed OpenAPI int64 format"
     );
 }
 

@@ -12,7 +12,7 @@ use axum::http::{Method, Request, StatusCode};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use ciborium::value::Value as CborValue;
-use common::{get, post_json, test_app_with_config};
+use common::{encode_nanos_strings, get, post_json, test_app_with_config};
 use http_body_util::BodyExt;
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
@@ -281,8 +281,9 @@ async fn post_with_bearer(
     app: axum::Router,
     uri: &str,
     token: &str,
-    body: Value,
+    mut body: Value,
 ) -> (StatusCode, Vec<u8>) {
+    encode_nanos_strings(&mut body);
     let req = Request::builder()
         .method(Method::POST)
         .uri(uri)

@@ -9,6 +9,7 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.account_history_page_response import AccountHistoryPageResponse
+from ...models.api_error_response import ApiErrorResponse
 from ...types import UNSET, Unset
 from typing import cast
 
@@ -49,7 +50,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> AccountHistoryPageResponse | Any | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> AccountHistoryPageResponse | Any | ApiErrorResponse | None:
     if response.status_code == 200:
         response_200 = AccountHistoryPageResponse.from_dict(response.json())
 
@@ -58,7 +59,10 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return response_200
 
     if response.status_code == 400:
-        response_400 = cast(Any, None)
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
         return response_400
 
     if response.status_code == 401:
@@ -79,7 +83,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[AccountHistoryPageResponse | Any]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[AccountHistoryPageResponse | Any | ApiErrorResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -96,7 +100,7 @@ def sync_detailed(
     before: str | Unset = UNSET,
     category: str | Unset = UNSET,
 
-) -> Response[AccountHistoryPageResponse | Any]:
+) -> Response[AccountHistoryPageResponse | Any | ApiErrorResponse]:
     """ GET /v1/accounts/{id}/events?limit&before&category
 
     Args:
@@ -110,7 +114,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[AccountHistoryPageResponse | Any]
+        Response[AccountHistoryPageResponse | Any | ApiErrorResponse]
      """
 
 
@@ -136,7 +140,7 @@ def sync(
     before: str | Unset = UNSET,
     category: str | Unset = UNSET,
 
-) -> AccountHistoryPageResponse | Any | None:
+) -> AccountHistoryPageResponse | Any | ApiErrorResponse | None:
     """ GET /v1/accounts/{id}/events?limit&before&category
 
     Args:
@@ -150,7 +154,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        AccountHistoryPageResponse | Any
+        AccountHistoryPageResponse | Any | ApiErrorResponse
      """
 
 
@@ -171,7 +175,7 @@ async def asyncio_detailed(
     before: str | Unset = UNSET,
     category: str | Unset = UNSET,
 
-) -> Response[AccountHistoryPageResponse | Any]:
+) -> Response[AccountHistoryPageResponse | Any | ApiErrorResponse]:
     """ GET /v1/accounts/{id}/events?limit&before&category
 
     Args:
@@ -185,7 +189,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[AccountHistoryPageResponse | Any]
+        Response[AccountHistoryPageResponse | Any | ApiErrorResponse]
      """
 
 
@@ -211,7 +215,7 @@ async def asyncio(
     before: str | Unset = UNSET,
     category: str | Unset = UNSET,
 
-) -> AccountHistoryPageResponse | Any | None:
+) -> AccountHistoryPageResponse | Any | ApiErrorResponse | None:
     """ GET /v1/accounts/{id}/events?limit&before&category
 
     Args:
@@ -225,7 +229,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        AccountHistoryPageResponse | Any
+        AccountHistoryPageResponse | Any | ApiErrorResponse
      """
 
 

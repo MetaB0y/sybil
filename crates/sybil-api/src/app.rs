@@ -138,6 +138,8 @@ use crate::util::now_ms;
         routes::bots::TokenUsageResponse,
         routes::bots::BotEquitySeriesResponse,
         routes::bots::BotEquityPointResponse,
+        ApiErrorDetails,
+        ApiErrorResponse,
     )),
     modifiers(&BearerReadAddon),
     info(
@@ -147,6 +149,390 @@ use crate::util::now_ms;
     )
 )]
 pub struct ApiDoc;
+
+const DECIMAL_U64_PATTERN: &str = "^[0-9]+$";
+const HEX_20_PATTERN: &str = "^(?:0x)?[0-9a-fA-F]{40}$";
+const HEX_32_PATTERN: &str = "^(?:0x)?[0-9a-fA-F]{64}$";
+const COMPRESSED_P256_PATTERN: &str = "^(?:0x)?(?:02|03)[0-9a-fA-F]{64}$";
+const PRICE_NANOS_PATTERN: &str = "^0*(?:[0-9]{1,9}|1000000000)$";
+const U32_DECIMAL_PATTERN: &str = "^(?:0|[1-9][0-9]{0,8}|[1-3][0-9]{9}|4[0-1][0-9]{8}|42[0-8][0-9]{7}|429[0-3][0-9]{6}|4294[0-8][0-9]{5}|42949[0-5][0-9]{4}|429496[0-6][0-9]{3}|4294967[0-1][0-9]{2}|42949672[0-8][0-9]|429496729[0-5])$";
+const CURSOR_PATTERN: &str = "^[0-9]+\\.[0-9]+$";
+
+fn visit_string_schemas(
+    schema: &mut utoipa::openapi::RefOr<utoipa::openapi::Schema>,
+    visitor: &mut impl FnMut(&mut utoipa::openapi::Object),
+) {
+    if let utoipa::openapi::RefOr::T(schema) = schema {
+        visit_schema_string_leaves(schema, visitor);
+    }
+}
+
+fn visit_schema_string_leaves(
+    schema: &mut utoipa::openapi::Schema,
+    visitor: &mut impl FnMut(&mut utoipa::openapi::Object),
+) {
+    use utoipa::openapi::Schema;
+    use utoipa::openapi::schema::{AdditionalProperties, ArrayItems, SchemaType, Type};
+
+    match schema {
+        Schema::Object(object) => {
+            let is_string = match &object.schema_type {
+                SchemaType::Type(kind) => *kind == Type::String,
+                SchemaType::Array(kinds) => kinds.contains(&Type::String),
+                SchemaType::AnyValue => false,
+            };
+            if is_string {
+                visitor(object);
+            }
+            for property in object.properties.values_mut() {
+                visit_string_schemas(property, visitor);
+            }
+            if let Some(additional) = object.additional_properties.as_deref_mut()
+                && let AdditionalProperties::RefOr(schema) = additional
+            {
+                visit_string_schemas(schema, visitor);
+            }
+        }
+        Schema::Array(array) => {
+            if let ArrayItems::RefOrSchema(items) = &mut array.items {
+                visit_string_schemas(items, visitor);
+            }
+            for item in &mut array.prefix_items {
+                visit_schema_string_leaves(item, visitor);
+            }
+        }
+        Schema::OneOf(composite) => {
+            for item in &mut composite.items {
+                visit_string_schemas(item, visitor);
+            }
+        }
+        Schema::AllOf(composite) => {
+            for item in &mut composite.items {
+                visit_string_schemas(item, visitor);
+            }
+        }
+        Schema::AnyOf(composite) => {
+            for item in &mut composite.items {
+                visit_string_schemas(item, visitor);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn set_string_pattern(
+    schema: &mut utoipa::openapi::RefOr<utoipa::openapi::Schema>,
+    pattern: &str,
+    overwrite: bool,
+) {
+    visit_string_schemas(schema, &mut |object| {
+        if overwrite || object.pattern.is_none() {
+            object.pattern = Some(pattern.to_string());
+        }
+    });
+}
+
+fn constrain_named_schema(
+    name: &str,
+    schema: &mut utoipa::openapi::RefOr<utoipa::openapi::Schema>,
+) {
+    if name.ends_with("_nanos") {
+        // Scalar DTO fields carry signed/unsigned patterns at their declaration.
+        // This fallback reaches map/array leaves whose generated schema cannot
+        // express the serde adapter directly; those containers are unsigned.
+        set_string_pattern(schema, DECIMAL_U64_PATTERN, false);
+    }
+
+    let fixed_hex_pattern = if matches!(
+        name,
+        "vault_address_hex" | "token_address_hex" | "sender_hex" | "recipient_hex"
+    ) {
+        Some(HEX_20_PATTERN)
+    } else if name.ends_with("_digest_hex")
+        || name.ends_with("_root_hex")
+        || name.ends_with("_hash_hex")
+        || name == "nullifier_hex"
+        || name == "bundle_id_hex"
+    {
+        Some(HEX_32_PATTERN)
+    } else if matches!(
+        name,
+        "public_key_hex" | "pubkey_hex" | "signer_pubkey_hex" | "target_pubkey_hex"
+    ) {
+        Some(COMPRESSED_P256_PATTERN)
+    } else {
+        None
+    };
+    if let Some(pattern) = fixed_hex_pattern {
+        set_string_pattern(schema, pattern, true);
+    }
+
+    match name {
+        "key_hex" => {
+            set_string_pattern(schema, HEX_32_PATTERN, true);
+        }
+        "signature_hex" => {
+            set_string_pattern(schema, "^(?:0x)?(?:[0-9a-fA-F]{2})+$", true);
+        }
+        "transport_digest" => {
+            set_string_pattern(schema, HEX_32_PATTERN, true);
+        }
+        "creation_key" => {
+            visit_string_schemas(schema, &mut |object| {
+                object.pattern = Some("^[A-Za-z0-9_:/.-]+$".to_string());
+                object.min_length = Some(1);
+                object.max_length = Some(128);
+            });
+        }
+        "prices_nanos" => {
+            // Component-specific map key/value constraints are applied below;
+            // the same field name also appears on response DTOs with string
+            // market names, so it cannot be specialized safely by name alone.
+        }
+        "label" => {
+            visit_string_schemas(schema, &mut |object| object.max_length = Some(128));
+        }
+        "provisioning_key" => {
+            visit_string_schemas(schema, &mut |object| {
+                object.min_length = Some(1);
+                object.max_length = Some(128);
+            });
+        }
+        "display_name" => {
+            visit_string_schemas(schema, &mut |object| {
+                object.min_length = Some(1);
+                object.max_length = Some(32);
+            });
+        }
+        "after" | "before" => {
+            set_string_pattern(schema, CURSOR_PATTERN, true);
+        }
+        "leaf_key_hex" => {
+            set_string_pattern(schema, "^(?:0x)?(?:[0-9a-fA-F]{2}){1,64}$", true);
+        }
+        _ => {}
+    }
+}
+
+fn specialize_component_schema(
+    name: &str,
+    schema: &mut utoipa::openapi::RefOr<utoipa::openapi::Schema>,
+) {
+    use utoipa::openapi::schema::Type;
+    use utoipa::openapi::{Object, RefOr, Schema};
+
+    let RefOr::T(Schema::Object(component)) = schema else {
+        return;
+    };
+
+    match name {
+        "SetReferencePricesRequest" => {
+            let Some(RefOr::T(Schema::Object(prices))) =
+                component.properties.get_mut("prices_nanos")
+            else {
+                return;
+            };
+            if let Some(additional) = prices.additional_properties.as_deref_mut()
+                && let utoipa::openapi::schema::AdditionalProperties::RefOr(value_schema) =
+                    additional
+            {
+                set_string_pattern(value_schema, PRICE_NANOS_PATTERN, true);
+            }
+            let mut property_names = Object::with_type(Type::String);
+            property_names.pattern = Some(U32_DECIMAL_PATTERN.to_string());
+            prices.property_names = Some(Box::new(Schema::Object(property_names)));
+        }
+        "SubmitL1WithdrawalEventRequest" => {
+            let mut status = Object::with_type(Type::String);
+            status.description = Some("Queue state observed from the vault event.".to_string());
+            status.enum_values = Some(
+                ["not_requested", "queued", "finalized", "cancelled"]
+                    .into_iter()
+                    .map(|value| serde_json::Value::String(value.to_string()))
+                    .collect(),
+            );
+            component
+                .properties
+                .insert("status".to_string(), RefOr::T(Schema::Object(status)));
+        }
+        _ => {}
+    }
+}
+
+fn constrain_schema_tree(schema: &mut utoipa::openapi::RefOr<utoipa::openapi::Schema>) {
+    if let utoipa::openapi::RefOr::T(schema) = schema {
+        constrain_owned_schema_tree(schema);
+    }
+}
+
+fn constrain_owned_schema_tree(schema: &mut utoipa::openapi::Schema) {
+    use utoipa::openapi::Schema;
+    use utoipa::openapi::schema::{AdditionalProperties, ArrayItems};
+
+    match schema {
+        Schema::Object(object) => {
+            use utoipa::Number;
+            use utoipa::openapi::schema::{KnownFormat, SchemaFormat};
+
+            let has_unsigned_minimum = match object.minimum.as_ref() {
+                Some(Number::Int(0) | Number::UInt(0)) => true,
+                Some(Number::Float(value)) => *value == 0.0,
+                _ => false,
+            };
+            let unsigned_int64 = matches!(
+                object.format.as_ref(),
+                Some(SchemaFormat::KnownFormat(KnownFormat::Int64))
+            ) && has_unsigned_minimum;
+            if unsigned_int64 {
+                // OpenAPI has no standard `uint64` format. Leaving `int64`
+                // here would tell contract tooling that values above
+                // `i64::MAX` are invalid even though serde accepts the full
+                // Rust `u64` range. An unformatted integer plus the explicit
+                // maximum describes the actual JSON boundary.
+                object.format = None;
+                if object.maximum.is_none() {
+                    object.maximum = Some(Number::UInt(usize::MAX));
+                }
+            }
+            for (name, property) in &mut object.properties {
+                constrain_named_schema(name, property);
+                constrain_schema_tree(property);
+            }
+            if let Some(additional) = object.additional_properties.as_deref_mut()
+                && let AdditionalProperties::RefOr(schema) = additional
+            {
+                constrain_schema_tree(schema);
+            }
+            if let Some(property_names) = object.property_names.as_deref_mut() {
+                constrain_owned_schema_tree(property_names);
+            }
+        }
+        Schema::Array(array) => {
+            if let ArrayItems::RefOrSchema(items) = &mut array.items {
+                constrain_schema_tree(items);
+            }
+            for item in &mut array.prefix_items {
+                constrain_owned_schema_tree(item);
+            }
+        }
+        Schema::OneOf(composite) => {
+            for item in &mut composite.items {
+                constrain_schema_tree(item);
+            }
+        }
+        Schema::AllOf(composite) => {
+            for item in &mut composite.items {
+                constrain_schema_tree(item);
+            }
+        }
+        Schema::AnyOf(composite) => {
+            for item in &mut composite.items {
+                constrain_schema_tree(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn api_error_content() -> utoipa::openapi::Content {
+    utoipa::openapi::Content::new(Some(utoipa::openapi::Ref::from_schema_name(
+        "ApiErrorResponse",
+    )))
+}
+
+fn decorate_operation_rejection(
+    operation: &mut Option<utoipa::openapi::path::Operation>,
+    path_has_parameters: bool,
+) {
+    use utoipa::openapi::path::ParameterIn;
+    use utoipa::openapi::{Ref, RefOr};
+
+    let Some(operation) = operation else {
+        return;
+    };
+    for parameter in operation.parameters.iter_mut().flatten() {
+        if let Some(schema) = parameter.schema.as_mut() {
+            constrain_named_schema(&parameter.name, schema);
+            constrain_schema_tree(schema);
+        }
+    }
+
+    let operation_has_parameters = operation.parameters.as_ref().is_some_and(|parameters| {
+        parameters.iter().any(|parameter| {
+            matches!(
+                parameter.parameter_in,
+                ParameterIn::Path | ParameterIn::Query
+            )
+        })
+    });
+    if !path_has_parameters && !operation_has_parameters && operation.request_body.is_none() {
+        return;
+    }
+
+    match operation.responses.responses.entry("400".to_string()) {
+        std::collections::btree_map::Entry::Vacant(entry) => {
+            entry.insert(RefOr::Ref(Ref::from_response_name("InvalidRequest")));
+        }
+        std::collections::btree_map::Entry::Occupied(mut entry) => {
+            if let RefOr::T(response) = entry.get_mut() {
+                response
+                    .content
+                    .entry("application/json".to_string())
+                    .or_insert_with(api_error_content);
+            }
+        }
+    }
+}
+
+fn finalize_openapi(mut openapi: utoipa::openapi::OpenApi) -> utoipa::openapi::OpenApi {
+    use utoipa::openapi::RefOr;
+    use utoipa::openapi::response::Response;
+
+    let mut invalid_request = Response::new(
+        "Malformed path, query, or JSON body. The public validation policy is HTTP 400 with an ApiErrorResponse JSON envelope.",
+    );
+    invalid_request
+        .content
+        .insert("application/json".to_string(), api_error_content());
+    openapi
+        .components
+        .get_or_insert_with(Default::default)
+        .responses
+        .insert("InvalidRequest".to_string(), RefOr::T(invalid_request));
+
+    for (name, schema) in openapi
+        .components
+        .iter_mut()
+        .flat_map(|components| components.schemas.iter_mut())
+    {
+        constrain_schema_tree(schema);
+        specialize_component_schema(name, schema);
+    }
+    for path_item in openapi.paths.paths.values_mut() {
+        let path_parameters = path_item
+            .parameters
+            .as_ref()
+            .is_some_and(|parameters| !parameters.is_empty());
+        if let Some(parameters) = path_item.parameters.as_mut() {
+            for parameter in parameters {
+                if let Some(schema) = parameter.schema.as_mut() {
+                    constrain_named_schema(&parameter.name, schema);
+                    constrain_schema_tree(schema);
+                }
+            }
+        }
+        decorate_operation_rejection(&mut path_item.get, path_parameters);
+        decorate_operation_rejection(&mut path_item.put, path_parameters);
+        decorate_operation_rejection(&mut path_item.post, path_parameters);
+        decorate_operation_rejection(&mut path_item.delete, path_parameters);
+        decorate_operation_rejection(&mut path_item.options, path_parameters);
+        decorate_operation_rejection(&mut path_item.head, path_parameters);
+        decorate_operation_rejection(&mut path_item.patch, path_parameters);
+        decorate_operation_rejection(&mut path_item.trace, path_parameters);
+    }
+
+    openapi
+}
 
 /// Defines the `bearer_read` security scheme referenced by SYB-60's
 /// read-only, bearer-gated private endpoints (e.g. `GET
@@ -649,7 +1035,7 @@ pub fn openapi_document(include_dev_routes: bool) -> utoipa::openapi::OpenApi {
     if include_dev_routes {
         routes = routes.merge(dev_routes());
     }
-    routes.split_for_parts().1
+    finalize_openapi(routes.split_for_parts().1)
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
