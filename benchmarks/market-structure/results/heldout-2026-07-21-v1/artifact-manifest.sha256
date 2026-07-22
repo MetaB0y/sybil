@@ -1,0 +1,14 @@
+2f9d401066b2cd21180a48b1e57d224c990670c7be3576a369affbf42be506ab  benchmarks/market-structure/protocol-heldout-2026-07-21-v1.json
+8a0fa95b0a69277122b372f4da671c585431e6cd89d0552ac0fb7835af34406c  benchmarks/market-structure/results/heldout-2026-07-21-v1/CLAIMS.md
+aa8ab75f42cc8a6d0473eb1b94e9b2ea02b3334b1e9b9820f0b7de4de704cf95  benchmarks/market-structure/results/heldout-2026-07-21-v1/REPORT.md
+80be878a289697b8723134b9481fe5d53f737ae8938d0c9e4a0450f01c8ce61c  benchmarks/market-structure/results/heldout-2026-07-21-v1/REPRODUCE.md
+950edace1398cdb38ebad42129c3bbfd3cfe0ce292ba44b435fcf591b0dc73f5  benchmarks/market-structure/results/heldout-2026-07-21-v1/analysis/README.md
+a62f2cb27a1fc915df5dfc2e93c4c5c894e84fe15fe91bce63e2d3ec790cfe64  benchmarks/market-structure/results/heldout-2026-07-21-v1/analysis/analysis-manifest.json
+8220742bfe8a9e27c7b0a0577d3a7b4f4e2f6fa484761617db1301df9c902e45  benchmarks/market-structure/results/heldout-2026-07-21-v1/analysis/engine-metrics.csv.gz
+7bd7f8078b522a9c7c75ccb276a0dfb2c783958d99de9a64be6e545f6c442a67  benchmarks/market-structure/results/heldout-2026-07-21-v1/analysis/historical-summary.json
+fe965b0f946b768e738e504a7986e4cfc1ad5b5b9820bd5b94eb69c3bf2188d0  benchmarks/market-structure/results/heldout-2026-07-21-v1/analysis/historical-transactions.csv.gz
+702c097a8f8b1ad49548113c8a83031a0026909cb30a8aed18e511f79dd159de  benchmarks/market-structure/results/heldout-2026-07-21-v1/analysis/paired-differences.csv.gz
+02ad4e90076e4e27f368fbc80b187a6be70407412caeb9a21c25bebe41ff2152  benchmarks/market-structure/results/heldout-2026-07-21-v1/analysis/paired-summary.csv
+18cb534066e96cab07c201bae90434eef746e0fdc6db3a93c19c2915e593e778  benchmarks/market-structure/results/heldout-2026-07-21-v1/raw/paired-runs.jsonl.gz
+7336aea1e8383a60fa13303ba40a797c27113e9e9c74f6ee79e8e7534234838a  benchmarks/market-structure/results/heldout-2026-07-21-v1/raw/polymarket-israel-gaza-january-2026.jsonl.gz
+6fc83cb73120ac15dfd32de2f9ef091e0f04f2cad440fa646de8799de2947ee8  benchmarks/market-structure/results/heldout-2026-07-21-v1/raw/polymarket-israel-gaza-january-2026.manifest.json
