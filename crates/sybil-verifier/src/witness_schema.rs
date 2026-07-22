@@ -25,7 +25,7 @@ use crate::types::{
     WitnessOrder, WitnessRejection,
 };
 
-pub const WITNESS_FORMAT_VERSION: u8 = 12;
+pub const WITNESS_FORMAT_VERSION: u8 = 13;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum WitnessDecodeError {
@@ -37,7 +37,7 @@ pub enum WitnessDecodeError {
     },
     #[error("trailing bytes after canonical witness at offset {offset}: {trailing} bytes")]
     TrailingBytes { offset: usize, trailing: usize },
-    #[error("unknown witness format version {0}; only v12 is supported")]
+    #[error("unknown witness format version {0}; only v13 is supported")]
     UnknownVersion(u8),
     #[error("invalid tag for {field} at offset {offset}: {tag}")]
     InvalidTag {
@@ -446,6 +446,7 @@ impl<'a> WitnessReader<'a> {
             5 => Ok(RejectionReason::InvalidOrder(
                 self.read_u32_len_string("rejection_reason.invalid_order")?,
             )),
+            6 => Ok(RejectionReason::AtomicBundle),
             tag => Err(WitnessDecodeError::InvalidTag {
                 field: "rejection_reason",
                 tag,
@@ -585,6 +586,21 @@ impl<'a> WitnessReader<'a> {
                     1 => ClientActionWitness::Cancel {
                         account_id: self.read_u64()?,
                         order_id: self.read_u64()?,
+                        nonce: self.read_u64()?,
+                        authorization: self.read_key_op_auth()?,
+                    },
+                    2 => ClientActionWitness::MmBundle {
+                        account_id: self.read_u64()?,
+                        bundle_id: self.read_hash32()?,
+                        revision: self.read_u64()?,
+                        orders: self.read_vec("client_action.mm_bundle.orders", |reader| {
+                            reader.read_order()
+                        })?,
+                        order_sides: self
+                            .read_vec("client_action.mm_bundle.order_sides", |reader| {
+                                reader.read_mm_side()
+                            })?,
+                        max_capital: Nanos(self.read_u64()?),
                         nonce: self.read_u64()?,
                         authorization: self.read_key_op_auth()?,
                     },
@@ -1247,6 +1263,69 @@ mod tests {
 
         assert_eq!(canonical_witness_bytes(&decoded), bytes);
         assert_witness_eq(&decoded, &witness);
+    }
+
+    #[test]
+    fn decode_round_trips_signed_mm_bundle_action() {
+        let mut witness = representative_witness();
+        let orders = vec![
+            fixture_order(
+                70,
+                MarketId::new(3),
+                MarketId::new(9),
+                510_000_000,
+                Some(11),
+            ),
+            fixture_order(
+                71,
+                MarketId::new(9),
+                MarketId::new(3),
+                490_000_000,
+                Some(11),
+            ),
+        ];
+        witness
+            .system_events
+            .push(SystemEventWitness::ClientActionAuthorized(
+                ClientActionWitness::MmBundle {
+                    account_id: 1001,
+                    bundle_id: [0x55; 32],
+                    revision: 0,
+                    orders: orders.clone(),
+                    order_sides: vec![MmSide::BuyYes, MmSide::SellNo],
+                    max_capital: Nanos(2_000_000_000),
+                    nonce: 19,
+                    authorization: KeyOpAuth::RawP256 {
+                        signer_pubkey: {
+                            let mut key = [0x77; 33];
+                            key[0] = 0x02;
+                            key
+                        },
+                        signature: [0x66; 64],
+                    },
+                },
+            ));
+
+        let bytes = canonical_witness_bytes(&witness);
+        let decoded = decode_canonical_witness_bytes(&bytes).unwrap();
+        assert_eq!(canonical_witness_bytes(&decoded), bytes);
+        assert!(matches!(
+            decoded.system_events.last(),
+            Some(SystemEventWitness::ClientActionAuthorized(
+                ClientActionWitness::MmBundle {
+                    account_id: 1001,
+                    bundle_id,
+                    revision: 0,
+                    orders: decoded_orders,
+                    order_sides,
+                    max_capital: Nanos(2_000_000_000),
+                    nonce: 19,
+                    ..
+                }
+            )) if *bundle_id == [0x55; 32]
+                && decoded_orders == &orders
+                && order_sides == &[MmSide::BuyYes, MmSide::SellNo]
+        ));
     }
 
     #[test]

@@ -2,7 +2,7 @@
 tags: [zk, infrastructure, authenticated-data]
 layer: verification
 status: current
-last_verified: 2026-07-16
+last_verified: 2026-07-22
 ---
 
 # Proof architecture
@@ -87,15 +87,15 @@ For every streamed private `StateTransitionGuestInput`, the guest re-derives:
 2. canonical events, witness, state, and DA commitments;
 3. order/fill limits, uniform prices, groups, MM budgets, and welfare;
 4. integer settlement, minting, balances, positions, and reservations;
-5. market, bridge, withdrawal, quarantine, key-operation, and ordinary
-   signed-action transitions;
+5. market, bridge, withdrawal, quarantine, key-operation, ordinary
+   signed-action, and signed atomic MM-bundle transitions;
 6. deposit prefix/checkpoint agreement and the per-block public-input hash.
 
 It then requires exact header/root/genesis chaining, folds the verified block
 hashes and DA commitments in order, and reveals one epoch public-input hash for
 the claimed start/end range.
 
-Witness v12 retains ordinary order/cancel RawP256/WebAuthn envelopes and the
+Witness v13 retains ordinary order/cancel and atomic MM-bundle RawP256/WebAuthn envelopes and the
 account leaf commits `last_trading_nonce`. Shared native/guest verification
 replays both against the actor-ordered active key set; see
 [[P256 Authentication]] and [[Threat Model]].

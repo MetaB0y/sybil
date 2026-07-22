@@ -276,6 +276,29 @@ fn verify(witness: &BlockWitness) -> Result<(), String> {
                         ),
                         authorization,
                     ),
+                    ClientActionWitness::MmBundle {
+                        account_id,
+                        bundle_id,
+                        revision,
+                        orders,
+                        order_sides,
+                        max_capital,
+                        nonce,
+                        authorization,
+                    } => (
+                        *account_id,
+                        crate::client_action::canonical_mm_bundle_bytes(
+                            *account_id,
+                            *bundle_id,
+                            *revision,
+                            orders,
+                            order_sides,
+                            *max_capital,
+                            *nonce,
+                            witness.genesis_hash,
+                        )?,
+                        authorization,
+                    ),
                 };
                 let keys = running.get(&account_id).ok_or_else(|| {
                     format!("client action account {account_id} has no running key set")
@@ -490,7 +513,8 @@ fn event_account_ids(event: &SystemEventWitness) -> Vec<u64> {
         | SystemEventWitness::KeyRevoked { account_id, .. } => vec![*account_id],
         SystemEventWitness::ClientActionAuthorized(action) => match action {
             ClientActionWitness::Order { account_id, .. }
-            | ClientActionWitness::Cancel { account_id, .. } => vec![*account_id],
+            | ClientActionWitness::Cancel { account_id, .. }
+            | ClientActionWitness::MmBundle { account_id, .. } => vec![*account_id],
         },
         SystemEventWitness::QuarantineClaimed { account_id, .. } => vec![*account_id],
         SystemEventWitness::MarketResolved {

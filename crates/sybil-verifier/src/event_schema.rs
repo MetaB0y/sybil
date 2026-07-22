@@ -225,6 +225,37 @@ pub fn system_event_leaf_value(event: &SystemEventWitness) -> Vec<u8> {
                     value.extend_from_slice(&nonce.to_le_bytes());
                     append_key_op_auth(&mut value, authorization);
                 }
+                ClientActionWitness::MmBundle {
+                    account_id,
+                    bundle_id,
+                    revision,
+                    orders,
+                    order_sides,
+                    max_capital,
+                    nonce,
+                    authorization,
+                } => {
+                    value.push(2);
+                    value.extend_from_slice(&account_id.to_le_bytes());
+                    value.extend_from_slice(bundle_id);
+                    value.extend_from_slice(&revision.to_le_bytes());
+                    value.extend_from_slice(&(orders.len() as u64).to_le_bytes());
+                    for order in orders {
+                        append_order(&mut value, order);
+                    }
+                    value.extend_from_slice(&(order_sides.len() as u64).to_le_bytes());
+                    for side in order_sides {
+                        value.push(match side {
+                            matching_engine::MmSide::SellYes => 0,
+                            matching_engine::MmSide::BuyYes => 1,
+                            matching_engine::MmSide::SellNo => 2,
+                            matching_engine::MmSide::BuyNo => 3,
+                        });
+                    }
+                    value.extend_from_slice(&max_capital.0.to_le_bytes());
+                    value.extend_from_slice(&nonce.to_le_bytes());
+                    append_key_op_auth(&mut value, authorization);
+                }
             }
         }
     }
@@ -325,6 +356,7 @@ fn append_rejection_reason(value: &mut Vec<u8>, reason: &RejectionReason) {
         }
         RejectionReason::AccountNotFound => value.push(2),
         RejectionReason::CompleteSetFormation => value.push(3),
+        RejectionReason::AtomicBundle => value.push(6),
         RejectionReason::InvalidOrder(reason) => {
             value.push(5);
             push_str(value, reason);

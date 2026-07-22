@@ -3,14 +3,14 @@ tags: [infrastructure]
 layer: sequencer
 crate: matching-sequencer
 status: current
-last_verified: 2026-07-11
+last_verified: 2026-07-22
 ---
 
 Not every order fills in its first batch. When a durable order isn't matched — perhaps the clearing price moved away from its limit, or there wasn't enough counterparty liquidity — the unfilled remainder becomes a **resting order** in the order book, automatically re-included in each subsequent [[Block Lifecycle|batch]] until it fills, expires, or is cancelled.
 
 Each resting order has an effective `expires_at_block`. If the order has no user expiry, the sequencer derives one from the configurable system TTL. If the order has an explicit expiry, the sequencer caps it by the system TTL. IOC is API sugar for an explicit expiry at the next eligible batch height; after that batch, any unfilled remainder is removed instead of resting. This prevents the system from accumulating unbounded stale orders while giving durable orders multiple chances to fill.
 
-MM (market maker) quotes are explicitly excluded from the order book. MM quotes are one-shot: they bypass the book entirely and are consumed by the current batch. This design matches how professional market makers operate — they want to re-evaluate and re-quote every batch based on current conditions, not have stale quotes persist. Regular trader orders persist because retail users submit and expect fills over a reasonable time horizon.
+MM (market maker) quotes are explicitly excluded from the order book. MM quotes are one-shot: they bypass the book entirely and are consumed by their signed exact next batch. A public submission is one atomic bundle governed by a single maximum-capital budget; all orders enter that batch together or all are rejected. This design matches how professional market makers operate — they want to re-evaluate and re-quote every batch based on current conditions, not have stale quotes persist. Regular trader orders persist because retail users submit and expect fills over a reasonable time horizon.
 
 ## Order Book and Reservations
 

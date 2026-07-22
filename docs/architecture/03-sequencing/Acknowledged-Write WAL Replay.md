@@ -54,6 +54,8 @@ AcknowledgedWrite =
   | DeferredBundle(OrderSubmission)
   | AuthenticatedDirectAdmit { resting, nonce, authorization }
   | AuthenticatedDeferredBundle { submission, nonce, authorization }
+  | AuthenticatedMmBundle { submission, bundle_id, revision, order_sides,
+                            max_capital, nonce, authorization }
   | AuthenticatedCancel { account_id, order_id, nonce, authorization, timestamp_ms }
   | ControlPlane(ControlPlaneCommand)
   | L1Deposit(L1Deposit)
@@ -93,6 +95,9 @@ Existing live-ordering disciplines remain explicit:
 - each signed order/cancel persists its exact RawP256/WebAuthn envelope, trading
   nonce, and state effect in one row; replay cannot recover the action without
   its authorization or advance the nonce without its action;
+- each signed MM bundle persists its bundle id, revision, exact ordered sides,
+  shared integer budget, nonce, authorization envelope, and admitted orders in
+  one row; recovery reconstructs the whole pending bundle and witness action;
 - a direct resting-order admit is applied live first, then durably appended;
   append failure rolls the admit back before returning an error;
 - no acknowledged write is allowed before the first committed block snapshot,

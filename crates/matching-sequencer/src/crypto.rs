@@ -7,7 +7,7 @@
 use std::hash::{Hash, Hasher};
 
 use crate::error::SequencerError;
-use matching_engine::Order;
+use matching_engine::{MmSide, Nanos, Order};
 use p256::ecdsa::signature::{Signer, Verifier};
 use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
 use sybil_oracle::{ResolutionAttestation, SignedAttestation};
@@ -260,6 +260,19 @@ pub struct SignedOrder {
     pub signature: Signature,
 }
 
+/// An atomic market-maker bundle with a P256 ECDSA signature.
+pub struct SignedMmBundle {
+    pub account_id: crate::account::AccountId,
+    pub bundle_id: [u8; 32],
+    pub revision: u64,
+    pub orders: Vec<Order>,
+    pub order_sides: Vec<MmSide>,
+    pub max_capital: Nanos,
+    pub nonce: u64,
+    pub signer: PublicKey,
+    pub signature: Signature,
+}
+
 /// A resting-order cancellation authenticated by a P256 signature.
 pub struct SignedCancel {
     pub account_id: crate::account::AccountId,
@@ -282,6 +295,21 @@ pub struct SignedBridgeWithdrawal {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct AuthenticatedOrder {
     pub order: Order,
+    pub nonce: u64,
+    pub authorization: sybil_verifier::ClientActionAuth,
+}
+
+/// An atomic MM bundle whose exact account authorization envelope was
+/// verified before entering the sequencer and must be retained for guest
+/// replay.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct AuthenticatedMmBundle {
+    pub account_id: crate::account::AccountId,
+    pub bundle_id: [u8; 32],
+    pub revision: u64,
+    pub orders: Vec<Order>,
+    pub order_sides: Vec<MmSide>,
+    pub max_capital: Nanos,
     pub nonce: u64,
     pub authorization: sybil_verifier::ClientActionAuth,
 }
@@ -321,6 +349,34 @@ pub struct AuthenticatedBridgeWithdrawal {
 /// NOTE: `id` is excluded because the sequencer assigns IDs after submission.
 pub fn canonical_order_bytes(order: &Order, nonce: u64, genesis_hash: [u8; 32]) -> Vec<u8> {
     sybil_verifier::client_action::canonical_order_bytes(order, nonce, genesis_hash)
+}
+
+/// Deterministic canonical bytes for a signed atomic MM bundle.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the signed protocol tuple stays explicit at this trust boundary"
+)]
+pub fn canonical_mm_bundle_bytes(
+    account_id: crate::account::AccountId,
+    bundle_id: [u8; 32],
+    revision: u64,
+    orders: &[Order],
+    order_sides: &[MmSide],
+    max_capital: Nanos,
+    nonce: u64,
+    genesis_hash: [u8; 32],
+) -> Result<Vec<u8>, SequencerError> {
+    sybil_verifier::client_action::canonical_mm_bundle_bytes(
+        account_id.0,
+        bundle_id,
+        revision,
+        orders,
+        order_sides,
+        max_capital,
+        nonce,
+        genesis_hash,
+    )
+    .map_err(SequencerError::InvalidMmBundle)
 }
 
 /// Deterministic canonical byte encoding of a cancel request for signing.
@@ -565,6 +621,28 @@ pub fn verify_signed_order(
         .map_err(|_| SequencerError::InvalidSignature)
 }
 
+/// Verify a signed atomic MM bundle's P256 ECDSA signature.
+pub fn verify_signed_mm_bundle(
+    signed: &SignedMmBundle,
+    genesis_hash: [u8; 32],
+) -> Result<(), SequencerError> {
+    let msg = canonical_mm_bundle_bytes(
+        signed.account_id,
+        signed.bundle_id,
+        signed.revision,
+        &signed.orders,
+        &signed.order_sides,
+        signed.max_capital,
+        signed.nonce,
+        genesis_hash,
+    )?;
+    signed
+        .signer
+        .0
+        .verify(&msg, &signed.signature)
+        .map_err(|_| SequencerError::InvalidSignature)
+}
+
 /// Verify a signed cancel request's P256 ECDSA signature.
 pub fn verify_signed_cancel(
     signed: &SignedCancel,
@@ -611,6 +689,46 @@ pub fn sign_order(
         signer: PublicKey(*key.verifying_key()),
         signature,
     }
+}
+
+/// Sign an atomic MM bundle with a P256 signing key (tests and native clients).
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the signing helper mirrors every field in the canonical protocol tuple"
+)]
+pub fn sign_mm_bundle(
+    account_id: crate::account::AccountId,
+    bundle_id: [u8; 32],
+    revision: u64,
+    orders: &[Order],
+    order_sides: &[MmSide],
+    max_capital: Nanos,
+    nonce: u64,
+    genesis_hash: [u8; 32],
+    key: &SigningKey,
+) -> Result<SignedMmBundle, SequencerError> {
+    let msg = canonical_mm_bundle_bytes(
+        account_id,
+        bundle_id,
+        revision,
+        orders,
+        order_sides,
+        max_capital,
+        nonce,
+        genesis_hash,
+    )?;
+    let signature: Signature = key.sign(&msg);
+    Ok(SignedMmBundle {
+        account_id,
+        bundle_id,
+        revision,
+        orders: orders.to_vec(),
+        order_sides: order_sides.to_vec(),
+        max_capital,
+        nonce,
+        signer: PublicKey(*key.verifying_key()),
+        signature,
+    })
 }
 
 fn to_canonical_attestation(att: &ResolutionAttestation) -> CanonicalAttestation {

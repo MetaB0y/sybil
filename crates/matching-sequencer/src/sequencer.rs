@@ -169,6 +169,9 @@ impl BlockSequencer {
             }
             | sybil_verifier::ClientActionWitness::Cancel {
                 account_id, nonce, ..
+            }
+            | sybil_verifier::ClientActionWitness::MmBundle {
+                account_id, nonce, ..
             } => (AccountId(*account_id), *nonce),
         };
         self.capture_system_account_baseline(account_id);

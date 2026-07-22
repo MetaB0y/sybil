@@ -16,6 +16,7 @@ use matching_engine::NANOS_PER_DOLLAR;
 /// - BuyYes + BuyNo on one grouped binary market must sum to at least $1.
 /// - BuyYes on every outcome in a group must sum to at least $1.
 /// - SellYes/SellNo do not contribute; complete-set redemption is legitimate.
+#[derive(Clone)]
 pub(super) struct GroupCoverageTracker {
     /// market_id → group_index
     market_to_group: HashMap<MarketId, usize>,
@@ -220,6 +221,85 @@ impl BlockSequencer {
             }
         }
 
+        if let Some(constraint) = &submission.mm_constraint {
+            let Some(account) = self.accounts.get(submission.account_id) else {
+                return AdmitOutcome::Rejected(SequencerError::Rejected(Rejection {
+                    order_id: 0,
+                    account_id: submission.account_id,
+                    reason: RejectionReason::AccountNotFound,
+                }));
+            };
+            if submission.orders.is_empty() {
+                return AdmitOutcome::Rejected(SequencerError::InvalidMmBundle(
+                    "bundle must contain at least one order".to_string(),
+                ));
+            }
+            if constraint.max_capital.0 == 0 {
+                return AdmitOutcome::Rejected(SequencerError::InvalidMmBundle(
+                    "shared budget must be greater than zero".to_string(),
+                ));
+            }
+            let available = account.balance.max(0) as u64;
+            if constraint.max_capital.0 > available {
+                return AdmitOutcome::Rejected(SequencerError::Rejected(Rejection {
+                    order_id: 0,
+                    account_id: submission.account_id,
+                    reason: RejectionReason::InsufficientBalance {
+                        required: i64::try_from(constraint.max_capital.0).unwrap_or(i64::MAX),
+                        available: account.balance,
+                    },
+                }));
+            }
+            if constraint.order_ids.len() != submission.orders.len()
+                || constraint.order_sides.len() != submission.orders.len()
+            {
+                return AdmitOutcome::Rejected(SequencerError::InvalidMmBundle(
+                    "shared constraint must cover every order exactly once".to_string(),
+                ));
+            }
+            let mut seen = std::collections::HashSet::new();
+            for (index, order_id) in constraint.order_ids.iter().copied().enumerate() {
+                let Some(side) = constraint.order_sides.get(&order_id).copied() else {
+                    return AdmitOutcome::Rejected(SequencerError::InvalidMmBundle(
+                        "shared constraint is missing an order side".to_string(),
+                    ));
+                };
+                if !seen.insert(order_id) {
+                    return AdmitOutcome::Rejected(SequencerError::InvalidMmBundle(
+                        "shared constraint contains a duplicate order".to_string(),
+                    ));
+                }
+                match crate::validation::mm_side_for_order(&submission.orders[index]) {
+                    Ok(derived) if derived == side => {}
+                    Ok(_) => {
+                        return AdmitOutcome::Rejected(SequencerError::InvalidMmBundle(
+                            "signed side does not match its order payoff".to_string(),
+                        ));
+                    }
+                    Err(reason) => {
+                        return AdmitOutcome::Rejected(SequencerError::Rejected(Rejection {
+                            order_id,
+                            account_id: submission.account_id,
+                            reason,
+                        }));
+                    }
+                }
+            }
+
+            let mut candidate_stp = GroupCoverageTracker::new(&self.market_groups);
+            self.seed_group_coverage_for_account(&mut candidate_stp, submission.account_id);
+            for order in &submission.orders {
+                if candidate_stp.would_complete_set(submission.account_id, order) {
+                    return AdmitOutcome::Rejected(SequencerError::Rejected(Rejection {
+                        order_id: order.id,
+                        account_id: submission.account_id,
+                        reason: RejectionReason::CompleteSetFormation,
+                    }));
+                }
+                candidate_stp.record(submission.account_id, order);
+            }
+        }
+
         let eligible = submission.mm_constraint.is_none()
             && submission.orders.len() == 1
             && submission.orders[0].num_markets == 1;
@@ -283,7 +363,10 @@ impl BlockSequencer {
 
     /// Assign durable, globally monotonic IDs before either direct admission or
     /// deferred persistence so the submission acknowledgement can expose them.
-    fn assign_submission_order_ids(&mut self, submission: &mut OrderSubmission) -> Vec<u64> {
+    pub(super) fn assign_submission_order_ids(
+        &mut self,
+        submission: &mut OrderSubmission,
+    ) -> Vec<u64> {
         let order_ids: Vec<u64> = submission
             .orders
             .iter_mut()

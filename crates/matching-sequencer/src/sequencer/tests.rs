@@ -1277,6 +1277,49 @@ fn placed_order_stats_count_mm_batch_orders() {
 }
 
 #[test]
+fn independent_accounts_keep_independent_atomic_mm_constraints() {
+    let (markets, market) = setup();
+    let mut accounts = AccountStore::new();
+    let first = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+    let second = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+    let mut seq = BlockSequencer::with_default_solver(
+        accounts,
+        markets.clone(),
+        vec![],
+        SequencerConfig::default(),
+    );
+
+    let submissions = [(first, 410_000_000), (second, 420_000_000)]
+        .into_iter()
+        .map(|(account_id, price)| {
+            let mut constraint =
+                MmConstraint::new(MmId::new(account_id.0), Nanos(10 * NANOS_PER_DOLLAR));
+            constraint.add_order(0, matching_engine::MmSide::BuyYes);
+            OrderSubmission {
+                account_id,
+                orders: vec![outcome_buy(&markets, 0, market, 0, price, q(1))],
+                mm_constraint: Some(constraint),
+            }
+        })
+        .collect();
+
+    let production = seq.produce_block(submissions, 1_000);
+    assert_eq!(production.witness.mm_constraints.len(), 2);
+    assert_eq!(
+        production
+            .witness
+            .mm_constraints
+            .iter()
+            .map(|constraint| constraint.mm_id.0)
+            .collect::<HashSet<_>>(),
+        HashSet::from([first.0, second.0])
+    );
+    assert_eq!(production.witness.orders.len(), 2);
+    assert!(production.witness.orders.iter().all(|order| order.is_mm));
+    assert!(sybil_verifier::verify_full(&production.witness, false).valid);
+}
+
+#[test]
 fn flash_mm_quotes_set_no_fill_mark_and_liquidity() {
     let (markets, m0) = setup();
     let mut accounts = AccountStore::new();
@@ -1701,10 +1744,17 @@ fn test_account_not_found_rejection() {
 #[test]
 fn test_mm_orders_skip_validation() {
     let (markets, m0) = setup();
-    let (mut seq, aid) = make_sequencer(0);
+    let mut accounts = AccountStore::new();
+    let aid = accounts.create_account(NANOS_PER_DOLLAR as i64);
+    let mut seq = BlockSequencer::with_default_solver(
+        accounts,
+        markets.clone(),
+        vec![],
+        SequencerConfig::default(),
+    );
 
     let order = outcome_buy(&markets, 0, m0, 0, 500_000_000, 100);
-    let mut constraint = MmConstraint::new(MmId(1), Nanos(50 * NANOS_PER_DOLLAR));
+    let mut constraint = MmConstraint::new(MmId(1), Nanos(NANOS_PER_DOLLAR));
     constraint.add_order(0, matching_engine::MmSide::BuyYes);
 
     let sub = OrderSubmission {
@@ -3444,8 +3494,13 @@ fn test_mm_complete_set_buyyes_rejected() {
     };
 
     let bp = seq.produce_block(vec![sub], 1000);
-    // Per-order STP: only the 3rd order (completing the set) is rejected
-    assert_eq!(bp.block.rejections.len(), 1);
+    assert_eq!(bp.block.rejections.len(), 3);
+    assert!(
+        bp.block
+            .rejections
+            .iter()
+            .all(|rejection| matches!(rejection.reason, RejectionReason::AtomicBundle))
+    );
     assert!(bp.block.fills.is_empty());
 }
 
@@ -3559,13 +3614,19 @@ fn test_mm_same_market_crossing_bids_are_rejected() {
     };
 
     let result = run_batch(&mut seq, vec![sub], &markets, &[group]);
-    assert_eq!(result.rejections.len(), 1);
+    assert_eq!(result.rejections.len(), 2);
+    assert!(
+        result
+            .rejections
+            .iter()
+            .all(|rejection| matches!(rejection.reason, RejectionReason::AtomicBundle))
+    );
     assert!(result.fills.is_empty());
 }
 
 #[test]
 fn test_grouped_mm_complementary_bids_require_a_price_cross() {
-    for (limit, expected_rejections) in [(400_000_000, 0), (600_000_000, 1)] {
+    for (limit, expected_rejections) in [(400_000_000, 0), (600_000_000, 2)] {
         let (markets, m0, _m1, _m2, group) = setup_group();
         let mut accounts = AccountStore::new();
         let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
@@ -3629,25 +3690,16 @@ fn test_mm_buyno_coverage_without_a_cross_is_accepted() {
 // --- MM budget capping ---
 
 #[test]
-fn test_mm_budget_clamped_to_balance() {
-    // MM has $10 balance but requests $50 budget
+fn test_mm_budget_above_balance_is_rejected_without_clamping() {
     let (markets, m0) = setup();
     let mut accounts = AccountStore::new();
     let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
-    let counter = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
     let mut seq = BlockSequencer::with_default_solver(
         accounts,
         markets.clone(),
         vec![],
         SequencerConfig::default(),
     );
-
-    // Give counterparty YES positions to sell
-    seq.accounts
-        .get_mut(counter)
-        .unwrap()
-        .positions
-        .insert((m0, 0), 1000);
 
     let mut constraint = MmConstraint::new(MmId::new(1), Nanos(50 * NANOS_PER_DOLLAR));
     constraint.add_order(0, matching_engine::MmSide::BuyYes);
@@ -3657,21 +3709,14 @@ fn test_mm_budget_clamped_to_balance() {
         orders: vec![outcome_buy(&markets, 0, m0, 0, 600_000_000, 100)],
         mm_constraint: Some(constraint),
     };
-    let sell_sub = OrderSubmission {
-        account_id: counter,
-        orders: vec![outcome_sell(&markets, 0, m0, 0, 400_000_000, 100)],
-        mm_constraint: None,
-    };
-
-    let _result = run_batch(&mut seq, vec![mm_sub, sell_sub], &markets, &[]);
-
-    // MM balance should never go below 0
-    let mm_acct = seq.accounts.get(aid).unwrap();
-    assert!(
-        mm_acct.balance >= 0,
-        "MM balance negative: {}",
-        mm_acct.balance
-    );
+    assert!(matches!(
+        seq.try_admit_direct(mm_sub, 1_000),
+        AdmitOutcome::Rejected(SequencerError::Rejected(Rejection {
+            reason: RejectionReason::InsufficientBalance { .. },
+            ..
+        }))
+    ));
+    assert_eq!(seq.pending_bundles_len(), 0);
 }
 
 #[test]
@@ -4255,7 +4300,7 @@ fn cross_block_stp_mm_path_sees_prior_resting() {
     );
     assert!(matches!(
         bp.block.rejections[0].reason,
-        RejectionReason::CompleteSetFormation
+        RejectionReason::AtomicBundle
     ));
 }
 

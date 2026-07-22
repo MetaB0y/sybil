@@ -223,6 +223,33 @@ impl Store {
         .map(|_| ())
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the WAL append keeps every signed bundle field explicit"
+    )]
+    pub async fn append_authenticated_mm_bundle(
+        &self,
+        submission: &crate::sequencer::OrderSubmission,
+        bundle_id: [u8; 32],
+        revision: u64,
+        order_sides: &[matching_engine::MmSide],
+        max_capital: matching_engine::Nanos,
+        nonce: u64,
+        authorization: &sybil_verifier::ClientActionAuth,
+    ) -> Result<(), StoreError> {
+        self.append_acknowledged_write(AcknowledgedWrite::AuthenticatedMmBundle {
+            submission: submission.clone(),
+            bundle_id,
+            revision,
+            order_sides: order_sides.to_vec(),
+            max_capital,
+            nonce,
+            authorization: authorization.clone(),
+        })
+        .await
+        .map(|_| ())
+    }
+
     pub async fn append_authenticated_cancel(
         &self,
         account_id: AccountId,
@@ -292,7 +319,7 @@ impl Store {
     }
 }
 
-pub const ACKNOWLEDGED_WRITE_ENVELOPE_VERSION: u8 = 1;
+pub const ACKNOWLEDGED_WRITE_ENVELOPE_VERSION: u8 = 2;
 
 /// One actor-ordered mutation accepted after the committed block fence.
 ///
@@ -317,6 +344,15 @@ pub enum AcknowledgedWrite {
         nonce: u64,
         authorization: sybil_verifier::ClientActionAuth,
     },
+    AuthenticatedMmBundle {
+        submission: crate::sequencer::OrderSubmission,
+        bundle_id: [u8; 32],
+        revision: u64,
+        order_sides: Vec<matching_engine::MmSide>,
+        max_capital: matching_engine::Nanos,
+        nonce: u64,
+        authorization: sybil_verifier::ClientActionAuth,
+    },
     AuthenticatedCancel {
         account_id: AccountId,
         order_id: u64,
@@ -333,6 +369,7 @@ impl AcknowledgedWrite {
             Self::DeferredBundle(_) => "deferred_bundle",
             Self::AuthenticatedDirectAdmit { .. } => "authenticated_direct_admit",
             Self::AuthenticatedDeferredBundle { .. } => "authenticated_deferred_bundle",
+            Self::AuthenticatedMmBundle { .. } => "authenticated_mm_bundle",
             Self::AuthenticatedCancel { .. } => "authenticated_cancel",
             Self::ControlPlane(_) => "control_plane",
             Self::L1Deposit(_) => "l1_deposit",

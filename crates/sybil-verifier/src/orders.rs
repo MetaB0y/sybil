@@ -262,6 +262,45 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
                 // Valid rejection: MM orders would form a complete set in a market group.
                 // No further validation needed — the sequencer detected self-trade potential.
             }
+            RejectionReason::AtomicBundle => {
+                let constraints = witness
+                    .mm_constraints
+                    .iter()
+                    .filter(|constraint| constraint.order_ids.contains(&rej.order.id))
+                    .collect::<Vec<_>>();
+                if constraints.len() != 1 {
+                    violations.push(Violation {
+                        kind: ViolationKind::IncorrectRejectionReason,
+                        details: format!(
+                            "Order {}: atomic-bundle rejection has {} containing constraints",
+                            rej.order.id,
+                            constraints.len()
+                        ),
+                    });
+                    continue;
+                }
+                let constraint = constraints[0];
+                let all_rejected_together = constraint.order_ids.iter().all(|order_id| {
+                    witness.rejections.iter().any(|candidate| {
+                        candidate.order.id == *order_id
+                            && candidate.account_id == rej.account_id
+                            && matches!(candidate.reason, RejectionReason::AtomicBundle)
+                    })
+                });
+                let any_accepted = witness
+                    .orders
+                    .iter()
+                    .any(|candidate| constraint.order_ids.contains(&candidate.order.id));
+                if !all_rejected_together || any_accepted {
+                    violations.push(Violation {
+                        kind: ViolationKind::IncorrectRejectionReason,
+                        details: format!(
+                            "Order {}: MM bundle was not rejected atomically",
+                            rej.order.id
+                        ),
+                    });
+                }
+            }
             RejectionReason::InvalidOrder(reason) => {
                 if rej.order.validate_binary_one_hot().is_ok() {
                     violations.push(Violation {

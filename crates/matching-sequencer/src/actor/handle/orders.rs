@@ -1,4 +1,7 @@
-use crate::crypto::{AuthenticatedCancel, AuthenticatedOrder, SignedCancel, SignedOrder};
+use crate::crypto::{
+    AuthenticatedCancel, AuthenticatedMmBundle, AuthenticatedOrder, SignedCancel, SignedMmBundle,
+    SignedOrder,
+};
 use crate::error::SequencerError;
 use crate::sequencer::OrderSubmission;
 
@@ -37,6 +40,22 @@ impl SequencerHandle {
         authenticated: AuthenticatedOrder,
     ) -> Result<Vec<u64>, SequencerError> {
         self.rpc(|reply| SequencerMsg::SubmitAuthenticatedOrder(authenticated, reply))
+            .await?
+    }
+
+    pub async fn submit_signed_mm_bundle(
+        &self,
+        signed: SignedMmBundle,
+    ) -> Result<Vec<u64>, SequencerError> {
+        self.rpc(|reply| SequencerMsg::SubmitSignedMmBundle(signed, reply))
+            .await?
+    }
+
+    pub async fn submit_authenticated_mm_bundle(
+        &self,
+        authenticated: AuthenticatedMmBundle,
+    ) -> Result<Vec<u64>, SequencerError> {
+        self.rpc(|reply| SequencerMsg::SubmitAuthenticatedMmBundle(authenticated, reply))
             .await?
     }
 

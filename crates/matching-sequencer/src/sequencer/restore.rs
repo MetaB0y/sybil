@@ -286,6 +286,32 @@ impl BlockSequencer {
                     authorization,
                 })
             }
+            AcknowledgedWrite::AuthenticatedMmBundle {
+                submission,
+                bundle_id,
+                revision,
+                order_sides,
+                max_capital,
+                nonce,
+                authorization,
+            } => {
+                for order in &submission.orders {
+                    self.next_order_id = self.next_order_id.max(order.id.saturating_add(1));
+                }
+                let account_id = submission.account_id;
+                let orders = submission.orders.clone();
+                self.pending_bundles.push(submission);
+                self.apply_client_action_authorized(sybil_verifier::ClientActionWitness::MmBundle {
+                    account_id: account_id.0,
+                    bundle_id,
+                    revision,
+                    orders,
+                    order_sides,
+                    max_capital,
+                    nonce,
+                    authorization,
+                })
+            }
             AcknowledgedWrite::AuthenticatedCancel {
                 account_id,
                 order_id,

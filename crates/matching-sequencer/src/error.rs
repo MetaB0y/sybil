@@ -18,6 +18,9 @@ pub enum RejectionReason {
     AccountNotFound,
     /// Buy limits fund a complete set within a market group (self-trade via minting).
     CompleteSetFormation,
+    /// The order belongs to an MM bundle whose all-or-nothing validation
+    /// failed for at least one member or for the shared budget.
+    AtomicBundle,
     /// Order shape or quantity is not supported by production admission.
     InvalidOrder(String),
     /// Order time-in-force made it ineligible for the target batch.
@@ -35,6 +38,7 @@ impl RejectionReason {
             RejectionReason::InsufficientPosition { .. } => "insufficient_position",
             RejectionReason::AccountNotFound => "account_not_found",
             RejectionReason::CompleteSetFormation => "complete_set",
+            RejectionReason::AtomicBundle => "atomic_bundle",
             RejectionReason::InvalidOrder(_) => "invalid_order",
             RejectionReason::Expired { .. } => "expired",
         }
@@ -170,6 +174,9 @@ pub enum SequencerError {
     /// Account has too many deferred bundles.
     #[error("account {} has too many pending bundles: limit {}", .account_id.0, .limit)]
     TooManyPendingBundles { account_id: AccountId, limit: usize },
+    /// A signed MM bundle violates its all-or-nothing shape or identity rules.
+    #[error("invalid MM bundle: {0}")]
+    InvalidMmBundle(String),
     /// All handles dropped; the actor has shut down.
     #[error("sequencer actor shut down")]
     ActorGone,

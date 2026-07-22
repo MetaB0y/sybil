@@ -6,8 +6,9 @@ use matching_engine::MarketId;
 use matching_engine::Nanos;
 use matching_engine::mm_constraint::{MmConstraint, MmId, MmSide};
 use matching_sequencer::crypto::{
-    AccountAuthScheme, AuthenticatedCancel, AuthenticatedOrder, PublicKey, SignedCancel,
-    SignedOrder, canonical_cancel_bytes, canonical_order_bytes,
+    AccountAuthScheme, AuthenticatedCancel, AuthenticatedMmBundle, AuthenticatedOrder, PublicKey,
+    SignedCancel, SignedMmBundle, SignedOrder, canonical_cancel_bytes, canonical_mm_bundle_bytes,
+    canonical_order_bytes,
 };
 use matching_sequencer::{AccountId, OrderSubmission, PendingOrderInfo};
 use p256::Sec1Point;
@@ -17,8 +18,8 @@ use crate::convert::{apply_time_in_force, order_spec_to_order, signed_order_data
 use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::request::{
-    AuthScheme, CancelSignedOrderRequest, OrderSpec, SubmitOrderRequest, SubmitSignedOrderRequest,
-    TimeInForce,
+    AuthScheme, CancelSignedOrderRequest, OrderSpec, SubmitOrderRequest,
+    SubmitSignedMmBundleRequest, SubmitSignedOrderRequest, TimeInForce,
 };
 use crate::types::response::{
     ApiErrorResponse, CancelOrderResponse, OrderAcceptedResponse, PendingOrderResponse,
@@ -64,6 +65,18 @@ fn parse_required_signature(signature_hex: Option<&str>) -> Result<Signature, Ap
     parse_signature(signature_hex.ok_or_else(|| {
         AppError::bad_request("signature_hex is required for raw_p256 signed requests")
     })?)
+}
+
+fn parse_bundle_id(bundle_id_hex: &str) -> Result<[u8; 32], AppError> {
+    let bytes = hex::decode(
+        bundle_id_hex
+            .trim_start_matches("0x")
+            .trim_start_matches("0X"),
+    )
+    .map_err(|_| AppError::bad_request("Invalid hex encoding for bundle_id_hex"))?;
+    bytes
+        .try_into()
+        .map_err(|_| AppError::bad_request("bundle_id_hex must encode exactly 32 bytes"))
 }
 
 fn sequencer_auth_scheme(scheme: AuthScheme) -> AccountAuthScheme {
@@ -218,6 +231,123 @@ pub async fn submit_signed_order(
                 .sequencer
                 .submit_authenticated_order(AuthenticatedOrder {
                     order,
+                    nonce: req.nonce,
+                    authorization,
+                })
+                .await?
+        }
+    };
+
+    Ok(Json(OrderAcceptedResponse {
+        accepted: true,
+        order_ids,
+    }))
+}
+
+/// POST /v1/orders/mm-bundles/signed
+#[utoipa::path(
+    tag = "routesorders",
+    post,
+    path = "/v1/orders/mm-bundles/signed",
+    request_body = SubmitSignedMmBundleRequest,
+    responses(
+        (status = 200, description = "Signed atomic MM bundle accepted", body = OrderAcceptedResponse),
+        (status = 400, description = "Invalid bundle or signature", body = ApiErrorResponse),
+        (status = 403, description = "Signer or account mismatch", body = ApiErrorResponse),
+        (status = 404, description = "Unknown signer, account, or market", body = ApiErrorResponse),
+        (status = 409, description = "Stale nonce or target block", body = ApiErrorResponse)
+    )
+)]
+pub async fn submit_signed_mm_bundle(
+    State(state): State<AppState>,
+    Json(req): Json<SubmitSignedMmBundleRequest>,
+) -> Result<Json<OrderAcceptedResponse>, AppError> {
+    if req.orders.is_empty() {
+        return Err(AppError::bad_request("MM bundle orders must not be empty"));
+    }
+    if req.orders.len() > state.max_orders_per_submission {
+        return Err(
+            matching_sequencer::SequencerError::TooManyOrdersInSubmission {
+                count: req.orders.len(),
+                limit: state.max_orders_per_submission,
+            }
+            .into(),
+        );
+    }
+    let signer = parse_signer_public_key(&req.signer_pubkey_hex)?;
+    let bundle_id = parse_bundle_id(&req.bundle_id_hex)?;
+    let markets = state.sequencer.list_markets().await?;
+    let mut orders = Vec::with_capacity(req.orders.len());
+    let mut order_sides = Vec::with_capacity(req.orders.len());
+    for spec in &req.orders {
+        let mut order = order_spec_to_order(spec, &markets).map_err(|error| match error {
+            crate::convert::OrderSpecConversionError::MarketNotFound(market_id) => {
+                AppError::market_not_found(market_id.0)
+            }
+            crate::convert::OrderSpecConversionError::Invalid(error) => {
+                AppError::bad_request(error)
+            }
+        })?;
+        order.expires_at_block = Some(req.expires_at_block);
+        orders.push(order);
+        order_sides.push(mm_side_from_spec(spec));
+    }
+    let max_capital = Nanos(req.mm_budget_nanos);
+    let order_ids = match req.auth_scheme {
+        AuthScheme::RawP256 => {
+            let signature = parse_required_signature(req.signature_hex.as_deref())?;
+            state
+                .sequencer
+                .submit_signed_mm_bundle(SignedMmBundle {
+                    account_id: AccountId(req.account_id),
+                    bundle_id,
+                    revision: req.revision,
+                    orders,
+                    order_sides,
+                    max_capital,
+                    nonce: req.nonce,
+                    signer,
+                    signature,
+                })
+                .await?
+        }
+        AuthScheme::WebAuthn => {
+            ensure_registered_scheme(&state, &signer, sequencer_auth_scheme(req.auth_scheme))
+                .await?;
+            let assertion = req.webauthn_assertion.as_ref().ok_or_else(|| {
+                AppError::bad_request("webauthn_assertion is required for webauthn signed requests")
+            })?;
+            let genesis_hash = state
+                .sequencer
+                .get_genesis_hash()
+                .await?
+                .ok_or(matching_sequencer::SequencerError::GenesisHashUnavailable)?;
+            let canonical = canonical_mm_bundle_bytes(
+                AccountId(req.account_id),
+                bundle_id,
+                req.revision,
+                &orders,
+                &order_sides,
+                max_capital,
+                req.nonce,
+                genesis_hash,
+            )?;
+            webauthn::verify_assertion(&state.webauthn, &signer.0, &canonical, assertion).map_err(
+                |err| AppError::bad_request(format!("Invalid WebAuthn assertion: {err}")),
+            )?;
+            let authorization = webauthn::client_action_authorization(&signer.0, assertion)
+                .map_err(|err| {
+                    AppError::bad_request(format!("Invalid WebAuthn assertion envelope: {err}"))
+                })?;
+            state
+                .sequencer
+                .submit_authenticated_mm_bundle(AuthenticatedMmBundle {
+                    account_id: AccountId(req.account_id),
+                    bundle_id,
+                    revision: req.revision,
+                    orders,
+                    order_sides,
+                    max_capital,
                     nonce: req.nonce,
                     authorization,
                 })

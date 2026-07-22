@@ -194,6 +194,46 @@ def test_submit_orders_can_set_ioc_time_in_force(monkeypatch):
     ]
 
 
+def test_submit_signed_mm_bundle_preserves_signed_integer_fields(monkeypatch):
+    import asyncio
+
+    from sybil_client import SybilClient
+
+    captured = {}
+    client = SybilClient("http://example.invalid")
+
+    async def fake_request(method, path, **kwargs):
+        captured["method"] = method
+        captured["path"] = path
+        captured["json"] = kwargs["json"]
+        return {"accepted": True, "order_ids": [91, 92]}
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    order_ids = asyncio.run(
+        client.submit_signed_mm_bundle(
+            account_id=42,
+            bundle_id_hex="11" * 32,
+            orders=[
+                BuyYes.at_price(market_id=7, price=0.51, quantity=3),
+                SellNo.at_price(market_id=8, price=0.49, quantity=4),
+            ],
+            expires_at_block=12,
+            mm_budget_nanos=3_000_000_000,
+            nonce=17,
+            signer_pubkey_hex="02" + "22" * 32,
+            signature_hex="33" * 64,
+        )
+    )
+
+    assert order_ids == [91, 92]
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/v1/orders/mm-bundles/signed"
+    assert captured["json"]["mm_budget_nanos"] == "3000000000"
+    assert captured["json"]["expires_at_block"] == 12
+    assert captured["json"]["orders"][0]["quantity"] == 3_000
+    assert captured["json"]["orders"][1]["quantity"] == 4_000
+
+
 def test_fill_cursor_gap_requires_reconciliation(monkeypatch):
     import asyncio
     import pytest

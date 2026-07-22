@@ -31,6 +31,7 @@ PUBLIC GET /v1/events/{event_id}/traders
 PUBLIC GET /v1/events/{event_id}/raw
 PUBLIC GET /v1/feeds
 PUBLIC POST /v1/orders/signed
+PUBLIC POST /v1/orders/mm-bundles/signed
 PUBLIC POST /v1/orders/cancel/signed
 PUBLIC GET /v1/blocks
 PUBLIC GET /v1/blocks/latest

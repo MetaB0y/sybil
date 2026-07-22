@@ -55,8 +55,8 @@ The import path is `Store::import_witness_genesis` in
 recomputes the post-state root, verifies the optional expected root, restores
 the committed head, and is covered by a child-block continuation drill.
 
-Witness v12 imports the committed `last_trading_nonce` for every account, so
-previously accepted order/cancel signatures remain spent after recovery. The
+Witness v13 imports the committed `last_trading_nonce` for every account, so
+previously accepted order/cancel/MM-bundle signatures remain spent after recovery. The
 broader operational `last_nonce` is not validity state and is conservatively
 seeded from `last_trading_nonce`; this prevents trading replay while allowing
 non-trading operational nonce space to resume. The preserved `genesis_hash`

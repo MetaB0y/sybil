@@ -1054,7 +1054,7 @@ mod tests {
     use crate::sequencer::SequencerConfig;
     use crate::store::AcknowledgedWrite;
     use crate::system_event::SystemEvent;
-    use matching_engine::{MarketSet, NANOS_PER_DOLLAR, outcome_buy};
+    use matching_engine::{MarketSet, MmSide, NANOS_PER_DOLLAR, Nanos, outcome_buy, outcome_sell};
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -2748,6 +2748,101 @@ mod tests {
                 &epoch_public_inputs
             ))
         );
+    }
+
+    #[tokio::test]
+    async fn signed_atomic_mm_bundle_survives_restart_and_is_validity_bound() {
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(3_600),
+            ..SequencerConfig::default()
+        };
+        let (mut seq, aid) = make_test_sequencer_with_config(config.clone());
+        let signing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        seq.register_pubkey(aid, PublicKey(*signing_key.verifying_key()))
+            .unwrap();
+
+        let path = temp_store_path("signed-mm-bundle");
+        let store = Arc::new(crate::store::Store::open(&path).unwrap());
+        let handle = SequencerHandle::spawn_with_store_arc(seq, Some(store.clone()));
+        handle.produce_block().await.unwrap();
+        let genesis_hash = handle.get_genesis_hash().await.unwrap().unwrap();
+
+        let mut markets = MarketSet::new();
+        let market = markets.add_binary("Test");
+        let mut buy = outcome_buy(&markets, 0, market, 0, 510_000_000, 1_000);
+        let mut sell = outcome_sell(&markets, 0, market, 1, 490_000_000, 1_000);
+        buy.expires_at_block = Some(2);
+        sell.expires_at_block = Some(2);
+        let signed = crate::crypto::sign_mm_bundle(
+            aid,
+            [0x44; 32],
+            0,
+            &[buy, sell],
+            &[MmSide::BuyYes, MmSide::SellNo],
+            Nanos(2 * NANOS_PER_DOLLAR),
+            1,
+            genesis_hash,
+            &signing_key,
+        )
+        .unwrap();
+        let order_ids = handle.submit_signed_mm_bundle(signed).await.unwrap();
+        assert_eq!(order_ids.len(), 2);
+
+        let pending = store.load_state().await.unwrap().unwrap();
+        assert!(matches!(
+            pending.acknowledged_writes.as_slice(),
+            [crate::store::SequencedAcknowledgedWrite {
+                write: AcknowledgedWrite::AuthenticatedMmBundle {
+                    bundle_id,
+                    revision: 0,
+                    nonce: 1,
+                    ..
+                },
+                ..
+            }] if *bundle_id == [0x44; 32]
+        ));
+        assert!(handle.stop_and_wait(TEST_ACTOR_TIMEOUT).await);
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        let restored_seq = BlockSequencer::restore(restored, config);
+        let restored_handle =
+            SequencerHandle::spawn_with_store_arc(restored_seq, Some(store.clone()));
+        let block = restored_handle.produce_block().await.unwrap();
+        let witness = store
+            .block_witness(block.canonical.header.height)
+            .unwrap()
+            .expect("persisted signed MM bundle witness");
+        assert_eq!(witness.orders.iter().filter(|order| order.is_mm).count(), 2);
+        assert_eq!(witness.rejections.len(), 0);
+        assert!(witness.system_events.iter().any(|event| matches!(
+            event,
+            sybil_verifier::SystemEventWitness::ClientActionAuthorized(
+                sybil_verifier::ClientActionWitness::MmBundle {
+                    account_id,
+                    bundle_id,
+                    revision: 0,
+                    nonce: 1,
+                    orders,
+                    ..
+                }
+            ) if *account_id == aid.0 && *bundle_id == [0x44; 32] && orders.len() == 2
+        )));
+        assert_eq!(witness.mm_constraints.len(), 1);
+        assert_eq!(witness.mm_constraints[0].mm_id.0, aid.0);
+        assert_eq!(witness.mm_constraints[0].order_ids, order_ids);
+        assert!(sybil_verifier::verify_full(&witness, false).valid);
+
+        let mut missing_constraint = witness.clone();
+        missing_constraint.mm_constraints.clear();
+        assert!(!sybil_verifier::verify_full(&missing_constraint, false).valid);
+
+        let mut partial = witness;
+        partial.orders.pop();
+        assert!(!sybil_verifier::verify_full(&partial, false).valid);
+        assert!(restored_handle.stop_and_wait(TEST_ACTOR_TIMEOUT).await);
     }
 
     #[tokio::test]

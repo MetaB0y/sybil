@@ -463,6 +463,43 @@ class SybilClient:
         data = await self._request("POST", "/v1/orders", json=payload)
         return data.get("accepted", False)
 
+    async def submit_signed_mm_bundle(
+        self,
+        *,
+        account_id: int,
+        bundle_id_hex: str,
+        orders: list[OrderSpec],
+        expires_at_block: int,
+        mm_budget_nanos: int,
+        nonce: int,
+        signer_pubkey_hex: str,
+        signature_hex: str,
+        revision: int = 0,
+    ) -> list[int]:
+        """Submit one raw-P256 signed, all-or-nothing IOC MM bundle.
+
+        ``signature_hex`` must cover the canonical ``sybil/signing/mm-bundle/v1``
+        payload. All money remains integer nanodollars and every order is sent
+        in the signed positional order.
+        """
+        data = await self._request(
+            "POST",
+            "/v1/orders/mm-bundles/signed",
+            json={
+                "account_id": account_id,
+                "bundle_id_hex": bundle_id_hex,
+                "revision": revision,
+                "orders": [self._order_to_json(order) for order in orders],
+                "expires_at_block": expires_at_block,
+                "mm_budget_nanos": str(mm_budget_nanos),
+                "nonce": nonce,
+                "signer_pubkey_hex": signer_pubkey_hex,
+                "auth_scheme": "raw_p256",
+                "signature_hex": signature_hex,
+            },
+        )
+        return [int(order_id) for order_id in data["order_ids"]]
+
     async def buy_yes(
         self, account_id: int, market_id: int, price: float, quantity: int | float
     ) -> bool:

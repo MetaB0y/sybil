@@ -506,7 +506,7 @@ impl BlockSequencer {
             let account_id = sub.account_id;
             let order_ids_were_preassigned = submission_index < preassigned_submission_count;
 
-            let Some(account) = self.accounts.get(account_id) else {
+            let Some(account) = self.accounts.get(account_id).cloned() else {
                 for order in &sub.orders {
                     witness_rejections.push(WitnessRejection {
                         order: order.clone(),
@@ -524,12 +524,140 @@ impl BlockSequencer {
 
             let is_mm = sub.mm_constraint.is_some();
 
-            // Cap MM budget to account balance — prevents cumulative overdraft.
-            if let Some(ref mut mm_c) = sub.mm_constraint {
-                if account.balance <= 0 {
+            // MM submissions are the signed/shared-budget atomicity unit. They
+            // either contribute every quote plus one exact constraint, or
+            // every quote is rejected with no solver input.
+            if is_mm {
+                if !order_ids_were_preassigned {
+                    self.assign_submission_order_ids(&mut sub);
+                } else {
+                    for order in &sub.orders {
+                        self.next_order_id = self.next_order_id.max(order.id.saturating_add(1));
+                    }
+                }
+                let constraint = sub
+                    .mm_constraint
+                    .take()
+                    .expect("is_mm implies a constraint");
+                if sub.orders.is_empty()
+                    || constraint.max_capital.0 == 0
+                    || constraint.order_ids.len() != sub.orders.len()
+                    || constraint.order_sides.len() != sub.orders.len()
+                {
+                    return Err(SequencerError::InvalidMmBundle(
+                        "MM shared constraint does not cover the atomic bundle".to_string(),
+                    ));
+                }
+                let mut candidate_stp = stp.clone();
+                let mut failure = constraint.max_capital.0 > account.balance.max(0) as u64;
+
+                let mut seen_constraint_ids = HashSet::new();
+                if !failure {
+                    for order in &sub.orders {
+                        let Some(side) = constraint.order_sides.get(&order.id).copied() else {
+                            return Err(SequencerError::InvalidMmBundle(
+                                "MM shared constraint is missing an order side".to_string(),
+                            ));
+                        };
+                        if !constraint.order_ids.contains(&order.id)
+                            || !seen_constraint_ids.insert(order.id)
+                        {
+                            return Err(SequencerError::InvalidMmBundle(
+                                "MM shared constraint contains missing or duplicate orders"
+                                    .to_string(),
+                            ));
+                        }
+                        if let Err(reason) = validate_order_shape(order) {
+                            return Err(SequencerError::Rejected(Rejection {
+                                order_id: order.id,
+                                account_id,
+                                reason,
+                            }));
+                        }
+                        match crate::validation::mm_side_for_order(order) {
+                            Ok(derived) if derived == side => {}
+                            Ok(_) => {
+                                return Err(SequencerError::InvalidMmBundle(
+                                    "MM signed side does not match its payoff".to_string(),
+                                ));
+                            }
+                            Err(reason) => {
+                                return Err(SequencerError::Rejected(Rejection {
+                                    order_id: order.id,
+                                    account_id,
+                                    reason,
+                                }));
+                            }
+                        }
+                        if !order
+                            .active_markets()
+                            .all(|market| active_markets.contains(&market))
+                        {
+                            failure = true;
+                            break;
+                        }
+                        let expires_at_block =
+                            order.effective_expires_at_block(self.height, self.order_book.ttl());
+                        if self.height > expires_at_block {
+                            failure = true;
+                            break;
+                        }
+                        if candidate_stp.would_complete_set(account_id, order) {
+                            failure = true;
+                            break;
+                        }
+                        candidate_stp.record(account_id, order);
+                    }
+                }
+
+                if failure {
+                    let reason = RejectionReason::AtomicBundle;
+                    for order in sub.orders {
+                        witness_rejections.push(WitnessRejection {
+                            order: order.clone(),
+                            account_id: account_id.0,
+                            reason: convert_rejection_reason(&reason),
+                        });
+                        derived_view_sidecar
+                            .rejection_history
+                            .push(RejectedOrderView {
+                                order_id: order.id,
+                                order: order.clone(),
+                                account_id: account_id.0,
+                                reason: reason.clone(),
+                            });
+                        rejections.push(Rejection {
+                            order_id: order.id,
+                            account_id,
+                            reason: reason.clone(),
+                        });
+                    }
+                    all_mm_constraints.push(constraint);
                     continue;
                 }
-                mm_c.max_capital = mm_c.max_capital.min(Nanos(account.balance as u64));
+
+                stp = candidate_stp;
+                for order in sub.orders {
+                    order_account_map.insert(order.id, account_id);
+                    mm_order_ids_set.insert(order.id);
+                    witness_orders.push(WitnessOrder {
+                        order: order.clone(),
+                        account_id: account_id.0,
+                        is_mm: true,
+                    });
+                    derived_view_sidecar.admits.push(AdmitTimingView {
+                        order_id: order.id,
+                        account_id: account_id.0,
+                        admit_height: self.height,
+                        admit_timestamp_ms: timestamp_ms,
+                        is_new: true,
+                        is_mm: true,
+                        had_prior_fill: false,
+                    });
+                    all_orders.push(order);
+                }
+                all_mm_constraints.push(constraint);
+                continue;
             }
 
             let mut accepted_orders: Vec<Order> = Vec::new();
@@ -627,7 +755,7 @@ impl BlockSequencer {
                     match self.order_book.accept(
                         order.clone(),
                         account_id,
-                        account,
+                        &account,
                         self.height,
                         timestamp_ms,
                     ) {

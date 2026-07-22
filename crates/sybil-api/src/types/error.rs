@@ -251,6 +251,9 @@ impl From<matching_sequencer::SequencerError> for AppError {
             | matching_sequencer::SequencerError::TooManyPendingBundles { .. } => {
                 AppError::rate_limited(1).with_details(format!("{}", err))
             }
+            matching_sequencer::SequencerError::InvalidMmBundle(message) => {
+                AppError::bad_request(format!("Invalid MM bundle: {message}"))
+            }
             matching_sequencer::SequencerError::ActorGone => {
                 AppError::sequencer_unavailable("Sequencer actor is unavailable")
             }

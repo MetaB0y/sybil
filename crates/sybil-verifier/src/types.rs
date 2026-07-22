@@ -5,7 +5,9 @@
 
 use std::collections::HashMap;
 
-use matching_engine::{Fill, MarketGroup, MarketId, MmConstraint, Nanos, Order, OrderDirection};
+use matching_engine::{
+    Fill, MarketGroup, MarketId, MmConstraint, MmSide, Nanos, Order, OrderDirection,
+};
 use sybil_l1_protocol::{DEPOSIT_TREE_DEPTH, DepositFrontier};
 
 /// Everything the verifier needs to check a single block.
@@ -111,6 +113,19 @@ pub enum ClientActionWitness {
         nonce: u64,
         authorization: ClientActionAuth,
     },
+    /// One signed, all-or-nothing flash-liquidity bundle. Order ids are
+    /// sequencer-assigned after signature verification and are excluded from
+    /// canonical signing bytes.
+    MmBundle {
+        account_id: u64,
+        bundle_id: [u8; 32],
+        revision: u64,
+        orders: Vec<Order>,
+        order_sides: Vec<MmSide>,
+        max_capital: Nanos,
+        nonce: u64,
+        authorization: ClientActionAuth,
+    },
 }
 
 /// Reason an order was rejected (mirrors sequencer's `RejectionReason`).
@@ -129,6 +144,8 @@ pub enum RejectionReason {
     AccountNotFound,
     /// MM orders form a complete set within a market group (self-trade via minting).
     CompleteSetFormation,
+    /// The order was rejected as part of one all-or-nothing MM bundle.
+    AtomicBundle,
     /// Order shape or quantity is not supported by production admission.
     InvalidOrder(String),
     /// Order time-in-force made it ineligible for the target batch.

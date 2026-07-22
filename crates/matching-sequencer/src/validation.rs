@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use matching_engine::{MarketId, Order, SHARE_SCALE};
+use matching_engine::{MarketId, MmSide, Order, SHARE_SCALE};
 
 use crate::account::Account;
 use crate::error::RejectionReason;
@@ -12,6 +12,22 @@ pub fn validate_order_shape(order: &Order) -> Result<(), RejectionReason> {
     order
         .validate_binary_one_hot()
         .map_err(|reason| RejectionReason::InvalidOrder(reason.to_string()))
+}
+
+/// Derive the budget side of a supported single-market binary order.
+/// Keeping this derivation beside shape validation prevents a signed side tag
+/// from relabeling the economic meaning of its payoff vector.
+pub(crate) fn mm_side_for_order(order: &Order) -> Result<MmSide, RejectionReason> {
+    validate_order_shape(order)?;
+    match (order.payoffs[0], order.payoffs[1]) {
+        (1, 0) => Ok(MmSide::BuyYes),
+        (0, 1) => Ok(MmSide::BuyNo),
+        (-1, 0) => Ok(MmSide::SellYes),
+        (0, -1) => Ok(MmSide::SellNo),
+        _ => Err(RejectionReason::InvalidOrder(
+            "MM order payoff does not identify one binary side".to_string(),
+        )),
+    }
 }
 
 /// Admission-only resource floor for orders that can become durable resting

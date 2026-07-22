@@ -139,6 +139,19 @@ fn system_event_to_response(event: &matching_sequencer::SystemEvent) -> SystemEv
                     nonce,
                     authorization,
                 } => (*account_id, "cancel", *order_id, *nonce, authorization),
+                matching_sequencer::ClientActionWitness::MmBundle {
+                    account_id,
+                    orders,
+                    nonce,
+                    authorization,
+                    ..
+                } => (
+                    *account_id,
+                    "mm_bundle",
+                    orders.first().map_or(0, |order| order.id),
+                    *nonce,
+                    authorization,
+                ),
             };
             SystemEventResponse::ClientActionAuthorized {
                 account_id,

@@ -3,7 +3,7 @@ tags: [api, authentication, passkeys, security]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-20
+last_verified: 2026-07-22
 ---
 
 # P256 and WebAuthn authentication
@@ -11,8 +11,8 @@ last_verified: 2026-07-20
 > [!summary] In one paragraph
 > Accounts have a committed set of P256 signing keys. Raw agent keys sign
 > canonical action bytes directly; passkeys sign a WebAuthn assertion whose
-> challenge is the hash of those same bytes. Witness v12 carries key mutations
-> and ordinary order/cancel authorization envelopes in actor order. Native and
+> challenge is the hash of those same bytes. Witness v13 carries key mutations
+> and ordinary order/cancel plus atomic MM-bundle authorization envelopes in actor order. Native and
 > guest-safe verification replay the active key set, RawP256/WebAuthn signature,
 > exact action, genesis domain, and committed trading nonce. The deployed guest
 > commitment moves with the epoch guest in the coordinated #15 repin.
@@ -61,7 +61,7 @@ are validity-checked, not merely accepted by the server.
 
 Every canonical signed action begins with a unique versioned domain and binds
 the chain `genesis_hash`. This includes orders, cancellations, profile and read
-API-key mutations, bridge withdrawals, key operations, and resolution
+API-key mutations, atomic MM bundles, bridge withdrawals, key operations, and resolution
 attestations. Cancellation bytes also bind the account and order ID. For signed
 orders and cancellations, the API retains the exact RawP256/WebAuthn envelope,
 and the sequencer appends the action, envelope, and nonce in one acknowledged
@@ -69,7 +69,7 @@ WAL record before acknowledgement. Recovery reconstructs the same
 `ClientActionAuthorized` event.
 
 The account leaf commits a dedicated `last_trading_nonce`. Native and guest-safe
-verification require each witnessed order/cancel nonce to be strictly greater
+verification require each witnessed order/cancel/MM-bundle nonce to be strictly greater
 than the authenticated prior value; gaps are allowed. Key mutations and client
 actions share actor acknowledgement order, so an action must be authorized by a
 scheme-matching key active at that exact point. The action event is then bound
@@ -78,6 +78,14 @@ and read-key actions continue to use the broader sequencer `last_nonce`; bridge
 and resolution paths have their own state machines. They share canonical
 domain/genesis protection but remain outside this first trading-intent proof
 scope.
+
+An atomic MM bundle uses the distinct `sybil/signing/mm-bundle/v1` domain. The
+signed object includes the account, 32-byte bundle id, revision, exact ordered
+orders and economic sides, one maximum-capital budget, and nonce. The server
+does not recompute or clamp signed intent: a side inconsistent with the order's
+payoff, a nonzero initial revision, a non-next-block expiry, or a budget above
+the account balance is rejected before WAL append. Raw P256 and WebAuthn use
+the same canonical bytes and witness-verification path.
 
 Unsigned `POST /v1/orders` is a service route: in production it requires the
 service token; dev mode skips that service bearer for local workflows. It is not

@@ -128,6 +128,7 @@ pub(super) fn convert_rejection_reason(r: &RejectionReason) -> sybil_verifier::R
         RejectionReason::CompleteSetFormation => {
             sybil_verifier::RejectionReason::CompleteSetFormation
         }
+        RejectionReason::AtomicBundle => sybil_verifier::RejectionReason::AtomicBundle,
         RejectionReason::InvalidOrder(reason) => {
             sybil_verifier::RejectionReason::InvalidOrder(reason.clone())
         }

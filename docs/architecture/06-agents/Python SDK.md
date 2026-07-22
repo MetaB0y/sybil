@@ -2,14 +2,21 @@
 tags: [arena, crate]
 layer: arena
 status: current
-last_verified: 2026-07-18
+last_verified: 2026-07-22
 ---
 
 The Python SDK (`sybil_client`) is an async client that wraps the [[REST API]] for bot development. Built on `httpx` and `websockets`, it provides a `SybilClient` class with methods for every API endpoint plus convenience features: automatic [[Nanos and Integer Arithmetic|nanos]] conversion (pass prices as floats like 0.55 instead of 550,000,000), resumable WebSocket block streaming as an async iterator, and typed response objects.
 
 The core interaction pattern is straightforward. Create a client with the server URL, create an account with initial funds, submit orders using helper functions like `buy_yes(account_id, market_id, price, quantity)`, and stream blocks to see results. The SDK handles nanos and share-unit conversion — you think in dollars and ordinary shares, while the wire sends nanos and fixed-point quantity units (`1000` units = 1 share). `stream_block_events()` preserves whether a block is replayed and exposes the replay-complete boundary. `stream_blocks()` yields every block for idempotent observers; `stream_live_blocks()` yields only blocks safe for fresh side effects. Reconnects resume from the last delivered height; a retained-history gap raises `BlockStreamGapError` and requires a cold resync.
 
-The SDK is intentionally thin — it's a transport layer, not a trading framework. Strategy logic, position tracking, risk management, and decision-making live in the [[Bot Framework]] and individual bot implementations. The SDK just moves data between Python and the Rust server. It supports both unsigned orders (dev mode) and [[P256 Authentication|signed orders]] for authenticated submission.
+The SDK is intentionally thin — it's a transport layer, not a trading framework. Strategy logic, position tracking, risk management, and decision-making live in the [[Bot Framework]] and individual bot implementations. The SDK just moves data between Python and the Rust server. It supports unsigned orders (dev mode), [[P256 Authentication|signed orders]], and transport of externally signed atomic MM bundles.
+
+`submit_signed_mm_bundle()` preserves every protocol integer exactly: bundle
+revision, order price/quantity/expiry, maximum-capital nanodollars, and nonce.
+It accepts the already-produced RawP256/WebAuthn envelope rather than owning a
+private key or reconstructing signing bytes. Canonical MM-bundle construction
+and signing remain owned by `sybil-signing`; generated Python models are
+regenerated from OpenAPI.
 
 `get_order_admission_policy()` exposes the server's typed
 `OrderAdmissionPolicy`. The wrapper preserves the minimum notional as an exact
@@ -25,6 +32,7 @@ orders or make a risk decision; the [[Bot Framework]] owns that policy.
 - `stream_live_blocks()` — live-only convenience stream for side effects
 - Typed response objects: `Account`, `Market`, `Block`, `Fill`
 - Order helpers: `BuyYes`, `BuyNo`, `SellYes`, `SellNo`
+- Exact transport for externally signed atomic MM bundles
 - Typed public order-construction policy with exact nanos and unit-drift rejection
 - Thin transport layer — no strategy logic
 

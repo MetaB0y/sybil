@@ -7,6 +7,7 @@ pub type GenesisHash = [u8; 32];
 
 pub const ORDER_DOMAIN: &[u8] = b"sybil/signing/order/v1";
 pub const CANCEL_DOMAIN: &[u8] = b"sybil/signing/cancel/v1";
+pub const MM_BUNDLE_DOMAIN: &[u8] = b"sybil/signing/mm-bundle/v1";
 pub const PROFILE_UPDATE_DOMAIN: &[u8] = b"sybil/signing/profile-update/v1";
 pub const API_KEY_CREATE_DOMAIN: &[u8] = b"sybil/signing/read-api-key-create/v1";
 pub const API_KEY_REVOKE_DOMAIN: &[u8] = b"sybil/signing/read-api-key-revoke/v1";
@@ -50,10 +51,59 @@ pub struct Order {
     pub nonce: u64,
 }
 
+/// Side of one order in a signed market-maker bundle.
+///
+/// This is signed explicitly because shared-budget capital depends on the
+/// side. Admission also derives the side from the payoff vector and rejects a
+/// mismatch, so the signed value cannot be used to relabel an order.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
+)]
+pub enum MmSide {
+    SellYes,
+    BuyYes,
+    SellNo,
+    BuyNo,
+}
+
+/// Canonical order body inside an atomic MM bundle.
+///
+/// Sequencer-assigned order ids and the bundle-level replay nonce are
+/// deliberately absent. `side` is part of the signed economic intent.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct MmBundleOrder {
+    pub markets: [MarketId; MAX_MARKETS_PER_ORDER],
+    pub num_markets: u8,
+    pub payoffs: [i8; MAX_STATES],
+    pub num_states: u8,
+    pub limit_price: u64,
+    pub max_fill: u64,
+    pub condition: Option<PriceCondition>,
+    pub expires_at_block: Option<u64>,
+    pub side: MmSide,
+}
+
+/// Signed economic fields of one all-or-nothing flash-liquidity bundle.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct MmBundle {
+    pub account_id: u64,
+    pub bundle_id: [u8; 32],
+    pub revision: u64,
+    pub orders: Vec<MmBundleOrder>,
+    pub max_capital: u64,
+    pub nonce: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 struct OrderRequest {
     genesis_hash: GenesisHash,
     order: Order,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+struct MmBundleRequest {
+    genesis_hash: GenesisHash,
+    bundle: MmBundle,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
@@ -152,6 +202,16 @@ pub fn canonical_order_bytes(order: &Order, genesis_hash: GenesisHash) -> Vec<u8
         &OrderRequest {
             genesis_hash,
             order: order.clone(),
+        },
+    )
+}
+
+pub fn canonical_mm_bundle_bytes(bundle: &MmBundle, genesis_hash: GenesisHash) -> Vec<u8> {
+    domain_separated_bytes(
+        MM_BUNDLE_DOMAIN,
+        &MmBundleRequest {
+            genesis_hash,
+            bundle: bundle.clone(),
         },
     )
 }
@@ -297,6 +357,66 @@ mod tests {
         insta::assert_snapshot!(
             "buy_yes",
             hex::encode(canonical_order_bytes(&order, GENESIS_HASH))
+        );
+    }
+
+    #[test]
+    fn atomic_mm_bundle_snapshot() {
+        let bundle = MmBundle {
+            account_id: 42,
+            bundle_id: [0x11; 32],
+            revision: 0,
+            orders: vec![
+                MmBundleOrder {
+                    markets: [
+                        MarketId(7),
+                        MarketId::NONE,
+                        MarketId::NONE,
+                        MarketId::NONE,
+                        MarketId::NONE,
+                    ],
+                    num_markets: 1,
+                    payoffs: {
+                        let mut payoffs = [0; MAX_STATES];
+                        payoffs[0] = 1;
+                        payoffs
+                    },
+                    num_states: 2,
+                    limit_price: 510_000_000,
+                    max_fill: 1_000,
+                    condition: None,
+                    expires_at_block: Some(9),
+                    side: MmSide::BuyYes,
+                },
+                MmBundleOrder {
+                    markets: [
+                        MarketId(8),
+                        MarketId::NONE,
+                        MarketId::NONE,
+                        MarketId::NONE,
+                        MarketId::NONE,
+                    ],
+                    num_markets: 1,
+                    payoffs: {
+                        let mut payoffs = [0; MAX_STATES];
+                        payoffs[0] = -1;
+                        payoffs
+                    },
+                    num_states: 2,
+                    limit_price: 490_000_000,
+                    max_fill: 2_000,
+                    condition: None,
+                    expires_at_block: Some(9),
+                    side: MmSide::SellYes,
+                },
+            ],
+            max_capital: 3_000_000_000,
+            nonce: 17,
+        };
+
+        insta::assert_snapshot!(
+            "atomic_mm_bundle",
+            hex::encode(canonical_mm_bundle_bytes(&bundle, GENESIS_HASH))
         );
     }
 

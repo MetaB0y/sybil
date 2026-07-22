@@ -635,6 +635,40 @@ pub struct SubmitSignedOrderRequest {
     pub webauthn_assertion: Option<WebAuthnAssertion>,
 }
 
+/// Public signed submission of one all-or-nothing MM quote bundle.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
+pub struct SubmitSignedMmBundleRequest {
+    /// Account that owns the bundle. It must match the signer's registration.
+    pub account_id: u64,
+    /// Client-chosen opaque 32-byte bundle identity, hex encoded.
+    pub bundle_id_hex: String,
+    /// Initial submissions use revision zero.
+    pub revision: u64,
+    /// Every quote in the atomic bundle. All quote fields and their order are signed.
+    pub orders: Vec<OrderSpec>,
+    /// Exact next block this IOC bundle targets. The actor rejects any other height.
+    pub expires_at_block: u64,
+    /// Integer nanodollars: one flash-liquidity budget shared by every quote in the bundle.
+    #[serde(with = "crate::wire_integer")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
+    pub mm_budget_nanos: u64,
+    /// Per-account replay nonce covered by the signature.
+    pub nonce: u64,
+    /// Hex-encoded compressed P256 public key of the signer.
+    pub signer_pubkey_hex: String,
+    /// Authentication scheme for this signer.
+    #[serde(default)]
+    pub auth_scheme: AuthScheme,
+    /// Hex-encoded raw P256 ECDSA signature over canonical bundle bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature_hex: Option<String>,
+    /// WebAuthn assertion envelope over the same canonical bundle bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webauthn_assertion: Option<WebAuthnAssertion>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CancelSignedOrderRequest {

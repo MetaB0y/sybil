@@ -3,7 +3,7 @@ tags: [infrastructure, crate]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-20
+last_verified: 2026-07-22
 ---
 
 The REST API is the external interface to the exchange. Built with Axum, it
@@ -26,7 +26,7 @@ migration but always emits strings, and OpenAPI advertises the string contract.
 Clients must parse these values with integer/big-integer arithmetic rather than
 floating point.
 
-The endpoint groups are: **System** (`/v1/health`, `/v1/state-root`), **Proofs** (`/v1/proofs/state/{leaf_key_hex}`), **Data Availability** (`/v1/da/{height}/manifest`, `/v1/da/{height}/payload`), **Accounts** (create, query balance/positions, fund, register keys), **Markets** (list, create, query details/prices/groups, resolve), **Orders** (public construction policy plus unsigned or [[P256 Authentication|signed]] submission), **Bridge** (status, account bridge keys, L1 deposits, signed/unsigned withdrawal leaves), and **Blocks** (latest, by height, and the privacy-preserving [[WebSocket Block Stream|public WebSocket stream]] at `/v2/blocks/ws?from_block=N`). `/v1/health` reads committed height and genesis hash in one actor snapshot; snapshot failure returns 503 rather than reporting a partial chain identity as healthy. Operator/service writes, the state-proof and DA-payload custody surfaces, authenticated canonical v1 block stream, and bridge operations require `Authorization: Bearer $SYBIL_SERVICE_TOKEN`; an unset token fails closed. Dev mode skips that service bearer check for local workflows and additionally mounts simulation pause/resume, diagnostic all-pending/orderbook listings, and the explicit unverified [[Attestation|attestation shape stub]].
+The endpoint groups are: **System** (`/v1/health`, `/v1/state-root`), **Proofs** (`/v1/proofs/state/{leaf_key_hex}`), **Data Availability** (`/v1/da/{height}/manifest`, `/v1/da/{height}/payload`), **Accounts** (create, query balance/positions, fund, register keys), **Markets** (list, create, query details/prices/groups, resolve), **Orders** (public construction policy, ordinary unsigned/signed submission, and signed atomic MM bundles), **Bridge** (status, account bridge keys, L1 deposits, signed/unsigned withdrawal leaves), and **Blocks** (latest, by height, and the privacy-preserving [[WebSocket Block Stream|public WebSocket stream]] at `/v2/blocks/ws?from_block=N`). `/v1/health` reads committed height and genesis hash in one actor snapshot; snapshot failure returns 503 rather than reporting a partial chain identity as healthy. Operator/service writes, the state-proof and DA-payload custody surfaces, authenticated canonical v1 block stream, and bridge operations require `Authorization: Bearer $SYBIL_SERVICE_TOKEN`; an unset token fails closed. Dev mode skips that service bearer check for local workflows and additionally mounts simulation pause/resume, diagnostic all-pending/orderbook listings, and the explicit unverified [[Attestation|attestation shape stub]].
 
 When `SYBIL_EVENT_SNAPSHOT_DIR` is configured, startup requires that directory
 to be usable. Raw event PUTs publish through a unique same-directory temporary
@@ -175,6 +175,16 @@ nanodollar string and the canonical share-unit scale. Clients use this before
 constructing orders instead of duplicating a deployment default. The policy
 does not apply to flash-liquidity/MM bundles, which are one-shot and validated
 under their separate budget constraint.
+
+`POST /v1/orders/mm-bundles/signed` is the public atomic market-maker write.
+The request carries one account, 32-byte hexadecimal bundle id, revision zero,
+ordered simple orders with explicit MM sides, exact next-block expiry, one
+decimal-string `mm_budget_nanos`, trading nonce, signer, and RawP256 or WebAuthn
+authorization. Unknown fields and malformed bundle identities are rejected.
+The response is acknowledged only after signature/key/nonce, whole-bundle
+shape/STP/budget checks, and the exact authenticated WAL append. Block-time
+state drift rejects every member together; the server never admits a subset or
+silently reduces the signed budget.
 
 Trusted `POST /v1/markets` callers may supply `creation_key` as a stable
 operator identity (at most 128 ASCII letters, digits, or `-_:./`). The first

@@ -61,6 +61,14 @@ pub enum SequencerMsg {
         AuthenticatedOrder,
         RpcReplyPort<Result<Vec<u64>, SequencerError>>,
     ),
+    SubmitSignedMmBundle(
+        SignedMmBundle,
+        RpcReplyPort<Result<Vec<u64>, SequencerError>>,
+    ),
+    SubmitAuthenticatedMmBundle(
+        AuthenticatedMmBundle,
+        RpcReplyPort<Result<Vec<u64>, SequencerError>>,
+    ),
     CancelSignedOrder(SignedCancel, RpcReplyPort<Result<(), SequencerError>>),
     CancelAuthenticatedOrder(
         AuthenticatedCancel,

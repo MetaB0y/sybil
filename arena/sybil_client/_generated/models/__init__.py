@@ -126,6 +126,7 @@ from .state_root_response import StateRootResponse
 from .submit_l1_deposit_request import SubmitL1DepositRequest
 from .submit_l1_withdrawal_event_request import SubmitL1WithdrawalEventRequest
 from .submit_order_request import SubmitOrderRequest
+from .submit_signed_mm_bundle_request import SubmitSignedMmBundleRequest
 from .submit_signed_order_request import SubmitSignedOrderRequest
 from .system_event_response_type_0 import SystemEventResponseType0
 from .system_event_response_type_0_type import SystemEventResponseType0Type
@@ -289,6 +290,7 @@ __all__ = (
     "SubmitL1DepositRequest",
     "SubmitL1WithdrawalEventRequest",
     "SubmitOrderRequest",
+    "SubmitSignedMmBundleRequest",
     "SubmitSignedOrderRequest",
     "SystemEventResponseType0",
     "SystemEventResponseType0Type",

@@ -3,13 +3,13 @@ tags: [infrastructure]
 layer: sequencer
 crate: matching-sequencer
 status: current
-last_verified: 2026-07-18
+last_verified: 2026-07-22
 ---
 
 # Order admission
 
 > [!summary] In one paragraph
-> Admission has two durable paths for supported single-market orders. Simple non-MM orders are validated, capital-reserved, and inserted into the resting book immediately. MM-constrained or multi-order submissions are deferred to the next block so they can be validated atomically. Unsupported multi-market/custom payoff shapes are rejected, not deferred. Layered limits protect the actor before work becomes mailbox pressure.
+> Admission has two durable paths for supported single-market orders. Simple non-MM orders are validated, capital-reserved, and inserted into the resting book immediately. MM-constrained or multi-order submissions are deferred to the next block so they can be validated atomically. Public MM submissions are signed whole bundles with one budget and an exact next-block expiry. Unsupported multi-market/custom payoff shapes are rejected, not deferred. Layered limits protect the actor before work becomes mailbox pressure.
 
 Simple single-market, non-MM orders are admitted directly into the [[Pending Orders and TTL|resting order book]] at submission time, after validation and capital reservation. That makes them visible immediately and eligible for the next [[Block Lifecycle|block]] without waiting in an unvalidated queue.
 
@@ -20,6 +20,22 @@ rows in the global acknowledged-write WAL and drained into the next block. This
 preserves flash-liquidity, atomicity, group self-trade-prevention semantics, and
 exact ordering against nonce/key/bridge actions. Multi-market/custom payoff
 execution is rejected at API, admission, solver, and verifier boundaries.
+
+The public `POST /v1/orders/mm-bundles/signed` boundary admits revision-zero
+bundles only. Its canonical signature binds `genesis_hash`, account,
+32-byte bundle id, revision, ordered orders and their economic MM sides, one
+integer maximum-capital budget, and the trading nonce. Every order must expire
+at the actor's exact next block. Shape, market activity, payoff-derived side,
+group self-trade prevention, total budget, account balance, signature, active
+key, and nonce are checked before the acknowledged-write append. The append is
+durable before the bundle becomes live or the API acknowledges it.
+
+At block construction the entire bundle is revalidated against the then-current
+state. Either all orders and the exact shared constraint enter the solver, or
+all orders are rejected with `AtomicBundle`; no order, side, or budget can be
+silently dropped or clamped. The witness retains the signed action and exact
+constraint in both cases so native and guest verification reject a partial
+admission or fabricated bundle result.
 
 Complete-set self-trade prevention within protocol `MarketGroup`s is
 price-aware. Complementary YES/NO bids on one grouped market are rejected only
@@ -50,7 +66,7 @@ Admission has lightweight backpressure before either path mutates state:
 
 ```mermaid
 graph TB
-    API["REST API<br/>POST /v1/orders"]
+    API["REST API<br/>ordinary + signed MM bundle routes"]
     API --> LIMITS["Admission limits<br/>HTTP + sequencer"]
     LIMITS --> DIRECT["Direct admit<br/>single-market non-MM"]
     LIMITS --> DEFER["Deferred submissions<br/>MM · supported multi-order"]
@@ -71,12 +87,12 @@ graph TB
 - MM quotes are one-shot — never carried over to the next batch
 - Admission backpressure is generous by default and only affects abnormal load
 - Durable resting-order growth is backed by positive order notional
-- Orders arrive from [[REST API]] endpoints `POST /v1/orders` and `POST /v1/orders/signed`
+- Orders arrive from [[REST API]] endpoints `POST /v1/orders`, `POST /v1/orders/signed`, and `POST /v1/orders/mm-bundles/signed`
 
 ## Where This Lives
 > `crates/matching-sequencer/src/actor.rs` — admission limits and deferred-buffer routing
 > `crates/matching-sequencer/src/sequencer.rs` — direct admit vs deferred submission decision
-> `crates/matching-sequencer/src/store/wal.rs` — global `DirectAdmit` / `DeferredBundle` durability
+> `crates/matching-sequencer/src/store/wal.rs` — global direct/deferred/authenticated-bundle durability
 
 ## See Also
 - [[Block Lifecycle]] — deferred submissions are merged at block production

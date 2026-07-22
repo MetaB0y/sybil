@@ -1119,6 +1119,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/orders/mm-bundles/signed": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** POST /v1/orders/mm-bundles/signed */
+    post: operations["submit_signed_mm_bundle"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/orders/pending": {
     parameters: {
       query?: never;
@@ -3584,6 +3601,42 @@ export interface components {
       orders: components["schemas"]["OrderSpec"][];
       /** @description Time-in-force policy applied to all orders in this submission. */
       time_in_force?: components["schemas"]["TimeInForce"];
+    };
+    /** @description Public signed submission of one all-or-nothing MM quote bundle. */
+    SubmitSignedMmBundleRequest: {
+      /**
+       * Format: int64
+       * @description Account that owns the bundle. It must match the signer's registration.
+       */
+      account_id: number;
+      /** @description Authentication scheme for this signer. */
+      auth_scheme?: components["schemas"]["AuthScheme"];
+      /** @description Client-chosen opaque 32-byte bundle identity, hex encoded. */
+      bundle_id_hex: string;
+      /**
+       * Format: int64
+       * @description Exact next block this IOC bundle targets. The actor rejects any other height.
+       */
+      expires_at_block: number;
+      /** @description Integer nanodollars: one flash-liquidity budget shared by every quote in the bundle. */
+      mm_budget_nanos: string;
+      /**
+       * Format: int64
+       * @description Per-account replay nonce covered by the signature.
+       */
+      nonce: number;
+      /** @description Every quote in the atomic bundle. All quote fields and their order are signed. */
+      orders: components["schemas"]["OrderSpec"][];
+      /**
+       * Format: int64
+       * @description Initial submissions use revision zero.
+       */
+      revision: number;
+      /** @description Hex-encoded raw P256 ECDSA signature over canonical bundle bytes. */
+      signature_hex?: string | null;
+      /** @description Hex-encoded compressed P256 public key of the signer. */
+      signer_pubkey_hex: string;
+      webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
     };
     SubmitSignedOrderRequest: {
       /** @description Authentication scheme for this signer. Defaults to raw P256 for SDKs and bots. */
@@ -6179,6 +6232,66 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  submit_signed_mm_bundle: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SubmitSignedMmBundleRequest"];
+      };
+    };
+    responses: {
+      /** @description Signed atomic MM bundle accepted */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OrderAcceptedResponse"];
+        };
+      };
+      /** @description Invalid bundle or signature */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
+      };
+      /** @description Signer or account mismatch */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
+      };
+      /** @description Unknown signer, account, or market */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
+      };
+      /** @description Stale nonce or target block */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiErrorResponse"];
+        };
       };
     };
   };

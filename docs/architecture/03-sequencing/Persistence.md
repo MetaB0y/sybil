@@ -190,7 +190,7 @@ would protect template installation only until the next block; once
 `save_block()` clears the acknowledged suffix, templates must be snapshot state
 like feeds and market metadata.
 
-Store layout v4 adds service provisioning receipts and the independent public
+Store layout v4 added service provisioning receipts and the independent public
 allocation counter. It requires fresh genesis rather than guessing how many
 historical accounts came from the anonymous surface. Layout v3 added the
 canonical market creation key. Keyed market creation
@@ -199,6 +199,11 @@ the existing id, while a conflict is rejected. The first creation remains
 durable-before-live and replay reconstructs the same key before any caller can
 retry. Older layouts are rejected rather than loading unkeyed native markets and
 falling back to title/tag discovery; deployment requires a fresh genesis.
+
+Store layout v5 adds exact authenticated MM-bundle rows to acknowledged-write
+replay and rejects every earlier store at open. The WAL envelope is v2 because
+the MessagePack enum layout changed. There is no compatibility decoder: start a
+fresh genesis or use the coordinated canonical-witness import path.
 
 ## Tier 3: Derived Views
 

@@ -210,6 +210,9 @@ fn apply_event(
                 }
                 | crate::ClientActionWitness::Cancel {
                     account_id, nonce, ..
+                }
+                | crate::ClientActionWitness::MmBundle {
+                    account_id, nonce, ..
                 } => (*account_id, *nonce),
             };
             let account = account_mut(accounts, account_id)?;

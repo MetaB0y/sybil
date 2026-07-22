@@ -352,7 +352,25 @@ async fn unsigned_orders_are_service_gated_while_signed_orders_remain_public() {
 
     // A malformed signed request reaches public request validation rather
     // than the service gate; real web clients authorize with the signature.
-    let (status, _) = request_json(app, Method::POST, "/v1/orders/signed", None, json!({})).await;
+    let (status, _) = request_json(
+        app.clone(),
+        Method::POST,
+        "/v1/orders/signed",
+        None,
+        json!({}),
+    )
+    .await;
+    assert_ne!(status, StatusCode::UNAUTHORIZED);
+    assert_ne!(status, StatusCode::FORBIDDEN);
+
+    let (status, _) = request_json(
+        app,
+        Method::POST,
+        "/v1/orders/mm-bundles/signed",
+        None,
+        json!({}),
+    )
+    .await;
     assert_ne!(status, StatusCode::UNAUTHORIZED);
     assert_ne!(status, StatusCode::FORBIDDEN);
 }

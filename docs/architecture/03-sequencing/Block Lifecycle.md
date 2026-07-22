@@ -32,7 +32,7 @@ flowchart LR
     ADMIT --> PROBLEM["4. Build supported Problem"]
     PROBLEM --> SOLVE["5. Solve + integer landing"]
     SOLVE --> SETTLE["6. Settle + update book"]
-    SETTLE --> SEAL["7. Roots · block · witness v12"]
+    SETTLE --> SEAL["7. Roots · block · witness v13"]
     SEAL --> PERSIST["8. Persist + fence"]
     PERSIST --> COMMIT["9. Swap live state + publish"]
 ```
@@ -44,7 +44,7 @@ Settlement applies shared integer primitives, derives MINT adjustments, updates 
 Two artifacts leave the kernel:
 
 - `SealedBlock`: canonical block plus explicitly non-validity derived views for REST/WebSocket.
-- `BlockWitness` v12: transition-complete private material for native verification, proving, DA, and recovery, including ordinary order/cancel authorization, trading nonces, canonical group creation identity, and the executable two-state market lifecycle.
+- `BlockWitness` v13: transition-complete private material for native verification, proving, DA, and recovery, including ordinary order/cancel and atomic MM-bundle authorization, trading nonces, canonical group creation identity, and the executable two-state market lifecycle.
 
 After the fence and live-state swap, `SealedBlock` publication updates the
 shared read-only recent-block ring before broadcasting the live event. Replay

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fingerprint": "sha256:c1c3a932c281de09bbae3f139b6017a7baf0c714b17d034a5b56cbad73a72499",
+  "fingerprint": "sha256:3486d94dace41ef31ebe2bc8ccd70d48ac04a7c1a4250f1c4a43ca8b15c4a5b2",
   "inputs": {
     "commonware_packages": [
       {
@@ -70,35 +70,35 @@
         "checksum": "dfad44dd2c8e97d55dbe271802740e919d2ce8839277ea53d958381caab92a44"
       }
     ],
-    "golden_vectors_sha256": "ba98f64935a9b87f1d0ec61db56470fd90898e215121410b11c19b8542eb975b",
+    "golden_vectors_sha256": "9570a106f29ac28835399d5cda1163a718633625adba9e5946b698ceb47330be",
     "guests": {
       "state_transition": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "7968826fd3773b34fd76b36ac7ec13ca22bbf14247c672303b2c8d8a57349fc0",
-        "app_exe_commit": "0x0075a20eff341d436c027a0186d0511f577f49e5aa17fdf6dff495e96f17788c",
+        "source_sha256": "73371bb657c0c07f40e97a1e623bb015f771d07e780677f6f75be61416af18b1",
+        "app_exe_commit": "0x003b701ac6da570efa91be160499dd26c7b6cd88182fdf17b16e043f3a98b973",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       },
       "escape_claim": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "5e5a896cefa2cf85bfe9ab0fe4b6f1a6b94ffe6ffcef60fe80bd913251d2bd56",
-        "app_exe_commit": "0x0052975428c506265dc5e2762aef205352e5d5282f2f556bba00a668930fb97e",
+        "source_sha256": "58df060ea6ff61803267857543f5fb43c5329baf64c370eb191112936139d72d",
+        "app_exe_commit": "0x00690871523a5e7c63c2bbe796aa312347b34a1427293b7b7e1c0f5c152f013f",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       }
     },
     "desired_validity_pins": {
       "state_transition": {
-        "app_exe_commit": "0x0075a20eff341d436c027a0186d0511f577f49e5aa17fdf6dff495e96f17788c",
+        "app_exe_commit": "0x003b701ac6da570efa91be160499dd26c7b6cd88182fdf17b16e043f3a98b973",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       },
       "escape_claim": {
-        "app_exe_commit": "0x0052975428c506265dc5e2762aef205352e5d5282f2f556bba00a668930fb97e",
+        "app_exe_commit": "0x00690871523a5e7c63c2bbe796aa312347b34a1427293b7b7e1c0f5c152f013f",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       }
     }
   },
   "decision": {
     "action": "fresh_genesis",
-    "reason": "WebAuthn RP/origin migrated to app.62-171-170-238.nip.io for the new prelaunch host; no prior chain state is compatible with the rebuilt main and escape guests.",
+    "reason": "Witness v13 adds signed atomic MM-bundle authorization and AtomicBundle rejection semantics; WAL envelope v2 and store layout v5 intentionally reject prior state.",
     "reference": "docs/runbooks/fresh-genesis-redeploy.md"
   }
 }

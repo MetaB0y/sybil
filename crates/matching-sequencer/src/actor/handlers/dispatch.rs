@@ -192,6 +192,24 @@ impl Actor for SequencerActor {
                 state.record_submission_metrics("signed", 1, &result);
                 let _ = reply.send(result);
             }
+            SequencerMsg::SubmitSignedMmBundle(signed, reply) => {
+                let order_count = signed.orders.len();
+                let result = match state.check_global_submission_rate() {
+                    Ok(()) => state.handle_signed_mm_bundle(signed).await,
+                    Err(err) => Err(err),
+                };
+                state.record_submission_metrics("signed_mm_bundle", order_count, &result);
+                let _ = reply.send(result);
+            }
+            SequencerMsg::SubmitAuthenticatedMmBundle(authenticated, reply) => {
+                let order_count = authenticated.orders.len();
+                let result = match state.check_global_submission_rate() {
+                    Ok(()) => state.handle_authenticated_mm_bundle(authenticated).await,
+                    Err(err) => Err(err),
+                };
+                state.record_submission_metrics("signed_mm_bundle", order_count, &result);
+                let _ = reply.send(result);
+            }
             SequencerMsg::CancelSignedOrder(signed, reply) => {
                 let result = match state.check_global_submission_rate() {
                     Ok(()) => state.handle_signed_cancel(signed).await,
