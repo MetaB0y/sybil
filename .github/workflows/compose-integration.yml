@@ -26,7 +26,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
-      - uses: taiki-e/install-action@1e7bd61f4b270e749b15995a9e7aa0fe7449dc13 # just
+      - uses: taiki-e/install-action@8cadc51ed27a248e6c184b0b14864be7f1a877b6 # just
 
       - name: Compose account-to-fill integration # just itest-compose
         run: just itest-compose
