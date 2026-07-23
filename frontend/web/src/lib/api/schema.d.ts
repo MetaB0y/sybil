@@ -3645,10 +3645,7 @@ export interface components {
       category?: string | null;
       /** @description Replacement description. */
       description?: string | null;
-      /**
-       * Format: int64
-       * @description Replacement expiry timestamp in ms (0 = no expiry).
-       */
+      /** @description Replacement expiry timestamp in ms (0 = no expiry). */
       expiry_timestamp_ms?: number | null;
       /**
        * @description Replacement market name. Must not be blank.
