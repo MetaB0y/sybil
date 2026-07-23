@@ -101,9 +101,12 @@ Apple Silicon → amd64 is not a supported deploy path.
    SYBIL_WEBAUTHN_RP_ID=sybil.exchange
    SYBIL_WEBAUTHN_ORIGIN=https://app.sybil.exchange
    SYBIL_CORS_ORIGINS=https://app.sybil.exchange
-   SYBIL_API_SITE=https://api.sybil.exchange
-   SYBIL_APP_SITE=https://app.sybil.exchange
+   SYBIL_API_SITE=http://api.sybil.exchange
+   SYBIL_APP_SITE=http://app.sybil.exchange
    ```
+   These two site labels are deliberately `http://`: host nginx terminates
+   public TLS and forwards to Caddy's loopback HTTP listener. The browser/API
+   URLs and WebAuthn origin remain `https://`.
 7. Replace the temporary `/etc/nginx/sites-available/sybil-exchange` with the
    repo's `deploy/nginx/sybil.conf`, and delete the temporary file and its
    symlink — otherwise two files declare the same `server_name` and nginx picks
