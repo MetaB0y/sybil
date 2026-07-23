@@ -459,7 +459,7 @@ consensus-incompatible rollback requires the matching backup/genesis domain.
 ## WebAuthn validity pins
 
 Locked-profile startup requires the API WebAuthn policy to equal the values compiled
-into shared native/guest verification: RP ID `app.sybil.exchange`, origin
+into shared native/guest verification: RP ID `sybil.exchange`, origin
 `https://app.sybil.exchange`, and user verification enabled. A mismatch
 would let the API admit an assertion the validity guest must reject, so the
 deployment preflight fails closed. Serving another hostname requires an
