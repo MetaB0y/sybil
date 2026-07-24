@@ -115,7 +115,7 @@ signature covers authenticatorData || SHA-256(clientDataJSON)
 The API checks credential/public-key association, `webauthn.get`, challenge,
 origin, RP ID hash, user presence, user verification, signature shape, and
 configured envelope limits. Shared guest-safe verification independently pins
-RP `app.sybil.exchange`, exact origin
+RP `sybil.exchange`, exact origin
 `https://app.sybil.exchange`, and rejects `crossOrigin: true`. Changing
 either pin is a fresh guest/deployment migration.
 

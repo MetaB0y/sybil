@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fingerprint": "sha256:fc69373c1fb64054b19edc11890fdd79532147c50c33d89057b51ad284c1c7f2",
+  "fingerprint": "sha256:bfaf0643bd7eef07c2faf11ab659db1169f7bf40b96f85541b4d9692f95ecb8d",
   "inputs": {
     "commonware_packages": [
       {
@@ -74,31 +74,31 @@
     "guests": {
       "state_transition": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "a46d555253998e4ceba0365ff43244b22a8951e90111de56a8ea7f378112d398",
-        "app_exe_commit": "0x0060f5d194b975e3e513396bb23c8fb8b047a9f78e5b61884eb2b31e1fab6f4e",
+        "source_sha256": "a7ea50ef91e2b93d96feae222b6454cab73f3182612faec9bd34711098a2792b",
+        "app_exe_commit": "0x00142f7d36af6b84c4663f9c95dfc16cce02e3dca31135271cda23056363a498",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       },
       "escape_claim": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "28f8a660b39515c24d7c2f669ad5f6796f3901f2a6b6b2222a678700eb267b22",
-        "app_exe_commit": "0x0042bd996a1b16e62053164e0f5080e8be33aadba10ebac862def073d2fdee6f",
+        "source_sha256": "b88da5f69aa8e861dd8de57178e3192a6f13f8c094695806d3ef99672c150d13",
+        "app_exe_commit": "0x0097e4c8d79bbe415ef6cb5764db50dba9a09ff526276951328a56ab37450350",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       }
     },
     "desired_validity_pins": {
       "state_transition": {
-        "app_exe_commit": "0x0060f5d194b975e3e513396bb23c8fb8b047a9f78e5b61884eb2b31e1fab6f4e",
+        "app_exe_commit": "0x00142f7d36af6b84c4663f9c95dfc16cce02e3dca31135271cda23056363a498",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       },
       "escape_claim": {
-        "app_exe_commit": "0x0042bd996a1b16e62053164e0f5080e8be33aadba10ebac862def073d2fdee6f",
+        "app_exe_commit": "0x0097e4c8d79bbe415ef6cb5764db50dba9a09ff526276951328a56ab37450350",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       }
     }
   },
   "decision": {
     "action": "fresh_genesis",
-    "reason": "Correct the witness v14 empty-transition hash pin; the rebuilt guest commitment is repinned while deployed evidence remains unset, so prelaunch must use a fresh genesis.",
+    "reason": "WebAuthn RP/origin migration to sybil.exchange and https://app.sybil.exchange requires a new devnet chain domain",
     "reference": "docs/runbooks/fresh-genesis-redeploy.md"
   }
 }

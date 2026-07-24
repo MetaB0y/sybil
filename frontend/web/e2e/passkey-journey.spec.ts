@@ -11,7 +11,7 @@ import {
  *
  * This is the test that would have caught the rp_id/origin blocker: a config
  * bug had the server's `webauthn_rp_id`/`origin` defaulting to localhost while
- * the browser registers/signs under the page origin (`app.<box>.nip.io`), so
+ * the browser registers/signs under the deployed page origin, so
  * every real passkey assertion was rejected server-side (RpIdHashMismatch /
  * OriginMismatch) even though the browser ceremony "succeeded".
  *

@@ -84,19 +84,18 @@ parameter — only the first block carries it, because nginx warns when another
 block redefines protocol options for the same socket, and 1.24 has no per-server
 `http2 on;` directive.
 
-## Not done — needs the build machine
+## Validity migration prepared
 
-Everything below needs Linux/amd64 and the OpenVM toolchain. `DEPLOY.md` says
-Apple Silicon → amd64 is not a supported deploy path.
+Both guests were rebuilt on Linux/amd64 with the pinned OpenVM v2.0.0
+toolchain. Both executable commitments moved. Their release records,
+fingerprint locks, generated protocol pins, and desired deployment pins are
+updated, and `deploy/validity-boundary.json` records the required fresh-genesis
+boundary. `deploy/validity-pins.json` remains `pending_redeploy`; repository
+pins do not claim that a host or verifier adapter has moved.
 
-1. `just openvm-install` if the toolchain is not present.
-2. `just openvm-commit-all` — rebuild both guests, get new commitments.
-   Confirm whether the escape commitment actually moves; it depends on whether
-   dead-code elimination keeps the constant in that guest. Do not assume.
-3. Update `deploy/validity-pins.json` `desired` with the new commitments.
-4. `VALIDITY_BOUNDARY_ACTION=fresh_genesis VALIDITY_BOUNDARY_REASON="..." just validity-boundary-write`
-5. `just check-consensus` should now pass.
-6. On the host, update `/opt/sybil/.env`:
+## Remaining deployment steps
+
+1. On the host, update `/opt/sybil/.env`:
    ```
    SYBIL_WEBAUTHN_RP_ID=sybil.exchange
    SYBIL_WEBAUTHN_ORIGIN=https://app.sybil.exchange
@@ -107,28 +106,27 @@ Apple Silicon → amd64 is not a supported deploy path.
    These two site labels are deliberately `http://`: host nginx terminates
    public TLS and forwards to Caddy's loopback HTTP listener. The browser/API
    URLs and WebAuthn origin remain `https://`.
-7. Replace the temporary `/etc/nginx/sites-available/sybil-exchange` with the
+2. Replace the temporary `/etc/nginx/sites-available/sybil-exchange` with the
    repo's `deploy/nginx/sybil.conf`, and delete the temporary file and its
    symlink — otherwise two files declare the same `server_name` and nginx picks
    the first one loaded. `nginx -t` should be warning-free.
 
-   **This kills `app.62-171-170-238.nip.io`.** The rewritten config drops that
+   **This intentionally kills `app.62-171-170-238.nip.io`.** The reviewed
+   decision is not to retain a redirect. The rewritten config drops that
    hostname from every `server_name`, so it falls through to nginx's default
    server and will present a mismatched certificate. Old tweets, bookmarks, and
    any `og:url` pointing there stop working. Passkeys cannot work on that host
-   after the repin regardless — an rpId must be a domain suffix of the page
-   origin, and `sybil.exchange` is not a suffix of a nip.io name — so a 301 to
-   `app.sybil.exchange` is the only sensible thing to serve there. Decide
-   deliberately: keep the kill, or add the redirect block before deploying.
-8. `just deploy-reset-state CONFIRM` — the wipe.
-9. Export the build-time values, then `just deploy-all`:
+   after the repin regardless: an RP ID must be a domain suffix of the page
+   origin, and `sybil.exchange` is not a suffix of a nip.io name.
+3. `just deploy-reset-state CONFIRM` — the wipe.
+4. Export the build-time values, then `just deploy-all`:
    ```
    export NEXT_PUBLIC_API_BASE=https://api.sybil.exchange
    export NEXT_PUBLIC_WS_BASE=wss://api.sybil.exchange
    export NEXT_PUBLIC_WEBAUTHN_RP_ID=sybil.exchange
    ```
    These are baked into the image; exporting them after the build does nothing.
-10. Commit the generated `deploy/releases/<id>.json`.
+5. Commit the generated `deploy/releases/<id>.json`.
 
 ## What to check after
 
@@ -158,17 +156,16 @@ broken signup.
 
 ## Gates run locally
 
-- `cargo test -p sybil-verifier` — 152 passed.
-- `cargo test -p sybil-escape-claim` — 17 passed.
-- `just check-fast` — passed.
-- Frontend lint / `tsc` / `vitest` (411 tests) — passed.
-- `just frontend-check` fails on macOS, but not because of this change:
-  `scripts/generate-types.sh --check` builds its temp file with
-  `mktemp -t sybil-schema.XXXXXX.d.ts`, and BSD `mktemp` treats that as a prefix
-  and appends its own suffix, so the file no longer ends in `.d.ts` and prettier
-  cannot infer a parser. GNU `mktemp` substitutes in place, so the gate passes on
-  a Linux build host and in CI.
+- Both OpenVM guests were rebuilt, and `just zk-rebuild-check` reproduced the
+  committed executable and VM commitments exactly.
+- `just check-consensus` — passed with the regenerated validity artifacts.
+- `just check-all` — passed on Linux with a shared Cargo target and eight Rust
+  test threads.
+- `just api-contract-check` — 213 positive and 295 negative Schemathesis cases
+  passed.
+- `just frontend-check` — 414 tests passed and 1 skipped; the production build
+  completed.
+- `just arena-check` — 365 tests passed.
 
-Not run here: `just check-consensus` (needs regenerated commitments),
-`just itest-compose`, `pnpm e2e` (L4 browser journey — its base URL now points
-at `app.sybil.exchange`, so it cannot pass until the cutover is live).
+Not run here: `just itest-compose` and `pnpm e2e`. The L4 browser journey now
+targets `app.sybil.exchange`, so it cannot pass until the cutover is live.

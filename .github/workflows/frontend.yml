@@ -71,7 +71,7 @@ jobs:
     # deployment; override with the `E2E_BASE_URL` repo/environment variable
     # (and `E2E_API_BASE` if the API is not on the app host's parent domain).
     env:
-      E2E_BASE_URL: ${{ vars.E2E_BASE_URL || 'https://app.172-104-31-54.nip.io' }}
+      E2E_BASE_URL: ${{ vars.E2E_BASE_URL || 'https://app.sybil.exchange' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
