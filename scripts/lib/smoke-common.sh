@@ -68,12 +68,22 @@ def valid_reference(market):
         return False
     return 0 < value <= 1_000_000_000
 
+def tags(market):
+    values = market.get("tags")
+    if not isinstance(values, list):
+        return set()
+    return {
+        value.strip().lower()
+        for value in values
+        if isinstance(value, str) and value.strip()
+    }
+
 native = [
     market
     for market in markets
     if active(market)
     and market.get("polymarket_condition_id") is None
-    and (market.get("resolution_criteria") or "") != ""
+    and "native" in tags(market)
 ]
 mirrored = [
     market
