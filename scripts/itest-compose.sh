@@ -334,7 +334,7 @@ BRIDGE_ACCOUNT_BODY="$(python3 - "$BRIDGE_PUBLIC_KEY" <<'PY'
 import json, sys
 print(json.dumps({
     "provisioning_key": "itest-bridge/v1",
-    "initial_balance_nanos": 0,
+    "initial_balance_nanos": "0",
     "initial_key": {"public_key_hex": sys.argv[1], "auth_scheme": "raw_p256"},
 }))
 PY

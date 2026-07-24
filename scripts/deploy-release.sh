@@ -29,8 +29,8 @@ usage:
   scripts/deploy-release.sh rollback <release-id> <ssh-host> CONFIRM
   scripts/deploy-release.sh verify <ssh-host>
 
-Promotion requires a clean Jujutsu working copy whose latest nonempty revision
-equals main@origin. Successful records are written to deploy/releases/.
+Promotion requires a new empty Jujutsu change whose direct parent equals
+main@origin. Successful records are written to deploy/releases/.
 Rollback reuses an already recorded host image set and never builds.
 EOF
     exit "${1:-2}"
@@ -59,7 +59,7 @@ source_revision() {
     working_revision="$(jj log -r '@ & ~empty()' --no-graph -T 'commit_id ++ "\n"')"
     [[ -z "$working_revision" ]] \
         || die "start a new empty jj change before building a release"
-    revision="$(jj log -r 'latest(::@ & ~empty())' --no-graph -T 'commit_id ++ "\n"')"
+    revision="$(jj log -r '@-' --no-graph -T 'commit_id ++ "\n"')"
     main="$(jj log -r 'main@origin' --no-graph -T 'commit_id ++ "\n"')"
     [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || die "could not derive a 40-hex source revision"
     [[ "$revision" == "$main" ]] \
