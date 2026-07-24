@@ -1,7 +1,9 @@
 "use client";
 
 import { createPasskeyForAccount } from "@/lib/auth/webauthn";
-import { registerPasskey } from "./settings";
+import { registerPasskey, SettingsActionError } from "./settings";
+
+const MAX_STALE_BINDING_ATTEMPTS = 3;
 
 export interface AddBackupPasskeyArgs {
   accountId: number;
@@ -22,13 +24,26 @@ export async function addBackupPasskey(
   const passkey = await createPasskeyForAccount(args.accountId, {
     authenticatorAttachment: "any",
   });
-  await registerPasskey({
-    accountId: args.accountId,
-    publicKeyHex: args.publicKeyHex,
-    authScheme: "webauthn",
-    credentialIdB64url: args.credentialIdB64url,
-    passkey,
-    label: "backup passkey",
-  });
+  for (let attempt = 0; attempt < MAX_STALE_BINDING_ATTEMPTS; attempt += 1) {
+    try {
+      await registerPasskey({
+        accountId: args.accountId,
+        publicKeyHex: args.publicKeyHex,
+        authScheme: "webauthn",
+        credentialIdB64url: args.credentialIdB64url,
+        passkey,
+        label: "backup passkey",
+      });
+      return { publicKeyHex: passkey.publicKeyHex };
+    } catch (error) {
+      const staleBinding =
+        error instanceof SettingsActionError &&
+        error.status === 409 &&
+        error.message.includes("stale key-operation state binding");
+      if (!staleBinding || attempt === MAX_STALE_BINDING_ATTEMPTS - 1) {
+        throw error;
+      }
+    }
+  }
   return { publicKeyHex: passkey.publicKeyHex };
 }
