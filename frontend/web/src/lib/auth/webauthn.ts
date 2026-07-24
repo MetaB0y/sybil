@@ -110,18 +110,21 @@ export async function signWebAuthnBytes(
       canonicalBytes as unknown as BufferSource,
     ),
   );
+  const publicKey: PublicKeyCredentialRequestOptions = {
+    challenge: challenge as unknown as BufferSource,
+    allowCredentials: [
+      {
+        type: "public-key",
+        id: base64UrlDecode(credentialIdB64url) as unknown as BufferSource,
+      },
+    ],
+    userVerification: "required",
+    timeout: 60_000,
+  };
+  const configuredRpId = rpId();
+  if (configuredRpId) publicKey.rpId = configuredRpId;
   const credential = (await navigator.credentials.get({
-    publicKey: {
-      challenge: challenge as unknown as BufferSource,
-      allowCredentials: [
-        {
-          type: "public-key",
-          id: base64UrlDecode(credentialIdB64url) as unknown as BufferSource,
-        },
-      ],
-      userVerification: "required",
-      timeout: 60_000,
-    },
+    publicKey,
   })) as PublicKeyCredential | null;
 
   if (!credential) throw new Error("Passkey signing was cancelled");
@@ -150,19 +153,20 @@ export async function verifyStoredPasskey(
   if (!isWebAuthnAvailable()) {
     throw new Error("WebAuthn is not available in this browser");
   }
-  const credential = await navigator.credentials.get({
-    publicKey: {
-      challenge: randomBytes(32) as unknown as BufferSource,
-      allowCredentials: [
-        {
-          type: "public-key",
-          id: base64UrlDecode(credentialIdB64url) as unknown as BufferSource,
-        },
-      ],
-      userVerification: "required",
-      timeout: 60_000,
-    },
-  });
+  const publicKey: PublicKeyCredentialRequestOptions = {
+    challenge: randomBytes(32) as unknown as BufferSource,
+    allowCredentials: [
+      {
+        type: "public-key",
+        id: base64UrlDecode(credentialIdB64url) as unknown as BufferSource,
+      },
+    ],
+    userVerification: "required",
+    timeout: 60_000,
+  };
+  const configuredRpId = rpId();
+  if (configuredRpId) publicKey.rpId = configuredRpId;
+  const credential = await navigator.credentials.get({ publicKey });
   if (!credential) throw new Error("Passkey sign-in was cancelled");
 }
 
