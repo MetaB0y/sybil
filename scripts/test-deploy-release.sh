@@ -15,7 +15,7 @@ web_ref="sybil-web:$revision"
 image_id="sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 fake_working_revision=""
-fake_latest_revision="$revision"
+fake_parent_revision="$revision"
 fake_main_revision="$revision"
 jj() {
     local rev=""
@@ -29,12 +29,15 @@ jj() {
     done
     case "$rev" in
         '@ & ~empty()') printf '%s' "$fake_working_revision" ;;
-        'latest(::@ & ~empty())') printf '%s\n' "$fake_latest_revision" ;;
+        '@-') printf '%s\n' "$fake_parent_revision" ;;
         'main@origin') printf '%s\n' "$fake_main_revision" ;;
         *) return 2 ;;
     esac
 }
 
+# A content-empty merge commit is still a valid main revision. The release
+# source is the direct parent of the required empty working change, not the
+# latest ancestor that happens to change file content.
 [[ "$(source_revision)" == "$revision" ]]
 fake_working_revision=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 if (source_revision >"$work/nonempty.out" 2>"$work/nonempty.err"); then
