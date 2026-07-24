@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use sybil_api_types::{CreateMarketRequest, SetMarketMetadataRequest, UpdateMarketContentRequest};
+use sybil_api_types::{CreateMarketRequest, SetMarketMetadataRequest};
 use url::Url;
 
 use crate::error::Error;
@@ -27,20 +27,6 @@ pub struct NativeMarketCatalog {
     /// Native market templates, in listing order.
     #[serde(default)]
     pub markets: Vec<NativeMarketTemplate>,
-    /// Template ids withdrawn from the product, by their original catalog id.
-    ///
-    /// Deleting a template is not enough on a running deployment: the markets
-    /// it created still exist on chain, and an id the applier no longer visits
-    /// is simply never reconciled again — it keeps its stale text and stays on
-    /// the board. Listing it here closes every market it created, which drops
-    /// the event from the markets index.
-    ///
-    /// A market cannot be erased. It is committed state, and positions, fills
-    /// and DA witnesses all reference its id. A retired template that is also
-    /// deleted from `markets` is never created again from genesis, which is
-    /// the only sense in which one truly goes away.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub retired: Vec<String>,
 }
 
 /// One native market template.
@@ -258,39 +244,7 @@ impl NativeMarketCatalog {
             }
         }
 
-        // A template that is both listed and retired would be created and
-        // closed on the same run, so the board would flicker with every deploy.
-        let mut retired = HashSet::new();
-        for (i, template_id) in self.retired.iter().enumerate() {
-            let context = format!("retired native template #{i} ({template_id:?})");
-            validate_id(template_id, &context)?;
-            if !retired.insert(template_id.clone()) {
-                return Err(Error::NativeCatalog(format!("{context} is listed twice")));
-            }
-            if ids.contains(template_id) {
-                return Err(Error::NativeCatalog(format!(
-                    "{context} is also a live template"
-                )));
-            }
-        }
         Ok(())
-    }
-
-    /// Whether a live market's creation key belongs to a retired template.
-    ///
-    /// A retired template's outcome ids leave the catalog with it, so its
-    /// market keys cannot be rebuilt from a spec — they are recognised on live
-    /// state instead. Match is exact (a binary template) or on the `:` outcome
-    /// boundary, never a bare prefix: retiring `metr_th50` must not sweep up
-    /// `metr_th50_leader`.
-    pub fn is_retired_creation_key(&self, creation_key: &str) -> bool {
-        self.retired.iter().any(|template_id| {
-            let base = native_market_creation_key(template_id);
-            creation_key == base
-                || creation_key
-                    .strip_prefix(&base)
-                    .is_some_and(|rest| rest.starts_with(':'))
-        })
     }
 }
 
@@ -612,20 +566,6 @@ impl NativeMarketSpec {
         }
     }
 
-    /// The same content as `create_request`, addressed to a market that already
-    /// exists. Every field here must match its `create_request` counterpart, or
-    /// applying a catalog twice would flip the market between two texts.
-    pub fn update_request(&self) -> UpdateMarketContentRequest {
-        UpdateMarketContentRequest {
-            name: self.name.clone(),
-            description: self.description.clone(),
-            category: Some(self.category.clone()),
-            tags: Some(self.tags()),
-            resolution_criteria: None,
-            expiry_timestamp_ms: Some(self.end_time_ms),
-        }
-    }
-
     fn tags(&self) -> Vec<String> {
         vec!["native".to_string(), self.category.clone()]
     }
@@ -759,7 +699,7 @@ mod tests {
     /// A native market must read like a mirrored one: rules in `description`,
     /// no second "resolution" block, no operator mechanics in either.
     #[test]
-    fn published_content_is_rules_only_and_matches_between_create_and_update() {
+    fn published_content_is_rules_only() {
         let catalog =
             NativeMarketCatalog::parse_json(include_str!("../native_markets.json")).unwrap();
         let by_template: std::collections::HashMap<&str, &NativeMarketTemplate> = catalog
@@ -796,44 +736,7 @@ mod tests {
                 "{} leaked operator mechanics into the description",
                 spec.market_key
             );
-
-            // Applying the same catalog twice must not flip a market between
-            // two texts, so the edit path has to agree with the create path.
-            let update = spec.update_request();
-            assert_eq!(update.name, create.name);
-            assert_eq!(update.description, create.description);
-            assert_eq!(update.category, create.category);
-            assert_eq!(update.tags, create.tags);
-            assert_eq!(update.resolution_criteria, create.resolution_criteria);
-            assert_eq!(update.expiry_timestamp_ms, create.expiry_timestamp_ms);
         }
-    }
-
-    #[test]
-    fn retirement_matches_on_the_outcome_boundary_only() {
-        let catalog = NativeMarketCatalog {
-            retired: vec!["metr_th50".to_string()],
-            ..NativeMarketCatalog::default()
-        };
-        assert!(catalog.is_retired_creation_key("native:metr_th50"));
-        assert!(catalog.is_retired_creation_key("native:metr_th50:rung_8h"));
-        // A neighbouring template whose id merely starts the same way keeps
-        // trading; closing it would withdraw a market nobody retired.
-        assert!(!catalog.is_retired_creation_key("native:metr_th50_leader"));
-        assert!(!catalog.is_retired_creation_key("native:metr_th50_leader:openai"));
-        assert!(!catalog.is_retired_creation_key("native:other"));
-    }
-
-    #[test]
-    fn a_template_cannot_be_live_and_retired_at_once() {
-        let mut catalog =
-            NativeMarketCatalog::parse_json(include_str!("../native_markets.json")).unwrap();
-        catalog.retired.push(catalog.markets[0].id.clone());
-        let error = catalog.validate().unwrap_err().to_string();
-        assert!(
-            error.contains("also a live template"),
-            "expected a live/retired clash, got {error}"
-        );
     }
 
     /// Sybil settles every market YES or NO — `resolve_market` takes a payout
@@ -943,19 +846,13 @@ mod tests {
             title_for("openai_flagship_input_price_below_eoy2026:openai_input_le_5"),
             Some("Will OpenAI flagship model input API price be ≤$5/MTok at end of 2026?")
         );
-        // The whole context-window event was withdrawn from the product, so no
-        // rung of it may reappear as a live spec.
+        // The context-window event was removed from the fresh-genesis catalog,
+        // so no rung of it may reappear as a live spec.
         assert!(
             specs.iter().all(|spec| !spec
                 .market_key
                 .starts_with("context_window_max_advertised_eoy2026")),
-            "the retired context-window event must not return"
-        );
-        assert!(
-            catalog.is_retired_creation_key(
-                "native:context_window_max_advertised_eoy2026:context_window_above_3m_eoy2026"
-            ),
-            "retired rungs must still be recognised on live state so they get closed"
+            "the removed context-window event must not return"
         );
 
         for market in &catalog.markets {

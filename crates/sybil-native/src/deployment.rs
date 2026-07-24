@@ -5,10 +5,7 @@ use serde::{Deserialize, Serialize};
 use sybil_api_types::{CreateMarketGroupRequest, ExtendMarketGroupRequest};
 use sybil_client::SybilClient;
 
-use crate::{
-    Error, NativeMarketCatalog, NativeMarketSpec, NativeQuoteRange, native_group_key,
-    native_market_creation_key,
-};
+use crate::{Error, NativeMarketCatalog, NativeMarketSpec, NativeQuoteRange, native_group_key};
 
 pub const NATIVE_DEPLOYMENT_SCHEMA_VERSION: u32 = 1;
 
@@ -86,41 +83,14 @@ pub async fn apply_catalog(
     let specs = catalog.enabled_market_specs();
     let mut deployed = Vec::with_capacity(specs.len());
 
-    // Live creation keys, read from the chain rather than the local manifest:
-    // the manifest lives on a container volume that can be lost while chain
-    // state survives, and a missing manifest must not look like an empty
-    // deployment. Markets absent here are created; markets present here are
-    // reconciled, because `create_market` rejects a key whose creation fields
-    // drifted (`MarketCreationKeyConflict`) instead of quietly updating.
-    let live = client.list_markets().await?;
-    let live_by_creation_key: BTreeMap<&str, &sybil_api_types::MarketResponse> = live
-        .iter()
-        .filter_map(|market| Some((market.creation_key.as_deref()?, market)))
-        .collect();
-
     for spec in &specs {
-        let creation_key = native_market_creation_key(&spec.market_key);
-        let market_id = match live_by_creation_key.get(creation_key.as_str()) {
-            Some(existing) => {
-                let response = client
-                    .update_market_content(existing.market_id, &spec.update_request())
-                    .await?;
-                if response.updated {
-                    tracing::info!(
-                        market_id = existing.market_id,
-                        native_market_key = %spec.market_key,
-                        "rewrote native market content from catalog"
-                    );
-                }
-                existing.market_id
-            }
-            None => {
-                client
-                    .create_market(&spec.create_request())
-                    .await?
-                    .market_id
-            }
-        };
+        // Creation keys make an unchanged rerun idempotent. A changed
+        // committed contract remains a conflict: this catalog is applied to a
+        // fresh genesis rather than editing a live market's rules or title.
+        let market_id = client
+            .create_market(&spec.create_request())
+            .await?
+            .market_id;
         client
             .set_market_metadata(market_id, &spec.metadata_request())
             .await?;
@@ -134,7 +104,6 @@ pub async fn apply_catalog(
         });
     }
 
-    close_retired(client, catalog, &live).await?;
     ensure_groups(client, &specs, &deployed).await?;
     deployed.sort_by(|left, right| left.market_key.cmp(&right.market_key));
     Ok(NativeDeployment {
@@ -142,47 +111,6 @@ pub async fn apply_catalog(
         genesis_hash,
         markets: deployed,
     })
-}
-
-/// Take every market of a retired template off the board.
-///
-/// `closed` is display state, so this withdraws the event without deciding it:
-/// the markets page drops closed cards, and an operator can still settle them
-/// on their merits. Deleting is not on the table — a market is committed state
-/// that positions, fills and DA witnesses reference by id. A retired template
-/// also removed from `markets` is simply never created again from genesis,
-/// which is the only way one truly disappears.
-async fn close_retired(
-    client: &SybilClient,
-    catalog: &NativeMarketCatalog,
-    live: &[sybil_api_types::MarketResponse],
-) -> Result<(), Error> {
-    if catalog.retired.is_empty() {
-        return Ok(());
-    }
-    for market in live {
-        let Some(creation_key) = market.creation_key.as_deref() else {
-            continue;
-        };
-        if !catalog.is_retired_creation_key(creation_key) || market.closed == Some(true) {
-            continue;
-        }
-        client
-            .set_market_metadata(
-                market.market_id,
-                &sybil_api_types::SetMarketMetadataRequest {
-                    closed: Some(true),
-                    ..Default::default()
-                },
-            )
-            .await?;
-        tracing::info!(
-            market_id = market.market_id,
-            creation_key,
-            "closed retired native market"
-        );
-    }
-    Ok(())
 }
 
 async fn ensure_groups(

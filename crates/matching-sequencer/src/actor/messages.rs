@@ -231,15 +231,6 @@ pub enum SequencerMsg {
         MarketMetadata,
         RpcReplyPort<Result<MarketId, SequencerError>>,
     ),
-    /// Rewrite a live market's committed name and metadata. Replies `true`
-    /// when the edit changed something, `false` when the market already
-    /// matched and no durable write was made.
-    UpdateMarketContent(
-        MarketId,
-        String,
-        MarketMetadata,
-        RpcReplyPort<Result<bool, SequencerError>>,
-    ),
     PauseBlockProduction(RpcReplyPort<Result<(), SequencerError>>),
     ResumeBlockProduction(RpcReplyPort<Result<(), SequencerError>>),
     Query(SequencerReadQuery),

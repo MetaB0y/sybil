@@ -64,21 +64,6 @@ impl MarketSet {
         id
     }
 
-    /// Rename an existing market. Returns `false` when the id is unknown.
-    ///
-    /// The name is committed (it rides `MarketSnapshot` into the state root),
-    /// so callers must route this through a durable control-plane command
-    /// rather than mutating a restored set in place.
-    pub fn rename(&mut self, id: MarketId, name: impl Into<String>) -> bool {
-        match self.markets.get_mut(&id) {
-            Some(market) => {
-                market.name = name.into();
-                true
-            }
-            None => false,
-        }
-    }
-
     /// Add a market directly (preserving its existing ID).
     pub fn add_market(&mut self, market: Market) {
         let id = market.id;

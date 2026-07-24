@@ -928,32 +928,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/v1/markets/{id}/content": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    /**
-     * PUT /v1/markets/{id}/content — replace a live market's committed prose.
-     * @description The edit path for text a creation key already owns. `POST /v1/markets`
-     *     stays strict: repeating a key with different creation fields is a 409, so
-     *     a typo can never silently re-point a key at a different market. This route
-     *     is where an operator says "yes, same market, new wording".
-     *
-     *     Both the name and the metadata digest ride `MarketSnapshot` into the state
-     *     root, so a successful edit moves the root at the block it lands in.
-     */
-    put: operations["update_market_content"];
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/v1/markets/{id}/metadata": {
     parameters: {
       query?: never;
@@ -2273,13 +2247,6 @@ export interface components {
        */
       closed?: boolean | null;
       created_at_ms?: number | null;
-      /**
-       * @description Operator idempotency key this market was created under, if any. Lets a
-       *     catalog applier map its checked-in specs onto live market ids from
-       *     server state alone, instead of trusting a local manifest that a wiped
-       *     volume could have lost while chain state survived.
-       */
-      creation_key?: string | null;
       description?: string | null;
       /** @description Event-level expected end date (epoch ms). Display only. */
       event_end_date_ms?: number | null;
@@ -3626,48 +3593,6 @@ export interface components {
       /** Format: int64 */
       prompt_tokens: number;
       trader_name: string;
-    };
-    /**
-     * @description Full replacement of a live market's committed prose.
-     *
-     *     This is the edit path for text a creation key already owns — the catalog
-     *     applier reaches for it when a checked-in spec drifted from the deployed
-     *     market, where `POST /v1/markets` would return `MarketCreationKeyConflict`.
-     *     Replacement, not patch: every field is authoritative, and an omitted
-     *     optional clears the stored value.
-     *
-     *     Identity is not editable here. `creation_key`, `created_at_ms`, and the
-     *     resolution template stay as created whatever this body says — the point of
-     *     the op is to fix wording, not to re-key a market or re-wire how it settles.
-     */
-    UpdateMarketContentRequest: {
-      /** @description Replacement category. */
-      category?: string | null;
-      /** @description Replacement description. */
-      description?: string | null;
-      /** @description Replacement expiry timestamp in ms (0 = no expiry). */
-      expiry_timestamp_ms?: number | null;
-      /**
-       * @description Replacement market name. Must not be blank.
-       * @example Will it rain tomorrow?
-       */
-      name: string;
-      /** @description Replacement resolution criteria. */
-      resolution_criteria?: string | null;
-      /** @description Replacement discovery tags. */
-      tags?: string[] | null;
-    };
-    /**
-     * @description Outcome of a market content edit. `updated: false` means the market already
-     *     carried exactly this content and no block-visible write was made, so the
-     *     catalog applier can re-run against an unchanged deployment without churning
-     *     the state root.
-     */
-    UpdateMarketContentResponse: {
-      /** Format: int32 */
-      market_id: number;
-      name: string;
-      updated: boolean;
     };
     WebAuthnAssertion: {
       /** @description Base64url authenticatorData bytes from `navigator.credentials.get`. */
@@ -5779,60 +5704,6 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
-      };
-    };
-  };
-  update_market_content: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Market ID */
-        id: number;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["UpdateMarketContentRequest"];
-      };
-    };
-    responses: {
-      /** @description Market content replaced */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["UpdateMarketContentResponse"];
-        };
-      };
-      /** @description Blank market name */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ApiErrorResponse"];
-        };
-      };
-      /** @description Market not found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ApiErrorResponse"];
-        };
-      };
-      /** @description Market is resolved or otherwise not tradeable */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ApiErrorResponse"];
-        };
       };
     };
   };

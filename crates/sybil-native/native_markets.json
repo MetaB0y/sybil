@@ -1970,8 +1970,5 @@
       "event_image_url": "https://www.google.com/s2/favicons?domain=snorkel.ai&sz=128",
       "operator_notes": "Read the binary-completion column at the 500-step budget and take the maximum across all rows."
     }
-  ],
-  "retired": [
-    "context_window_max_advertised_eoy2026"
   ]
 }

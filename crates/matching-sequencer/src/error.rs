@@ -232,9 +232,6 @@ pub enum SequencerError {
     /// The requested market was not found.
     #[error("market {market_id:?} not found")]
     MarketNotFound { market_id: MarketId },
-    /// A market edit supplied a blank name.
-    #[error("market name must not be empty")]
-    InvalidMarketName,
     /// An operator creation key is malformed at the canonical boundary.
     #[error("invalid market creation key: {0}")]
     InvalidMarketCreationKey(String),

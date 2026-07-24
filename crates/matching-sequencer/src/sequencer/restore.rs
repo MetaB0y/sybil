@@ -580,11 +580,6 @@ impl BlockSequencer {
                 self.create_market_with_metadata(name, metadata)?;
                 Ok(())
             }
-            ControlPlaneCommand::UpdateMarketContent {
-                market_id,
-                name,
-                metadata,
-            } => self.update_market_content(market_id, name, metadata),
             ControlPlaneCommand::CreateMarketGroup {
                 name,
                 creation_key,
