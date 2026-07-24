@@ -313,7 +313,9 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   const addBackup = page.getByRole("button", { name: "Add backup passkey" });
   await expect(addBackup).toBeEnabled();
   await addBackup.click();
-  await expect(page.getByRole("status")).toContainText("Backup passkey added");
+  await expect(
+    page.getByRole("status").filter({ hasText: "Backup passkey added" }),
+  ).toBeVisible();
   await expect(page.getByText(/backup passkey · webauthn/i)).toBeVisible();
 
   // Show-once credentials must never claim a clipboard write succeeded when
