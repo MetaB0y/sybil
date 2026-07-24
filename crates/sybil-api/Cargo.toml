@@ -47,7 +47,7 @@ clap = { workspace = true, features = ["derive", "env"] }
 reqwest = { workspace = true, features = ["json", "query"] }
 rmp-serde = { workspace = true }
 serde_yaml = "0.9"
-base64 = "0.22"
+base64 = "0.23"
 ciborium = "0.2"
 sha2 = "0.11"
 

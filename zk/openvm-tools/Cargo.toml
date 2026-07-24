@@ -13,7 +13,7 @@ description = "Host tools for Sybil OpenVM artifacts"
 [workspace]
 
 [dependencies]
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.6", features = ["derive"] }
 hex = "0.4"
 openvm = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.0", features = ["std"] }
 rmp-serde = "1"

@@ -11,7 +11,7 @@ serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 hex = { workspace = true }
-insta = "1.47.2"
+insta = "1.48.0"
 
 [lints.clippy]
 # f64 ban (SYB-196) is scoped to the consensus crates (matching-engine,
