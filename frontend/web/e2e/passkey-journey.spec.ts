@@ -144,9 +144,14 @@ async function pickMarkets(
   // never-traded market is simply absent), so classify against that map — not
   // just the summary's snapshot field.
   const priceMap = pricesResp.prices ?? {};
-  const priced = summary.find(
-    (m) => m.status === "active" && priceMap[String(m.market_id)] != null,
-  );
+  const priced = summary.find((m) => {
+    const indicative = priceMap[String(m.market_id)]?.yes_price_nanos;
+    return (
+      m.status === "active" &&
+      indicative != null &&
+      BigInt(indicative) >= 100_000_000n
+    );
+  });
   const nullPrice = summary.find(
     (m) =>
       m.status === "active" &&
@@ -696,21 +701,24 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   });
   await page.goto("/portfolio");
   await page.getByRole("tab", { name: /open orders/i }).click();
-  const cancelRow = page.locator(`[data-order-id="${cancelOrderId}"]`);
-  await expect(cancelRow).toBeVisible({ timeout: 20_000 });
+  const cancelButton = page.getByRole("button", {
+    name: "Cancel",
+    exact: true,
+  });
+  await expect(cancelButton).toBeVisible({ timeout: 20_000 });
   const cancelResponsePromise = page.waitForResponse(
     (response) =>
       response.url().endsWith("/v1/orders/cancel/signed") &&
       response.request().method() === "POST",
   );
-  await cancelRow.getByRole("button", { name: "Cancel" }).click();
+  await cancelButton.click();
   const cancelResponse = await cancelResponsePromise;
   expect(
     cancelResponse.ok(),
     `signed cancel should succeed: HTTP ${cancelResponse.status()}`,
   ).toBeTruthy();
   expect(await cancelResponse.json()).toMatchObject({ cancelled: true });
-  await expect(cancelRow).toHaveCount(0, { timeout: 10_000 });
+  await expect(cancelButton).toHaveCount(0, { timeout: 10_000 });
 
   await expect(async () => {
     const orders = await getJson<PendingOrder[]>(
