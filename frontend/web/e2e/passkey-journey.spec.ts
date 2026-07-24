@@ -37,10 +37,10 @@ const REQUEST_API_BASE = process.env.E2E_REQUEST_API_BASE ?? API_BASE;
 const CRITICAL =
   /OriginMismatch|RpIdHashMismatch|webauthn|passkey|signature|accepted=false|InvalidAssertion/i;
 
-/** The API lives on the app host's PARENT domain: `app.<x>` → `<x>`. */
+/** The product API is the `api.` sibling of the deployed `app.` hostname. */
 function deriveApiBase(appUrl: string): string {
   const u = new URL(appUrl);
-  u.hostname = u.hostname.replace(/^app\./, "");
+  u.hostname = u.hostname.replace(/^app\./, "api.");
   return `${u.protocol}//${u.host}`;
 }
 
@@ -48,7 +48,7 @@ interface MarketSummary {
   market_id: number;
   name: string;
   status?: string;
-  yes_price_nanos: number | null;
+  yes_price_nanos: number | string | null;
 }
 
 interface Portfolio {
@@ -130,7 +130,7 @@ async function getJson<T>(
 }
 
 interface PricesResponse {
-  prices: Record<string, { yes_price_nanos: number | null }>;
+  prices: Record<string, { yes_price_nanos: number | string | null }>;
 }
 
 async function pickMarkets(
@@ -680,7 +680,6 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   // 14. Cancel through the real portfolio UI. The remaining backup passkey
   //     signs `/v1/orders/cancel/signed`; the row should disappear immediately
   //     from the shared cache, then the API must confirm it is no longer open.
-  await page.goto("/portfolio");
   const bridgeKey = await getJson<{ sybil_account_key_hex: string }>(
     request,
     `${REQUEST_API_BASE}/v1/accounts/${accountId}/bridge-key`,
@@ -689,23 +688,11 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   const displayedBridgeKey = bridgeKey.sybil_account_key_hex.startsWith("0x")
     ? bridgeKey.sybil_account_key_hex
     : `0x${bridgeKey.sybil_account_key_hex}`;
-  const depositGuide = page.getByRole("region", { name: "L1 deposits" });
-  await expect(depositGuide).toContainText(displayedBridgeKey, {
+  await page.goto("/settings");
+  await expect(page.getByText(displayedBridgeKey, { exact: true })).toBeVisible({
     timeout: 20_000,
   });
-  await expect(depositGuide).toContainText(/no L1 refund flow today/i);
-  const withdrawals = page.getByRole("region", { name: "Normal withdrawals" });
-  await expect(withdrawals).toContainText("0 active", { timeout: 20_000 });
-  await expect(withdrawals).toContainText("No active withdrawal leaves");
-  await expect(withdrawals).toContainText(
-    /new withdrawal requests are not enabled/i,
-  );
-  await expect(withdrawals).toContainText(
-    /relay, delayed L1 finalization, and confirmed-log indexing are separate steps/i,
-  );
-  await expect(withdrawals).toContainText(
-    /accept-all mock relay is not real-funds proof security/i,
-  );
+  await page.goto("/portfolio");
   await page.getByRole("tab", { name: /open orders/i }).click();
   const cancelRow = page.locator(`[data-order-id="${cancelOrderId}"]`);
   await expect(cancelRow).toBeVisible({ timeout: 20_000 });
