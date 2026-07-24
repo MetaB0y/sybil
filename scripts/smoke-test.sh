@@ -62,7 +62,7 @@ step "Account lifecycle"
 
 ACCT=$(curl -sf -X POST "$API/v1/accounts" \
     -H 'content-type: application/json' \
-    -d '{"provisioning_key":"smoke-test/account-1/v1","initial_balance_nanos":100000000000}')
+    -d '{"provisioning_key":"smoke-test/account-1/v1","initial_balance_nanos":"100000000000"}')
 ACCT_ID=$(echo "$ACCT" | sed -n 's/.*"account_id":\([0-9]*\).*/\1/p')
 [[ -n "$ACCT_ID" ]] && pass "POST /v1/accounts → id=$ACCT_ID (\$100)" || fail "POST /v1/accounts"
 
@@ -91,18 +91,18 @@ step "Order submission"
 
 ORDER=$(curl -sf -X POST "$API/v1/orders" \
     -H 'content-type: application/json' \
-    -d "{\"account_id\": $ACCT_ID, \"orders\": [{\"type\": \"BuyYes\", \"market_id\": $MKT_ID, \"limit_price_nanos\": 600000000, \"quantity\": 10}]}")
+    -d "{\"account_id\": $ACCT_ID, \"orders\": [{\"type\": \"BuyYes\", \"market_id\": $MKT_ID, \"limit_price_nanos\": \"600000000\", \"quantity\": 10}]}")
 echo "$ORDER" | grep -q "accepted" && pass "POST /v1/orders (BuyYes)" || fail "POST /v1/orders"
 
 # Submit a counterparty so we get a fill
 ACCT2=$(curl -sf -X POST "$API/v1/accounts" \
     -H 'content-type: application/json' \
-    -d '{"provisioning_key":"smoke-test/account-2/v1","initial_balance_nanos":100000000000}')
+    -d '{"provisioning_key":"smoke-test/account-2/v1","initial_balance_nanos":"100000000000"}')
 ACCT2_ID=$(echo "$ACCT2" | sed -n 's/.*"account_id":\([0-9]*\).*/\1/p')
 
 ORDER2=$(curl -sf -X POST "$API/v1/orders" \
     -H 'content-type: application/json' \
-    -d "{\"account_id\": $ACCT2_ID, \"orders\": [{\"type\": \"BuyNo\", \"market_id\": $MKT_ID, \"limit_price_nanos\": 600000000, \"quantity\": 10}]}")
+    -d "{\"account_id\": $ACCT2_ID, \"orders\": [{\"type\": \"BuyNo\", \"market_id\": $MKT_ID, \"limit_price_nanos\": \"600000000\", \"quantity\": 10}]}")
 echo "$ORDER2" | grep -q "accepted" && pass "POST /v1/orders (BuyNo counterparty)" || fail "POST /v1/orders counterparty"
 
 # ── Wait for block with fills ──────────────────────────────────────────────

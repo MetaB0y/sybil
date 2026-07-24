@@ -340,7 +340,7 @@ fn signed_order_body(
         "order": {
             "market_ids": [market_id],
             "payoffs": payoffs_pair,
-            "limit_price_nanos": limit_price,
+            "limit_price_nanos": limit_price.to_string(),
             "max_fill": quantity
         },
         "time_in_force": "GTC",
@@ -456,7 +456,7 @@ async fn run(args: Args) -> Result<SeedSummary, String> {
             "/v1/accounts",
             Some(&json!({
                 "provisioning_key": provisioning_key(args.run_id, role),
-                "initial_balance_nanos": 0,
+                "initial_balance_nanos": "0",
                 "initial_key": {"public_key_hex": public_key_hex}
             })),
         )
@@ -474,7 +474,7 @@ async fn run(args: Args) -> Result<SeedSummary, String> {
             "fund_account",
             Method::POST,
             &fund_path,
-            Some(&json!({"amount_nanos": ACCOUNT_FUNDING_NANOS})),
+            Some(&json!({"amount_nanos": ACCOUNT_FUNDING_NANOS.to_string()})),
         )
         .await?;
         if u64_field(&funded, "account_id")? != account_id
@@ -650,6 +650,7 @@ mod tests {
         let first = signed_order_body(&key, [7; 32], 3, [1, 0], 600_000_000, 1_000, 247_000_001);
         let second = signed_order_body(&key, [7; 32], 3, [1, 0], 600_000_000, 1_000, 247_000_001);
         assert_eq!(first, second);
+        assert_eq!(first["order"]["limit_price_nanos"], "600000000");
     }
 
     #[test]

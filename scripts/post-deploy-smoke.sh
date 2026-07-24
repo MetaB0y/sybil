@@ -666,7 +666,7 @@ check_onboarding() {
     fi
 
     # 3d. Explicitly funded service creation, no token -> 401.
-    http POST /v1/accounts '{"initial_balance_nanos":1000000000000}' none
+    http POST /v1/accounts '{"initial_balance_nanos":"1000000000000"}' none
     if [[ "$HTTP_CODE" == "401" ]]; then
         pass "explicitly funded POST /v1/accounts (no token) -> 401 (service-tiered)"
     else
@@ -818,7 +818,7 @@ provision_smoke_account() {
 import json
 import sys
 
-role, public_key, balance = sys.argv[1], sys.argv[2], int(sys.argv[3])
+role, public_key, balance = sys.argv[1], sys.argv[2], sys.argv[3]
 print(json.dumps({
     "provisioning_key": f"post-deploy-smoke/{role}/v1",
     "initial_balance_nanos": balance,
@@ -854,7 +854,8 @@ import json
 import sys
 
 public_key, signature = sys.argv[1], sys.argv[2]
-market, nonce, price, quantity = map(int, sys.argv[3:7])
+market, nonce, quantity = map(int, (sys.argv[3], sys.argv[4], sys.argv[6]))
+price = sys.argv[5]
 payoffs = [int(value) for value in sys.argv[7].split(",")]
 print(json.dumps({
     "signer_pubkey_hex": public_key,
@@ -1030,7 +1031,7 @@ check_gating() {
     local acct=""
     if [[ -n "$SERVICE_TOKEN" ]]; then
         http POST /v1/accounts \
-            '{"provisioning_key":"post-deploy-smoke/gating/v1","initial_balance_nanos":1000000000}' token
+            '{"provisioning_key":"post-deploy-smoke/gating/v1","initial_balance_nanos":"1000000000"}' token
         acct="$(echo "$HTTP_BODY" | jget account_id)"
     fi
     [[ -z "$acct" ]] && acct=1
@@ -1046,7 +1047,7 @@ check_gating() {
     local entry method path body
     for entry in "${gated[@]}"; do
         method="${entry%%|*}"; path="${entry#*|}"
-        body=""; [[ "$method" == "POST" ]] && body='{"amount_nanos":1000}'
+        body=""; [[ "$method" == "POST" ]] && body='{"amount_nanos":"1000"}'
 
         # WITHOUT token -> 401
         http "$method" "$path" "$body" none
@@ -1073,7 +1074,7 @@ check_gating() {
 
     # WRONG token -> 403 (bonus: constant-time compare must reject).
     if [[ -n "$SERVICE_TOKEN" ]]; then
-        http POST "/v1/accounts/$acct/fund" '{"amount_nanos":1000}' bad
+        http POST "/v1/accounts/$acct/fund" '{"amount_nanos":"1000"}' bad
         if [[ "$HTTP_CODE" == "403" ]]; then
             pass "wrong token -> 403"
         else
@@ -1125,7 +1126,7 @@ check_signed_cancel_lifecycle() {
 import sys, json
 pk, sig, m, n = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
 print(json.dumps({"signer_pubkey_hex": pk,
-    "order": {"market_ids": [m], "payoffs": [1, 0], "limit_price_nanos": 10000000, "max_fill": 1000},
+    "order": {"market_ids": [m], "payoffs": [1, 0], "limit_price_nanos": "10000000", "max_fill": 1000},
     "nonce": n, "signature_hex": sig}))
 PY
 )"
