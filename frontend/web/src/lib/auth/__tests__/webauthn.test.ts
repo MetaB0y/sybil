@@ -5,6 +5,8 @@ import {
   base64UrlEncode,
   createPasskeyForAccount,
   discoverPasskeyAccount,
+  signWebAuthnBytes,
+  verifyStoredPasskey,
 } from "../webauthn";
 
 afterEach(() => {
@@ -129,5 +131,46 @@ describe("discoverPasskeyAccount", () => {
     await expect(discoverPasskeyAccount()).rejects.toThrow(
       "This passkey predates usernameless login; use the same browser it was created in",
     );
+  });
+});
+
+describe("passkey assertions", () => {
+  function installWebAuthn(get: ReturnType<typeof vi.fn>) {
+    vi.stubGlobal("window", { PublicKeyCredential: class {} });
+    vi.stubGlobal("navigator", { credentials: { get } });
+  }
+
+  it("uses the configured RP ID for signed actions", async () => {
+    process.env.NEXT_PUBLIC_WEBAUTHN_RP_ID = "sybil.exchange";
+    const get = vi.fn().mockResolvedValue(null);
+    installWebAuthn(get);
+
+    await expect(
+      signWebAuthnBytes("AQL9_g", new Uint8Array([4, 5, 6])),
+    ).rejects.toThrow("Passkey signing was cancelled");
+    expect(get.mock.calls[0]?.[0]).toMatchObject({
+      publicKey: {
+        rpId: "sybil.exchange",
+        userVerification: "required",
+        timeout: 60_000,
+      },
+    });
+  });
+
+  it("uses the configured RP ID when reconnecting a saved passkey", async () => {
+    process.env.NEXT_PUBLIC_WEBAUTHN_RP_ID = "sybil.exchange";
+    const get = vi.fn().mockResolvedValue(null);
+    installWebAuthn(get);
+
+    await expect(verifyStoredPasskey("AQL9_g")).rejects.toThrow(
+      "Passkey sign-in was cancelled",
+    );
+    expect(get.mock.calls[0]?.[0]).toMatchObject({
+      publicKey: {
+        rpId: "sybil.exchange",
+        userVerification: "required",
+        timeout: 60_000,
+      },
+    });
   });
 });
