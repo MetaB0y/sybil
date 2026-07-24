@@ -50,3 +50,7 @@ arena/live/decisions.db
 arena/live/__pycache__/
 frontend/CLAUDE.md
 .playwright-mcp/
+# Local soak run state: actor-credentials.json holds live bearer tokens and
+# soak.env holds SYBIL_SOAK_MM_TOKEN. The directory is mode 700 and must never
+# reach the remote.
+.sybil-soak/

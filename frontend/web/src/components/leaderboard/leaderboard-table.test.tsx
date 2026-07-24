@@ -46,6 +46,7 @@ describe("LeaderboardTable read states", () => {
         rows={[
           {
             rank: 1,
+            kind: "human",
             accountId: 42,
             label: "Trader #42",
             pnlNanos: 1_000_000_000n,

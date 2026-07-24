@@ -1152,6 +1152,28 @@ async fn keyed_market_creation_converges_and_rejects_conflicts() {
 }
 
 #[tokio::test]
+async fn market_group_creation_rejects_unknown_members_before_wal() {
+    let (app, handle) = test_app(true).await;
+    let (status, body) = post_json(
+        app,
+        "/v1/markets/groups",
+        json!({
+            "name": "Invalid group",
+            "creation_key": "test:invalid-group",
+            "market_ids": [u32::MAX],
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+    assert!(handle.list_market_groups().await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn resolved_market_rejects_new_orders() {
     let (app, _) = test_app(true).await;
 

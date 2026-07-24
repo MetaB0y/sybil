@@ -3343,6 +3343,67 @@ fn market_group_creation_key_is_canonical_idempotent_and_conflict_safe() {
 }
 
 #[test]
+fn market_group_creation_rejects_invalid_members_without_mutation() {
+    let mut markets = MarketSet::new();
+    let m0 = markets.add_binary("A");
+    let m1 = markets.add_binary("B");
+    let m2 = markets.add_binary("C");
+    let mut seq = BlockSequencer::with_default_solver(
+        AccountStore::new(),
+        markets,
+        vec![],
+        SequencerConfig::default(),
+    );
+
+    let missing = MarketId::new(u32::MAX);
+    let error = seq
+        .create_market_group_with_key(
+            "Missing".to_string(),
+            Some("native:event:missing".to_string()),
+            vec![m0, missing],
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        SequencerError::MarketNotFound { market_id } if market_id == missing
+    ));
+    assert!(seq.market_groups().is_empty());
+
+    seq.create_market_group_with_key(
+        "First".to_string(),
+        Some("native:event:first".to_string()),
+        vec![m0, m1],
+    )
+    .unwrap();
+    let error = seq
+        .create_market_group_with_key(
+            "Overlap".to_string(),
+            Some("native:event:overlap".to_string()),
+            vec![m1, m2],
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        SequencerError::MarketAlreadyGrouped { group_id: 0 }
+    ));
+    assert_eq!(seq.market_groups().len(), 1);
+
+    seq.resolve_market(m2, Nanos::ZERO, 1_000).unwrap();
+    let error = seq
+        .create_market_group_with_key(
+            "Resolved".to_string(),
+            Some("native:event:resolved".to_string()),
+            vec![m2],
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        SequencerError::MarketNotTradeable { market_id, .. } if market_id == m2
+    ));
+    assert_eq!(seq.market_groups().len(), 1);
+}
+
+#[test]
 fn extending_market_group_is_idempotent_and_rejects_cross_group_member() {
     let mut markets = MarketSet::new();
     let m0 = markets.add_binary("A");

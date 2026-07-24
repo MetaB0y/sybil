@@ -7,7 +7,7 @@ import { AccountProvider } from "@/lib/account/provider";
 import { RealtimeProvider } from "@/lib/ws/realtime-provider";
 import { ThemeProvider } from "@/lib/theme/provider";
 
-const DEFAULT_API_BASE = "https://62-171-170-238.nip.io";
+const DEFAULT_API_BASE = "https://api.sybil.exchange";
 const API_ORIGIN = apiOrigin(
   process.env.NEXT_PUBLIC_API_BASE ?? DEFAULT_API_BASE,
 );

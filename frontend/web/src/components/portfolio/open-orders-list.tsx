@@ -16,6 +16,9 @@
  *   (falls back to the block height for orders admitted before that field).
  * - Every column is click-to-sort; default order is newest-first by created
  *   time. Paginated at PORTFOLIO_PAGE_SIZE rows/page.
+ *
+ * The row itself is not a link — it carries a Cancel button — so only the
+ * market cell navigates. Row chrome comes from `./table` like every other tab.
  */
 
 import Link from "next/link";
@@ -43,6 +46,24 @@ import { PortfolioToolbar } from "./portfolio-toolbar";
 import { SearchField } from "./search-field";
 import { SidePill } from "./side-pill";
 import { TifCell } from "./tif-cell";
+import {
+  ActionCell,
+  bodyRowGrid,
+  cmpBig,
+  cmpNullableBig,
+  Empty,
+  MarketLabel,
+  nextSort,
+  PagerFooter,
+  RightCell,
+  SortHeader,
+  TableCard,
+  TableHead,
+  type Column,
+  type Sort,
+} from "./table";
+import { DataCard } from "@/components/data-card";
+import { useCompactLayout } from "@/lib/responsive/use-compact";
 
 type Market = components["schemas"]["MarketResponse"];
 
@@ -75,10 +96,11 @@ type SortKey =
   | "value"
   | "created"
   | "tif";
-type SortDir = "asc" | "desc";
-type Sort = { key: SortKey; dir: SortDir };
 
-const COLUMNS: { key: SortKey; label: string; align: "left" | "right" }[] = [
+const GRID =
+  "28px minmax(0, 1.3fr) 56px 48px 100px 56px 84px 82px 76px 92px 64px";
+
+const COLUMNS: Column<SortKey>[] = [
   { key: "market", label: "Market", align: "left" },
   { key: "action", label: "Action", align: "left" },
   { key: "side", label: "Side", align: "left" },
@@ -89,19 +111,6 @@ const COLUMNS: { key: SortKey; label: string; align: "left" | "right" }[] = [
   { key: "created", label: "Created", align: "right" },
   { key: "tif", label: "TIF", align: "right" },
 ];
-
-/** Text columns sort A→Z first; numeric columns sort high→low first. */
-function nextSort(prev: Sort | null, key: SortKey): Sort {
-  if (prev && prev.key === key) {
-    return { key, dir: prev.dir === "asc" ? "desc" : "asc" };
-  }
-  const numeric = key !== "market" && key !== "action" && key !== "side";
-  return { key, dir: numeric ? "desc" : "asc" };
-}
-
-function cmpBig(a: bigint, b: bigint): number {
-  return a > b ? 1 : a < b ? -1 : 0;
-}
 
 /** Ascending comparison; null avg-fill / created sort lowest. */
 function compareBy(a: OpenRow, b: OpenRow, key: SortKey): number {
@@ -117,10 +126,7 @@ function compareBy(a: OpenRow, b: OpenRow, key: SortKey): number {
     case "limit":
       return cmpBig(a.limitNanos, b.limitNanos);
     case "avgfill":
-      if (a.avgPriceNanos == null && b.avgPriceNanos == null) return 0;
-      if (a.avgPriceNanos == null) return -1;
-      if (b.avgPriceNanos == null) return 1;
-      return cmpBig(a.avgPriceNanos, b.avgPriceNanos);
+      return cmpNullableBig(a.avgPriceNanos, b.avgPriceNanos);
     case "value":
       return cmpBig(a.valueNanos, b.valueNanos);
     case "created":
@@ -152,7 +158,7 @@ export function OpenOrdersList({
   marketsById,
   titleByMarket,
 }: Props) {
-  const [sort, setSort] = useState<Sort | null>(null);
+  const [sort, setSort] = useState<Sort<SortKey> | null>(null);
   const [query, setQuery] = useState("");
   const qc = useQueryClient();
   const nowMs = useStore(selectLatestBlock)?.timestamp_ms ?? null;
@@ -220,7 +226,9 @@ export function OpenOrdersList({
   const paged = usePaged(visibleRows, PORTFOLIO_PAGE_SIZE);
 
   const onSort = (key: SortKey) => {
-    setSort((s) => nextSort(s, key));
+    setSort((s) =>
+      nextSort(s, key, key !== "market" && key !== "action" && key !== "side"),
+    );
     paged.setPage(0);
   };
 
@@ -247,22 +255,14 @@ export function OpenOrdersList({
       ) : visibleRows.length === 0 ? (
         <Empty>No open orders match “{query}”.</Empty>
       ) : (
-        <div
-          className="portfolio-grid-table"
-          style={{
-            background: "var(--surface-1)",
-            border: "1px solid var(--border-1)",
-            borderRadius: 6,
-            overflowY: "hidden",
-          }}
-        >
-          <div style={rowGrid("var(--fg-4)")}>
+        <TableCard>
+          <TableHead columns={GRID}>
             <span />
             {COLUMNS.map((col) => (
               <SortHeader key={col.key} col={col} sort={sort} onSort={onSort} />
             ))}
             <span />
-          </div>
+          </TableHead>
           {paged.visible.map((r) => (
             <OrderRow
               key={r.order.order_id}
@@ -273,10 +273,10 @@ export function OpenOrdersList({
               onCancelled={onCancelled}
             />
           ))}
-          <div style={{ padding: "0 14px" }}>
+          <PagerFooter>
             <Pager paged={paged} />
-          </div>
-        </div>
+          </PagerFooter>
+        </TableCard>
       )}
     </div>
   );
@@ -297,9 +297,9 @@ export function OrderRow({
 }) {
   const { order, market, label, action, outcome, placed, filled, remaining } =
     row;
-  const isBuy = action === "BUY";
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const compact = useCompactLayout();
 
   async function onCancel() {
     setError(null);
@@ -324,13 +324,129 @@ export function OrderRow({
     }
   }
 
+  const cancelButton = (
+    <button
+      type="button"
+      onClick={onCancel}
+      disabled={cancelling}
+      style={{
+        padding: "3px 9px",
+        background: "transparent",
+        border: "1px solid color-mix(in srgb, var(--no) 32%, transparent)",
+        borderRadius: 3,
+        color: "var(--no)",
+        fontFamily: "var(--font-mono)",
+        fontSize: 10,
+        cursor: cancelling ? "not-allowed" : "pointer",
+        textTransform: "uppercase",
+        letterSpacing: "var(--track-wide)",
+      }}
+    >
+      {cancelling ? "…" : "Cancel"}
+    </button>
+  );
+
+  const cancelError = error && (
+    <span
+      role="alert"
+      style={{
+        gridColumn: "1 / -1",
+        color: "var(--no)",
+        fontFamily: "var(--font-mono)",
+        fontSize: 11,
+        lineHeight: 1.4,
+      }}
+    >
+      Couldn&apos;t cancel order: {error}
+    </span>
+  );
+
+  if (compact) {
+    // Cancel is a button inside the row, so the card cannot be a link — the
+    // market name carries the navigation instead, as it does in the desktop
+    // Orders row for the same reason.
+    return (
+      <DataCard
+        thumb={
+          <MarketThumb
+            marketId={order.market_id}
+            name={label}
+            imageUrl={market?.market_image_url ?? market?.event_image_url ?? null}
+            fallbackIconUrl={
+              market?.market_icon_url ?? market?.event_icon_url ?? null
+            }
+            size={28}
+          />
+        }
+        title={
+          // Deliberately not `MarketLabel`: that one truncates to a single
+          // nowrap line for the desktop column, which on a card runs the
+          // question straight off the right edge.
+          <Link
+            href={`/m/${order.market_id}`}
+            style={{ color: "inherit", textDecoration: "none" }}
+          >
+            {label}
+          </Link>
+        }
+        chips={
+          <>
+            <ActionCell side={action} />
+            <SidePill outcome={outcome} />
+            <TifCell expiresAtBlock={order.expires_at_block} />
+          </>
+        }
+        pairs={[
+          {
+            label: "Filled / placed",
+            value: (
+              <FilledCell
+                placed={placed}
+                filled={filled}
+                remaining={remaining}
+              />
+            ),
+            wide: true,
+          },
+          { label: "Limit", value: formatCentsPrecise(row.limitNanos) },
+          {
+            label: "Avg fill",
+            value: (
+              <AvgFillCell
+                agg={{ count: row.fillCount, avgPriceNanos: row.avgPriceNanos }}
+              />
+            ),
+          },
+          {
+            label: "Value",
+            value: formatDollars(row.valueNanos, { decimals: 2 }),
+          },
+          {
+            label: "Created",
+            value: (
+              <CreatedCell
+                ms={row.createdMs}
+                block={row.createdBlock}
+                nowMs={nowMs}
+              />
+            ),
+          },
+        ]}
+        footer={
+          <>
+            {cancelButton}
+            {cancelError}
+          </>
+        }
+      />
+    );
+  }
+
   return (
     <div
+      className="portfolio-row"
       data-order-id={order.order_id}
-      style={{
-        ...rowGrid("var(--fg-2)"),
-        borderTop: "1px solid var(--border-1)",
-      }}
+      style={bodyRowGrid(GRID)}
     >
       <Link
         href={`/m/${order.market_id}`}
@@ -338,7 +454,7 @@ export function OrderRow({
           gridColumn: "1 / span 2",
           display: "grid",
           gridTemplateColumns: "28px minmax(0, 1fr)",
-          gap: 14,
+          gap: 12,
           alignItems: "center",
           minWidth: 0,
           borderRadius: 3,
@@ -355,30 +471,9 @@ export function OrderRow({
           }
           size={28}
         />
-        <span
-          style={{
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            color: "var(--fg-1)",
-            fontFamily: "var(--font-sans)",
-            fontSize: 13,
-          }}
-        >
-          {label}
-        </span>
+        <MarketLabel>{label}</MarketLabel>
       </Link>
-      <span
-        style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 11,
-          color: isBuy ? "var(--accent)" : "var(--no)",
-          fontWeight: 600,
-          letterSpacing: "var(--track-wide)",
-        }}
-      >
-        {isBuy ? "BUY" : "SELL"}
-      </span>
+      <ActionCell side={action} />
       <SidePill outcome={outcome} />
       <RightCell mono>
         <FilledCell placed={placed} filled={filled} remaining={remaining} />
@@ -402,41 +497,8 @@ export function OrderRow({
       <RightCell>
         <TifCell expiresAtBlock={order.expires_at_block} />
       </RightCell>
-      <RightCell>
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={cancelling}
-          style={{
-            padding: "3px 9px",
-            background: "transparent",
-            border: "1px solid color-mix(in srgb, var(--no) 32%, transparent)",
-            borderRadius: 3,
-            color: "var(--no)",
-            fontFamily: "var(--font-mono)",
-            fontSize: 10,
-            cursor: cancelling ? "not-allowed" : "pointer",
-            textTransform: "uppercase",
-            letterSpacing: "var(--track-wide)",
-          }}
-        >
-          {cancelling ? "…" : "Cancel"}
-        </button>
-      </RightCell>
-      {error && (
-        <span
-          role="alert"
-          style={{
-            gridColumn: "1 / -1",
-            color: "var(--no)",
-            fontFamily: "var(--font-mono)",
-            fontSize: 11,
-            lineHeight: 1.4,
-          }}
-        >
-          Couldn&apos;t cancel order: {error}
-        </span>
-      )}
+      <RightCell>{cancelButton}</RightCell>
+      {cancelError}
     </div>
   );
 }
@@ -507,98 +569,5 @@ function AvgFillCell({ agg }: { agg: OrderFillAgg }) {
         >{` ·${count}`}</span>
       )}
     </span>
-  );
-}
-
-function SortHeader({
-  col,
-  sort,
-  onSort,
-}: {
-  col: (typeof COLUMNS)[number];
-  sort: Sort | null;
-  onSort: (key: SortKey) => void;
-}) {
-  const active = sort?.key === col.key;
-  return (
-    <button
-      type="button"
-      onClick={() => onSort(col.key)}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 3,
-        width: "100%",
-        justifyContent: col.align === "right" ? "flex-end" : "flex-start",
-        padding: 0,
-        border: 0,
-        background: "transparent",
-        cursor: "pointer",
-        font: "inherit",
-        letterSpacing: "var(--track-wide)",
-        color: active ? "var(--fg-2)" : "var(--fg-4)",
-      }}
-    >
-      <span style={{ whiteSpace: "nowrap" }}>{col.label}</span>
-      <span style={{ fontSize: 8, lineHeight: 1, opacity: active ? 1 : 0.3 }}>
-        {active ? (sort!.dir === "asc" ? "▲" : "▼") : "↕"}
-      </span>
-    </button>
-  );
-}
-
-function rowGrid(color: string): React.CSSProperties {
-  return {
-    display: "grid",
-    gridTemplateColumns:
-      "28px minmax(0, 1.3fr) 56px 48px 100px 56px 84px 82px 76px 92px 64px",
-    gap: 14,
-    alignItems: "center",
-    padding: "10px 14px",
-    color,
-    fontFamily: "var(--font-mono)",
-    fontSize: 11,
-    letterSpacing: "var(--track-wide)",
-  };
-}
-
-function RightCell({
-  children,
-  mono,
-}: {
-  children: React.ReactNode;
-  mono?: boolean;
-}) {
-  return (
-    <span
-      style={{
-        textAlign: "right",
-        fontFamily: mono ? "var(--font-mono)" : "inherit",
-        fontSize: mono ? 12 : undefined,
-        color: mono ? "var(--fg-1)" : undefined,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {children}
-    </span>
-  );
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        padding: "32px 16px",
-        background: "var(--surface-1)",
-        border: "1px dashed var(--border-1)",
-        borderRadius: 6,
-        color: "var(--fg-4)",
-        fontFamily: "var(--font-mono)",
-        fontSize: 12,
-        textAlign: "center",
-      }}
-    >
-      {children}
-    </div>
   );
 }

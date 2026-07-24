@@ -6,9 +6,14 @@
  * that turns accent when a non-"all" value is active, opening a click-outside /
  * Escape-dismissable listbox. Extracted from `history-feed` so every tab uses
  * one implementation.
+ *
+ * On a phone the list is pinned to the viewport rather than to the trigger:
+ * three of these sit in one row, and a 168px panel hung off the left-most
+ * trigger ran clean off the side of the screen.
  */
 
 import { useEffect, useRef, useState } from "react";
+import { useCompactLayout } from "@/lib/responsive/use-compact";
 
 export function FilterDropdown({
   value,
@@ -23,8 +28,20 @@ export function FilterDropdown({
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const compact = useCompactLayout();
+  // Where the viewport-pinned panel hangs from, captured when it opens.
+  const [anchorBottom, setAnchorBottom] = useState(0);
   const current = options.find((o) => o.value === value) ?? options[0];
   const isActive = value !== "all";
+
+  function toggle() {
+    const next = !open;
+    if (next && buttonRef.current) {
+      setAnchorBottom(buttonRef.current.getBoundingClientRect().bottom);
+    }
+    setOpen(next);
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -36,22 +53,34 @@ export function FilterDropdown({
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") setOpen(false);
     }
+    // A pinned panel does not travel with its trigger, so scrolling dismisses
+    // it rather than leaving it stranded mid-page.
+    function onScroll() {
+      setOpen(false);
+    }
     document.addEventListener("pointerdown", onDown);
     document.addEventListener("keydown", onKey);
+    if (compact) window.addEventListener("scroll", onScroll, true);
     return () => {
       document.removeEventListener("pointerdown", onDown);
       document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onScroll, true);
     };
-  }, [open]);
+  }, [open, compact]);
 
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
       <button
+        ref={buttonRef}
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={ariaLabel}
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggle}
+        /* An 11px mono chip. Three of them side by side on a phone, each blown
+           up to the coarse-pointer 44px, made a band of boxes taller than the
+           tab strip above them. See `.hit-target`. */
+        className="hit-target"
         style={{
           display: "inline-flex",
           alignItems: "center",
@@ -95,13 +124,23 @@ export function FilterDropdown({
           role="listbox"
           aria-label={ariaLabel}
           style={{
-            position: "absolute",
-            top: "calc(100% + 6px)",
-            right: 0,
+            ...(compact
+              ? {
+                  position: "fixed" as const,
+                  top: anchorBottom + 6,
+                  left: "var(--space-4)",
+                  right: "var(--space-4)",
+                  maxHeight: `calc(100dvh - ${Math.round(anchorBottom + 24)}px)`,
+                }
+              : {
+                  position: "absolute" as const,
+                  top: "calc(100% + 6px)",
+                  right: 0,
+                  minWidth: 168,
+                  maxWidth: 280,
+                  maxHeight: 300,
+                }),
             zIndex: 30,
-            minWidth: 168,
-            maxWidth: 280,
-            maxHeight: 300,
             overflowY: "auto",
             background: "var(--surface-3)",
             border: "1px solid var(--border-2)",

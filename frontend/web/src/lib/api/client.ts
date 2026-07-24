@@ -5,7 +5,7 @@ import {
 } from "@/lib/account/storage";
 import type { paths } from "./schema";
 
-const DEFAULT_API_BASE = "https://62-171-170-238.nip.io";
+const DEFAULT_API_BASE = "https://api.sybil.exchange";
 const baseUrl = process.env.NEXT_PUBLIC_API_BASE ?? DEFAULT_API_BASE;
 
 export const api = createClient<paths>({ baseUrl });

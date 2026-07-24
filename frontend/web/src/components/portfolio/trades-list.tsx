@@ -53,6 +53,25 @@ import { FilterDropdown } from "./filter-dropdown";
 import { PortfolioToolbar } from "./portfolio-toolbar";
 import { SearchField } from "./search-field";
 import { SidePill, valueChipStyle } from "./side-pill";
+import {
+  ActionCell,
+  bodyRowGrid,
+  cmpNullableBig,
+  Empty,
+  MarketLabel,
+  Muted,
+  nextSort,
+  PagerFooter,
+  RightCell,
+  SortHeader,
+  TableCard,
+  TableHead,
+  TimeCell,
+  type Column,
+  type Sort,
+} from "./table";
+import { DataCard } from "@/components/data-card";
+import { useCompactLayout } from "@/lib/responsive/use-compact";
 
 type Market = components["schemas"]["MarketResponse"];
 
@@ -127,15 +146,10 @@ type SortKey =
   | "value"
   | "pnl"
   | "time";
-type SortDir = "asc" | "desc";
-type Sort = { key: SortKey; dir: SortDir };
+/** Qty is 62px because it renders shares ("150.25"), not raw units. */
+const GRID = "28px minmax(0, 1.3fr) 56px 48px 62px 74px 94px 82px 70px 96px";
 
-const COLUMNS: {
-  key: SortKey;
-  label: string;
-  align: "left" | "right";
-  info?: string;
-}[] = [
+const COLUMNS: Column<SortKey>[] = [
   { key: "market", label: "Market", align: "left" },
   { key: "action", label: "Action", align: "left" },
   { key: "side", label: "Side", align: "left" },
@@ -147,23 +161,9 @@ const COLUMNS: {
   { key: "time", label: "Time", align: "right" },
 ];
 
-/** Text columns sort A→Z first; numeric columns sort high→low first. */
-function nextSort(prev: Sort | null, key: SortKey): Sort {
-  if (prev && prev.key === key) {
-    return { key, dir: prev.dir === "asc" ? "desc" : "asc" };
-  }
-  const numeric =
-    key === "qty" ||
-    key === "price" ||
-    key === "welfare" ||
-    key === "value" ||
-    key === "pnl" ||
-    key === "time";
-  return { key, dir: numeric ? "desc" : "asc" };
-}
-
-function cmpBig(a: bigint, b: bigint): number {
-  return a > b ? 1 : a < b ? -1 : 0;
+/** Every column but the three text ones sorts high→low on first click. */
+function isNumericColumn(key: SortKey): boolean {
+  return key !== "market" && key !== "action" && key !== "side";
 }
 
 /** Ascending comparison; null numbers sort lowest. */
@@ -178,25 +178,13 @@ function compareBy(a: TradeRowData, b: TradeRowData, key: SortKey): number {
     case "qty":
       return (a.qty ?? -1) - (b.qty ?? -1);
     case "price":
-      if (a.priceNanos == null && b.priceNanos == null) return 0;
-      if (a.priceNanos == null) return -1;
-      if (b.priceNanos == null) return 1;
-      return cmpBig(a.priceNanos, b.priceNanos);
+      return cmpNullableBig(a.priceNanos, b.priceNanos);
     case "welfare":
-      if (a.welfareNanos == null && b.welfareNanos == null) return 0;
-      if (a.welfareNanos == null) return -1;
-      if (b.welfareNanos == null) return 1;
-      return cmpBig(a.welfareNanos, b.welfareNanos);
+      return cmpNullableBig(a.welfareNanos, b.welfareNanos);
     case "value":
-      if (a.valueNanos == null && b.valueNanos == null) return 0;
-      if (a.valueNanos == null) return -1;
-      if (b.valueNanos == null) return 1;
-      return cmpBig(a.valueNanos, b.valueNanos);
+      return cmpNullableBig(a.valueNanos, b.valueNanos);
     case "pnl":
-      if (a.realizedPnlNanos == null && b.realizedPnlNanos == null) return 0;
-      if (a.realizedPnlNanos == null) return -1;
-      if (b.realizedPnlNanos == null) return 1;
-      return cmpBig(a.realizedPnlNanos, b.realizedPnlNanos);
+      return cmpNullableBig(a.realizedPnlNanos, b.realizedPnlNanos);
     case "time":
       return a.filledAtMs - b.filledAtMs;
   }
@@ -238,6 +226,9 @@ function ExportCsvButton({
       onClick={onExport}
       disabled={count === 0}
       aria-label="Export fills as CSV"
+      /* Sits in the same control row as the filter chips; the coarse floor made
+         it half again their height. See `.hit-target`. */
+      className="hit-target"
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -267,7 +258,7 @@ export function TradesList({
   titleByMarket,
   retentionLimited = false,
 }: Props) {
-  const [sort, setSort] = useState<Sort | null>(null);
+  const [sort, setSort] = useState<Sort<SortKey> | null>(null);
   const [query, setQuery] = useState("");
   const [marketId, setMarketId] = useState<number | "all">("all");
 
@@ -404,7 +395,7 @@ export function TradesList({
   const paged = usePaged(visibleRows, PORTFOLIO_PAGE_SIZE);
 
   const onSort = (key: SortKey) => {
-    setSort((s) => nextSort(s, key));
+    setSort((s) => nextSort(s, key, isNumericColumn(key)));
     paged.setPage(0);
   };
 
@@ -456,28 +447,22 @@ export function TradesList({
       ) : visibleRows.length === 0 ? (
         <Empty>No trades match these filters.</Empty>
       ) : (
-        <div
-          className="portfolio-grid-table"
-          style={{
-            background: "var(--surface-1)",
-            border: "1px solid var(--border-1)",
-            borderRadius: 6,
-            overflowY: "hidden",
-          }}
-        >
-          <div style={rowGrid("var(--fg-4)")}>
+        <TableCard>
+          <TableHead columns={GRID}>
             <span />
             {COLUMNS.map((col) => (
-              <SortHeader key={col.key} col={col} sort={sort} onSort={onSort} />
+              <SortHeader key={col.key} col={col} sort={sort} onSort={onSort}>
+                {col.info ? <Glossary term={col.info} /> : null}
+              </SortHeader>
             ))}
-          </div>
+          </TableHead>
           {paged.visible.map((r) => (
             <TradeRow key={r.id} row={r} />
           ))}
-          <div style={{ padding: "0 14px 12px" }}>
+          <PagerFooter>
             <Pager paged={paged} />
-          </div>
-        </div>
+          </PagerFooter>
+        </TableCard>
       )}
     </div>
   );
@@ -486,8 +471,6 @@ export function TradesList({
 function TradeRow({ row }: { row: TradeRowData }) {
   const [expanded, setExpanded] = useState(false);
   const { market, label, marketId } = row;
-  const isBuy = row.side === "BUY";
-  const isSell = row.side === "SELL";
   // Only orders with more than one fill are worth expanding into partials.
   const canExpand = row.fills.length > 1;
 
@@ -499,12 +482,97 @@ function TradeRow({ row }: { row: TradeRowData }) {
     setExpanded((x) => !x);
   };
 
+  const compact = useCompactLayout();
+  if (compact) {
+    return (
+      <div>
+        <DataCard
+          href={`/m/${marketId}`}
+          thumb={
+            <MarketThumb
+              marketId={marketId}
+              name={label}
+              imageUrl={
+                market?.market_image_url ?? market?.event_image_url ?? null
+              }
+              fallbackIconUrl={
+                market?.market_icon_url ?? market?.event_icon_url ?? null
+              }
+              size={28}
+            />
+          }
+          title={label}
+          chips={
+            <>
+              <ActionCell side={row.side} />
+              {row.outcome ? <SidePill outcome={row.outcome} /> : <Muted>—</Muted>}
+              <TimeCell ms={row.filledAtMs} />
+            </>
+          }
+          pairs={[
+            {
+              label: "Qty",
+              value: row.qty == null ? "—" : formatShareUnits(row.qty),
+            },
+            {
+              label: "Price",
+              value: (
+                <PriceCell
+                  settledNanos={row.priceNanos}
+                  requestedNanos={row.requestedPriceNanos}
+                />
+              ),
+            },
+            {
+              label: "Value",
+              value:
+                row.valueNanos != null
+                  ? formatDollars(row.valueNanos, { decimals: 2 })
+                  : "—",
+            },
+            { label: "P&L", value: <PnlCell pnlNanos={row.realizedPnlNanos} /> },
+            {
+              label: "Welfare",
+              value: <WelfareCell welfareNanos={row.welfareNanos} />,
+              wide: true,
+            },
+          ]}
+          {...(canExpand
+            ? {
+                footer: (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    aria-expanded={expanded}
+                    onClick={toggle}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") toggle(e);
+                    }}
+                    style={{ color: "var(--accent)", cursor: "pointer" }}
+                  >
+                    {expanded ? "hide partial fills" : "show partial fills"}
+                  </span>
+                ),
+              }
+            : {})}
+        />
+        {canExpand && expanded && (
+          <ExpandedFills
+            fills={row.fills}
+            requestedPriceNanos={row.requestedPriceNanos}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div style={{ borderTop: "1px solid var(--border-1)" }}>
+    <div>
       <Link
+        className="portfolio-row"
         href={`/m/${marketId}`}
         style={{
-          ...rowGrid("var(--fg-2)"),
+          ...bodyRowGrid(GRID),
           textDecoration: "none",
           color: "inherit",
           background: expanded ? "var(--surface-2)" : undefined,
@@ -525,21 +593,10 @@ function TradeRow({ row }: { row: TradeRowData }) {
             alignItems: "center",
             gap: 10,
             overflow: "hidden",
-            color: "var(--fg-1)",
-            fontFamily: "var(--font-sans)",
-            fontSize: 13,
+            minWidth: 0,
           }}
         >
-          <span
-            style={{
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              minWidth: 0,
-            }}
-          >
-            {label}
-          </span>
+          <MarketLabel>{label}</MarketLabel>
           {canExpand && (
             <span
               role="button"
@@ -564,21 +621,7 @@ function TradeRow({ row }: { row: TradeRowData }) {
             </span>
           )}
         </span>
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 11,
-            color: isBuy
-              ? "var(--accent)"
-              : isSell
-                ? "var(--no)"
-                : "var(--fg-4)",
-            fontWeight: 600,
-            letterSpacing: "var(--track-wide)",
-          }}
-        >
-          {isBuy ? "BUY" : isSell ? "SELL" : "—"}
-        </span>
+        <ActionCell side={row.side} />
         {row.outcome ? <SidePill outcome={row.outcome} /> : <Muted>—</Muted>}
         <RightCell mono>
           {row.qty == null ? "—" : formatShareUnits(row.qty)}
@@ -601,7 +644,7 @@ function TradeRow({ row }: { row: TradeRowData }) {
           <PnlCell pnlNanos={row.realizedPnlNanos} />
         </RightCell>
         <RightCell>
-          <FilledTime ms={row.filledAtMs} />
+          <TimeCell ms={row.filledAtMs} />
         </RightCell>
       </Link>
       {canExpand && expanded && (
@@ -638,9 +681,9 @@ function ExpandedFills({
           requestedPriceNanos={requestedPriceNanos}
         />
       ))}
-      <div style={{ padding: "0 14px 12px" }}>
+      <PagerFooter>
         <Pager paged={paged} />
-      </div>
+      </PagerFooter>
     </div>
   );
 }
@@ -652,6 +695,7 @@ function FillSubRow({
   fill: HistoryEvent;
   requestedPriceNanos: bigint | null;
 }) {
+  const compact = useCompactLayout();
   const qty = fill.qty ?? null;
   const price = fill.priceNanos ?? null;
   const valueNanos =
@@ -666,15 +710,45 @@ function FillSubRow({
     const edge = notionalNanos(requestedPriceNanos - price, qty);
     welfareNanos = fill.side === "BUY" ? edge : -edge;
   }
+  if (compact) {
+    // No grid to align under on a phone, so the fill states which one it is
+    // rather than relying on blank identity columns to imply it.
+    return (
+      <DataCard
+        title={
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
+            partial fill
+          </span>
+        }
+        chips={<TimeCell ms={fill.timestampMs} />}
+        pairs={[
+          { label: "Qty", value: qty == null ? "—" : formatShareUnits(qty) },
+          {
+            label: "Price",
+            value: (
+              <PriceCell
+                settledNanos={price}
+                requestedNanos={requestedPriceNanos}
+              />
+            ),
+          },
+          {
+            label: "Value",
+            value:
+              valueNanos != null
+                ? formatDollars(valueNanos, { decimals: 2 })
+                : "—",
+          },
+          { label: "Welfare", value: <WelfareCell welfareNanos={welfareNanos} /> },
+        ]}
+      />
+    );
+  }
+
   // Same 10-column grid as a trade row → columns align. Identity columns
   // (thumb/market/action/side) and the P&L column stay blank for a fill.
   return (
-    <div
-      style={{
-        ...rowGrid("var(--fg-2)"),
-        borderTop: "1px solid var(--border-1)",
-      }}
-    >
+    <div style={bodyRowGrid(GRID)}>
       <span />
       <span />
       <span />
@@ -690,34 +764,11 @@ function FillSubRow({
         {valueNanos != null ? formatDollars(valueNanos, { decimals: 2 }) : "—"}
       </RightCell>
       {/* Time on one line, spanning the main table's P&L + Time columns. */}
-      <span
-        style={{
-          gridColumn: "span 2",
-          textAlign: "right",
-          fontFamily: "var(--font-mono)",
-          fontSize: 11,
-          color: "var(--fg-3)",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {fmtFillTime(fill.timestampMs)}
+      <span style={{ gridColumn: "span 2", textAlign: "right" }}>
+        <TimeCell ms={fill.timestampMs} />
       </span>
     </div>
   );
-}
-
-function fmtFillTime(ms: number): string {
-  const d = new Date(ms);
-  const date = d.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
-  const time = d.toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-  return `${time} ${date}`;
 }
 
 /**
@@ -805,148 +856,5 @@ function PnlCell({ pnlNanos }: { pnlNanos: bigint | null }) {
         ? "—"
         : formatDollars(pnlNanos, { decimals: 2, sign: true })}
     </span>
-  );
-}
-
-/** Fill time on one line — wall clock, then a faded short date. Same shape as
- *  the market-detail closed-orders stamp. Full timestamp on hover. */
-function FilledTime({ ms }: { ms: number }) {
-  const d = new Date(ms);
-  const date = d.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
-  const time = d.toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-  return (
-    <span
-      title={d.toLocaleString()}
-      style={{
-        fontFamily: "var(--font-mono)",
-        fontSize: 11,
-        color: "var(--fg-2)",
-        whiteSpace: "nowrap",
-      }}
-    >
-      {time}
-      <span style={{ color: "var(--fg-4)" }}>{` ${date}`}</span>
-    </span>
-  );
-}
-
-function SortHeader({
-  col,
-  sort,
-  onSort,
-}: {
-  col: (typeof COLUMNS)[number];
-  sort: Sort | null;
-  onSort: (key: SortKey) => void;
-}) {
-  const active = sort?.key === col.key;
-  const button = (
-    <button
-      type="button"
-      onClick={() => onSort(col.key)}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 3,
-        width: col.info ? "auto" : "100%",
-        justifyContent: col.align === "right" ? "flex-end" : "flex-start",
-        padding: 0,
-        border: 0,
-        background: "transparent",
-        cursor: "pointer",
-        font: "inherit",
-        letterSpacing: "var(--track-wide)",
-        color: active ? "var(--fg-2)" : "var(--fg-4)",
-      }}
-    >
-      <span style={{ whiteSpace: "nowrap" }}>{col.label}</span>
-      <span style={{ fontSize: 8, lineHeight: 1, opacity: active ? 1 : 0.3 }}>
-        {active ? (sort!.dir === "asc" ? "▲" : "▼") : "↕"}
-      </span>
-    </button>
-  );
-  if (!col.info) return button;
-  // A `?` glossary badge sits beside the sort label (not nested in the button).
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 3,
-        width: "100%",
-        justifyContent: col.align === "right" ? "flex-end" : "flex-start",
-      }}
-    >
-      {button}
-      <Glossary term={col.info} />
-    </span>
-  );
-}
-
-function rowGrid(color: string): React.CSSProperties {
-  return {
-    display: "grid",
-    // Qty is 62px because it now renders shares ("150.25"), not raw units.
-    gridTemplateColumns:
-      "28px minmax(0, 1.3fr) 56px 48px 62px 74px 94px 82px 70px 96px",
-    gap: 14,
-    alignItems: "center",
-    padding: "10px 14px",
-    color,
-    fontFamily: "var(--font-mono)",
-    fontSize: 11,
-    letterSpacing: "var(--track-wide)",
-  };
-}
-
-function RightCell({
-  children,
-  mono,
-}: {
-  children: React.ReactNode;
-  mono?: boolean;
-}) {
-  return (
-    <span
-      style={{
-        textAlign: "right",
-        fontFamily: mono ? "var(--font-mono)" : "inherit",
-        fontSize: mono ? 12 : undefined,
-        color: mono ? "var(--fg-1)" : undefined,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {children}
-    </span>
-  );
-}
-
-function Muted({ children }: { children: React.ReactNode }) {
-  return <span style={{ color: "var(--fg-4)" }}>{children}</span>;
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        padding: "32px 16px",
-        background: "var(--surface-1)",
-        border: "1px dashed var(--border-1)",
-        borderRadius: 6,
-        color: "var(--fg-4)",
-        fontFamily: "var(--font-mono)",
-        fontSize: 12,
-        textAlign: "center",
-      }}
-    >
-      {children}
-    </div>
   );
 }

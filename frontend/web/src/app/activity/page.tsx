@@ -36,13 +36,16 @@ export default function ActivityPage() {
       <div
         className="sybil-page-pad"
         style={{
-          // +36px = markets ClearingTicker height, so the title aligns
+          // The ticker offset keeps this title on the markets page's baseline
           // with /'s "All markets" across pages
-          paddingTop: "calc(var(--space-6) + 36px)",
+          paddingTop: "calc(var(--space-6) + var(--ticker-offset))",
           paddingBottom: "var(--space-6)",
         }}
       >
-        <PageHeader title="Activity" />
+        <PageHeader
+          title="Activity"
+          meta="every committed batch · volume, welfare, trader and bot activity"
+        />
       </div>
 
       <ActivityOverviewReadNotice

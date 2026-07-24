@@ -4,6 +4,9 @@
  * Positions tab. Grid rows matching `PortfolioVariants.jsx:11-60`, now with a
  * market thumbnail, click-to-sort column headers, and pagination:
  *   thumb · market · side · shares · entry¢ · mark¢ · 7d spark · value · pnl · resolves
+ *
+ * Row chrome (card, grid metrics, headers, cells, hover) comes from
+ * `./table` so the four portfolio tabs stay aligned with each other.
  */
 
 import Link from "next/link";
@@ -18,6 +21,23 @@ import { PortfolioToolbar } from "./portfolio-toolbar";
 import { PositionSparkline } from "./position-sparkline";
 import { SearchField } from "./search-field";
 import { SidePill } from "./side-pill";
+import {
+  bodyRowGrid,
+  cmpBig,
+  cmpNullableBig,
+  Empty,
+  MarketLabel,
+  nextSort,
+  PagerFooter,
+  RightCell,
+  SortHeader,
+  TableCard,
+  TableHead,
+  type Column,
+  type Sort,
+} from "./table";
+import { DataCard } from "@/components/data-card";
+import { useCompactLayout } from "@/lib/responsive/use-compact";
 import { avgEntryPriceNanos } from "@/lib/account/positions";
 import type { AccountFill } from "@/lib/account/use-account-fills";
 import type { Portfolio } from "@/lib/account/use-portfolio";
@@ -70,21 +90,24 @@ type SortKey =
   | "value"
   | "pnl"
   | "resolves";
-type SortDir = "asc" | "desc";
-type Sort = { key: SortKey; dir: SortDir };
 
-/** Text columns sort A→Z first; numeric columns sort high→low first. */
-function nextSort(prev: Sort | null, key: SortKey): Sort {
-  if (prev && prev.key === key) {
-    return { key, dir: prev.dir === "asc" ? "desc" : "asc" };
-  }
-  const numeric = key !== "market" && key !== "side";
-  return { key, dir: numeric ? "desc" : "asc" };
-}
+/** P&L is 116px because its amount and percent share one line. */
+const GRID = "32px minmax(0, 1.4fr) 50px 70px 60px 60px 88px 80px 116px 110px";
 
-function cmpBig(a: bigint, b: bigint): number {
-  return a > b ? 1 : a < b ? -1 : 0;
-}
+/** The 7d sparkline is the one column with nothing to sort by. */
+const SPARK_COLUMN = { spark: "7d" } as const;
+
+const COLUMNS: (Column<SortKey> | typeof SPARK_COLUMN)[] = [
+  { key: "market", label: "Market", align: "left" },
+  { key: "side", label: "Side", align: "left" },
+  { key: "shares", label: "Shares", align: "right" },
+  { key: "entry", label: "Entry", align: "right" },
+  { key: "mark", label: "Mark", align: "right" },
+  SPARK_COLUMN,
+  { key: "value", label: "Value", align: "right" },
+  { key: "pnl", label: "P&L", align: "right" },
+  { key: "resolves", label: "Resolves", align: "right" },
+];
 
 /** Ascending comparison; null numbers sort lowest. */
 function compareBy(
@@ -100,19 +123,13 @@ function compareBy(
     case "shares":
       return a.shares - b.shares;
     case "entry":
-      if (a.avgNanos == null && b.avgNanos == null) return 0;
-      if (a.avgNanos == null) return -1;
-      if (b.avgNanos == null) return 1;
-      return cmpBig(a.avgNanos, b.avgNanos);
+      return cmpNullableBig(a.avgNanos, b.avgNanos);
     case "mark":
       return cmpBig(a.markNanos, b.markNanos);
     case "value":
       return cmpBig(a.valueNanos, b.valueNanos);
     case "pnl":
-      if (a.pnlNanos == null && b.pnlNanos == null) return 0;
-      if (a.pnlNanos == null) return -1;
-      if (b.pnlNanos == null) return 1;
-      return cmpBig(a.pnlNanos, b.pnlNanos);
+      return cmpNullableBig(a.pnlNanos, b.pnlNanos);
     case "resolves":
       return (a.resolveMs ?? Infinity) - (b.resolveMs ?? Infinity);
   }
@@ -125,7 +142,7 @@ export function PositionsList({
   marketsById,
   titleByMarket,
 }: Props) {
-  const [sort, setSort] = useState<Sort | null>(null);
+  const [sort, setSort] = useState<Sort<SortKey> | null>(null);
   const [query, setQuery] = useState("");
 
   const rows = useMemo<PositionRowData[]>(() => {
@@ -171,7 +188,7 @@ export function PositionsList({
   const paged = usePaged(visibleRows, PORTFOLIO_PAGE_SIZE);
 
   const onSort = (key: SortKey) => {
-    setSort((s) => nextSort(s, key));
+    setSort((s) => nextSort(s, key, key !== "market" && key !== "side"));
     paged.setPage(0);
   };
 
@@ -198,85 +215,34 @@ export function PositionsList({
       ) : visibleRows.length === 0 ? (
         <Empty>No positions match “{query}”.</Empty>
       ) : (
-        <div
-          className="portfolio-grid-table"
-          style={{
-            background: "var(--surface-1)",
-            border: "1px solid var(--border-1)",
-            borderRadius: 6,
-            overflowY: "hidden",
-          }}
-        >
-          <div style={rowGrid("var(--fg-4)")}>
+        <TableCard>
+          <TableHead columns={GRID}>
             <span />
-            <SortHeader
-              col="market"
-              label="Market"
-              align="left"
-              sort={sort}
-              onSort={onSort}
-            />
-            <SortHeader
-              col="side"
-              label="Side"
-              align="left"
-              sort={sort}
-              onSort={onSort}
-            />
-            <SortHeader
-              col="shares"
-              label="Shares"
-              align="right"
-              sort={sort}
-              onSort={onSort}
-            />
-            <SortHeader
-              col="entry"
-              label="Entry"
-              align="right"
-              sort={sort}
-              onSort={onSort}
-            />
-            <SortHeader
-              col="mark"
-              label="Mark"
-              align="right"
-              sort={sort}
-              onSort={onSort}
-            />
-            <span style={{ textAlign: "center" }}>7d</span>
-            <SortHeader
-              col="value"
-              label="Value"
-              align="right"
-              sort={sort}
-              onSort={onSort}
-            />
-            <SortHeader
-              col="pnl"
-              label="P&amp;L"
-              align="right"
-              sort={sort}
-              onSort={onSort}
-            />
-            <SortHeader
-              col="resolves"
-              label="Resolves"
-              align="right"
-              sort={sort}
-              onSort={onSort}
-            />
-          </div>
+            {COLUMNS.map((col) =>
+              "spark" in col ? (
+                <span key={col.spark} style={{ textAlign: "center" }}>
+                  {col.spark}
+                </span>
+              ) : (
+                <SortHeader
+                  key={col.key}
+                  col={col}
+                  sort={sort}
+                  onSort={onSort}
+                />
+              ),
+            )}
+          </TableHead>
           {paged.visible.map((r) => (
             <PositionRow
               key={`${r.position.market_id}:${r.position.outcome}`}
               row={r}
             />
           ))}
-          <div style={{ padding: "0 14px" }}>
+          <PagerFooter>
             <Pager paged={paged} />
-          </div>
-        </div>
+          </PagerFooter>
+        </TableCard>
       )}
     </div>
   );
@@ -293,39 +259,102 @@ function PositionRow({ row }: { row: PositionRowData }) {
     pnlNanos,
     pnlPct,
   } = row;
+  const compact = useCompactLayout();
+
+  const thumb = (
+    <MarketThumb
+      marketId={position.market_id}
+      name={label}
+      imageUrl={market?.market_image_url ?? market?.event_image_url ?? null}
+      fallbackIconUrl={market?.market_icon_url ?? market?.event_icon_url ?? null}
+      size={28}
+    />
+  );
+
+  // Amount and percent on ONE line: the percent is a restatement of the amount,
+  // not a second fact, so it reads as a suffix rather than a stacked value.
+  // Keeps every row a single text line tall.
+  const pnl = (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "baseline",
+        justifyContent: "flex-end",
+        gap: 5,
+        fontFamily: "var(--font-mono)",
+        whiteSpace: "nowrap",
+        color:
+          pnlNanos == null
+            ? "var(--fg-3)"
+            : pnlNanos >= 0n
+              ? "var(--yes)"
+              : "var(--no)",
+      }}
+    >
+      <span style={{ fontSize: 12 }}>
+        {pnlNanos == null
+          ? "—"
+          : formatDollars(pnlNanos, { decimals: 2, sign: true })}
+      </span>
+      {pnlPct != null && (
+        <span style={{ fontSize: 10, opacity: 0.75 }}>
+          {`${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%`}
+        </span>
+      )}
+    </span>
+  );
+
+  if (compact) {
+    return (
+      <DataCard
+        href={`/m/${position.market_id}`}
+        thumb={thumb}
+        title={label}
+        chips={
+          <>
+            <SidePill outcome={position.outcome} />
+            <span>{formatShareUnits(position.quantity)} shares</span>
+          </>
+        }
+        pairs={[
+          {
+            label: "Entry",
+            value: avgNanos == null ? "—" : formatCentsPrecise(avgNanos),
+          },
+          { label: "Mark", value: formatCentsPrecise(markNanos) },
+          {
+            label: "Value",
+            value: formatDollars(valueNanos, { decimals: 2 }),
+          },
+          { label: "P&L", value: pnl },
+        ]}
+        footer={
+          <>
+            <span>resolves {formatResolves(market)}</span>
+            <span style={{ marginLeft: "auto", display: "inline-flex" }}>
+              <PositionSparkline
+                marketId={position.market_id}
+                outcome={position.outcome}
+              />
+            </span>
+          </>
+        }
+      />
+    );
+  }
 
   return (
     <Link
+      className="portfolio-row"
       href={`/m/${position.market_id}`}
       style={{
-        ...rowGrid("var(--fg-2)"),
+        ...bodyRowGrid(GRID),
         textDecoration: "none",
         color: "inherit",
-        borderTop: "1px solid var(--border-1)",
-        transition: "background var(--dur-fast) var(--ease-standard)",
       }}
     >
-      <MarketThumb
-        marketId={position.market_id}
-        name={label}
-        imageUrl={market?.market_image_url ?? market?.event_image_url ?? null}
-        fallbackIconUrl={
-          market?.market_icon_url ?? market?.event_icon_url ?? null
-        }
-        size={28}
-      />
-      <span
-        style={{
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          color: "var(--fg-1)",
-          fontFamily: "var(--font-sans)",
-          fontSize: 13,
-        }}
-      >
-        {label}
-      </span>
+      {thumb}
+      <MarketLabel>{label}</MarketLabel>
       <SidePill outcome={position.outcome} />
       <RightCell mono>{formatShareUnits(position.quantity)}</RightCell>
       <RightCell mono>
@@ -339,138 +368,9 @@ function PositionRow({ row }: { row: PositionRowData }) {
         />
       </span>
       <RightCell mono>{formatDollars(valueNanos, { decimals: 2 })}</RightCell>
-      <RightCell>
-        {/* Amount and percent on ONE line: the percent is a restatement of the
-            amount, not a second fact, so it reads as a suffix rather than a
-            stacked value. Keeps every row a single text line tall. */}
-        <span
-          style={{
-            display: "inline-flex",
-            alignItems: "baseline",
-            justifyContent: "flex-end",
-            gap: 5,
-            fontFamily: "var(--font-mono)",
-            whiteSpace: "nowrap",
-            color:
-              pnlNanos == null
-                ? "var(--fg-3)"
-                : pnlNanos >= 0n
-                  ? "var(--yes)"
-                  : "var(--no)",
-          }}
-        >
-          <span style={{ fontSize: 12 }}>
-            {pnlNanos == null
-              ? "—"
-              : formatDollars(pnlNanos, { decimals: 2, sign: true })}
-          </span>
-          {pnlPct != null && (
-            <span style={{ fontSize: 10, opacity: 0.75 }}>
-              {`${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%`}
-            </span>
-          )}
-        </span>
-      </RightCell>
+      <RightCell>{pnl}</RightCell>
       <RightCell mono>{formatResolves(market)}</RightCell>
     </Link>
-  );
-}
-
-function SortHeader({
-  col,
-  label,
-  align,
-  sort,
-  onSort,
-}: {
-  col: SortKey;
-  label: string;
-  align: "left" | "right";
-  sort: Sort | null;
-  onSort: (key: SortKey) => void;
-}) {
-  const active = sort?.key === col;
-  return (
-    <button
-      type="button"
-      onClick={() => onSort(col)}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 3,
-        width: "100%",
-        justifyContent: align === "right" ? "flex-end" : "flex-start",
-        padding: 0,
-        border: 0,
-        background: "transparent",
-        cursor: "pointer",
-        font: "inherit",
-        letterSpacing: "var(--track-wide)",
-        color: active ? "var(--fg-2)" : "var(--fg-4)",
-      }}
-    >
-      <span style={{ whiteSpace: "nowrap" }}>{label}</span>
-      <span style={{ fontSize: 8, lineHeight: 1, opacity: active ? 1 : 0.3 }}>
-        {active ? (sort!.dir === "asc" ? "▲" : "▼") : "↕"}
-      </span>
-    </button>
-  );
-}
-
-function rowGrid(color: string): React.CSSProperties {
-  return {
-    display: "grid",
-    // P&L is 116px because its amount and percent now share one line.
-    gridTemplateColumns:
-      "32px minmax(0, 1.4fr) 50px 70px 60px 60px 88px 80px 116px 110px",
-    gap: 10,
-    alignItems: "center",
-    padding: "10px 14px",
-    color,
-    fontFamily: "var(--font-mono)",
-    fontSize: 11,
-    letterSpacing: "var(--track-wide)",
-  };
-}
-
-function RightCell({
-  children,
-  mono,
-}: {
-  children: React.ReactNode;
-  mono?: boolean;
-}) {
-  return (
-    <span
-      style={{
-        textAlign: "right",
-        fontFamily: mono ? "var(--font-mono)" : "inherit",
-        fontSize: mono ? 12 : undefined,
-        color: mono ? "var(--fg-1)" : undefined,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {children}
-    </span>
-  );
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        padding: "32px 16px",
-        background: "var(--surface-1)",
-        border: "1px dashed var(--border-1)",
-        borderRadius: 6,
-        color: "var(--fg-4)",
-        fontFamily: "var(--font-mono)",
-        fontSize: 12,
-        textAlign: "center",
-      }}
-    >
-      {children}
-    </div>
   );
 }
 

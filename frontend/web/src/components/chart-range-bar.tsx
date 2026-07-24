@@ -28,6 +28,10 @@ export function ChartRangeBar({
 }) {
   return (
     <div
+      /* Six 10px segments in one track. The coarse-pointer floor turned each
+         into a 44px box and the track into a 300px slab above the chart, so the
+         segments keep their drawn size and take the touch target as hit area. */
+      className="hit-target-group"
       style={{
         display: "inline-flex",
         gap: 2,

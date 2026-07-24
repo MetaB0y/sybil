@@ -60,7 +60,7 @@ impl BlockSequencer {
         market_ids: Vec<MarketId>,
     ) -> (u64, MarketGroup) {
         self.create_market_group_with_key(name, None, market_ids)
-            .expect("an unkeyed market group has no identity conflict")
+            .expect("unkeyed market group creation requires valid ungrouped active markets")
     }
 
     pub fn create_market_group_with_key(
@@ -72,7 +72,7 @@ impl BlockSequencer {
         market_ids.sort_by_key(|market_id| market_id.0);
         market_ids.dedup();
         if let Some(existing) =
-            self.existing_market_group_for_creation(&name, creation_key.as_deref(), &market_ids)?
+            self.can_create_market_group(&name, creation_key.as_deref(), &market_ids)?
         {
             return Ok(existing);
         }
@@ -85,6 +85,44 @@ impl BlockSequencer {
         }
         self.market_groups.push(group.clone());
         Ok((group_id, group))
+    }
+
+    pub(crate) fn can_create_market_group(
+        &self,
+        name: &str,
+        creation_key: Option<&str>,
+        market_ids: &[MarketId],
+    ) -> Result<Option<(u64, MarketGroup)>, SequencerError> {
+        if let Some(existing) =
+            self.existing_market_group_for_creation(name, creation_key, market_ids)?
+        {
+            return Ok(Some(existing));
+        }
+
+        for &market_id in market_ids {
+            if self.markets.get(market_id).is_none() {
+                return Err(SequencerError::MarketNotFound { market_id });
+            }
+            let status = self.lifecycle.market_status(market_id);
+            if !status.is_tradeable() {
+                return Err(SequencerError::MarketNotTradeable {
+                    market_id,
+                    status: status.as_str().to_string(),
+                });
+            }
+            if let Some((group_id, _)) = self
+                .market_groups
+                .iter()
+                .enumerate()
+                .find(|(_, group)| group.markets.contains(&market_id))
+            {
+                return Err(SequencerError::MarketAlreadyGrouped {
+                    group_id: group_id as u64,
+                });
+            }
+        }
+
+        Ok(None)
     }
 
     pub(crate) fn existing_market_group_for_creation(
@@ -203,6 +241,7 @@ impl BlockSequencer {
     pub fn set_market_metadata(&mut self, market_id: MarketId, metadata: MarketMetadata) {
         self.lifecycle.set_market_metadata(market_id, metadata);
     }
+
     pub fn resolve_market(
         &mut self,
         market_id: MarketId,

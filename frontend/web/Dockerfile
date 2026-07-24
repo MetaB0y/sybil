@@ -4,8 +4,8 @@
 # Build context is this directory (frontend/web).
 #
 #   docker build \
-#     --build-arg NEXT_PUBLIC_API_BASE=https://62-171-170-238.nip.io \
-#     --build-arg NEXT_PUBLIC_WS_BASE=wss://62-171-170-238.nip.io \
+#     --build-arg NEXT_PUBLIC_API_BASE=https://api.sybil.exchange \
+#     --build-arg NEXT_PUBLIC_WS_BASE=wss://api.sybil.exchange \
 #     -t sybil-web:latest frontend/web
 #
 # IMPORTANT: NEXT_PUBLIC_* are inlined into the client bundle at BUILD time.
@@ -27,13 +27,18 @@ WORKDIR /app
 ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
 RUN corepack enable
 
-# Public (build-time-baked) config. Defaults target the live nip.io backend;
-# override per environment. WEBAUTHN_RP_ID must match the public domain that
-# serves this app (passkeys are scoped to the rpId) — leave empty to use the
-# page's own host, or set it explicitly when the app is on a subdomain.
-ARG NEXT_PUBLIC_API_BASE=https://62-171-170-238.nip.io
-ARG NEXT_PUBLIC_WS_BASE=wss://62-171-170-238.nip.io
-ARG NEXT_PUBLIC_WEBAUTHN_RP_ID=
+# Public (build-time-baked) config. Defaults target the live backend; override
+# per environment.
+#
+# NEXT_PUBLIC_WEBAUTHN_RP_ID must equal EXPECTED_WEBAUTHN_RP_ID in
+# crates/sybil-verifier/src/key_op_auth.rs, which is the registrable domain and
+# NOT the `app.` host serving this page. Do not leave it empty: the browser then
+# defaults the rpId to the page's own host, minting passkeys under
+# `app.sybil.exchange` whose rpIdHash the guest rejects. That failure only shows
+# up at the first passkey ceremony, so it is defaulted explicitly here.
+ARG NEXT_PUBLIC_API_BASE=https://api.sybil.exchange
+ARG NEXT_PUBLIC_WS_BASE=wss://api.sybil.exchange
+ARG NEXT_PUBLIC_WEBAUTHN_RP_ID=sybil.exchange
 ARG NEXT_PUBLIC_SENTRY_DSN=
 ENV NEXT_PUBLIC_API_BASE=$NEXT_PUBLIC_API_BASE \
     NEXT_PUBLIC_WS_BASE=$NEXT_PUBLIC_WS_BASE \

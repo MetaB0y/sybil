@@ -125,6 +125,11 @@
 
   /* ── Layout ──────────────────────────────────────────────────────────── */
   --nav-height:        56px;
+  /* Height of the markets page's RECENT TRADES ticker. Every other page pads
+     its header by this so titles land on one baseline across the site. The
+     ticker is hidden on phones, where it is a marquee of truncated text in
+     scarce vertical space, so globals.css zeroes this at that width. */
+  --ticker-offset:     36px;
   --max-content:       1440px;
   --max-essay:         720px;
   --side-rail:         260px;

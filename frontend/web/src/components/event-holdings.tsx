@@ -51,14 +51,32 @@ import { EventClosedOrders } from "@/components/event-closed-orders";
 import { EventOpenOrders } from "@/components/event-open-orders";
 import { Pager, usePaged } from "@/components/event-list-pager";
 import { SidePill } from "@/components/portfolio/side-pill";
+import { DataCard } from "@/components/data-card";
+import { useCompactLayout } from "@/lib/responsive/use-compact";
+import {
+  cmpBig,
+  cmpNullableBig,
+  Empty,
+  EventRow,
+  EventTable,
+  HeaderCell,
+  nextSort,
+  OutcomeLabel,
+  Right,
+  type Column,
+  type Sort,
+} from "@/components/event-table";
 
 /** Which sub-view the "your holdings" section is showing. */
 type View = "holdings" | "open" | "closed";
 
-const VIEW_TABS: { id: View; label: string }[] = [
-  { id: "holdings", label: "Holdings" },
-  { id: "open", label: "Open orders" },
-  { id: "closed", label: "Closed orders" },
+// `short` is what a phone shows: three full labels do not fit one line at
+// 390px, and the section heading above them ("your positions & orders") already
+// says what kind of thing is being switched.
+const VIEW_TABS: { id: View; label: string; short: string }[] = [
+  { id: "holdings", label: "Holdings", short: "Holdings" },
+  { id: "open", label: "Open orders", short: "Open" },
+  { id: "closed", label: "Closed orders", short: "Closed" },
 ];
 
 const sectionStyle: React.CSSProperties = {
@@ -116,25 +134,23 @@ type Holding = {
 };
 
 type SortKey = "outcome" | "side" | "shares" | "price" | "value" | "pnl";
-type SortDir = "asc" | "desc";
-type Sort = { key: SortKey; dir: SortDir };
 
-const COLUMNS: { key: SortKey; label: string; align: "left" | "right" }[] = [
+/* Outcome / Side / Qty / Price / Value / P&L, laid out on the same slots the
+   closed-orders list uses so the two tables line up where they overlap. */
+const GRID = "minmax(0, 1fr) 48px 62px 104px 78px 70px";
+
+const COLUMNS: Column<SortKey>[] = [
   { key: "outcome", label: "Outcome", align: "left" },
   { key: "side", label: "Side", align: "left" },
-  { key: "shares", label: "Shares", align: "right" },
+  { key: "shares", label: "Qty", align: "right" },
   { key: "price", label: "Price", align: "right" },
   { key: "value", label: "Value", align: "right" },
   { key: "pnl", label: "P&L", align: "right" },
 ];
 
-/** Text columns sort A→Z first; numeric columns sort high→low first. */
-function nextSort(prev: Sort | null, key: SortKey): Sort {
-  if (prev && prev.key === key) {
-    return { key, dir: prev.dir === "asc" ? "desc" : "asc" };
-  }
-  const numeric = key !== "outcome" && key !== "side";
-  return { key, dir: numeric ? "desc" : "asc" };
+/** Every column but the two text ones sorts high→low on first click. */
+function isNumericColumn(key: SortKey): boolean {
+  return key !== "outcome" && key !== "side";
 }
 
 /** −1 / 0 / 1 ascending comparison for a key; nulls (PnL) sort lowest. */
@@ -151,15 +167,8 @@ function compareBy(a: Holding, b: Holding, key: SortKey): number {
     case "value":
       return cmpBig(a.valueNanos, b.valueNanos);
     case "pnl":
-      if (a.pnlNanos == null && b.pnlNanos == null) return 0;
-      if (a.pnlNanos == null) return -1;
-      if (b.pnlNanos == null) return 1;
-      return cmpBig(a.pnlNanos, b.pnlNanos);
+      return cmpNullableBig(a.pnlNanos, b.pnlNanos);
   }
-}
-
-function cmpBig(a: bigint, b: bigint): number {
-  return a > b ? 1 : a < b ? -1 : 0;
 }
 
 export function EventHoldings({ marketId }: { marketId: number }) {
@@ -175,7 +184,7 @@ export function EventHoldings({ marketId }: { marketId: number }) {
   const ordersData = orders.data;
   const historyData = history.events;
 
-  const [sort, setSort] = useState<Sort | null>(null);
+  const [sort, setSort] = useState<Sort<SortKey> | null>(null);
   const [view, setView] = useState<View>("holdings");
   // Outcome filter (null = all outcomes). Scopes every view to one market.
   const [selectedMarket, setSelectedMarket] = useState<number | null>(null);
@@ -248,19 +257,35 @@ export function EventHoldings({ marketId }: { marketId: number }) {
       .sort((a, b) => (b.created_at_ms ?? 0) - (a.created_at_ms ?? 0));
   }, [ordersData, labelByMarket]);
 
-  // Does this event have any terminally-closed order in the history feed? Cheap
-  // existence scan so the section can render the Closed view; the full per-order
-  // reconstruction lives in EventClosedOrders.
-  const hasClosed = useMemo(() => {
+  // Distinct terminally-closed orders per market in this event. Cheap scan over
+  // the history feed — enough to decide whether the Closed view has anything and
+  // which outcomes to mark in the filter; the full per-order reconstruction
+  // lives in EventClosedOrders.
+  const closedOrdersByMarket = useMemo(() => {
     const eventMarketIds = new Set(labelByMarket.keys());
-    return historyData.some(
-      (e) =>
-        e.orderId != null &&
-        e.marketId != null &&
-        eventMarketIds.has(e.marketId) &&
-        CLOSED_TYPES.has(e.type),
-    );
+    const byMarket = new Map<number, Set<number>>();
+    for (const e of historyData) {
+      if (e.orderId == null || e.marketId == null) continue;
+      if (!eventMarketIds.has(e.marketId)) continue;
+      if (!CLOSED_TYPES.has(e.type)) continue;
+      const seen = byMarket.get(e.marketId) ?? new Set<number>();
+      seen.add(e.orderId);
+      byMarket.set(e.marketId, seen);
+    }
+    return byMarket;
   }, [historyData, labelByMarket]);
+  const hasClosed = closedOrdersByMarket.size > 0;
+
+  // Which outcomes the filter should mark as "you have something here" — a
+  // position, a resting order, or a closed order. Without it every outcome in a
+  // 12-way event looks equally worth opening, and most lead to an empty table.
+  const activeMarkets = useMemo(() => {
+    const ids = new Set<number>();
+    for (const h of holdings) ids.add(h.position.market_id);
+    for (const o of eventOrders) ids.add(o.market_id);
+    for (const id of closedOrdersByMarket.keys()) ids.add(id);
+    return ids;
+  }, [holdings, eventOrders, closedOrdersByMarket]);
 
   // Apply the outcome filter for display. The render gate below still considers
   // the *full* event, so picking an outcome with no rows narrows the table
@@ -386,19 +411,23 @@ export function EventHoldings({ marketId }: { marketId: number }) {
           flexWrap: "wrap",
         }}
       >
+        <div className="eyebrow">{"your positions & orders"}</div>
+        {/* The switcher and the filter it scopes stay together: one names the
+            view, the other narrows it, and split across two lines on a phone
+            they read as unrelated controls. */}
         <div
           style={{
             display: "flex",
             alignItems: "center",
-            gap: "var(--space-3)",
+            gap: "var(--space-2)",
             minWidth: 0,
-            flexWrap: "wrap",
           }}
         >
-          <div className="eyebrow">{"your positions & orders"}</div>
+          <ViewSwitcher value={view} onChange={setView} />
           {outcomes.length > 1 && (
             <OutcomeFilter
               outcomes={outcomes}
+              activeMarkets={activeMarkets}
               selected={selectedMarket}
               onChange={(id) => {
                 setSelectedMarket(id);
@@ -407,7 +436,6 @@ export function EventHoldings({ marketId }: { marketId: number }) {
             />
           )}
         </div>
-        <ViewSwitcher value={view} onChange={setView} />
       </div>
 
       {view === "holdings" ? (
@@ -418,20 +446,22 @@ export function EventHoldings({ marketId }: { marketId: number }) {
               : "No holdings in this outcome."}
           </Empty>
         ) : (
-          <div>
-            <Row header>
+          <EventTable>
+            <EventRow columns={GRID} header>
               {COLUMNS.map((col) => (
                 <HeaderCell
                   key={col.key}
                   col={col}
                   sort={sort}
                   onSort={() => {
-                    setSort((s) => nextSort(s, col.key));
+                    setSort((s) =>
+                      nextSort(s, col.key, isNumericColumn(col.key)),
+                    );
                     holdingsPage.setPage(0);
                   }}
                 />
               ))}
-            </Row>
+            </EventRow>
             {holdingsPage.visible.map((h) => (
               <HoldingRow
                 key={`${h.position.market_id}:${h.outcome}`}
@@ -439,7 +469,7 @@ export function EventHoldings({ marketId }: { marketId: number }) {
               />
             ))}
             <Pager paged={holdingsPage} />
-          </div>
+          </EventTable>
         )
       ) : view === "open" ? (
         <EventOpenOrders
@@ -540,8 +570,14 @@ function ViewSwitcher({
   value: View;
   onChange: (v: View) => void;
 }) {
+  const compact = useCompactLayout();
   return (
     <div
+      /* Three 11px labels in one track — see `.hit-target-group`. At the coarse
+         floor each grew to 44px, which wrapped "open orders" and "closed
+         orders" over two lines and made the switch taller than the card's
+         title. */
+      className="hit-target-group"
       style={{
         display: "inline-flex",
         background: "var(--bg-2)",
@@ -559,7 +595,11 @@ function ViewSwitcher({
             type="button"
             onClick={() => onChange(t.id)}
             style={{
-              padding: "4px 10px",
+              whiteSpace: "nowrap",
+              // Tighter on a phone: the outcome filter shares this row, and the
+              // 2px per side buys it the width to read "All outcomes" whole
+              // rather than "All outc…".
+              padding: compact ? "4px 8px" : "4px 10px",
               border: 0,
               borderRadius: 3,
               background: active ? "var(--surface-2)" : "transparent",
@@ -572,7 +612,7 @@ function ViewSwitcher({
               transition: "background 120ms",
             }}
           >
-            {t.label}
+            {compact ? t.short : t.label}
           </button>
         );
       })}
@@ -586,13 +626,20 @@ function ViewSwitcher({
  * multi-outcome events; a single binary market has nothing to filter. Colored
  * dots match the chart legend (`colorForOutcome`). Mirrors the rail picker's
  * click-outside + Escape close.
+ *
+ * Outcomes you actually hold or have traded read at full strength; the rest are
+ * dimmed, so a 12-way event's menu shows at a glance which two are worth
+ * opening. Empty outcomes stay selectable — the table just says it's empty.
  */
 function OutcomeFilter({
   outcomes,
+  activeMarkets,
   selected,
   onChange,
 }: {
   outcomes: EventOutcome[];
+  /** market_ids with a position, resting order, or closed order. */
+  activeMarkets: Set<number>;
   selected: number | null;
   onChange: (id: number | null) => void;
 }) {
@@ -614,6 +661,7 @@ function OutcomeFilter({
     };
   }, []);
 
+  const compact = useCompactLayout();
   const selectedIndex = outcomes.findIndex((o) => o.marketId === selected);
   const selectedOutcome = selectedIndex >= 0 ? outcomes[selectedIndex] : null;
   const selectedColor =
@@ -625,17 +673,23 @@ function OutcomeFilter({
   }
 
   return (
-    <div ref={ref} style={{ position: "relative" }}>
+    <div
+      ref={ref}
+      /* Capped here, not on the button, so the trigger shrinks with the row
+         instead of pushing the switcher beside it onto its own line. */
+      style={{ position: "relative", maxWidth: 200, minWidth: 0 }}
+    >
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="listbox"
         aria-expanded={open}
+        className="hit-target"
         style={{
-          display: "inline-flex",
+          display: "flex",
           alignItems: "center",
           gap: 6,
-          maxWidth: 200,
+          maxWidth: "100%",
           padding: "4px 8px",
           borderRadius: 4,
           background: "var(--bg-2)",
@@ -643,7 +697,10 @@ function OutcomeFilter({
           cursor: "pointer",
           fontFamily: "var(--font-mono)",
           fontSize: 11,
-          letterSpacing: "var(--track-wide)",
+          // Sharing a row with the view switcher at 390px leaves ~115px here,
+          // and the tracking alone was the difference between "All outcomes"
+          // and "All outcom…".
+          letterSpacing: compact ? "normal" : "var(--track-wide)",
           color: "var(--fg-2)",
         }}
       >
@@ -692,9 +749,10 @@ function OutcomeFilter({
           style={{
             position: "absolute",
             top: "calc(100% + 4px)",
-            left: 0,
+            right: 0,
             zIndex: 30,
             minWidth: 200,
+            maxWidth: "calc(100vw - var(--space-6))",
             background: "var(--surface-2)",
             border: "1px solid var(--border-2)",
             borderRadius: 6,
@@ -709,6 +767,7 @@ function OutcomeFilter({
         >
           <OutcomeOption
             label="All outcomes"
+            active
             selected={selected == null}
             onClick={() => pick(null)}
           />
@@ -717,6 +776,7 @@ function OutcomeFilter({
               key={o.marketId}
               label={o.shortLabel}
               color={colorForOutcome(o, i)}
+              active={activeMarkets.has(o.marketId)}
               selected={selected === o.marketId}
               onClick={() => pick(o.marketId)}
             />
@@ -730,11 +790,14 @@ function OutcomeFilter({
 function OutcomeOption({
   label,
   color,
+  active,
   selected,
   onClick,
 }: {
   label: string;
   color?: string;
+  /** You have a position or an order here — render it at full strength. */
+  active: boolean;
   selected: boolean;
   onClick: () => void;
 }) {
@@ -770,6 +833,7 @@ function OutcomeOption({
           height: 8,
           borderRadius: "50%",
           background: color ?? "var(--fg-4)",
+          opacity: active ? 1 : 0.4,
           flexShrink: 0,
         }}
       />
@@ -782,65 +846,11 @@ function OutcomeOption({
           whiteSpace: "nowrap",
           fontFamily: "var(--font-sans)",
           fontSize: 13,
-          color: "var(--fg-1)",
+          fontWeight: active ? 500 : 400,
+          color: active ? "var(--fg-1)" : "var(--fg-4)",
         }}
       >
         {label}
-      </span>
-    </button>
-  );
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        padding: "24px 0",
-        color: "var(--fg-4)",
-        fontFamily: "var(--font-mono)",
-        fontSize: 12,
-        letterSpacing: "var(--track-wide)",
-        textAlign: "center",
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function HeaderCell({
-  col,
-  sort,
-  onSort,
-}: {
-  col: (typeof COLUMNS)[number];
-  sort: Sort | null;
-  onSort: () => void;
-}) {
-  const active = sort?.key === col.key;
-  return (
-    <button
-      type="button"
-      onClick={onSort}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 4,
-        width: "100%",
-        justifyContent: col.align === "right" ? "flex-end" : "flex-start",
-        padding: 0,
-        border: 0,
-        background: "transparent",
-        cursor: "pointer",
-        font: "inherit",
-        textTransform: "uppercase",
-        letterSpacing: "var(--track-wide)",
-        color: active ? "var(--fg-2)" : "var(--fg-4)",
-      }}
-    >
-      <span>{col.label}</span>
-      <span style={{ fontSize: 8, lineHeight: 1, opacity: active ? 1 : 0.3 }}>
-        {active ? (sort!.dir === "asc" ? "▲" : "▼") : "↕"}
       </span>
     </button>
   );
@@ -849,104 +859,72 @@ function HeaderCell({
 function HoldingRow({ holding }: { holding: Holding }) {
   const { label, quantity, outcome, avgNanos, markNanos, valueNanos, pnlNanos } =
     holding;
-  return (
-    <Row>
-      <span
-        style={{
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          color: "var(--fg-1)",
-          fontFamily: "var(--font-sans)",
-          fontSize: 13,
-        }}
-      >
-        {label}
-      </span>
-      <SidePill outcome={outcome} />
-      <Right mono>{formatShareUnits(quantity, 1)}</Right>
-      <Right mono>
-        {avgNanos == null ? (
-          formatCentsPrecise(markNanos)
-        ) : (
-          // entry → mark. Fade the entry (what you paid, historical) so the eye
-          // lands on the mark — the live price that's actually true right now.
-          <span>
-            <span style={{ color: "var(--fg-4)" }}>{formatCentsPrecise(avgNanos)}</span>
-            <span style={{ color: "var(--fg-4)" }}>{" → "}</span>
-            {formatCentsPrecise(markNanos)}
-          </span>
-        )}
-      </Right>
-      <Right mono>{formatDollarsRounded(valueNanos, { decimals: 1 })}</Right>
-      <Right>
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 12,
-            color:
-              pnlNanos == null
-                ? "var(--fg-3)"
-                : pnlNanos >= 0n
-                  ? "var(--yes)"
-                  : "var(--no)",
-          }}
-        >
-          {pnlNanos == null
-            ? "—"
-            : formatDollarsRounded(pnlNanos, { decimals: 1, sign: true })}
+  const compact = useCompactLayout();
+
+  const price =
+    avgNanos == null ? (
+      formatCentsPrecise(markNanos)
+    ) : (
+      // entry → mark. Fade the entry (what you paid, historical) so the eye
+      // lands on the mark — the live price that's actually true right now.
+      <span>
+        <span style={{ color: "var(--fg-4)" }}>
+          {formatCentsPrecise(avgNanos)}
         </span>
-      </Right>
-    </Row>
-  );
-}
+        <span style={{ color: "var(--fg-4)" }}>{" → "}</span>
+        {formatCentsPrecise(markNanos)}
+      </span>
+    );
 
-function Row({
-  children,
-  header,
-}: {
-  children: React.ReactNode;
-  header?: boolean;
-}) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr) 52px 60px 104px 78px 80px",
-        gap: 10,
-        alignItems: "center",
-        padding: "9px 0",
-        borderTop: header ? undefined : "1px solid var(--border-1)",
-        fontFamily: "var(--font-mono)",
-        fontSize: header ? 10 : 11,
-        letterSpacing: "var(--track-wide)",
-        textTransform: header ? "uppercase" : undefined,
-        color: header ? "var(--fg-4)" : "var(--fg-2)",
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function Right({
-  children,
-  mono,
-}: {
-  children: React.ReactNode;
-  mono?: boolean;
-}) {
-  return (
+  const pnl = (
     <span
       style={{
-        textAlign: "right",
-        whiteSpace: "nowrap",
-        fontFamily: mono ? "var(--font-mono)" : "inherit",
-        fontSize: mono ? 12 : undefined,
-        color: mono ? "var(--fg-1)" : undefined,
+        fontFamily: "var(--font-mono)",
+        fontSize: 12,
+        color:
+          pnlNanos == null
+            ? "var(--fg-3)"
+            : pnlNanos >= 0n
+              ? "var(--yes)"
+              : "var(--no)",
       }}
     >
-      {children}
+      {pnlNanos == null
+        ? "—"
+        : formatDollarsRounded(pnlNanos, { decimals: 1, sign: true })}
     </span>
+  );
+
+  if (compact) {
+    return (
+      <DataCard
+        title={label}
+        chips={
+          <>
+            <SidePill outcome={outcome} />
+            <span>{formatShareUnits(quantity, 1)} shares</span>
+          </>
+        }
+        pairs={[
+          { label: "Price", value: price, wide: true },
+          {
+            label: "Value",
+            value: formatDollarsRounded(valueNanos, { decimals: 1 }),
+          },
+          { label: "P&L", value: pnl },
+        ]}
+      />
+    );
+  }
+
+  return (
+    <EventRow columns={GRID}>
+      <OutcomeLabel>{label}</OutcomeLabel>
+      <SidePill outcome={outcome} />
+      <Right mono>{formatShareUnits(quantity, 1)}</Right>
+      <Right mono>{price}</Right>
+      <Right mono>{formatDollarsRounded(valueNanos, { decimals: 1 })}</Right>
+      <Right>{pnl}</Right>
+    </EventRow>
   );
 }

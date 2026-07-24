@@ -50,8 +50,12 @@ export function OverviewView() {
   const [answer, setAnswer] = useState<string>("");
 
   const markets = useDevMarkets().data ?? [];
-  const pendingOrders = useDevPendingOrders().data ?? [];
-  const accounts = useDevAccounts().data ?? [];
+  // Kept as queries so the answers can tell "zero" apart from "never read":
+  // both of these sources are unreachable on a non-dev-mode deployment.
+  const pendingQuery = useDevPendingOrders();
+  const accountsQuery = useDevAccounts();
+  const pendingOrders = pendingQuery.data ?? [];
+  const accounts = accountsQuery.data ?? [];
   const { blocks } = useDevRecentBlocks();
 
   // ── trivial aggregates (computed inline per the console getters) ──────
@@ -101,6 +105,8 @@ export function OverviewView() {
         accounts,
         marketIndex: mIdx,
         aggregates,
+        pendingAvailable: !pendingQuery.isError,
+        accountsAvailable: !accountsQuery.isError,
       }),
     );
   }
@@ -146,6 +152,7 @@ export function OverviewView() {
       </StatGrid>
 
       <div
+        className="dev-split-grid"
         style={{
           display: "grid",
           gridTemplateColumns: "minmax(0,1.4fr) minmax(360px,0.8fr)",

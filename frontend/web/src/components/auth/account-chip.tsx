@@ -43,7 +43,7 @@ export function AccountChip() {
   if (!session) {
     return (
       <button
-        className="account-chip nav-chip"
+        className="account-chip nav-chip hit-target"
         type="button"
         onClick={() => setOpen(true)}
       >
@@ -124,7 +124,7 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
   return (
     <div ref={rootRef} style={{ position: "relative" }}>
       <button
-        className="account-chip nav-chip"
+        className="account-chip nav-chip hit-target"
         type="button"
         data-connected="true"
         onClick={() => setOpen((o) => !o)}
@@ -157,8 +157,14 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
           style={{
             position: "absolute",
             top: "calc(100% + 6px)",
-            left: 0,
+            // Anchored to the chip's right edge with a floor of its own, not
+            // stretched to the chip's width: on a phone the chip is ~110px, and
+            // at that width every row broke over two lines ("In orders" under
+            // its own label, "Copy private key (backup)" over three). Capped so
+            // it can never reach past the left edge of a small screen.
             right: 0,
+            minWidth: 236,
+            maxWidth: "calc(100vw - var(--space-6))",
             background: "var(--surface-1)",
             border: "1px solid var(--border-1)",
             borderRadius: 8,
@@ -258,6 +264,7 @@ function InfoRow({
           letterSpacing: "var(--track-wide)",
           textTransform: "uppercase",
           color: "var(--fg-4)",
+          whiteSpace: "nowrap",
         }}
       >
         {label}
@@ -291,13 +298,13 @@ function PasskeyNotice() {
         padding: "8px 10px",
         display: "flex",
         flexDirection: "column",
-        gap: 3,
+        gap: 2,
       }}
     >
       <span
         style={{
           fontFamily: "var(--font-mono)",
-          fontSize: 10,
+          fontSize: 9,
           letterSpacing: "var(--track-wide)",
           textTransform: "uppercase",
           color: "var(--warn)",
@@ -305,11 +312,13 @@ function PasskeyNotice() {
       >
         Passkey account
       </span>
+      {/* The menu is pinned to the account chip's width, so this notice sits in
+          a narrow column — it reads a step down from the rest of the menu. */}
       <span
         style={{
           fontFamily: "var(--font-sans)",
-          fontSize: 12,
-          lineHeight: 1.4,
+          fontSize: 11,
+          lineHeight: 1.35,
           color: "var(--fg-3)",
         }}
       >
@@ -389,7 +398,7 @@ function ChipShell({ label, disabled }: { label: string; disabled?: boolean }) {
     <button
       type="button"
       disabled={disabled}
-      className="nav-chip"
+      className="nav-chip hit-target"
       aria-hidden={disabled}
     >
       {label}

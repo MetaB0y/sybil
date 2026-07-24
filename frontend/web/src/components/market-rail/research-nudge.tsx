@@ -40,6 +40,22 @@ export function ResearchNudge() {
     return () => media.removeEventListener("change", sync);
   }, []);
 
+  // The same query the 44px control floor uses in globals.css. The name sits in
+  // a fixed-height clipping slot, and a 44px link inside a 15px slot rendered
+  // its text below the clip — the row read as "not sure? ask" and nothing else.
+  // The slot grows to hold it rather than the link shrinking, so the target
+  // stays real and nothing invisible overlaps the bet button above.
+  const [coarse, setCoarse] = useState(false);
+  useEffect(() => {
+    const media = window.matchMedia(
+      "(max-width: 1280px) and (pointer: coarse)",
+    );
+    const sync = () => setCoarse(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
+
   useEffect(() => {
     // Reduced-motion means no autonomous content replacement, not merely a
     // hard cut without the slide animation.
@@ -79,6 +95,12 @@ export function ResearchNudge() {
       <span
         onMouseEnter={() => setPaused(true)}
         onMouseLeave={() => setPaused(false)}
+        // A finger cannot hover, so without this the name could swap between
+        // the press and the release — and a click that starts on one element
+        // and ends on another never fires at all.
+        onPointerDown={() => setPaused(true)}
+        onPointerUp={() => setPaused(false)}
+        onPointerCancel={() => setPaused(false)}
         onFocusCapture={() => setPaused(true)}
         onBlurCapture={(event) => {
           if (!event.currentTarget.contains(event.relatedTarget))
@@ -89,8 +111,8 @@ export function ResearchNudge() {
           display: "inline-block",
           overflow: "hidden",
           minWidth: 108,
-          height: "1.4em",
-          lineHeight: "1.4em",
+          height: coarse ? 44 : "1.4em",
+          lineHeight: coarse ? "44px" : "1.4em",
         }}
       >
         {outgoingPlatform && (

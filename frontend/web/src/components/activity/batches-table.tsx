@@ -26,6 +26,8 @@ import {
   formatInt,
 } from "@/lib/format/nanos";
 import { useBatchPage } from "@/lib/activity/use-batches";
+import { DataCardList } from "@/components/data-card";
+import { useCompactLayout } from "@/lib/responsive/use-compact";
 import { selectLatestBlock, useStore } from "@/lib/store";
 import type { BatchRow as BatchRowData } from "@/lib/activity/types";
 
@@ -166,19 +168,7 @@ export function BatchesTable({
         />
       )}
 
-      <div
-        className="activity-grid-table"
-        style={{
-          background: "var(--surface-1)",
-          // border-2 is the "card outline" token — border-1 (hairline) is too
-          // faint in light theme, leaving the batch table (and its expanded
-          // detail) floating with no visible left/right edge. Matches the
-          // leaderboard fix (aa78ea2).
-          border: "1px solid var(--border-2)",
-          borderRadius: 6,
-          overflowY: "hidden",
-        }}
-      >
+      <TableShell>
         <Header />
         {rows.length === 0 && (
           <div
@@ -219,7 +209,7 @@ export function BatchesTable({
             )}
           </Fragment>
         ))}
-      </div>
+      </TableShell>
 
       <Pager
         page={page}
@@ -232,6 +222,32 @@ export function BatchesTable({
         onPageSize={changePageSize}
       />
     </section>
+  );
+}
+
+/**
+ * The bordered table card, or — on a phone — a plain stack of `DataCard` rows,
+ * which carry their own border and need no 860px scroll port.
+ */
+function TableShell({ children }: { children: ReactNode }) {
+  const compact = useCompactLayout();
+  if (compact) return <DataCardList>{children}</DataCardList>;
+  return (
+    <div
+      className="activity-grid-table"
+      style={{
+        background: "var(--surface-1)",
+        // border-2 is the "card outline" token — border-1 (hairline) is too
+        // faint in light theme, leaving the batch table (and its expanded
+        // detail) floating with no visible left/right edge. Matches the
+        // leaderboard fix (aa78ea2).
+        border: "1px solid var(--border-2)",
+        borderRadius: 6,
+        overflowY: "hidden",
+      }}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -614,6 +630,10 @@ function PageButton({
 }
 
 function Header() {
+  // Nothing to sort here, so on a phone the header has no job — the cards below
+  // label their own values.
+  const compact = useCompactLayout();
+  if (compact) return null;
   return (
     <div
       style={{
@@ -656,6 +676,69 @@ function Row({
   expanded: boolean;
   onToggle: () => void;
 }) {
+  const compact = useCompactLayout();
+  if (compact) {
+    return (
+      <button
+        type="button"
+        className="activity-batch-row data-card"
+        id={batchLabelId(row.height)}
+        aria-expanded={expanded}
+        aria-controls={detailId(row.height)}
+        onClick={onToggle}
+        style={{
+          width: "100%",
+          textAlign: "left",
+          font: "inherit",
+          cursor: "pointer",
+          background: expanded ? "var(--surface-2)" : undefined,
+        }}
+      >
+        <div className="data-card-head">
+          <span className="data-card-title" style={{ fontFamily: "var(--font-mono)" }}>
+            #{formatInt(row.height)}
+          </span>
+          <span style={{ marginLeft: "auto", color: "var(--fg-4)", fontFamily: "var(--font-mono)", fontSize: 11 }}>
+            {fmtClock(row.timestampMs)} · {fmtRelTime(row.timestampMs)}
+          </span>
+        </div>
+        <div className="data-card-pairs">
+          <div className="data-card-pair">
+            <span className="data-card-label">Markets</span>
+            <span className="data-card-value">{row.marketsTouched}</span>
+          </div>
+          <div className="data-card-pair">
+            <span className="data-card-label">Traders</span>
+            <span className="data-card-value">{row.uniqueTraders}</span>
+          </div>
+          <div className="data-card-pair">
+            <span className="data-card-label">Volume</span>
+            <span className="data-card-value">
+              {formatCompactDollars(row.matchedVolumeNanos)}
+            </span>
+          </div>
+          <div className="data-card-pair">
+            <span className="data-card-label">Welfare</span>
+            <span className="data-card-value" style={{ color: "var(--yes)" }}>
+              {row.welfareNanos > 0n ? "+" : ""}
+              {formatCompactDollarsCents(row.welfareNanos)}
+            </span>
+          </div>
+          <div className="data-card-pair" data-wide="true">
+            <span className="data-card-label">Orders</span>
+            <span className="data-card-value">
+              {row.ordersPlaced} placed ·{" "}
+              <span style={{ color: "var(--yes)" }}>{row.ordersMatched} matched</span> ·{" "}
+              <span style={{ color: "var(--fg-4)" }}>
+                {row.ordersUnmatched} unmatched
+              </span>
+            </span>
+          </div>
+        </div>
+      </button>
+    );
+  }
+
   return (
     <button
       type="button"

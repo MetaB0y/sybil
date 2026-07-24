@@ -70,7 +70,9 @@ pub use account_keys::{
     MAX_WEBAUTHN_CLIENT_DATA_JSON_BYTES, account_keys_digest, canonical_escape_claim_bytes,
     canonical_key_registration_bytes, canonical_key_revocation_bytes, empty_account_keys_digest,
 };
-pub use key_op_auth::{EXPECTED_RP_ID_HASH, EXPECTED_WEBAUTHN_RP_ID, verify_keyop_auth};
+pub use key_op_auth::{
+    EXPECTED_RP_ID_HASH, EXPECTED_WEBAUTHN_ORIGIN, EXPECTED_WEBAUTHN_RP_ID, verify_keyop_auth,
+};
 pub use types::{
     AccountReservationSnapshot, AccountSnapshot, BlockWitness, BridgeStateSnapshot,
     ClientActionAuth, ClientActionWitness, DepositAccumulatorWitness, KeyOpAuth, KeyRecord,

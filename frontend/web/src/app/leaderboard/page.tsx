@@ -6,13 +6,15 @@
  * row is highlighted. Display-name opt-in awaits profiles (SYB-60).
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { PageHeader } from "@/components/page-header";
 import { LeaderboardTable } from "@/components/leaderboard/leaderboard-table";
 import { WindowTabs } from "@/components/leaderboard/window-tabs";
 import { useAccountSession } from "@/lib/account/use-account";
+import { useBotLeaderboard } from "@/lib/leaderboard/use-bot-leaderboard";
 import {
   DEFAULT_LEADERBOARD_WINDOW,
+  mergeAndRank,
   useLeaderboard,
   type LeaderboardWindow,
 } from "@/lib/leaderboard/use-leaderboard";
@@ -24,6 +26,13 @@ export default function LeaderboardPage() {
   const session = useAccountSession();
   const { rows, isLoading, isRetrying, readState, errorMessage, retry } =
     useLeaderboard(window);
+  // Arena bots never publish a profile, so they cannot reach /v1/leaderboard.
+  // They are fetched separately and ranked alongside the opt-in human rows.
+  const bots = useBotLeaderboard(window);
+  const allRows = useMemo(
+    () => mergeAndRank(rows, bots.rows),
+    [rows, bots.rows],
+  );
 
   return (
     <main
@@ -39,18 +48,18 @@ export default function LeaderboardPage() {
       <div
         className="sybil-page-pad"
         style={{
-          paddingTop: "calc(var(--space-6) + 36px)",
+          paddingTop: "calc(var(--space-6) + var(--ticker-offset))",
         }}
       >
         <PageHeader
           title="Leaderboard"
-          meta="top traders on Sybil, ranked by net PnL"
+          meta="arena bots and opted-in traders, ranked by net PnL"
           action={<WindowTabs value={window} onChange={setWindow} />}
         />
       </div>
 
       <LeaderboardTable
-        rows={rows}
+        rows={allRows}
         isLoading={isLoading}
         isRetrying={isRetrying}
         readState={readState}

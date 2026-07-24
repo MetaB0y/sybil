@@ -18,7 +18,9 @@ import {
   formatInt,
 } from "@/lib/format/nanos";
 import { useBatchDetail } from "@/lib/activity/use-batch-detail";
+import { useCompactLayout } from "@/lib/responsive/use-compact";
 import type { BatchMarketRow, BatchRow } from "@/lib/activity/types";
+import { DataCard } from "@/components/data-card";
 import { DonutOutcome } from "./donut-outcome";
 
 const ROWS_INITIAL = 8;
@@ -31,6 +33,7 @@ type SortKey = "clear" | "delta" | "volume" | "welfare" | "orders";
 type SortDir = "asc" | "desc";
 
 export function BatchDetail({ row }: { row: BatchRow }) {
+  const compact = useCompactLayout();
   const { block, rows, isPending } = useBatchDetail(row.height);
   const [shown, setShown] = useState(ROWS_INITIAL);
   // Default order: biggest matched volume first, then most matched, then most
@@ -58,10 +61,13 @@ export function BatchDetail({ row }: { row: BatchRow }) {
 
   return (
     <div
+      /* The 70px left indent lines the panel up under the desktop row's expand
+         caret. On a phone it pushed the table clean off the right edge, so the
+         compact panel sits flush with the card stack it belongs to. */
+      className="activity-batch-detail"
       style={{
         background: "var(--bg-1)",
         borderBottom: "1px solid var(--border-1)",
-        padding: "18px 24px 24px 70px",
       }}
     >
       <div
@@ -69,19 +75,22 @@ export function BatchDetail({ row }: { row: BatchRow }) {
         style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 24 }}
       >
         {/* Left: market rows */}
-        <div style={{ display: "flex", flexDirection: "column" }}>
+        <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
           <div
             style={{
               flex: 1,
               display: "flex",
               flexDirection: "column",
-              background: "var(--surface-1)",
-              border: "1px solid var(--border-1)",
+              // Card rows carry their own border; the table shell would draw a
+              // second one around the stack.
+              gap: compact ? "var(--space-2)" : 0,
+              background: compact ? "transparent" : "var(--surface-1)",
+              border: compact ? 0 : "1px solid var(--border-1)",
               borderRadius: 6,
               overflow: "hidden",
             }}
           >
-            <MarketTableHeader sort={sort} onSort={onSort} />
+            {!compact && <MarketTableHeader sort={sort} onSort={onSort} />}
             {isPending && (
               <div
                 style={{
@@ -107,7 +116,7 @@ export function BatchDetail({ row }: { row: BatchRow }) {
               </div>
             )}
             {visible.map((m) => (
-              <MarketRow key={m.marketId} row={m} />
+              <MarketRow key={m.marketId} row={m} compact={compact} />
             ))}
 
             {(remaining > 0 || shown > ROWS_INITIAL) && (
@@ -309,9 +318,76 @@ function sortMarketRows(
   });
 }
 
-function MarketRow({ row }: { row: BatchMarketRow }) {
+function MarketRow({
+  row,
+  compact,
+}: {
+  row: BatchMarketRow;
+  compact: boolean;
+}) {
   const deltaCents =
     row.deltaNanos == null ? null : Number(row.deltaNanos) / 1e7;
+  const deltaColor =
+    deltaCents == null
+      ? "var(--fg-4)"
+      : deltaCents > 0
+        ? "var(--yes)"
+        : deltaCents < 0
+          ? "var(--no)"
+          : "var(--fg-3)";
+  const deltaText =
+    deltaCents == null
+      ? "—"
+      : `${deltaCents >= 0 ? "+" : ""}${deltaCents.toFixed(1)}`;
+
+  // Six columns of numbers behind a truncated question ("W…") is what the grid
+  // came to on a phone. Same figures, one card, nothing cut off.
+  if (compact) {
+    return (
+      <DataCard
+        href={`/m/${row.marketId}`}
+        thumb={
+          <span
+            aria-hidden
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background: getCategoryColor(row.category),
+              display: "inline-block",
+            }}
+          />
+        }
+        title={row.title}
+        pairs={[
+          { label: "Clear", value: formatCents(row.clearPriceNanos) },
+          {
+            label: "Δ",
+            value: <span style={{ color: deltaColor }}>{deltaText}</span>,
+          },
+          {
+            label: "Matched vol",
+            value: formatCompactDollars(row.matchedVolumeNanos),
+          },
+          {
+            label: "Welfare",
+            value: (
+              <span style={{ color: "var(--yes)" }}>
+                {row.welfareNanos >= 0n ? "+" : ""}
+                {formatCompactDollarsCents(row.welfareNanos)}
+              </span>
+            ),
+          },
+          {
+            label: "Processed / matched",
+            value: `${formatInt(row.ordersPlaced)} / ${formatInt(row.ordersMatched)}`,
+            wide: true,
+          },
+        ]}
+      />
+    );
+  }
+
   return (
     <div
       style={{
@@ -359,22 +435,7 @@ function MarketRow({ row }: { row: BatchMarketRow }) {
       </span>
 
       {/* Delta vs prev batch (real, signed cents) */}
-      <span
-        style={cellNumber(
-          deltaCents == null
-            ? "var(--fg-4)"
-            : deltaCents > 0
-              ? "var(--yes)"
-              : deltaCents < 0
-                ? "var(--no)"
-                : "var(--fg-3)",
-          11,
-        )}
-      >
-        {deltaCents == null
-          ? "—"
-          : `${deltaCents >= 0 ? "+" : ""}${deltaCents.toFixed(1)}`}
-      </span>
+      <span style={cellNumber(deltaColor, 11)}>{deltaText}</span>
 
       {/* Matched volume — real, per-market from by_market */}
       <span style={cellNumber("var(--fg-2)", 12)}>

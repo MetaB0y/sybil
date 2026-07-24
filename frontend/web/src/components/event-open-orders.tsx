@@ -37,6 +37,23 @@ import { selectLatestBlock, useStore } from "@/lib/store";
 import { Pager, usePaged } from "@/components/event-list-pager";
 import { SidePill } from "@/components/portfolio/side-pill";
 import { TifCell } from "@/components/portfolio/tif-cell";
+import { DataCard } from "@/components/data-card";
+import { useCompactLayout } from "@/lib/responsive/use-compact";
+import {
+  ActionCell,
+  CancelButton,
+  cmpBig,
+  cmpNullableBig,
+  Empty,
+  EventRow,
+  EventTable,
+  HeaderCell,
+  nextSort,
+  OutcomeLabel,
+  Right,
+  type Column,
+  type Sort,
+} from "@/components/event-table";
 
 /** WAC avg fill price (nanos) + fill count for one order. */
 interface OrderFillAgg {
@@ -73,10 +90,11 @@ type SortKey =
   | "value"
   | "created"
   | "tif";
-type SortDir = "asc" | "desc";
-type Sort = { key: SortKey; dir: SortDir };
+/* Cancel gets the same 62px slot the other lists give their last column. */
+const GRID =
+  "minmax(0, 1fr) 56px 48px 108px 56px 74px 78px 70px 76px 62px";
 
-const COLUMNS: { key: SortKey; label: string; align: "left" | "right" }[] = [
+const COLUMNS: Column<SortKey>[] = [
   { key: "outcome", label: "Outcome", align: "left" },
   { key: "action", label: "Action", align: "left" },
   { key: "side", label: "Side", align: "left" },
@@ -88,23 +106,9 @@ const COLUMNS: { key: SortKey; label: string; align: "left" | "right" }[] = [
   { key: "tif", label: "TIF", align: "right" },
 ];
 
-/** Text columns sort A→Z first; numeric columns sort high→low first. */
-function nextSort(prev: Sort | null, key: SortKey): Sort {
-  if (prev && prev.key === key) {
-    return { key, dir: prev.dir === "asc" ? "desc" : "asc" };
-  }
-  const numeric =
-    key === "placed" ||
-    key === "limit" ||
-    key === "avgfill" ||
-    key === "value" ||
-    key === "created" ||
-    key === "tif";
-  return { key, dir: numeric ? "desc" : "asc" };
-}
-
-function cmpBig(a: bigint, b: bigint): number {
-  return a > b ? 1 : a < b ? -1 : 0;
+/** Every column but the three text ones sorts high→low on first click. */
+function isNumericColumn(key: SortKey): boolean {
+  return key !== "outcome" && key !== "action" && key !== "side";
 }
 
 /** Ascending comparison for a key; null avg-fill sorts lowest. */
@@ -124,10 +128,7 @@ function compareBy(a: OpenRow, b: OpenRow, key: SortKey): number {
     case "limit":
       return cmpBig(a.limitNanos, b.limitNanos);
     case "avgfill":
-      if (a.avgPriceNanos == null && b.avgPriceNanos == null) return 0;
-      if (a.avgPriceNanos == null) return -1;
-      if (b.avgPriceNanos == null) return 1;
-      return cmpBig(a.avgPriceNanos, b.avgPriceNanos);
+      return cmpNullableBig(a.avgPriceNanos, b.avgPriceNanos);
     case "value":
       return cmpBig(a.valueNanos, b.valueNanos);
     case "created":
@@ -154,7 +155,7 @@ export function EventOpenOrders({
   accountId: number;
   publicKeyHex: string;
 }) {
-  const [sort, setSort] = useState<Sort | null>(null);
+  const [sort, setSort] = useState<Sort<SortKey> | null>(null);
 
   // Aggregate visible fills by order_id → count + WAC price (mirrors
   // OpenOrdersList). Bounded by the fills window, so very old / heavily-filled
@@ -240,21 +241,21 @@ export function EventOpenOrders({
   }
 
   return (
-    <div>
-      <Row header>
+    <EventTable>
+      <EventRow columns={GRID} header>
         {COLUMNS.map((col) => (
           <HeaderCell
             key={col.key}
             col={col}
             sort={sort}
             onSort={() => {
-              setSort((s) => nextSort(s, col.key));
+              setSort((s) => nextSort(s, col.key, isNumericColumn(col.key)));
               paged.setPage(0);
             }}
           />
         ))}
         <span />
-      </Row>
+      </EventRow>
       {paged.visible.map((r) => (
         <OrderRow
           key={r.order.order_id}
@@ -266,7 +267,7 @@ export function EventOpenOrders({
         />
       ))}
       <Pager paged={paged} />
-    </div>
+    </EventTable>
   );
 }
 
@@ -296,9 +297,9 @@ function OrderRow({
     fillCount,
     placedAtMs,
   } = row;
-  const isBuy = action === "BUY";
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const compact = useCompactLayout();
 
   async function onCancel() {
     setCancelError(null);
@@ -323,42 +324,71 @@ function OrderRow({
     }
   }
 
+  const filledCell =
+    placed === 0 ? (
+      <>{formatShareUnits(order.remaining_quantity, 1)}</>
+    ) : (
+      // Rounded to 1dp in view.
+      <span>
+        {`${formatShareUnits(filled, 1)} / ${formatShareUnits(placed, 1)}`}
+      </span>
+    );
+
+  const cancel = (
+    <CancelButton
+      cancelling={cancelling}
+      title={cancelError || undefined}
+      onClick={onCancel}
+    />
+  );
+
+  if (compact) {
+    return (
+      <DataCard
+        title={label}
+        chips={
+          <>
+            <ActionCell side={action} />
+            <SidePill outcome={outcome} />
+            <TifCell expiresAtBlock={order.expires_at_block} />
+          </>
+        }
+        pairs={[
+          { label: "Filled / placed", value: filledCell, wide: true },
+          { label: "Limit", value: formatCentsPrecise(limitNanos) },
+          {
+            label: "Avg fill",
+            value: <AvgFillCell priceNanos={avgPriceNanos} count={fillCount} />,
+          },
+          {
+            label: "Value",
+            value: formatDollarsRounded(valueNanos, { decimals: 1 }),
+          },
+          {
+            label: "Created",
+            value: <CreatedCell placedAtMs={placedAtMs} nowMs={nowMs} />,
+          },
+        ]}
+        footer={
+          <>
+            {cancel}
+            {cancelError && (
+              <span role="alert" style={{ color: "var(--no)" }}>
+                {cancelError}
+              </span>
+            )}
+          </>
+        }
+      />
+    );
+  }
+
   return (
-    <Row>
-      <span
-        style={{
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          color: "var(--fg-1)",
-          fontFamily: "var(--font-sans)",
-          fontSize: 13,
-        }}
-      >
-        {label}
-      </span>
-      <span
-        style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 11,
-          color: isBuy ? "var(--accent)" : "var(--no)",
-          fontWeight: 600,
-          letterSpacing: "var(--track-wide)",
-        }}
-      >
-        {action}
-      </span>
+    <EventRow columns={GRID}>
+      <OutcomeLabel>{label}</OutcomeLabel>
+      <ActionCell side={action} />
       <SidePill outcome={outcome} />
-      <Right mono>
-        {placed === 0 ? (
-          <>{formatShareUnits(order.remaining_quantity, 1)}</>
-        ) : (
-          // Rounded to 1dp in view.
-          <span>
-            {`${formatShareUnits(filled, 1)} / ${formatShareUnits(placed, 1)}`}
-          </span>
-        )}
-      </Right>
+      <Right mono>{filledCell}</Right>
       <Right mono>{formatCentsPrecise(limitNanos)}</Right>
       <Right mono>
         <AvgFillCell priceNanos={avgPriceNanos} count={fillCount} />
@@ -370,29 +400,7 @@ function OrderRow({
       <Right>
         <TifCell expiresAtBlock={order.expires_at_block} />
       </Right>
-      <Right>
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={cancelling}
-          title={cancelError || undefined}
-          style={{
-            padding: "3px 8px",
-            background: "transparent",
-            border: "1px solid color-mix(in srgb, var(--no) 32%, transparent)",
-            borderRadius: 3,
-            color: "var(--no)",
-            fontFamily: "var(--font-mono)",
-            fontSize: 9.5,
-            cursor: cancelling ? "not-allowed" : "pointer",
-            textTransform: "uppercase",
-            letterSpacing: "var(--track-wide)",
-            opacity: cancelling ? 0.6 : 1,
-          }}
-        >
-          {cancelling ? "…" : "Cancel"}
-        </button>
-      </Right>
+      {cancel}
       {cancelError && (
         <span
           role="alert"
@@ -407,7 +415,7 @@ function OrderRow({
           Couldn&apos;t cancel order: {cancelError}
         </span>
       )}
-    </Row>
+    </EventRow>
   );
 }
 
@@ -457,111 +465,5 @@ function AvgFillCell({
         >{` ·${count}`}</span>
       )}
     </span>
-  );
-}
-
-function HeaderCell({
-  col,
-  sort,
-  onSort,
-}: {
-  col: (typeof COLUMNS)[number];
-  sort: Sort | null;
-  onSort: () => void;
-}) {
-  const active = sort?.key === col.key;
-  return (
-    <button
-      type="button"
-      onClick={onSort}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 4,
-        width: "100%",
-        justifyContent: col.align === "right" ? "flex-end" : "flex-start",
-        padding: 0,
-        border: 0,
-        background: "transparent",
-        cursor: "pointer",
-        font: "inherit",
-        textTransform: "uppercase",
-        letterSpacing: "var(--track-wide)",
-        color: active ? "var(--fg-2)" : "var(--fg-4)",
-      }}
-    >
-      <span style={{ whiteSpace: "nowrap" }}>{col.label}</span>
-      <span style={{ fontSize: 8, lineHeight: 1, opacity: active ? 1 : 0.3 }}>
-        {active ? (sort!.dir === "asc" ? "▲" : "▼") : "↕"}
-      </span>
-    </button>
-  );
-}
-
-function Row({
-  children,
-  header,
-}: {
-  children: React.ReactNode;
-  header?: boolean;
-}) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns:
-          "minmax(0, 1fr) 56px 48px 108px 56px 74px 78px 70px 76px 62px",
-        gap: 14,
-        alignItems: "center",
-        padding: "9px 0",
-        borderTop: header ? undefined : "1px solid var(--border-1)",
-        fontFamily: "var(--font-mono)",
-        fontSize: header ? 10 : 11,
-        letterSpacing: "var(--track-wide)",
-        textTransform: header ? "uppercase" : undefined,
-        color: header ? "var(--fg-4)" : "var(--fg-2)",
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function Right({
-  children,
-  mono,
-}: {
-  children: React.ReactNode;
-  mono?: boolean;
-}) {
-  return (
-    <span
-      style={{
-        textAlign: "right",
-        whiteSpace: "nowrap",
-        fontFamily: mono ? "var(--font-mono)" : "inherit",
-        fontSize: mono ? 12 : undefined,
-        color: mono ? "var(--fg-1)" : undefined,
-      }}
-    >
-      {children}
-    </span>
-  );
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        padding: "24px 0",
-        color: "var(--fg-4)",
-        fontFamily: "var(--font-mono)",
-        fontSize: 12,
-        letterSpacing: "var(--track-wide)",
-        textAlign: "center",
-      }}
-    >
-      {children}
-    </div>
   );
 }

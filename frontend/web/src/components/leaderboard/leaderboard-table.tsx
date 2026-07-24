@@ -13,6 +13,8 @@
 
 import { useMemo, useState } from "react";
 import { Pager, usePaged } from "@/components/event-list-pager";
+import { DataCard, DataCardList } from "@/components/data-card";
+import { useCompactLayout } from "@/lib/responsive/use-compact";
 import { formatCompactDollars, formatInt } from "@/lib/format/nanos";
 import {
   formatRoiBps,
@@ -58,7 +60,8 @@ function compareBy(a: LeaderboardRow, b: LeaderboardRow, key: SortKey): number {
     case "roi":
       return a.roiBps - b.roiBps;
     case "markets":
-      return a.marketsTraded - b.marketsTraded;
+      // Unknown (bots) sorts below any real count in ascending order.
+      return (a.marketsTraded ?? -1) - (b.marketsTraded ?? -1);
     case "equity":
       return cmpBig(a.equityNanos, b.equityNanos);
   }
@@ -106,18 +109,7 @@ export function LeaderboardTable({
           onRetry={onRetry}
         />
       )}
-      <div
-        className="leaderboard-grid-table"
-        style={{
-          background: "var(--surface-1)",
-          // border-2 is the "card outline" token — border-1 (hairline) is too
-          // faint where the header (--bg-1) meets the identical page bg, so the
-          // table's top edge disappears in light theme.
-          border: "1px solid var(--border-2)",
-          borderRadius: 6,
-          overflowY: "hidden",
-        }}
-      >
+      <TableShell>
         <Header sort={sort} onSort={onSort} />
         {sorted.length === 0 && readState !== "unavailable" && (
           <div
@@ -134,9 +126,11 @@ export function LeaderboardTable({
         )}
         {paged.visible.map((row) => (
           <Row
-            key={row.accountId}
+            // Account ids are only unique within a ledger — an Arena bot and a
+            // sequencer account can share a number.
+            key={`${row.kind}:${row.accountId}`}
             row={row}
-            isMe={row.accountId === myAccountId}
+            isMe={row.kind === "human" && row.accountId === myAccountId}
           />
         ))}
         {paged.pageCount > 1 && (
@@ -144,8 +138,33 @@ export function LeaderboardTable({
             <Pager paged={paged} />
           </div>
         )}
-      </div>
+      </TableShell>
     </section>
+  );
+}
+
+/**
+ * The bordered table card, or — on a phone — a plain stack, since the rows
+ * inside render as `DataCard`s that bring their own border.
+ */
+function TableShell({ children }: { children: React.ReactNode }) {
+  const compact = useCompactLayout();
+  if (compact) return <DataCardList>{children}</DataCardList>;
+  return (
+    <div
+      className="leaderboard-grid-table"
+      style={{
+        background: "var(--surface-1)",
+        // border-2 is the "card outline" token — border-1 (hairline) is too
+        // faint where the header (--bg-1) meets the identical page bg, so the
+        // table's top edge disappears in light theme.
+        border: "1px solid var(--border-2)",
+        borderRadius: 6,
+        overflowY: "hidden",
+      }}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -213,6 +232,9 @@ function Header({
   sort: Sort | null;
   onSort: (key: SortKey) => void;
 }) {
+  const compact = useCompactLayout();
+  // Card rows carry their own labels; the column header has nothing to name.
+  if (compact) return null;
   return (
     <div
       style={{
@@ -343,6 +365,59 @@ const cell: React.CSSProperties = {
 };
 
 function Row({ row, isMe }: { row: LeaderboardRow; isMe: boolean }) {
+  const compact = useCompactLayout();
+
+  if (compact) {
+    return (
+      <DataCard
+        highlighted={isMe}
+        title={
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "baseline",
+              gap: 8,
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            <span style={{ color: "var(--fg-3)" }}>#{row.rank}</span>
+            {row.label}
+            {isMe && (
+              <span style={{ fontSize: 9, color: "var(--accent)" }}>YOU</span>
+            )}
+            {row.kind === "bot" && (
+              <span style={{ fontSize: 9, color: "var(--fg-3)" }}>BOT</span>
+            )}
+          </span>
+        }
+        pairs={[
+          {
+            label: "PnL",
+            value: (
+              <span style={{ color: signColor(row.pnlNanos) }}>
+                {formatSignedDollars(row.pnlNanos)}
+              </span>
+            ),
+          },
+          {
+            label: "ROI",
+            value: (
+              <span style={{ color: signColor(row.roiBps) }}>
+                {formatRoiBps(row.roiBps)}
+              </span>
+            ),
+          },
+          {
+            label: "Markets",
+            value:
+              row.marketsTraded == null ? "—" : formatInt(row.marketsTraded),
+          },
+          { label: "Equity", value: formatCompactDollars(row.equityNanos) },
+        ]}
+      />
+    );
+  }
+
   return (
     <div
       style={{
@@ -405,6 +480,24 @@ function Row({ row, isMe }: { row: LeaderboardRow; isMe: boolean }) {
             you
           </span>
         )}
+        {row.kind === "bot" && (
+          /* These figures come from the Arena ledger, not sequencer state —
+             say so rather than letting the row read as a human trader. */
+          <span
+            title="Arena bot · figures from the Arena feed"
+            style={{
+              fontSize: 9,
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+              color: "var(--fg-3)",
+              border: "1px solid var(--border-2)",
+              borderRadius: 3,
+              padding: "1px 4px",
+            }}
+          >
+            bot
+          </span>
+        )}
       </span>
 
       {/* pnl */}
@@ -417,9 +510,9 @@ function Row({ row, isMe }: { row: LeaderboardRow; isMe: boolean }) {
         {formatRoiBps(row.roiBps)}
       </span>
 
-      {/* markets traded */}
+      {/* markets traded — unknown for bots, which track fills not markets */}
       <span style={{ ...cell, color: "var(--fg-2)" }}>
-        {formatInt(row.marketsTraded)}
+        {row.marketsTraded == null ? "—" : formatInt(row.marketsTraded)}
       </span>
 
       {/* equity */}

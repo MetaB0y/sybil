@@ -48,7 +48,23 @@ import {
 } from "@/lib/format/nanos";
 import { Pager, usePaged } from "@/components/event-list-pager";
 import { SidePill, valueChipStyle } from "@/components/portfolio/side-pill";
-import { Glossary } from "@/components/glossary";
+import { DataCard } from "@/components/data-card";
+import { useCompactLayout } from "@/lib/responsive/use-compact";
+import {
+  ActionCell,
+  cmpNullableBig,
+  Empty,
+  EventRow,
+  EventTable,
+  EventTime,
+  HeaderCell,
+  Muted,
+  nextSort,
+  OutcomeLabel,
+  Right,
+  type Column,
+  type Sort,
+} from "@/components/event-table";
 
 type Status = "FILLED" | "PARTIAL" | "CANCELLED" | "EXPIRED" | "REJECTED";
 
@@ -114,16 +130,15 @@ type SortKey =
   | "pnl"
   | "welfare"
   | "closed";
-type SortDir = "asc" | "desc";
-type Sort = { key: SortKey; dir: SortDir };
+/* Ten columns: the outcome 1fr absorbs the slack, the rest stay compact. Qty
+   needs a touch more width for values like "234.375". */
+/* Closed needs 86px: "21:17 Jul 21" is ~80px of 11px mono, and the cell is
+   right-aligned + nowrap, so anything narrower spills past the card edge
+   instead of truncating. Value and P&L give up the width for it. */
+const GRID =
+  "minmax(0, 1fr) 56px 48px 82px 62px 74px 78px 62px 56px 86px";
 
-const COLUMNS: {
-  key: SortKey;
-  label: string;
-  align: "left" | "right";
-  /** Glossary term — renders a "?" tooltip badge beside the sort label. */
-  info?: string;
-}[] = [
+const COLUMNS: Column<SortKey>[] = [
   { key: "outcome", label: "Outcome", align: "left" },
   { key: "action", label: "Action", align: "left" },
   { key: "side", label: "Side", align: "left" },
@@ -136,23 +151,14 @@ const COLUMNS: {
   { key: "closed", label: "Closed", align: "right" },
 ];
 
-/** Text columns sort A→Z first; numeric columns sort high→low first. */
-function nextSort(prev: Sort | null, key: SortKey): Sort {
-  if (prev && prev.key === key) {
-    return { key, dir: prev.dir === "asc" ? "desc" : "asc" };
-  }
-  const numeric =
-    key === "qty" ||
-    key === "price" ||
-    key === "value" ||
-    key === "pnl" ||
-    key === "welfare" ||
-    key === "closed";
-  return { key, dir: numeric ? "desc" : "asc" };
-}
-
-function cmpBig(a: bigint, b: bigint): number {
-  return a > b ? 1 : a < b ? -1 : 0;
+/** Every column but the four text ones sorts high→low on first click. */
+function isNumericColumn(key: SortKey): boolean {
+  return (
+    key !== "outcome" &&
+    key !== "action" &&
+    key !== "side" &&
+    key !== "status"
+  );
 }
 
 /** Ascending comparison for a key; null numbers sort lowest. */
@@ -169,25 +175,13 @@ function compareBy(a: ClosedOrder, b: ClosedOrder, key: SortKey): number {
     case "qty":
       return (a.qty ?? -1) - (b.qty ?? -1);
     case "price":
-      if (a.priceNanos == null && b.priceNanos == null) return 0;
-      if (a.priceNanos == null) return -1;
-      if (b.priceNanos == null) return 1;
-      return cmpBig(a.priceNanos, b.priceNanos);
+      return cmpNullableBig(a.priceNanos, b.priceNanos);
     case "value":
-      if (a.valueNanos == null && b.valueNanos == null) return 0;
-      if (a.valueNanos == null) return -1;
-      if (b.valueNanos == null) return 1;
-      return cmpBig(a.valueNanos, b.valueNanos);
+      return cmpNullableBig(a.valueNanos, b.valueNanos);
     case "pnl":
-      if (a.realizedPnlNanos == null && b.realizedPnlNanos == null) return 0;
-      if (a.realizedPnlNanos == null) return -1;
-      if (b.realizedPnlNanos == null) return 1;
-      return cmpBig(a.realizedPnlNanos, b.realizedPnlNanos);
+      return cmpNullableBig(a.realizedPnlNanos, b.realizedPnlNanos);
     case "welfare":
-      if (a.welfareNanos == null && b.welfareNanos == null) return 0;
-      if (a.welfareNanos == null) return -1;
-      if (b.welfareNanos == null) return 1;
-      return cmpBig(a.welfareNanos, b.welfareNanos);
+      return cmpNullableBig(a.welfareNanos, b.welfareNanos);
     case "closed":
       return a.closedAtMs - b.closedAtMs;
   }
@@ -205,7 +199,7 @@ export function EventClosedOrders({
   /** Rows per page; defaults to the compact market-detail PAGE_SIZE. */
   pageSize?: number;
 }) {
-  const [sort, setSort] = useState<Sort | null>(null);
+  const [sort, setSort] = useState<Sort<SortKey> | null>(null);
 
   const closed = useMemo<ClosedOrder[]>(() => {
     const eventMarketIds = new Set(labelByMarket.keys());
@@ -408,76 +402,97 @@ export function EventClosedOrders({
   }
 
   return (
-    <div>
-      <Row header>
+    <EventTable>
+      <EventRow columns={GRID} header>
         {COLUMNS.map((col) => (
           <HeaderCell
             key={col.key}
             col={col}
             sort={sort}
             onSort={() => {
-              setSort((s) => nextSort(s, col.key));
+              setSort((s) => nextSort(s, col.key, isNumericColumn(col.key)));
               paged.setPage(0);
             }}
           />
         ))}
-      </Row>
+      </EventRow>
       {paged.visible.map((o) => (
         <ClosedRow key={o.orderId} order={o} />
       ))}
       <Pager paged={paged} />
-    </div>
+    </EventTable>
   );
 }
 
 function ClosedRow({ order }: { order: ClosedOrder }) {
-  const isBuy = order.side === "BUY";
-  const isSell = order.side === "SELL";
+  const compact = useCompactLayout();
+
+  const qtyCell =
+    order.qty == null ? (
+      "—"
+    ) : order.status === "PARTIAL" && order.remainderQty != null ? (
+      // filled / ordered — the faded total makes the unfilled (expired /
+      // cancelled) part visible without a separate phantom row.
+      <span>
+        {formatShareUnits(order.qty, 1)}
+        <span style={{ color: "var(--fg-4)" }}>
+          {` / ${formatShareUnits(order.qty + order.remainderQty, 1)}`}
+        </span>
+      </span>
+    ) : (
+      <span>{formatShareUnits(order.qty, 1)}</span>
+    );
+
+  if (compact) {
+    return (
+      <DataCard
+        title={order.label}
+        chips={
+          <>
+            <StatusBadge status={order.status} />
+            <ActionCell side={order.side} />
+            {order.outcome ? <SidePill outcome={order.outcome} /> : null}
+            <EventTime ms={order.closedAtMs} />
+          </>
+        }
+        pairs={[
+          { label: "Qty", value: qtyCell },
+          {
+            label: "Price",
+            value: (
+              <PriceCell
+                settledNanos={order.priceNanos}
+                requestedNanos={order.requestedPriceNanos}
+              />
+            ),
+          },
+          {
+            label: "Value",
+            value:
+              order.valueNanos != null
+                ? formatDollarsRounded(order.valueNanos, { decimals: 1 })
+                : "—",
+          },
+          { label: "P&L", value: <PnlCell pnlNanos={order.realizedPnlNanos} /> },
+          {
+            label: "Welfare",
+            value: <WelfareCell welfareNanos={order.welfareNanos} />,
+            wide: true,
+          },
+        ]}
+      />
+    );
+  }
+
   return (
-    <Row>
-      <span
-        style={{
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          color: "var(--fg-1)",
-          fontFamily: "var(--font-sans)",
-          fontSize: 13,
-        }}
-      >
-        {order.label}
-      </span>
-      <span
-        style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 11,
-          color: isBuy ? "var(--accent)" : isSell ? "var(--no)" : "var(--fg-4)",
-          fontWeight: 600,
-          letterSpacing: "var(--track-wide)",
-        }}
-      >
-        {isBuy ? "BUY" : isSell ? "SELL" : "—"}
-      </span>
+    <EventRow columns={GRID}>
+      <OutcomeLabel>{order.label}</OutcomeLabel>
+      <ActionCell side={order.side} />
       {order.outcome ? <SidePill outcome={order.outcome} /> : <Muted>—</Muted>}
       <Right>
         <StatusBadge status={order.status} />
       </Right>
-      <Right mono>
-        {order.qty == null ? (
-          "—"
-        ) : order.status === "PARTIAL" && order.remainderQty != null ? (
-          // filled / ordered — the faded total makes the unfilled (expired /
-          // cancelled) part visible without a separate phantom row.
-          <span>
-            {formatShareUnits(order.qty, 1)}
-            <span style={{ color: "var(--fg-4)" }}>
-              {` / ${formatShareUnits(order.qty + order.remainderQty, 1)}`}
-            </span>
-          </span>
-        ) : (
-          <span>{formatShareUnits(order.qty, 1)}</span>
-        )}
-      </Right>
+      <Right mono>{qtyCell}</Right>
       <Right mono dim={order.unfilled}>
         <PriceCell
           settledNanos={order.priceNanos}
@@ -496,9 +511,9 @@ function ClosedRow({ order }: { order: ClosedOrder }) {
         <PnlCell pnlNanos={order.realizedPnlNanos} />
       </Right>
       <Right>
-        <ClosedTime ms={order.closedAtMs} />
+        <EventTime ms={order.closedAtMs} />
       </Right>
-    </Row>
+    </EventRow>
   );
 }
 
@@ -623,169 +638,5 @@ function StatusBadge({ status }: { status: Status }) {
     <span style={valueChipStyle({ color: tone.fg, bg: tone.bg })}>
       {status}
     </span>
-  );
-}
-
-/** Close time — wall-clock first, then the short date faded after it, on one
- *  line. 24-hour so it stays compact enough to sit beside the date. */
-function ClosedTime({ ms }: { ms: number }) {
-  const d = new Date(ms);
-  const date = d.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
-  const time = d.toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-  return (
-    <span
-      title={d.toLocaleString()}
-      style={{
-        fontFamily: "var(--font-mono)",
-        fontSize: 11,
-        color: "var(--fg-2)",
-        whiteSpace: "nowrap",
-      }}
-    >
-      {time}
-      <span style={{ color: "var(--fg-4)" }}>{` ${date}`}</span>
-    </span>
-  );
-}
-
-function HeaderCell({
-  col,
-  sort,
-  onSort,
-}: {
-  col: (typeof COLUMNS)[number];
-  sort: Sort | null;
-  onSort: () => void;
-}) {
-  const active = sort?.key === col.key;
-  const sortButton = (
-    <button
-      type="button"
-      onClick={onSort}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 3,
-        width: col.info ? "auto" : "100%",
-        justifyContent: col.align === "right" ? "flex-end" : "flex-start",
-        padding: 0,
-        border: 0,
-        background: "transparent",
-        cursor: "pointer",
-        font: "inherit",
-        textTransform: "uppercase",
-        letterSpacing: "var(--track-wide)",
-        color: active ? "var(--fg-2)" : "var(--fg-4)",
-      }}
-    >
-      <span>{col.label}</span>
-      <span style={{ fontSize: 8, lineHeight: 1, opacity: active ? 1 : 0.3 }}>
-        {active ? (sort!.dir === "asc" ? "▲" : "▼") : "↕"}
-      </span>
-    </button>
-  );
-  // A `?` glossary badge sits beside the sort label as a sibling (not nested in
-  // the button — that would be invalid markup) for columns that explain a term.
-  if (!col.info) return sortButton;
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 3,
-        width: "100%",
-        justifyContent: col.align === "right" ? "flex-end" : "flex-start",
-      }}
-    >
-      {sortButton}
-      <Glossary term={col.info} />
-    </span>
-  );
-}
-
-function Row({
-  children,
-  header,
-}: {
-  children: React.ReactNode;
-  header?: boolean;
-}) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        // Ten columns in one row: keep the data columns compact, but give them a
-        // roomy gap so they breathe instead of bunching (the outcome 1fr absorbs
-        // the slack on wide screens). qty needs a touch more width for values
-        // like "234.375".
-        gridTemplateColumns:
-          "minmax(0, 1fr) 52px 46px 82px 62px 74px 78px 54px 52px 80px",
-        gap: 18,
-        alignItems: "center",
-        padding: "9px 0",
-        borderTop: header ? undefined : "1px solid var(--border-1)",
-        fontFamily: "var(--font-mono)",
-        fontSize: header ? 10 : 11,
-        letterSpacing: "var(--track-wide)",
-        textTransform: header ? "uppercase" : undefined,
-        color: header ? "var(--fg-4)" : "var(--fg-2)",
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function Right({
-  children,
-  mono,
-  dim,
-}: {
-  children: React.ReactNode;
-  mono?: boolean;
-  /** Fade the value to fg-4 — used for the limit price/value of orders that
-   *  never traded, so they read as "would have" rather than settled. */
-  dim?: boolean;
-}) {
-  return (
-    <span
-      style={{
-        textAlign: "right",
-        whiteSpace: "nowrap",
-        fontFamily: mono ? "var(--font-mono)" : "inherit",
-        fontSize: mono ? 12 : undefined,
-        color: dim ? "var(--fg-4)" : mono ? "var(--fg-1)" : undefined,
-      }}
-    >
-      {children}
-    </span>
-  );
-}
-
-function Muted({ children }: { children: React.ReactNode }) {
-  return <span style={{ color: "var(--fg-4)" }}>{children}</span>;
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        padding: "24px 0",
-        color: "var(--fg-4)",
-        fontFamily: "var(--font-mono)",
-        fontSize: 12,
-        letterSpacing: "var(--track-wide)",
-        textAlign: "center",
-      }}
-    >
-      {children}
-    </div>
   );
 }

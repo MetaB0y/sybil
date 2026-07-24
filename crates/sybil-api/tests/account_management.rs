@@ -33,7 +33,7 @@ use matching_sequencer::{
 };
 
 const SERVICE_TOKEN: &str = "account-management-service";
-const PASSKEY_ORIGIN: &str = "https://app.62-171-170-238.nip.io";
+const PASSKEY_ORIGIN: &str = "https://app.sybil.exchange";
 
 async fn test_app(_dev_mode: bool) -> (axum::Router, SequencerHandle) {
     test_app_with_config(ApiConfig {

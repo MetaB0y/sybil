@@ -22,6 +22,12 @@ services:
       - "127.0.0.1:3003:3003"
 
   sybil-web:
+    build:
+      args:
+        # Local pages are served from localhost, and an rpId must be a suffix of
+        # the page's origin — the production `sybil.exchange` default would make
+        # every local passkey ceremony throw SecurityError.
+        NEXT_PUBLIC_WEBAUTHN_RP_ID: "${NEXT_PUBLIC_WEBAUTHN_RP_ID:-localhost}"
     ports:
       - "127.0.0.1:3005:3000"
 

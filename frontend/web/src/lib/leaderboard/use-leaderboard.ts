@@ -29,12 +29,16 @@ type ApiResponse = components["schemas"]["LeaderboardResponse"];
 
 export interface LeaderboardRow {
   rank: number;
+  /** Which ledger the row came from — see `use-bot-leaderboard`. Account ids
+   *  are only unique within a kind, so never key or match on id alone. */
+  kind: "human" | "bot";
   accountId: number;
-  /** Signed public display name. */
+  /** Signed public display name, or the Arena trader name for bots. */
   label: string;
   pnlNanos: bigint;
   roiBps: number;
-  marketsTraded: number;
+  /** Null where the source does not track it (bots). */
+  marketsTraded: number | null;
   equityNanos: bigint;
 }
 
@@ -45,6 +49,7 @@ export function toLeaderboardRows(
   if (!data?.entries) return [];
   return data.entries.map((e: ApiEntry) => ({
     rank: e.rank,
+    kind: "human" as const,
     accountId: e.account_id,
     label: e.display_name,
     pnlNanos: parseNanos(e.pnl_nanos),
@@ -52,6 +57,25 @@ export function toLeaderboardRows(
     marketsTraded: e.markets_traded,
     equityNanos: parseNanos(e.equity_nanos),
   }));
+}
+
+/**
+ * Merge the server-ranked human rows with client-derived bot rows and renumber
+ * by PnL across both. The server's `rank` only covers the accounts it returned,
+ * so it cannot survive the merge — ties fall back to kind then account id so
+ * the order is stable between refetches rather than dependent on arrival.
+ */
+export function mergeAndRank(
+  human: LeaderboardRow[],
+  bots: LeaderboardRow[],
+): LeaderboardRow[] {
+  return [...human, ...bots]
+    .sort((a, b) => {
+      if (a.pnlNanos !== b.pnlNanos) return a.pnlNanos > b.pnlNanos ? -1 : 1;
+      if (a.kind !== b.kind) return a.kind === "human" ? -1 : 1;
+      return a.accountId - b.accountId;
+    })
+    .map((row, index) => ({ ...row, rank: index + 1 }));
 }
 
 export interface UseLeaderboardResult {

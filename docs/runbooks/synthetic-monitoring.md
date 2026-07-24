@@ -52,8 +52,8 @@ Manual run:
 ```bash
 cd /opt/sybil
 scripts/synthetic-probe.sh \
-  --base-url https://62-171-170-238.nip.io \
-  --app-origin https://app.62-171-170-238.nip.io \
+  --base-url https://api.sybil.exchange \
+  --app-origin https://app.sybil.exchange \
   --block-interval 10
 ```
 

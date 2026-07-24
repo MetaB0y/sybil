@@ -84,6 +84,9 @@ pub async fn apply_catalog(
     let mut deployed = Vec::with_capacity(specs.len());
 
     for spec in &specs {
+        // Creation keys make an unchanged rerun idempotent. A changed
+        // committed contract remains a conflict: this catalog is applied to a
+        // fresh genesis rather than editing a live market's rules or title.
         let market_id = client
             .create_market(&spec.create_request())
             .await?

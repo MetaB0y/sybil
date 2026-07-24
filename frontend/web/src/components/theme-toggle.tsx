@@ -7,7 +7,10 @@ export function ThemeToggle() {
   const isLight = theme === "light";
   return (
     <button
-      className="theme-toggle nav-icon-btn"
+      // 32px square by design, in a bar whose tallest thing is a 22px wordmark.
+      // The coarse-pointer floor would make it 44px — taller than the brand —
+      // so it carries its touch target as hit area instead.
+      className="theme-toggle nav-icon-btn hit-target"
       type="button"
       onClick={toggle}
       aria-label={isLight ? "Switch to dark theme" : "Switch to light theme"}

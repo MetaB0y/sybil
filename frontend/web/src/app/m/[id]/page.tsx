@@ -11,7 +11,6 @@ import {
 import { EventActivity } from "@/components/event-activity";
 import { EventHoldings } from "@/components/event-holdings";
 import { MarketRail } from "@/components/market-rail";
-import { PlaceOrderModal } from "@/components/market-rail/place-order-modal";
 import { MarketThumb } from "@/components/market-thumb";
 import { OutcomeLegend } from "@/components/outcome-legend";
 import { PriceChart, PriceHistoryNotice } from "@/components/price-chart";
@@ -24,11 +23,13 @@ import {
 import { getCategoryColor, pickDisplayCategory } from "@/lib/categorize";
 import { useMarket } from "@/lib/markets/use-market";
 import { SelectOutcomeProvider } from "@/lib/market-detail/active-outcome";
+import { chartLineSelection } from "@/lib/market-detail/chart-selection";
 import { useEventGroup } from "@/lib/market-detail/use-event-group";
 import { useMarketStats } from "@/lib/market-detail/use-market-stats";
 import { useEventPriceHistory } from "@/lib/markets/use-event-price-history";
 import { useEventRaw } from "@/lib/markets/use-event-raw";
 import { useEventTraders } from "@/lib/markets/use-event-traders";
+import { useCompactLayout } from "@/lib/responsive/use-compact";
 import { selectLatestBlock, useStore } from "@/lib/store";
 
 type RouteParams = { id: string };
@@ -73,16 +74,30 @@ export default function MarketDetailPage({
   // rather than navigating, so the [id] segment never remounts and the screen
   // doesn't blink. A fresh load / real navigation re-seeds from the new param.
   const [marketId, setMarketId] = useState(initialId);
+  // Outcomes visited during this session, oldest first. Switching to an outcome
+  // put its line on the chart, but only as a side effect of it being *active* —
+  // the moment you switched again it vanished, which made the rail's outcome
+  // picker feel like it hadn't done anything. Recording the switch here makes
+  // those lines stick; ChartSection unions them into the chart selection.
+  const [visitedOutcomeIds, setVisitedOutcomeIds] = useState<number[]>([]);
   const selectOutcome = useCallback((next: number) => {
     setMarketId(next);
+    setVisitedOutcomeIds((prev) =>
+      prev.includes(next) ? prev : [...prev, next],
+    );
     window.history.replaceState(window.history.state, "", `/m/${next}`);
+  }, []);
+  // Closing a line from the legend also forgets the visit — otherwise the ✕
+  // would be undone on the next render by the union above.
+  const keepVisited = useCallback((kept: readonly number[]) => {
+    setVisitedOutcomeIds((prev) => {
+      const next = prev.filter((id) => kept.includes(id));
+      return next.length === prev.length ? prev : next;
+    });
   }, []);
 
   const marketQ = useMarket(marketId);
   const market = marketQ.data;
-  const [orderOpen, setOrderOpen] = useState(false);
-  const openOrder = useCallback(() => setOrderOpen(true), []);
-  const closeOrder = useCallback(() => setOrderOpen(false), []);
 
   return (
     <SelectOutcomeProvider value={selectOutcome}>
@@ -98,11 +113,7 @@ export default function MarketDetailPage({
                 state shows in the status pill + the rail's read-only notice, not
                 a separate banner row (which shifted the page). */}
             <div className="market-detail-header-pad">
-              <Header
-                marketId={marketId}
-                market={market}
-                {...(market.closed === true ? {} : { onPlaceOrder: openOrder })}
-              />
+              <Header marketId={marketId} market={market} />
             </div>
 
             <div
@@ -110,7 +121,11 @@ export default function MarketDetailPage({
               data-testid="market-detail-grid"
             >
               <div className="no-scrollbar market-detail-content">
-                <ChartSection marketId={marketId} />
+                <ChartSection
+                  marketId={marketId}
+                  visitedOutcomeIds={visitedOutcomeIds}
+                  onKeepVisited={keepVisited}
+                />
                 <EventHoldings marketId={marketId} />
                 <DescriptionBlock market={market} />
                 <EventActivity marketId={marketId} />
@@ -118,12 +133,6 @@ export default function MarketDetailPage({
 
               <MarketRail marketId={marketId} />
             </div>
-
-            <PlaceOrderModal
-              marketId={marketId}
-              open={orderOpen}
-              onClose={closeOrder}
-            />
           </>
         )}
       </main>
@@ -140,7 +149,6 @@ export default function MarketDetailPage({
 function Header({
   marketId,
   market,
-  onPlaceOrder,
 }: {
   marketId: number;
   market: {
@@ -160,9 +168,8 @@ function Header({
     event_id?: string | null;
     polymarket_condition_id?: string | null;
   };
-  /** Mobile shortcut; desktop ordering stays in the visually vetted rail. */
-  onPlaceOrder?: () => void;
 }) {
+  const compact = useCompactLayout();
   const { stats } = useMarketStats(marketId);
   const { primary } = pickDisplayCategory(market.categories, market.category);
   const resolvesMs =
@@ -188,76 +195,78 @@ function Header({
         } as React.CSSProperties
       }
     >
-      <MarketThumb
-        key={marketId}
-        marketId={market.market_id}
-        name={market.name}
-        imageUrl={market.market_image_url ?? market.event_image_url ?? null}
-        fallbackIconUrl={
-          market.market_icon_url ?? market.event_icon_url ?? null
-        }
-        size={56}
-      />
+      {/* Three grid areas — thumb / crumb / headline. On a desktop the thumb
+          spans both rows down the left. On a phone the breadcrumb takes the
+          full width above and the thumb drops down beside the title, because
+          the breadcrumb wraps to two lines there and left the icon stranded
+          against it with the title starting below. */}
+      <span className="market-detail-thumb">
+        <MarketThumb
+          key={marketId}
+          marketId={market.market_id}
+          name={market.name}
+          imageUrl={market.market_image_url ?? market.event_image_url ?? null}
+          fallbackIconUrl={
+            market.market_icon_url ?? market.event_icon_url ?? null
+          }
+          /* Beside a 40px title the 56px tile reads as a logo; beside the
+             phone's 20px one it out-weighed the question it belongs to. */
+          size={compact ? 34 : 56}
+        />
+      </span>
+      {/* Breadcrumb: Markets / ● Category / resolves <date> · status */}
       <div
+        key={marketId}
+        className="text-mono market-detail-crumb"
         style={{
           display: "flex",
-          flexDirection: "column",
+          alignItems: "center",
+          flexWrap: "wrap",
           gap: "var(--space-2)",
-          minWidth: 0,
+          fontSize: "10px",
+          letterSpacing: "var(--track-wide)",
+          textTransform: "uppercase",
+          color: "var(--fg-3)",
         }}
       >
-        {/* Breadcrumb: Markets / ● Category / resolves <date> · status */}
-        <div
-          key={marketId}
-          className="text-mono"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            flexWrap: "wrap",
-            gap: "var(--space-2)",
-            fontSize: "10px",
-            letterSpacing: "var(--track-wide)",
-            textTransform: "uppercase",
-            color: "var(--fg-3)",
-          }}
+        <Link
+          className="mobile-action-link"
+          href="/"
+          style={{ color: "var(--fg-4)", textDecoration: "none" }}
         >
-          <Link
-            className="mobile-action-link"
-            href="/"
-            style={{ color: "var(--fg-4)", textDecoration: "none" }}
+          markets
+        </Link>
+        <span style={{ color: "var(--fg-4)" }}>/</span>
+        {primary ? (
+          <span
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
           >
-            markets
-          </Link>
-          <span style={{ color: "var(--fg-4)" }}>/</span>
-          {primary ? (
             <span
-              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-            >
-              <span
-                aria-hidden
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: "50%",
-                  background: getCategoryColor(primary),
-                  display: "inline-block",
-                }}
-              />
-              {primary}
-            </span>
-          ) : (
-            <span style={{ color: "var(--fg-4)" }}>uncategorized</span>
-          )}
-          {resolvesMs != null && (
-            <>
-              <span style={{ color: "var(--fg-4)" }}>/</span>
-              <span>resolves {formatDate(resolvesMs)}</span>
-            </>
-          )}
-          <span style={{ color: "var(--fg-4)" }}>/</span>
-          <span>{origin}</span>
-        </div>
+              aria-hidden
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: "50%",
+                background: getCategoryColor(primary),
+                display: "inline-block",
+              }}
+            />
+            {primary}
+          </span>
+        ) : (
+          <span style={{ color: "var(--fg-4)" }}>uncategorized</span>
+        )}
+        {resolvesMs != null && (
+          <>
+            <span style={{ color: "var(--fg-4)" }}>/</span>
+            <span>resolves {formatDate(resolvesMs)}</span>
+          </>
+        )}
+        <span style={{ color: "var(--fg-4)" }}>/</span>
+        <span>{origin}</span>
+      </div>
 
+      <div className="market-detail-headline">
         {/* Ordering lives in the rail; active markets need no redundant badge. */}
         <div className="market-detail-title-row">
           <h1
@@ -271,15 +280,6 @@ function Header({
           </h1>
           {market.closed === true && (
             <StatusPill status={market.status} closed />
-          )}
-          {onPlaceOrder && (
-            <button
-              type="button"
-              className="market-detail-place-order"
-              onClick={onPlaceOrder}
-            >
-              Place order
-            </button>
           )}
         </div>
 
@@ -398,8 +398,19 @@ function StatusPill({ status, closed }: { status: string; closed: boolean }) {
   );
 }
 
-function ChartSection({ marketId }: { marketId: number }) {
+function ChartSection({
+  marketId,
+  visitedOutcomeIds,
+  onKeepVisited,
+}: {
+  marketId: number;
+  /** Outcomes switched to during this visit; their lines stay on the chart. */
+  visitedOutcomeIds: number[];
+  /** Report the surviving set after a legend ✕ so the visit is forgotten too. */
+  onKeepVisited: (kept: readonly number[]) => void;
+}) {
   const [range, setRange] = useState<ChartRange>("ALL");
+  const compact = useCompactLayout();
   // Measured height of one legend chip row (reported by OutcomeLegend). We
   // reserve two of these above the chart so wrapping onto a second row fills
   // already-reserved space instead of pushing the chart down.
@@ -422,11 +433,12 @@ function ChartSection({ marketId }: { marketId: number }) {
   const setSelectedIds = useCallback(
     (next: number[] | null) => {
       setSelectedIdsState(next);
+      if (next) onKeepVisited(next);
       if (eventKey == null) return;
       if (next && next.length > 0) chartSelectionByEvent.set(eventKey, next);
       else chartSelectionByEvent.delete(eventKey);
     },
-    [eventKey],
+    [eventKey, onKeepVisited],
   );
 
   const outcomes = useMemo(() => group?.outcomes ?? [], [group]);
@@ -450,22 +462,23 @@ function ChartSection({ marketId }: { marketId: number }) {
         .map((o) => o.marketId),
     [outcomes],
   );
-  // Self-heals across navigation: stale ids from another event drop out, and
-  // an empty result falls back to the favourite-first default. The active
-  // outcome is always on the chart so it can be highlighted — but APPENDED as
-  // the last line (replacing the last when already at the cap), never prepended.
-  // Switching to an off-chart outcome then just adds a line at the end instead
-  // of reshuffling the whole chart.
-  const effectiveSelected = useMemo(() => {
-    const valid = (selectedIds ?? []).filter((id) => idSet.has(id));
-    const base = valid.length > 0 ? valid : defaultIds;
-    if (idSet.has(marketId) && !base.includes(marketId)) {
-      return base.length >= MAX_CHART_LINES
-        ? [...base.slice(0, MAX_CHART_LINES - 1), marketId]
-        : [...base, marketId];
-    }
-    return base;
-  }, [selectedIds, idSet, defaultIds, marketId]);
+  // Self-heals across navigation: stale ids from another event drop out, and an
+  // empty result falls back to the favourite-first default. Outcomes you have
+  // switched to — plus the active one — are APPENDED after that base, never
+  // prepended, so adding a line doesn't reshuffle the chart. At the cap the
+  // base gives way first: the lines you asked for outrank the defaults.
+  const effectiveSelected = useMemo(
+    () =>
+      chartLineSelection({
+        selectedIds,
+        visitedIds: visitedOutcomeIds,
+        activeId: marketId,
+        availableIds: idSet,
+        defaultIds,
+        max: MAX_CHART_LINES,
+      }),
+    [selectedIds, idSet, defaultIds, marketId, visitedOutcomeIds],
+  );
 
   // The selected outcome leads and receives the subtle legend treatment; chart
   // lines themselves remain uniformly weighted.
@@ -527,6 +540,7 @@ function ChartSection({ marketId }: { marketId: number }) {
       <div className="market-detail-chart-head" style={{}}>
         {outcomes.length > 0 ? (
           <div
+            className="market-detail-chart-legend"
             style={{
               flex: 1,
               minWidth: 0,
@@ -535,13 +549,17 @@ function ChartSection({ marketId }: { marketId: number }) {
               // once known; LEGEND_RESERVED_H covers the first paint. The legend
               // sits at the top of this block wrapper, so the reserved space
               // falls below it.
-              minHeight: group?.isMultiOutcome
-                ? legendRowH > 0
-                  ? // two rows + the wrap gap, plus a few px of slack so a row
-                    // with the slightly-taller "+N more" chip can't nudge it
-                    legendRowH * 2 + LEGEND_ROW_GAP + 6
-                  : LEGEND_RESERVED_H
-                : undefined,
+              // Nothing to reserve on a phone: the legend is one dropdown of
+              // fixed height, and it never wraps.
+              minHeight: compact
+                ? undefined
+                : group?.isMultiOutcome
+                  ? legendRowH > 0
+                    ? // two rows + the wrap gap, plus a few px of slack so a row
+                      // with the slightly-taller "+N more" chip can't nudge it
+                      legendRowH * 2 + LEGEND_ROW_GAP + 6
+                    : LEGEND_RESERVED_H
+                  : undefined,
             }}
           >
             <OutcomeLegend
@@ -553,9 +571,11 @@ function ChartSection({ marketId }: { marketId: number }) {
             />
           </div>
         ) : (
-          <div className="eyebrow">yes probability</div>
+          <div className="eyebrow market-detail-chart-legend">
+            yes probability
+          </div>
         )}
-        <div style={{ flexShrink: 0 }}>
+        <div className="market-detail-chart-range" style={{ flexShrink: 0 }}>
           <ChartRangeBar value={range} onChange={setRange} />
         </div>
       </div>

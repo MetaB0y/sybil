@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import { ConnectModal } from "@/components/auth/connect-modal";
+import { DevnetNotice } from "@/components/devnet-notice";
 import { GlobalNav } from "@/components/global-nav";
+import { DEVNET_DISMISSED_KEY } from "@/lib/devnet";
 import { Providers } from "./providers";
 import "./globals.css";
 
@@ -54,12 +56,17 @@ export const metadata: Metadata = {
 };
 
 // Runs before first paint: applies the persisted light theme so there's no
-// flash of dark before React hydrates. Dark is the default (no attribute).
-const THEME_INIT = `
+// flash of dark before React hydrates (dark is the default, no attribute), and
+// the same for a dismissed devnet notice — which also reserves layout space, so
+// restoring it after hydration would shove the whole page down a line.
+const CHROME_INIT = `
 (function () {
   try {
     var t = localStorage.getItem('sybil-theme');
     if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    if (localStorage.getItem('${DEVNET_DISMISSED_KEY}') === '1') {
+      document.documentElement.setAttribute('data-devnet', 'dismissed');
+    }
   } catch (e) {}
 })();
 `;
@@ -76,12 +83,15 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
+        <script dangerouslySetInnerHTML={{ __html: CHROME_INIT }} />
       </head>
       <body className="min-h-full flex flex-col">
         <Providers>
+          <DevnetNotice />
           <GlobalNav />
-          <div style={{ paddingTop: "var(--nav-height)" }}>{children}</div>
+          {/* Both strips are fixed, so the page reserves their combined height
+              (`--chrome-height`) rather than the nav bar's alone. */}
+          <div style={{ paddingTop: "var(--chrome-height)" }}>{children}</div>
           <ConnectModal />
         </Providers>
       </body>

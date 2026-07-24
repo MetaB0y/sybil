@@ -153,9 +153,14 @@ services:
     build:
       context: ./frontend/web
       args:
-        NEXT_PUBLIC_API_BASE: "${NEXT_PUBLIC_API_BASE:-https://62-171-170-238.nip.io}"
-        NEXT_PUBLIC_WS_BASE: "${NEXT_PUBLIC_WS_BASE:-wss://62-171-170-238.nip.io}"
-        NEXT_PUBLIC_WEBAUTHN_RP_ID: "${NEXT_PUBLIC_WEBAUTHN_RP_ID:-}"
+        NEXT_PUBLIC_API_BASE: "${NEXT_PUBLIC_API_BASE:-https://api.sybil.exchange}"
+        NEXT_PUBLIC_WS_BASE: "${NEXT_PUBLIC_WS_BASE:-wss://api.sybil.exchange}"
+        # Defaults to the guest-pinned RP, not empty. An empty value makes the
+        # browser fall back to the page's own host, which mints passkeys the
+        # guest rejects — and compose passing "" would override the Dockerfile
+        # default, so the safe value has to live here. Local dev overrides this
+        # to `localhost` in docker-compose.override.yml.
+        NEXT_PUBLIC_WEBAUTHN_RP_ID: "${NEXT_PUBLIC_WEBAUTHN_RP_ID:-sybil.exchange}"
     mem_limit: "512m"
     memswap_limit: "512m"
     restart: unless-stopped

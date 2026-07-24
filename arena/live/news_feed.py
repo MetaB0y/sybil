@@ -9,8 +9,8 @@ Pipeline:
   5. Deliver to traders
 
 Usage (standalone test):
-    cd arena && uv run python -m live.news_feed --sybil-url https://62-171-170-238.nip.io --duration 300
-    cd arena && OPENROUTER_API_KEY=... uv run python -m live.news_feed --sybil-url https://62-171-170-238.nip.io --duration 300
+    cd arena && uv run python -m live.news_feed --sybil-url https://api.sybil.exchange --duration 300
+    cd arena && OPENROUTER_API_KEY=... uv run python -m live.news_feed --sybil-url https://api.sybil.exchange --duration 300
 """
 
 import asyncio
@@ -738,7 +738,7 @@ async def _main():
     sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent.parent))
 
     parser = argparse.ArgumentParser(description="Test news feed")
-    parser.add_argument("--sybil-url", default="https://62-171-170-238.nip.io")
+    parser.add_argument("--sybil-url", default="https://api.sybil.exchange")
     parser.add_argument("--duration", type=int, default=300, help="Run for N seconds")
     parser.add_argument("--max-markets", type=int, default=10)
     args = parser.parse_args()

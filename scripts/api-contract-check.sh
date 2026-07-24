@@ -28,8 +28,18 @@ done
 
 binary="${SYBIL_CONTRACT_BINARY:-}"
 if [[ -z "$binary" ]]; then
-    cargo build -p sybil-api --bin sybil-api
-    binary="$repo_root/target/debug/sybil-api"
+    cargo build \
+        --manifest-path "$repo_root/Cargo.toml" \
+        -p sybil-api \
+        --bin sybil-api
+    target_dir="$(
+        cargo metadata \
+            --manifest-path "$repo_root/Cargo.toml" \
+            --format-version 1 \
+            --no-deps |
+            python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])'
+    )"
+    binary="$target_dir/debug/sybil-api"
 elif [[ "$binary" != /* ]]; then
     binary="$repo_root/$binary"
 fi

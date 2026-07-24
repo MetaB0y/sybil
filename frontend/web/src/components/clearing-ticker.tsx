@@ -1,18 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   formatAge,
   formatCompactDollars,
-  formatInt,
   formatPercentPrecise,
   parseNanos,
 } from "@/lib/format/nanos";
 import type { IndexMarket } from "@/lib/markets/use-markets";
 import { useEventQuestions } from "@/lib/markets/use-event-raw";
 import {
-  selectLatestBlock,
   selectRecentBlocks,
   selectRecentHistory,
   type RecentHistoryState,
@@ -25,10 +23,15 @@ type Props = {
   marketsById: Map<number, IndexMarket>;
 };
 
-/** Most recent clears to keep on the strip. */
-const MAX_TICKER_ITEMS = 40;
-/** Below this many items the content won't overflow, so don't animate. */
-const MARQUEE_MIN_ITEMS = 6;
+/** Most recent clears to keep on the strip. Sized against the scroll speed
+ *  below: a longer strip takes minutes to traverse end to end, so its tail is
+ *  already stale by the time it scrolls into view. */
+const MAX_TICKER_ITEMS = 16;
+/** Marquee speed in CSS px per second. Deriving the duration from measured
+ *  width rather than item count keeps the scroll rate identical whether two
+ *  markets clear or sixteen, and whether labels are short native names or long
+ *  mirror questions. */
+const MARQUEE_PX_PER_SEC = 30;
 
 /** One market clearing in one batch — a single "trade" entry on the ticker. */
 export type ClearEvent = {
@@ -62,7 +65,6 @@ export type ClearEvent = {
  * market_id or side, so a global feed can only speak in per-batch clears.
  */
 export function ClearingTicker({ marketsById }: Props) {
-  const latest = useStore(selectLatestBlock);
   const recent = useStore(selectRecentBlocks);
   const recentHistory = useStore(selectRecentHistory);
   const [paused, setPaused] = useState(false);
@@ -79,29 +81,72 @@ export function ClearingTicker({ marketsById }: Props) {
     [recent, marketsById],
   );
 
+  // Whether the content overflows is a question about width, not item count: a
+  // handful of long mirror questions overflows a phone while sixteen short
+  // native names may not fill a desktop. Measure both sides and compare.
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const copyRef = useRef<HTMLDivElement | null>(null);
+  const [copyWidth, setCopyWidth] = useState(0);
+  const [viewportWidth, setViewportWidth] = useState(0);
+
+  const animate = copyWidth > 0 && copyWidth > viewportWidth + 1;
+  // Constant pixel speed. Tying the duration to item count (the old
+  // `events.length * 6.4`) meant every new clear re-timed a running animation,
+  // which remapped its progress and jumped the strip sideways.
+  const durationSec = copyWidth / MARQUEE_PX_PER_SEC;
+
+  // A scrolling strip shows a frozen snapshot: splicing cells in mid-loop
+  // shifts every following cell sideways, which is the other half of the same
+  // stutter. Fresh clears are taken up at a loop boundary instead, where the
+  // track has wrapped back to its start. While nothing scrolls there is no
+  // boundary to wait for, so the live list renders directly.
+  const [frozen, setFrozen] = useState<ClearEvent[] | null>(null);
+  const displayed = animate && frozen ? frozen : events;
+  const pendingRef = useRef(events);
+  useEffect(() => {
+    pendingRef.current = events;
+  }, [events]);
+
+  // Resolve questions for what is on screen, not for the live window: a frozen
+  // snapshot outlives the blocks it came from, and keying this to `events`
+  // would drop its ids and flip cells back to catalog names mid-scroll.
   const eventIds = useMemo(() => {
     const ids = new Set<string>();
-    for (const event of events) {
+    for (const event of displayed) {
       if (event.condId && event.eventId) ids.add(event.eventId);
     }
     return [...ids];
-  }, [events]);
+  }, [displayed]);
   const questionByCondition = useEventQuestions(eventIds);
   const labelFor = (event: ClearEvent): string =>
     (event.condId ? questionByCondition.get(event.condId) : undefined) ??
     event.name;
 
-  const animate = events.length >= MARQUEE_MIN_ITEMS;
-  // ~one cell-width per ~6s keeps the scroll slow and readable as the list grows.
-  const durationSec = Math.max(36, events.length * 6.4);
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    const copy = copyRef.current;
+    if (!viewport || !copy || typeof ResizeObserver === "undefined") return;
+    // Labels arrive asynchronously (the mirror question replaces the catalog
+    // name), so cell widths settle after the first paint — observe rather than
+    // measure once.
+    const measure = () => {
+      setCopyWidth(copy.getBoundingClientRect().width);
+      setViewportWidth(viewport.clientWidth);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    observer.observe(copy);
+    return () => observer.disconnect();
+  }, [displayed]);
 
   return (
     <div
       className="clearing-ticker"
-      aria-busy={events.length === 0 && recentHistory === "loading"}
+      aria-busy={displayed.length === 0 && recentHistory === "loading"}
       style={{
         position: "sticky",
-        top: "var(--nav-height)",
+        top: "var(--chrome-height)",
         zIndex: 40,
         display: "flex",
         alignItems: "stretch",
@@ -141,13 +186,9 @@ export function ClearingTicker({ marketsById }: Props) {
           }}
         />
         <span>Recent trades</span>
-        <span style={{ color: "var(--accent)", opacity: 0.6 }}>·</span>
-        <span className="tabular">
-          #{latest?.height != null ? formatInt(latest.height) : "—"}
-        </span>
       </div>
 
-      {events.length === 0 ? (
+      {displayed.length === 0 ? (
         <span
           className="text-mono"
           role={recentHistory === "error" ? "alert" : "status"}
@@ -163,6 +204,7 @@ export function ClearingTicker({ marketsById }: Props) {
         </span>
       ) : (
         <div
+          ref={viewportRef}
           onMouseEnter={() => setPaused(true)}
           onMouseLeave={() => setPaused(false)}
           style={{
@@ -177,6 +219,17 @@ export function ClearingTicker({ marketsById }: Props) {
         >
           <div
             className="clearing-ticker-track"
+            // Start and every wrap are the two moments the track sits at its
+            // origin, so they are the only points where swapping cells is
+            // invisible. Ignore animations bubbling up from a cell.
+            onAnimationStart={(event) => {
+              if (event.target !== event.currentTarget) return;
+              setFrozen(pendingRef.current);
+            }}
+            onAnimationIteration={(event) => {
+              if (event.target !== event.currentTarget) return;
+              setFrozen(pendingRef.current);
+            }}
             style={{
               display: "inline-flex",
               flexWrap: "nowrap",
@@ -190,20 +243,31 @@ export function ClearingTicker({ marketsById }: Props) {
               animationPlayState: paused ? "paused" : "running",
             }}
           >
-            {events.map((e) => (
-              <TickerCell key={e.key} event={e} label={labelFor(e)} now={now} />
-            ))}
-            {/* Second copy makes the -50% loop seamless. */}
-            {animate &&
-              events.map((e) => (
+            <div ref={copyRef} style={{ display: "inline-flex", flexWrap: "nowrap" }}>
+              {displayed.map((e) => (
                 <TickerCell
-                  key={`dup-${e.key}`}
+                  key={e.key}
                   event={e}
                   label={labelFor(e)}
                   now={now}
-                  ariaHidden
                 />
               ))}
+            </div>
+            {/* Second copy makes the -50% loop seamless: the track is exactly
+                two identical copies wide, so half a track is one full copy. */}
+            {animate && (
+              <div style={{ display: "inline-flex", flexWrap: "nowrap" }}>
+                {displayed.map((e) => (
+                  <TickerCell
+                    key={`dup-${e.key}`}
+                    event={e}
+                    label={labelFor(e)}
+                    now={now}
+                    ariaHidden
+                  />
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

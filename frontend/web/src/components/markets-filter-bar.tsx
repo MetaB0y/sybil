@@ -72,6 +72,8 @@ export function MarketsFilterBar({
                 aria-pressed={active}
                 disabled={s.disabled}
                 onClick={() => !s.disabled && onSortChange(s.key)}
+                className="hit-target markets-sort-chip"
+                data-hit-area="expanded"
                 style={{
                   height: 26,
                   padding: "0 var(--space-3)",
@@ -120,6 +122,8 @@ export function MarketsFilterBar({
               ? "Closed markets hidden — click to show them greyed out"
               : "Closed markets shown — click to hide"
           }
+          className="hit-target markets-sort-chip"
+          data-hit-area="expanded"
           style={{
             height: 26,
             padding: "0 var(--space-3)",

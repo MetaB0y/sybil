@@ -72,7 +72,7 @@ the intended accepted chain:
 
 ```bash
 H=12345
-SRC=https://62-171-170-238.nip.io
+SRC=https://api.sybil.exchange
 SERVICE_TOKEN='replace-with-service-token'
 
 curl -fsS "$SRC/v1/da/$H/manifest" -o "da-$H.json"

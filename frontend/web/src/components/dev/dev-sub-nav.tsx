@@ -14,6 +14,10 @@ export function DevSubNav() {
         gap: 8,
         overflowX: "auto",
         flexWrap: "nowrap",
+        // Without these the strip sizes to its widest content instead of its
+        // container, so the tabs scroll *and* push the page 5px wide at 320px.
+        minWidth: 0,
+        maxWidth: "100%",
       }}
     >
       {DEV_SECTIONS.map((section) => {

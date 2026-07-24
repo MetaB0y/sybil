@@ -29,16 +29,7 @@ import {
   shortTime,
 } from "@/lib/dev/format";
 import { useDevRecentBlocks } from "@/lib/dev/use-recent-blocks";
-
-const controlStyle: CSSProperties = {
-  border: "1px solid var(--border-2)",
-  background: "var(--surface-1)",
-  color: "var(--fg-1)",
-  borderRadius: 6,
-  padding: "7px 9px",
-  fontFamily: "inherit",
-  fontSize: 12,
-};
+import { controlStyle } from "@/components/dev/primitives/control";
 
 const truncCell: CSSProperties = {
   padding: "7px 9px",
@@ -315,6 +306,7 @@ export function AggregatesView() {
           title="Open-Batch Indicative"
           actions={
             <select
+              className="dev-select"
               value={openBatchMarketId}
               onChange={(e) => setOpenBatchMarketId(Number(e.target.value))}
               style={{ ...controlStyle, minWidth: 280 }}

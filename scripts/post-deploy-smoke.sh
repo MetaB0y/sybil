@@ -32,11 +32,11 @@
 #
 # Configuration (flags override env; env overrides defaults):
 #   base_url / SYBIL_SMOKE_BASE          API root host
-#                                        (default https://62-171-170-238.nip.io;
+#                                        (default https://api.sybil.exchange;
 #                                        the API is at the ROOT host, not api.*)
 #   --service-token / SYBIL_SERVICE_TOKEN   bearer for service-gated routes
 #   --app-origin / SYBIL_SMOKE_APP_ORIGIN   browser origin for the CORS check
-#                                        (default https://app.62-171-170-238.nip.io)
+#                                        (default https://app.sybil.exchange)
 #   --block-interval / SYBIL_SMOKE_INTERVAL block time seconds (default 10)
 #   SYBIL_SMOKE_STARTUP_TIMEOUT
 #                                        seconds to wait for /v1/health after a
@@ -80,8 +80,8 @@
 set -uo pipefail
 
 # ── Configuration ───────────────────────────────────────────────────────────
-BASE="${SYBIL_SMOKE_BASE:-https://62-171-170-238.nip.io}"
-APP_ORIGIN="${SYBIL_SMOKE_APP_ORIGIN:-https://app.62-171-170-238.nip.io}"
+BASE="${SYBIL_SMOKE_BASE:-https://api.sybil.exchange}"
+APP_ORIGIN="${SYBIL_SMOKE_APP_ORIGIN:-https://app.sybil.exchange}"
 SERVICE_TOKEN="${SYBIL_SERVICE_TOKEN:-}"
 INTERVAL="${SYBIL_SMOKE_INTERVAL:-10}"
 STARTUP_TIMEOUT="${SYBIL_SMOKE_STARTUP_TIMEOUT:-60}"

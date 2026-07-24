@@ -349,7 +349,7 @@ export class BlockStream {
 
 // ── Singleton ─────────────────────────────────────────────────────────────
 
-export const DEFAULT_WS_BASE = "wss://62-171-170-238.nip.io";
+export const DEFAULT_WS_BASE = "wss://api.sybil.exchange";
 
 export function resolveBlockStreamBase(configured: string | undefined): string {
   const trimmed = configured?.trim();

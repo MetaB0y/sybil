@@ -17,8 +17,10 @@ export const GLOSSARY: Record<string, string> = {
     "The price the current batch would clear at if it ran right now. Updates as new orders come in. Not final until the batch closes.",
   "Last price":
     "The price this outcome last traded at. If it's been quiet, the most recent midpoint (mark) price.",
+  // The band is a server setting (`liquidity_band_nanos`, 5¢ by default), so
+  // naming a figure here would go stale the moment it's retuned.
   Liquidity:
-    "Resting orders within 5¢ of the price. Averaged over the last few batches.",
+    "Resting orders close to the current price — the depth you could trade against. Averaged over the last few batches.",
   IEV: "Indicative Executable Volume — the $ that would trade when this batch clears.",
   Imbalance:
     "Net direction of unmatched orders. Buy = more demand than supply at current price; sell = the reverse. Tells you which side is leaning.",
@@ -49,6 +51,12 @@ export function Glossary({
   // in render is disallowed). `null` = closed; a rect = open + anchored.
   const [rect, setRect] = useState<DOMRect | null>(null);
   const ref = useRef<HTMLSpanElement>(null);
+  // A tap fires the compatibility mouse events before `click`: the badge
+  // "hovers" open, then the click toggle immediately closed it again, so on a
+  // phone the definition flashed for a frame and could not be read. This
+  // records that the tooltip was opened by that hover, and the click then
+  // leaves it alone. Tapping elsewhere fires mouseleave and closes it.
+  const openedByHover = useRef(false);
   const content = GLOSSARY[term] ?? "";
   const openAt = (el: HTMLElement | null) =>
     setRect(el ? el.getBoundingClientRect() : null);
@@ -62,8 +70,14 @@ export function Glossary({
         alignItems: "center",
         gap: 4,
       }}
-      onMouseEnter={(e) => openAt(e.currentTarget)}
-      onMouseLeave={() => setRect(null)}
+      onMouseEnter={(e) => {
+        openedByHover.current = true;
+        openAt(e.currentTarget);
+      }}
+      onMouseLeave={() => {
+        openedByHover.current = false;
+        setRect(null);
+      }}
       onFocus={(e) => openAt(e.currentTarget)}
       onBlur={() => setRect(null)}
     >
@@ -74,8 +88,22 @@ export function Glossary({
         aria-label={`What is ${term}?`}
         onClick={(e) => {
           e.preventDefault();
-          setRect((r) => (r ? null : ref.current?.getBoundingClientRect() ?? null));
+          if (openedByHover.current) {
+            // This click is the tail of the gesture that just opened it.
+            openedByHover.current = false;
+            return;
+          }
+          setRect((r) =>
+            r ? null : (ref.current?.getBoundingClientRect() ?? null),
+          );
         }}
+        // A 13px dot beside an 11px label. On a touch device the blanket 44px
+        // control sizing turned it into a circle three times the height of the
+        // word it annotates, and pushed the value below it out of line with its
+        // neighbours. `.hit-target` keeps the dot 13px and puts the 44px into a
+        // pseudo-element that takes no layout space.
+        className="hit-target"
+        data-hit-area="expanded"
         style={{
           width: 13,
           height: 13,

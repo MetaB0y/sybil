@@ -120,17 +120,24 @@ export function GlobalNav() {
         href="/"
         style={{
           display: "inline-flex",
-          alignItems: "baseline",
+          // Centred, not baseline-aligned: the coarse-pointer floor makes this
+          // link 44px tall, and on a baseline the wordmark sat at the top of
+          // that box — 12px above the middle of the bar its neighbours centre
+          // on.
+          alignItems: "center",
           flexShrink: 0,
           textDecoration: "none",
           color: "var(--fg-1)",
         }}
       >
+        {/* Size lives in globals.css (`.global-nav-wordmark`), not here: the
+            phone header scales it up, and an inline font-size would outrank
+            the media query. */}
         <span
+          className="global-nav-wordmark"
           style={{
             fontFamily: "var(--font-display)",
             fontWeight: 700,
-            fontSize: "var(--fs-18)",
             letterSpacing: "var(--track-tight)",
             textTransform: "uppercase",
           }}
@@ -161,7 +168,7 @@ export function GlobalNav() {
         <button
           ref={menuButtonRef}
           type="button"
-          className="global-nav-menu-button"
+          className="global-nav-menu-button hit-target"
           aria-label={
             menuOpen ? "Close navigation menu" : "Open navigation menu"
           }

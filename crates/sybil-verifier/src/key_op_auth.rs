@@ -19,18 +19,23 @@ use p256::ecdsa::{Signature, VerifyingKey, signature::hazmat::PrehashVerifier};
 ///
 /// Changing this is a protocol migration: both the main and escape guests must
 /// be rebuilt and repinned together, and the API RP configuration must match.
-pub const EXPECTED_WEBAUTHN_RP_ID: &str = "app.62-171-170-238.nip.io";
+/// Deliberately the registrable domain, not the `app.` host that serves the UI.
+/// A passkey minted under this RP stays valid if the app later moves to the
+/// apex or to another subdomain; pinning the exact web host would make any such
+/// move another guest repin and fresh genesis. The origin below still restricts
+/// assertions to one exact browser origin.
+pub const EXPECTED_WEBAUTHN_RP_ID: &str = "sybil.exchange";
 
 /// Exact browser origin accepted by the guest for the pinned deployment.
 /// This is deliberately stricter than matching only the RP ID hash: an
 /// assertion minted by another origin under the same RP must not authorize a
 /// Sybil action.
-pub const EXPECTED_WEBAUTHN_ORIGIN: &str = "https://app.62-171-170-238.nip.io";
+pub const EXPECTED_WEBAUTHN_ORIGIN: &str = "https://app.sybil.exchange";
 
 /// `SHA256(EXPECTED_WEBAUTHN_RP_ID)`, pinned as bytes for guest use.
 pub const EXPECTED_RP_ID_HASH: [u8; 32] = [
-    0xb5, 0x98, 0xc6, 0xc3, 0x35, 0x55, 0xba, 0x99, 0xe3, 0xc8, 0x07, 0xf1, 0x85, 0x60, 0xc8, 0xaa,
-    0x89, 0x40, 0xf2, 0xd4, 0x02, 0xc9, 0xc2, 0x95, 0x07, 0xec, 0x90, 0x05, 0x3d, 0x30, 0xe6, 0x20,
+    0x0e, 0xa9, 0x94, 0x09, 0xb0, 0x92, 0x3a, 0x99, 0xb1, 0x5b, 0x3a, 0xc8, 0x2e, 0xb1, 0xbb, 0x06,
+    0xde, 0xd0, 0x2f, 0xab, 0xfe, 0xcd, 0x5b, 0x7c, 0xc3, 0x0c, 0xda, 0x11, 0xbb, 0xd6, 0x0a, 0x6c,
 ];
 
 const FLAG_UP: u8 = 0x01;
@@ -507,9 +512,11 @@ mod tests {
         let challenge = core::str::from_utf8(&base64url_sha256(&digest))
             .unwrap()
             .to_string();
+        // Build from the origin constant, not `https://{RP_ID}`: the RP is the
+        // registrable domain and the origin is the `app.` host, so they are no
+        // longer the same string.
         let client_data_json = format!(
-            "{{\"type\":\"webauthn.get\",\"challenge\":\"{challenge}\",\"origin\":\"https://{}\",\"crossOrigin\":false}}",
-            EXPECTED_WEBAUTHN_RP_ID
+            "{{\"type\":\"webauthn.get\",\"challenge\":\"{challenge}\",\"origin\":\"{EXPECTED_WEBAUTHN_ORIGIN}\",\"crossOrigin\":false}}"
         )
         .into_bytes();
         let mut authenticator_data = EXPECTED_RP_ID_HASH.to_vec();
@@ -540,9 +547,9 @@ mod tests {
     #[test]
     fn browser_client_data_corpus_extracts_exact_fields() {
         let samples: &[&[u8]] = &[
-            br#"{"type":"webauthn.get","challenge":"chrome-token","origin":"https://app.62-171-170-238.nip.io","crossOrigin":false}"#,
-            br#"{"type": "webauthn.get", "challenge": "safari-token", "origin": "https://app.62-171-170-238.nip.io"}"#,
-            br#"{"challenge":"firefox-token","origin":"https://app.62-171-170-238.nip.io","type":"webauthn.get","crossOrigin":false,"tokenBinding":{"status":"supported"}}"#,
+            br#"{"type":"webauthn.get","challenge":"chrome-token","origin":"https://app.sybil.exchange","crossOrigin":false}"#,
+            br#"{"type": "webauthn.get", "challenge": "safari-token", "origin": "https://app.sybil.exchange"}"#,
+            br#"{"challenge":"firefox-token","origin":"https://app.sybil.exchange","type":"webauthn.get","crossOrigin":false,"tokenBinding":{"status":"supported"}}"#,
         ];
         for (sample, expected) in samples.iter().zip([
             b"chrome-token".as_slice(),
@@ -559,7 +566,7 @@ mod tests {
 
     #[test]
     fn challenge_and_member_names_decode_all_json_escape_classes() {
-        let json = br#"{"t\u0079pe":"webauthn\u002eget","chall\u0065nge":"a\/b\\c\"d\b\f\n\r\t\u00e9\ud83d\ude00","ori\u0067in":"https:\/\/app.62-171-170-238.nip.io","cross\u004frigin":false}"#;
+        let json = br#"{"t\u0079pe":"webauthn\u002eget","chall\u0065nge":"a\/b\\c\"d\b\f\n\r\t\u00e9\ud83d\ude00","ori\u0067in":"https:\/\/app.sybil.exchange","cross\u004frigin":false}"#;
         let fields = extract_client_data_fields(json).unwrap();
         assert_eq!(fields.type_, b"webauthn.get");
         assert_eq!(
@@ -604,8 +611,8 @@ mod tests {
         let rejected: &[&[u8]] = &[
             br#"{"type":"webauthn.get","challenge":"bad","challenge":"good"}"#,
             br#"{"type":"bad","type":"webauthn.get","challenge":"good"}"#,
-            br#"{"type":"webauthn.get","challenge":"good","origin":"https://app.62-171-170-238.nip.io","origin":"https://evil.example"}"#,
-            br#"{"type":"webauthn.get","challenge":"good","origin":"https://app.62-171-170-238.nip.io","crossOrigin":false,"crossOrigin":true}"#,
+            br#"{"type":"webauthn.get","challenge":"good","origin":"https://app.sybil.exchange","origin":"https://evil.example"}"#,
+            br#"{"type":"webauthn.get","challenge":"good","origin":"https://app.sybil.exchange","crossOrigin":false,"crossOrigin":true}"#,
             br#"{"type":"webauthn.get","challenge":"bad","nested":{"challenge":"good"}}"#,
             br#"{"type":"webauthn.get","challenge":"bad\u0022,\u0022challenge\u0022:\u0022good"}"#,
             br#"{"type":"webauthn.get","challenge":"good\ud800"}"#,

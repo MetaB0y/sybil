@@ -1,8 +1,8 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const MOBILE_VIEWPORT = { width: 390, height: 844 };
-const APP_BASE = process.env.E2E_BASE_URL ?? "https://app.62-171-170-238.nip.io";
-const API_BASE = process.env.E2E_API_BASE ?? "https://62-171-170-238.nip.io";
+const APP_BASE = process.env.E2E_BASE_URL ?? "https://app.sybil.exchange";
+const API_BASE = process.env.E2E_API_BASE ?? "https://api.sybil.exchange";
 
 test.describe("mobile viewport smoke", () => {
   test.use({ viewport: MOBILE_VIEWPORT, isMobile: true, hasTouch: true });
@@ -55,26 +55,15 @@ test.describe("mobile viewport smoke", () => {
     await expect(page.getByTestId("price-chart-tooltip")).toBeVisible();
     await expect(chart).toHaveCSS("touch-action", "pan-y");
 
-    const placeOrder = page.getByRole("button", { name: "Place order" });
-    await expect(placeOrder).toBeVisible();
-    await placeOrder.click();
-
-    const dialog = page.getByRole("dialog", { name: "Place order" });
-    await expect(dialog).toBeVisible();
-    const closeOrder = dialog.getByRole("button", { name: "Close" });
-    await expect(closeOrder).toBeFocused();
-    const sheet = dialog.locator(".place-order-sheet");
-    await expect(sheet).toBeVisible();
-    const bottomGap = await sheet.evaluate(
-      (node) => window.innerHeight - node.getBoundingClientRect().bottom,
-    );
-    expect(Math.abs(bottomGap)).toBeLessThanOrEqual(1);
+    // Trading leads the page at phone width: the rail sits above the chart, so
+    // the bet controls must be on screen without a scroll or a sheet.
+    const rail = page.locator(".market-rail-responsive");
+    await expect(rail).toBeVisible();
+    const railTop = (await rail.boundingBox())!.y;
+    const chartTop = (await page.locator(".market-detail-chart-head").first().boundingBox())!.y;
+    expect(railTop).toBeLessThan(chartTop);
     await expectNoDocumentOverflow(page, href!);
-    await expectTouchTargets(page, `${href!} order sheet`);
-
-    await closeOrder.click();
-    await expect(dialog).toBeHidden();
-    await expect(placeOrder).toBeFocused();
+    await expectTouchTargets(page, href!);
 
     for (const path of ["/portfolio", "/activity", "/arena"]) {
       await page.goto(path);
@@ -344,9 +333,23 @@ async function expectTouchTargets(page: Page, path: string) {
     .locator("button:visible, a[href]:visible")
     .evaluateAll((targets) =>
       targets.flatMap((target) => {
-        if (target.getAttribute("aria-label") === "Open Next.js Dev Tools") {
+        // Next's dev-tools overlay lives in a shadow root that Playwright's
+        // locators pierce. None of it exists in a production build, and its
+        // buttons (the toolbar, the issues badge and its collapse control) are
+        // not ours to size — skip the whole portal rather than naming each one.
+        const root = target.getRootNode();
+        if (
+          root instanceof ShadowRoot &&
+          root.host.tagName.toLowerCase() === "nextjs-portal"
+        ) {
           return [];
         }
+        // Controls that are drawn small on purpose (the glossary "?", the
+        // market sort chips, the segments of a range bar) carry their 44px as a
+        // pseudo-element hit area — real for a finger, invisible to
+        // getBoundingClientRect. See `.hit-target` in globals.css.
+        if (target.dataset.hitArea === "expanded") return [];
+        if (target.closest(".hit-target, .hit-target-group")) return [];
         if (
           target instanceof HTMLAnchorElement &&
           getComputedStyle(target).display === "inline"

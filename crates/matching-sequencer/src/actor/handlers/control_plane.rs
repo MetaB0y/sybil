@@ -256,11 +256,10 @@ impl SequencerActorState {
         creation_key: Option<String>,
         market_ids: Vec<MarketId>,
     ) -> Result<(u64, MarketGroup), SequencerError> {
-        if let Some(existing) = self.sequencer.existing_market_group_for_creation(
-            &name,
-            creation_key.as_deref(),
-            &market_ids,
-        )? {
+        if let Some(existing) =
+            self.sequencer
+                .can_create_market_group(&name, creation_key.as_deref(), &market_ids)?
+        {
             return Ok(existing);
         }
         self.persist_control_plane(&ControlPlaneCommand::CreateMarketGroup {

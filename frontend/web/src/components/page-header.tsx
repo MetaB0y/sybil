@@ -27,15 +27,25 @@ export function PageHeader({
         gap: "var(--space-2)",
       }}
     >
+      {/* The row wraps below 640px (see globals.css): a 40px display title plus
+          a range bar does not fit on a phone, and an unwrapped row pushed the
+          whole page 34px wider than the viewport on /leaderboard. */}
       <div
+        className="page-header-title-row"
         style={{
           display: "flex",
           alignItems: "baseline",
           gap: "var(--space-3)",
         }}
       >
-        <h1 className="h-display">{title}</h1>
-        {action != null && <div style={{ marginLeft: "auto" }}>{action}</div>}
+        <h1 className="h-display" style={{ minWidth: 0 }}>
+          {title}
+        </h1>
+        {action != null && (
+          <div className="page-header-action" style={{ marginLeft: "auto" }}>
+            {action}
+          </div>
+        )}
       </div>
       {meta != null && <p className="text-annotation">{meta}</p>}
     </header>

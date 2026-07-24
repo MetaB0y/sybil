@@ -134,6 +134,51 @@ textarea {
   min-height: 40px;
 }
 
+/*
+ * Touch target without the bulk.
+ *
+ * Below, every control on a coarse pointer is forced to 44x44 so it can be
+ * tapped. For most controls that is exactly right, but a few are *meant* to be
+ * small: the glossary "?" is a 13px dot beside a label, and the market sort
+ * chips are 26px pills. Blowing those up to 44px made the "?" a circle three
+ * times the height of the word next to it, and turned the filter row into three
+ * chunky boxes.
+ *
+ * `.hit-target` keeps the element's drawn size and grows only the *hit* area,
+ * via a centred pseudo-element that takes no layout space. `.hit-target-group`
+ * says the same thing about every button inside a segmented control (a range
+ * bar, a tab pair) — there the pseudo-element grows only downwards and upwards,
+ * because neighbouring segments touch and a wider hit area would steal taps
+ * from the segment next door. The e2e touch-target sweep — which can only
+ * measure bounding boxes — skips anything under either marker.
+ */
+.hit-target,
+.hit-target-group button {
+  position: relative;
+}
+
+@media (pointer: coarse) {
+  .hit-target::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
+
+  .hit-target-group button::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: max(100%, 44px);
+    transform: translateY(-50%);
+  }
+}
+
 .responsive-scroll {
   width: 100%;
   max-width: 100%;
@@ -145,9 +190,92 @@ textarea {
   min-width: max-content;
 }
 
-.global-nav {
+/*
+ * Devnet notice — a standing strip above the nav on a public devnet.
+ *
+ * It is fixed like the nav, so the space it takes has to be reserved by hand:
+ * `--devnet-offset` is its height, `--chrome-height` is everything fixed at the
+ * top of the page, and anything that positions itself "below the chrome" uses
+ * the latter. Dismissing sets `data-devnet="dismissed"` on <html>, which zeroes
+ * the offset and hides the strip in one move — see `devnet-notice.tsx`.
+ */
+:root {
+  --devnet-offset: 34px;
+  --chrome-height: calc(var(--nav-height) + var(--devnet-offset));
+}
+
+:root[data-devnet="dismissed"] {
+  --devnet-offset: 0px;
+}
+
+.devnet-notice {
   position: fixed;
   top: 0;
+  left: 0;
+  right: 0;
+  z-index: 51;
+  height: var(--devnet-offset);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-4);
+  background: var(--warn-soft);
+  border-bottom: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+  color: var(--fg-1);
+}
+
+:root[data-devnet="dismissed"] .devnet-notice {
+  display: none;
+}
+
+.devnet-notice-text {
+  margin: 0;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.35;
+  letter-spacing: var(--track-wide);
+  text-align: center;
+  /* Two lines at phone width; past that it is one. Clipped rather than allowed
+     to grow, because the strip's height is what the page reserved for it. */
+  overflow: hidden;
+}
+
+.devnet-notice-text strong {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.devnet-notice-short {
+  display: none;
+}
+
+.devnet-notice-close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-3);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .devnet-notice-close:hover {
+    color: var(--fg-1);
+    background: color-mix(in srgb, var(--warn) 18%, transparent);
+  }
+}
+
+.global-nav {
+  position: fixed;
+  top: var(--devnet-offset);
   left: 0;
   right: 0;
   height: var(--nav-height);
@@ -160,6 +288,10 @@ textarea {
   align-items: center;
   gap: var(--space-5);
   padding: 0 var(--space-5);
+}
+
+.global-nav-wordmark {
+  font-size: var(--fs-18);
 }
 
 .global-nav-tabs {
@@ -400,21 +532,21 @@ textarea {
 
 .global-nav-sheet-backdrop {
   position: fixed;
-  inset: var(--nav-height) 0 0;
+  inset: var(--chrome-height) 0 0;
   z-index: 49;
   background: var(--overlay);
 }
 
 .global-nav-sheet {
   position: fixed;
-  top: var(--nav-height);
+  top: var(--chrome-height);
   left: 0;
   right: 0;
   z-index: 51;
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  max-height: calc(100dvh - var(--nav-height));
+  max-height: calc(100dvh - var(--chrome-height));
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: var(--space-4) var(--space-5) var(--space-5);
@@ -525,7 +657,7 @@ textarea {
 
 .market-detail-main {
   width: 100%;
-  height: calc(100dvh - var(--nav-height));
+  height: calc(100dvh - var(--chrome-height));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -559,7 +691,10 @@ textarea {
 .market-detail-header {
   display: grid;
   grid-template-columns: 56px minmax(0, 1fr);
-  gap: var(--space-4);
+  grid-template-areas:
+    "thumb crumb"
+    "thumb headline";
+  gap: var(--space-2) var(--space-4);
   align-items: start;
   margin-left: calc(-1 * var(--space-5));
   margin-right: calc(-1 * var(--space-5));
@@ -569,31 +704,28 @@ textarea {
   border-bottom: 1px solid var(--border-1);
 }
 
+.market-detail-thumb {
+  grid-area: thumb;
+  display: inline-flex;
+}
+
+.market-detail-crumb {
+  grid-area: crumb;
+}
+
+.market-detail-headline {
+  grid-area: headline;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
 .market-detail-title-row {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
   gap: var(--space-3);
-}
-
-/* Desktop ordering stays in the reviewed rail. Compact layouts get the modal
-   shortcut so order entry remains reachable before the rail reflows below the
-   long market content. */
-.market-detail-place-order {
-  display: none;
-  margin-left: auto;
-  flex-shrink: 0;
-  min-height: 40px;
-  padding: 8px 16px;
-  border: 0;
-  border-radius: var(--radius-md);
-  background: var(--accent);
-  color: var(--fg-on-accent);
-  font-family: var(--font-sans);
-  font-size: var(--fs-13);
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  cursor: pointer;
 }
 
 .market-detail-title {
@@ -614,12 +746,33 @@ textarea {
   flex-wrap: nowrap;
 }
 
-.place-order-close {
-  width: 40px;
-  height: 40px;
-  display: inline-flex;
+/* Expanded batch panel. The left indent lines it up under the row's expand
+   caret; small screens override it (there is no caret column there). */
+.activity-batch-detail {
+  padding: 18px 24px 24px 70px;
+}
+
+/* Activity / Comments, the outcome filter, then the range track. The filter
+   follows the switch it belongs to; the range track takes the right edge on a
+   desktop and its own line on a phone. */
+.event-activity-head {
+  display: flex;
   align-items: center;
-  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  min-width: 0;
+}
+
+.event-activity-head > :last-child {
+  margin-left: auto;
+}
+
+@media (max-width: 640px) {
+  /* No right edge to hold on a phone — the track keeps its own width and wraps
+     to the next line when the switch and the filter have taken the first. */
+  .event-activity-head > :last-child {
+    margin-left: 0;
+  }
 }
 
 .markets-filter-bar,
@@ -634,6 +787,11 @@ textarea {
   overflow-x: auto;
   overscroll-behavior-inline: contain;
   scrollbar-width: none;
+}
+
+/* Tabs never squeeze: a narrowed "Open orders" is what wrapped it in two. */
+.portfolio-tabs > * {
+  flex-shrink: 0;
 }
 
 .portfolio-tabs::-webkit-scrollbar {
@@ -699,6 +857,177 @@ textarea {
   min-width: 860px;
 }
 
+/* ── Card rows ───────────────────────────────────────────────────────────────
+   Phone-width form of a table row, rendered by `DataCard` below
+   COMPACT_BREAKPOINT_PX. The 860px floor above is what these replace: rather
+   than swiping a ten-column grid, each row becomes a card with its identity on
+   top and its numbers as labelled pairs, two per line. */
+.data-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.data-card {
+  display: flex;
+  flex-direction: column;
+  /* A card's min-content is its widest pair row; without this it can push its
+     way out of any flex or grid parent that sizes to content. */
+  min-width: 0;
+  gap: 9px;
+  padding: 12px 14px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-1);
+  border-radius: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+
+/* The viewer's own row, matching the desktop tables' self-highlight. */
+.data-card[data-highlighted="true"] {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-1));
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-1));
+}
+
+.data-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.data-card-thumb {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+/* Wraps rather than truncating: the market question is the whole point of the
+   row, and a phone has the vertical room a table column did not. */
+.data-card-title {
+  min-width: 0;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--fg-1);
+  overflow-wrap: anywhere;
+}
+
+.data-card-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+}
+
+/* Two pairs to a line on a phone, more on a tablet. The `max-width` stops a
+   wide card from stretching one pair across half a screen, which left the
+   label and its value at opposite ends of a lot of empty space. */
+.data-card-pairs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 10px var(--space-4);
+  max-width: 680px;
+}
+
+/* Label above value, both flush left. Side by side with the label pushed to one
+   edge and the value to the other, two pairs on a line read as four columns
+   with every value sitting closer to the *next* pair's label than its own —
+   "PNL   +$33.18   ROI   +3.3%". Stacked, each pair is unmistakably one thing.
+   The tabular figures still line up, because the columns are equal width. */
+.data-card-pair {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.data-card-pair[data-wide="true"] {
+  grid-column: 1 / -1;
+}
+
+.data-card-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--track-wide);
+  text-transform: uppercase;
+  color: var(--fg-4);
+  white-space: nowrap;
+}
+
+.data-card-value {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--fg-1);
+  overflow-wrap: anywhere;
+}
+
+.data-card-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+}
+
+
+/* Portfolio table rows (Positions / Orders / Trades / History). Every row is a
+   route into its market, so hovering tints the whole row on --surface-2 — the
+   same feedback the dev, arena and activity tables give — and the market label
+   goes accent to name where the tap actually lands. In Orders only the market
+   cell is the link, so the accent label is what carries the affordance there;
+   the row tint just follows the cursor. */
+.portfolio-row {
+  transition: background var(--dur-fast) var(--ease-standard);
+}
+
+.portfolio-row-market {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-1);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  transition: color var(--dur-fast) var(--ease-standard);
+}
+
+@media (hover: hover) {
+  .portfolio-row:hover {
+    background: var(--surface-2);
+  }
+
+  .portfolio-row:hover .portfolio-row-market {
+    color: var(--accent);
+  }
+}
+
+/* Market-detail lists (Holdings / Open orders / Closed orders under the chart).
+   These rows navigate nowhere — the tint is purely a reading aid across ten
+   columns — so there's no accent label the way portfolio rows have. */
+.event-row {
+  transition: background var(--dur-fast) var(--ease-standard);
+}
+
+@media (hover: hover) {
+  .event-row:hover {
+    background: var(--surface-2);
+  }
+}
+
+.portfolio-row:focus-visible {
+  position: relative;
+  z-index: 2;
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
 /* Dev-zone sub-nav tabs — same hover / active feedback as the global route
    tabs, kept compact for the dev toolbar's density. */
 .dev-sub-nav-tab {
@@ -767,7 +1096,10 @@ textarea {
   background: var(--bg-1);
   color: var(--fg-1);
   font-family: var(--font-sans);
-  padding: var(--space-6) var(--space-5) var(--space-9);
+  /* Every page header offsets by the markets ticker's height so titles land on
+     one baseline; without it "Bot Arena" sat 36px high. */
+  padding: calc(var(--space-6) + var(--ticker-offset)) var(--space-5)
+    var(--space-9);
 }
 
 .arena-panel-grid {
@@ -1015,15 +1347,9 @@ textarea {
 /* Market-detail page reflow keeps its own 1100px breakpoint, independent of the
    nav collapse above. */
 @media (max-width: 1100px) {
-  .market-detail-place-order {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-
   .market-detail-main {
     height: auto;
-    min-height: calc(100dvh - var(--nav-height));
+    min-height: calc(100dvh - var(--chrome-height));
     overflow: visible;
   }
 
@@ -1034,19 +1360,54 @@ textarea {
     overflow: visible;
   }
 
-  .market-detail-content {
-    order: 1;
-    overflow: visible;
-  }
-
+  /* Trading first. Stacked in source order the buy box landed below the chart,
+     the holdings, the description and the activity feed — about 2,400px down,
+     so the one thing you came to the page to do was the last thing on it. The
+     rail leads and the reading material follows. */
   .market-rail-responsive {
-    order: 2;
+    order: 1;
     overflow: visible !important;
-    padding-bottom: var(--space-6) !important;
+    padding-bottom: 0 !important;
   }
 
+  .market-detail-content {
+    order: 2;
+    overflow: visible;
+    padding-bottom: var(--space-6);
+  }
+
+  /* minmax(0, …), not 1fr: a grid item's automatic minimum is its content, and
+     a stack of cards min-contents at five 110px pair columns — 614px inside a
+     358px column, which is how the market rows ended up off the screen. */
   .activity-batch-detail-grid {
-    grid-template-columns: 1fr !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  /* The desktop indent aligns the panel under the row's expand caret; there is
+     no caret column left to align to once the rows are cards. */
+  .activity-batch-detail {
+    padding: var(--space-3) var(--space-3) var(--space-4) !important;
+  }
+
+  /* Dev Zone's two-column views pin their right column at 360px, which is wider
+     than a phone once the page padding is taken out — every one of them pushed
+     the document 6px past the viewport. */
+  .dev-split-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  /* Dev filter/picker selects size to their longest option (a market question
+     runs to ~780px). Nothing else in the row needs the width. */
+  .dev-select,
+  .dev-zone select {
+    max-width: 100%;
+    min-width: 0 !important;
+  }
+
+  /* Dev stat rows go up to four across; on a phone that is ~60px a cell and
+     the figures spill out of them. */
+  .dev-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 }
 
@@ -1065,14 +1426,94 @@ textarea {
     grid-template-columns: repeat(2, 1fr);
   }
 
+  /* Below 900px the legend and the range bar stop sharing a line. Left as one
+     row, `flex: 1` squeezed the legend into a ~150px column and the outcome
+     chips stacked one per row beside (and, once the chips hit their min width,
+     underneath) the range selector. Each gets its own full-width row instead,
+     range bar first so it stays reachable no matter how tall the chip list is. */
   .market-detail-chart-head {
     flex-wrap: wrap;
+  }
+
+  .market-detail-chart-legend,
+  .market-detail-chart-range {
+    flex: 1 0 100%;
+    min-width: 0;
+  }
+
+  .market-detail-chart-range {
+    order: -1;
   }
 }
 
 @media (max-width: 640px) {
   :root {
-    --nav-height: 56px;
+    /* The bar holds a wordmark and three 28px controls, all centred — the 64px
+       it took when those controls were 44px boxes was mostly air. */
+    --nav-height: 52px;
+    /* The notice runs to two lines of its short wording at this width. */
+    --devnet-offset: 44px;
+    /* The ticker is hidden at this width (below), so pages must not reserve
+       space for it or every title would sit 36px low. */
+    --ticker-offset: 0px;
+  }
+
+  .devnet-notice-long {
+    display: none;
+  }
+
+  .devnet-notice-short {
+    display: inline;
+  }
+
+  /* RECENT TRADES is a marquee of clipped mid-sentence text that ate 44px of a
+     phone screen directly under the header. The same live block height is on
+     the batch pill and the activity page. */
+  .clearing-ticker {
+    display: none !important;
+  }
+
+  /* The wordmark is the brand; at 18px it was the smallest thing in a bar of
+     44px controls. Sizing it up and stripping the boxes off the two icon
+     buttons puts the emphasis back where it belongs — the buttons keep their
+     44px targets, they just stop being drawn as buttons. */
+  .global-nav-wordmark {
+    font-size: var(--fs-20);
+  }
+
+  .global-nav .nav-icon-btn,
+  .global-nav-menu-button {
+    background: transparent;
+    border-color: transparent;
+    color: var(--fg-2);
+  }
+
+  /* One bordered control in the bar, and it is the one that does something.
+     All three stand 28px — the wordmark's own height — instead of the 44px the
+     coarse-pointer floor gave them; the touch target moved into
+     `.hit-target`'s pseudo-element. */
+  .global-nav .nav-chip {
+    height: 28px;
+    padding: 0 var(--space-2);
+    font-size: 11px;
+  }
+
+  .global-nav .nav-icon-btn,
+  .global-nav-menu-button {
+    height: 28px;
+    width: 28px;
+  }
+
+  /* A 40px display title plus a range bar does not fit on one phone line, and
+     an unwrapped row pushed /leaderboard 34px past the viewport at every phone
+     width. Let the action drop to its own full-width line instead. */
+  .page-header-title-row {
+    flex-wrap: wrap;
+  }
+
+  .page-header-action {
+    margin-left: 0 !important;
+    width: 100%;
   }
 
   .sybil-page-pad {
@@ -1125,6 +1566,23 @@ textarea {
     scrollbar-width: none;
   }
 
+  /* The filter block was ~110px of chrome above the first market: 14px tabs on
+     a 44px row, then three 44px boxes. The tabs come down a size and the chips
+     keep the height they were designed at (their 44px is hit area now), which
+     reads as a filter strip rather than a second toolbar. */
+  .markets-category-tab {
+    font-size: var(--fs-13) !important;
+  }
+
+  .markets-category-tabs {
+    gap: var(--space-3) !important;
+  }
+
+  .markets-sort-chip {
+    font-size: 10px !important;
+    padding: 0 var(--space-2) !important;
+  }
+
   .market-detail-header-pad,
   .market-detail-grid {
     padding-left: var(--space-4);
@@ -1135,8 +1593,16 @@ textarea {
     gap: var(--space-4);
   }
 
+  /* The breadcrumb wraps to two lines at this width, and with the thumb pinned
+     beside it the icon sat against the crumb with the title starting below and
+     to the right of it — reading as if it belonged to the breadcrumb. Give the
+     crumb the full width and drop the thumb down next to the title, which is
+     what it actually labels. */
   .market-detail-header {
-    grid-template-columns: 44px minmax(0, 1fr);
+    grid-template-columns: 34px minmax(0, 1fr);
+    grid-template-areas:
+      "crumb crumb"
+      "thumb headline";
     gap: var(--space-3);
     margin-left: calc(-1 * var(--space-4));
     margin-right: calc(-1 * var(--space-4));
@@ -1144,16 +1610,20 @@ textarea {
     padding-right: var(--space-4);
   }
 
+  /* A 24px question ran to four lines beside the thumbnail, which left a 56px
+     tile pinned to a column of text three times its height — the mismatch that
+     made the icon look misplaced. At 20px next to a 34px tile the two read as
+     one unit, the same pairing the market cards use. */
   .market-detail-title {
-    font-size: var(--fs-24);
-    line-height: var(--lh-24);
+    font-size: var(--fs-20);
+    line-height: var(--lh-20);
     letter-spacing: 0;
   }
 
-  .market-detail-title-row > button {
-    width: 100%;
-    margin-left: 0 !important;
-    min-height: 44px;
+  /* Beside a wrapped title the tile belongs at the first line, not the middle
+     of the block. */
+  .market-detail-thumb {
+    align-self: start;
   }
 
   .portfolio-hero-grid {
@@ -1183,17 +1653,31 @@ textarea {
     width: 100% !important;
   }
 
-  .withdrawal-row {
-    grid-template-columns: 1fr !important;
-  }
-
-  .withdrawal-row > :last-child {
-    justify-self: start;
-  }
-
-  .activity-hero-stats,
+  /* Two-up, not one-up. Stacking six all-time figures in a single column made
+     the hero ~1400px tall on a phone — the numbers are short enough (`$488K`,
+     `36`, `19`) that two fit side by side once the display size comes down. */
   .activity-pulse-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  /* Half these labels wrap to two lines at this width ("trader orders filled")
+     and half don't, which left every other figure sitting a line lower than the
+     one beside it. Reserving the second line puts all four on two shared
+     baselines. */
+  .activity-pulse-cell > .eyebrow {
+    min-height: 2.4em;
+  }
+
+  /* One rhythm for all six figures. Stacked into a single column the two hero
+     numbers kept a 44px display size while the four below them stayed at 30px,
+     with a caption hanging off the left cell of every other row — six stats
+     that never lined up with each other. Same size, same gaps, same column
+     edges: the whole block reads as one grid. */
+  .activity-hero-stats,
+  .activity-hero-numbers {
+    column-gap: var(--space-4);
+    row-gap: var(--space-5);
+    align-items: start;
   }
 
   .activity-hero-section,
@@ -1203,9 +1687,9 @@ textarea {
     padding-right: var(--space-4) !important;
   }
 
-  .activity-hero-numbers {
-    grid-template-columns: 1fr;
-    gap: var(--space-5) !important;
+  /* Matches the 30px of the four stats below it (`BigKv`). */
+  .activity-hero-value {
+    font-size: 30px !important;
   }
 
   .activity-table-head {
@@ -1219,7 +1703,10 @@ textarea {
   }
 
   .arena-main {
-    padding: var(--space-5) var(--space-4) var(--space-8);
+    /* Sibling pages keep the same offset at every width, so match them here
+       rather than reintroducing the misalignment on small screens. */
+    padding: calc(var(--space-6) + var(--ticker-offset)) var(--space-4)
+      var(--space-8);
   }
 
   .arena-panel-grid,
@@ -1244,37 +1731,6 @@ textarea {
     width: 100% !important;
     min-width: 0 !important;
     max-width: 100% !important;
-  }
-
-  .place-order-overlay {
-    align-items: flex-end !important;
-    padding: 0 !important;
-  }
-
-  .place-order-sheet {
-    width: 100% !important;
-    max-width: none !important;
-    max-height: calc(100dvh - var(--space-4)) !important;
-    border-radius: 16px 16px 0 0 !important;
-    border-bottom: 0 !important;
-  }
-
-  .place-order-sheet::before {
-    content: "";
-    display: block;
-    width: 40px;
-    height: 4px;
-    margin: 8px auto 0;
-    border-radius: var(--radius-pill);
-    background: var(--border-3);
-  }
-
-  .place-order-sheet-header {
-    padding-top: 8px !important;
-  }
-
-  .place-order-sheet-body {
-    padding-bottom: calc(18px + env(safe-area-inset-bottom)) !important;
   }
 
   .settings-profile-grid,
@@ -1302,6 +1758,14 @@ textarea {
     min-height: 44px !important;
   }
 
+  /* Opted out of the blanket sizing — these carry their 44px as hit area
+     instead, so they stay the size they were drawn. See `.hit-target`. */
+  .hit-target,
+  .hit-target-group button {
+    min-width: 0 !important;
+    min-height: 0 !important;
+  }
+
   button,
   [role="button"],
   [role="tab"] {
@@ -1309,7 +1773,6 @@ textarea {
   }
 
   .global-nav-menu-button,
-  .place-order-close,
   .theme-toggle {
     min-width: 44px;
   }

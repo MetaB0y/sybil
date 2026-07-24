@@ -202,33 +202,19 @@ export function EventActivity({ marketId }: { marketId: number }) {
         gap: "var(--space-4)",
       }}
     >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: "var(--space-3)",
-          flexWrap: "wrap",
-        }}
-      >
+      {/* Three siblings, not two nested groups: the outcome filter belongs
+          beside the Activity/Comments switch it filters, and on a phone the
+          range track is what drops to the second line. */}
+      <div className="event-activity-head">
         <SectionTabs />
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "var(--space-2)",
-            flexWrap: "wrap",
-          }}
-        >
-          {isMulti && (
-            <OutcomeFilter
-              outcomes={outcomes}
-              selected={selected}
-              onChange={setSelected}
-            />
-          )}
-          <RangeTabs value={range} onChange={pickRange} />
-        </div>
+        {isMulti && (
+          <OutcomeFilter
+            outcomes={outcomes}
+            selected={selected}
+            onChange={setSelected}
+          />
+        )}
+        <RangeTabs value={range} onChange={pickRange} />
       </div>
 
       {groupUnavailable ? (
@@ -910,6 +896,7 @@ function SectionTabs() {
   return (
     <>
       <div
+        className="hit-target-group"
         style={{
           display: "inline-flex",
           background: "var(--bg-2)",
@@ -961,6 +948,7 @@ function RangeTabs({
 }) {
   return (
     <div
+      className="hit-target-group"
       style={{
         display: "inline-flex",
         gap: 2,
@@ -1094,17 +1082,24 @@ function OutcomeFilter({
   }
 
   return (
-    <div ref={ref} style={{ position: "relative" }}>
+    <div
+      ref={ref}
+      /* Capped here rather than on the button so the trigger can shrink with
+         the row on a phone instead of forcing the range track onto a third
+         line. */
+      style={{ position: "relative", maxWidth: 200, minWidth: 0 }}
+    >
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="listbox"
         aria-expanded={open}
+        className="hit-target"
         style={{
-          display: "inline-flex",
+          display: "flex",
           alignItems: "center",
           gap: 6,
-          maxWidth: 200,
+          maxWidth: "100%",
           padding: "4px 8px",
           borderRadius: 4,
           background: "var(--bg-2)",
@@ -1166,6 +1161,9 @@ function OutcomeFilter({
             right: 0,
             zIndex: 30,
             minWidth: 200,
+            // Outcome labels can be long; without a cap the panel grew past the
+            // left edge of a phone screen and the list was unreadable.
+            maxWidth: "calc(100vw - var(--space-6))",
             background: "var(--surface-2)",
             border: "1px solid var(--border-2)",
             borderRadius: 6,
