@@ -1,0 +1,41 @@
+{
+  "schema": "sybil.release.v1",
+  "release_id": "20260724T084651Z-2b4bebae0421-web",
+  "created_at": "2026-07-24T08:46:51Z",
+  "verified_at": "2026-07-24T08:47:03Z",
+  "status": "verified",
+  "scope": "web",
+  "promotion_source_revision": "2b4bebae0421479a04bc97b4759e0625954996b3",
+  "images": {
+    "sybil-api": {
+      "ref": "sybil-api:804fccf2905027eabfa2e997b3c91ee184492f95",
+      "image_id": "sha256:4d4a4030b13c4ba7c301f2dd5c03a7d62c47c3446f113f5ecfeb2c2153e9a59a",
+      "source_revision": "804fccf2905027eabfa2e997b3c91ee184492f95"
+    },
+    "sybil-arena": {
+      "ref": "sybil-arena:804fccf2905027eabfa2e997b3c91ee184492f95",
+      "image_id": "sha256:0ccd97a5479fd8ec6adc8262287a0749d8bdadec51cb8609823fa1711fa1a1ad",
+      "source_revision": "804fccf2905027eabfa2e997b3c91ee184492f95"
+    },
+    "sybil-web": {
+      "ref": "sybil-web:2b4bebae0421479a04bc97b4759e0625954996b3",
+      "image_id": "sha256:829f0dc2985162a66c8349e83964088959c9de14d7961742917f61fb397bbed9",
+      "source_revision": "2b4bebae0421479a04bc97b4759e0625954996b3"
+    },
+    "caddy": {
+      "ref": "caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648",
+      "image_id": "sha256:af555904a0961945f16bb323a501457b13a4f7e9bde969b145b97da80b38ecbe",
+      "source_revision": null
+    }
+  },
+  "verified_containers": {
+    "sybil-web": {
+      "image_id": "sha256:829f0dc2985162a66c8349e83964088959c9de14d7961742917f61fb397bbed9",
+      "state": "running"
+    },
+    "caddy": {
+      "image_id": "sha256:af555904a0961945f16bb323a501457b13a4f7e9bde969b145b97da80b38ecbe",
+      "state": "running"
+    }
+  }
+}
