@@ -17,3 +17,8 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["."]
+
+[tool.ruff.lint]
+# Ruff 0.16 broadened its implicit defaults. Keep the existing lint contract
+# explicit so dependency refreshes do not silently introduce new policy.
+select = ["E4", "E7", "E9", "F"]

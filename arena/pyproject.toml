@@ -55,6 +55,9 @@ extend-exclude = [
 ]
 
 [tool.ruff.lint]
+# Ruff 0.16 broadened its implicit defaults. Keep the established gate explicit;
+# expanding policy belongs in a dedicated lint cleanup.
+select = ["E4", "E7", "E9", "F"]
 ignore = ["E501"]
 # These entrypoints extend sys.path before importing local packages.
 per-file-ignores = { "examples/full_competition.py" = ["E402"], "sim/runner.py" = ["E402"] }
