@@ -641,10 +641,10 @@ check_onboarding() {
     # 3b. A caller-supplied funding field is rejected by the key-only DTO.
     local pubb; pubb="$(mint_p256_pub)"
     http POST /v1/onboarding/accounts "{\"initial_balance_nanos\":1,\"initial_key\":{\"public_key_hex\":\"$pubb\"}}" none
-    if [[ "$HTTP_CODE" == "422" ]]; then
-        pass "caller-selected onboarding funding -> 422 (key-only DTO enforced)"
+    if [[ "$HTTP_CODE" == "400" ]]; then
+        pass "caller-selected onboarding funding -> 400 (key-only DTO enforced)"
     else
-        fail "caller-selected onboarding funding -> $HTTP_CODE (expected 422): $HTTP_BODY"
+        fail "caller-selected onboarding funding -> $HTTP_CODE (expected 400): $HTTP_BODY"
     fi
 
     # 3c. Key-only public allocation succeeds while stock remains, or returns

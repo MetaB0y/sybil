@@ -26,7 +26,7 @@ assert_proof_result() {
 }
 
 inventory=$(printf '%s' '[
-  {"market_id": 7, "status": "active", "polymarket_condition_id": null, "resolution_criteria": "native"},
+  {"market_id": 7, "status": "active", "polymarket_condition_id": null, "tags": ["native"]},
   {"market_id": 8, "status": "active", "polymarket_condition_id": "0xabc", "reference_price_nanos": "500000000"},
   {"market_id": 9, "status": "active", "polymarket_condition_id": "0xdef", "reference_price_nanos": null}
 ]' | smoke_market_inventory)
@@ -36,7 +36,7 @@ smoke_market_inventory_is_ready "$status" "$native" "$mirrored" "$referenced" \
     || fail "ready market inventory was rejected"
 
 unready=$(printf '%s' '[
-  {"market_id": 3, "status": "active", "polymarket_condition_id": null, "resolution_criteria": "native"}
+  {"market_id": 3, "status": "active", "polymarket_condition_id": null, "tags": ["native"]}
 ]' | smoke_market_inventory)
 assert_eq "$unready" "OK 1 0 0 3" "unready mirror inventory"
 read -r status native mirrored referenced _ <<< "$unready"
@@ -45,7 +45,7 @@ if smoke_market_inventory_is_ready "$status" "$native" "$mirrored" "$referenced"
 fi
 
 no_reference=$(printf '%s' '[
-  {"market_id": 3, "status": "active", "polymarket_condition_id": null, "resolution_criteria": "native"},
+  {"market_id": 3, "status": "active", "polymarket_condition_id": null, "tags": ["native"]},
   {"market_id": 4, "status": "active", "polymarket_condition_id": "0xabc", "reference_price_nanos": null}
 ]' | smoke_market_inventory)
 assert_eq "$no_reference" "OK 1 1 0 3" "unreferenced mirror inventory"
@@ -55,7 +55,7 @@ if smoke_market_inventory_is_ready "$status" "$native" "$mirrored" "$referenced"
 fi
 
 zero_and_inactive=$(printf '%s' '[
-  {"market_id": 3, "status": "active", "polymarket_condition_id": null, "resolution_criteria": "native"},
+  {"market_id": 3, "status": "active", "polymarket_condition_id": null, "tags": ["native"]},
   {"market_id": 4, "status": "active", "polymarket_condition_id": "0xzero", "reference_price_nanos": "0"},
   {"market_id": 5, "status": "resolved", "polymarket_condition_id": "0xold", "reference_price_nanos": "500000000"},
   {"market_id": 6, "status": "active", "polymarket_condition_id": "", "reference_price_nanos": "500000000"}

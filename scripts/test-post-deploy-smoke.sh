@@ -10,11 +10,11 @@ if grep -q 'SYBIL_SMOKE_SOURCE_ONLY' scripts/post-deploy-smoke.sh; then
 fi
 
 fixture_ready='[
-  {"market_id": 7, "status": "active", "polymarket_condition_id": null, "resolution_criteria": "native"},
+  {"market_id": 7, "status": "active", "polymarket_condition_id": null, "tags": ["native"]},
   {"market_id": 8, "status": "active", "polymarket_condition_id": "0xabc", "reference_price_nanos": "500000000"}
 ]'
 fixture_unready='[
-  {"market_id": 7, "status": "active", "polymarket_condition_id": null, "resolution_criteria": "native"}
+  {"market_id": 7, "status": "active", "polymarket_condition_id": null, "tags": ["native"]}
 ]'
 metrics_fresh='sybil_reference_prices_age_seconds 2.5'
 proof_root="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -50,7 +50,7 @@ for onboarding_enabled in true false; do
                 HTTP_BODY='{"enabled":false,"account_capacity":1000,"accounts_allocated":1000,"accounts_remaining":0,"grant_nanos":1000000000000}'
             fi
         elif [[ "$path" == "/v1/onboarding/accounts" && "$body" == *initial_balance_nanos* ]]; then
-            HTTP_CODE=422; HTTP_BODY='{"error":"unknown field"}'
+            HTTP_CODE=400; HTTP_BODY='{"error":"unknown field"}'
         elif [[ "$path" == "/v1/onboarding/accounts" && "$onboarding_enabled" == true ]]; then
             HTTP_CODE=200; HTTP_BODY='{"account_id":10,"balance_nanos":1000000000000}'
         elif [[ "$path" == "/v1/onboarding/accounts" ]]; then
@@ -73,7 +73,7 @@ http() {
         HTTP_CODE=200
         HTTP_BODY='{"enabled":true,"account_capacity":1000,"accounts_allocated":10,"accounts_remaining":990,"grant_nanos":1000000000000}'
     elif [[ "$path" == "/v1/onboarding/accounts" && "$body" == *initial_balance_nanos* ]]; then
-        HTTP_CODE=422; HTTP_BODY='{"error":"unknown field"}'
+        HTTP_CODE=400; HTTP_BODY='{"error":"unknown field"}'
     elif [[ "$path" == "/v1/onboarding/accounts" ]]; then
         HTTP_CODE=200; HTTP_BODY='{"account_id":10,"balance_nanos":0}'
     else
