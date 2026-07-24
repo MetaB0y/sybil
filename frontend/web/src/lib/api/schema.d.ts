@@ -5527,6 +5527,20 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description A requested market does not exist */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description A requested market is resolved or already grouped */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
     };
   };
   extend_market_group: {

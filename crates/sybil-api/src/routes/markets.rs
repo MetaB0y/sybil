@@ -539,7 +539,9 @@ pub async fn list_market_groups(
     request_body = CreateMarketGroupRequest,
     responses(
         (status = 200, description = "Market group created", body = MarketGroupResponse),
-        (status = 403, description = "Dev mode required")
+        (status = 403, description = "Dev mode required"),
+        (status = 404, description = "A requested market does not exist"),
+        (status = 409, description = "A requested market is resolved or already grouped")
     )
 )]
 pub async fn create_market_group(
