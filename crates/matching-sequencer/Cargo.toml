@@ -21,15 +21,17 @@ sha3 = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 rmp-serde = { workspace = true }
 redb = "4"
-commonware-codec = "2026.5.0"
-commonware-cryptography = "2026.5.0"
-commonware-parallel = "2026.5.0"
-commonware-runtime = "2026.5.0"
-commonware-storage = "2026.5.0"
+# Commonware qMDB upgrades cross the OpenVM guest commitment boundary; keep the
+# workspace on the validated release until that coordinated migration lands.
+commonware-codec = "=2026.5.0"
+commonware-cryptography = "=2026.5.0"
+commonware-parallel = "=2026.5.0"
+commonware-runtime = "=2026.5.0"
+commonware-storage = "=2026.5.0"
 futures = "0.3"
 getrandom = { workspace = true }
 p256 = { workspace = true, features = ["ecdsa"] }
-ractor = { version = "0.15.12", default-features = false, features = ["async-trait", "tokio_runtime"] }
+ractor = { version = "0.15.13", default-features = false, features = ["async-trait", "tokio_runtime"] }
 ratelimit = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }

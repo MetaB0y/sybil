@@ -52,7 +52,7 @@ unwrap_used = "deny"
 [workspace.dependencies]
 alloy = { version = "2.1.1", default-features = false }
 blake3 = "1"
-clap = "4.5"
+clap = "4.6"
 getrandom = "0.4"
 hex = "0.4"
 ipnet = "2.12"

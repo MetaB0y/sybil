@@ -13,7 +13,7 @@ path = "src/main.rs"
 sybil-history-types = { path = "../sybil-history-types" }
 axum = { version = "0.8", features = ["json"] }
 clap = { workspace = true, features = ["derive", "env"] }
-ractor = { version = "0.15.12", default-features = false, features = ["async-trait", "tokio_runtime"] }
+ractor = { version = "0.15.13", default-features = false, features = ["async-trait", "tokio_runtime"] }
 redb = "4"
 rmp-serde = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
